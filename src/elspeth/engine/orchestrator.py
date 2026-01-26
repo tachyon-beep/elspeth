@@ -32,6 +32,14 @@ from elspeth.contracts.events import (
     RunCompleted,
     RunCompletionStatus,
 )
+from elspeth.contracts.types import (
+    AggregationName,
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    SinkName,
+)
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -236,11 +244,11 @@ class Orchestrator:
 
     def _validate_route_destinations(
         self,
-        route_resolution_map: dict[tuple[str, str], str],
+        route_resolution_map: dict[tuple[NodeID, str], str],
         available_sinks: set[str],
-        transform_id_map: dict[int, str],
+        transform_id_map: dict[int, NodeID],
         transforms: list[RowPlugin],
-        config_gate_id_map: dict[str, str] | None = None,
+        config_gate_id_map: dict[GateName, NodeID] | None = None,
         config_gates: list[GateSettings] | None = None,
     ) -> None:
         """Validate all route destinations reference existing sinks.
@@ -270,7 +278,7 @@ class Orchestrator:
         # Add config gates to the lookup
         if config_gate_id_map and config_gates:
             for gate_config in config_gates:
-                node_id = config_gate_id_map.get(gate_config.name)
+                node_id = config_gate_id_map.get(GateName(gate_config.name))
                 if node_id is not None:
                     node_id_to_gate_name[node_id] = gate_config.name
 
@@ -297,7 +305,7 @@ class Orchestrator:
         self,
         transforms: list[RowPlugin],
         available_sinks: set[str],
-        _transform_id_map: dict[int, str],
+        _transform_id_map: dict[int, NodeID],
     ) -> None:
         """Validate all transform on_error destinations reference existing sinks.
 
@@ -388,9 +396,9 @@ class Orchestrator:
         source: SourceProtocol,
         transforms: list[RowPlugin],
         sinks: dict[str, SinkProtocol],
-        source_id: str,
-        transform_id_map: dict[int, str],
-        sink_id_map: dict[str, str],
+        source_id: NodeID,
+        transform_id_map: dict[int, NodeID],
+        sink_id_map: dict[SinkName, NodeID],
     ) -> None:
         """Explicitly assign node_id to all plugins with validation.
 
@@ -426,9 +434,9 @@ class Orchestrator:
 
         # Set node_id on sinks
         for sink_name, sink in sinks.items():
-            if sink_name not in sink_id_map:
+            if SinkName(sink_name) not in sink_id_map:
                 raise ValueError(f"Sink '{sink_name}' not found in graph. Available sinks: {list(sink_id_map.keys())}")
-            sink.node_id = sink_id_map[sink_name]
+            sink.node_id = sink_id_map[SinkName(sink_name)]
 
     def run(
         self,
@@ -637,27 +645,27 @@ class Orchestrator:
         # Build node_id -> plugin instance mapping for metadata extraction
         # Source: single plugin from config.source
         source_id = graph.get_source()
-        transform_id_map = graph.get_transform_id_map()
-        sink_id_map = graph.get_sink_id_map()
-        config_gate_id_map = graph.get_config_gate_id_map()
-        aggregation_id_map = graph.get_aggregation_id_map()
+        transform_id_map: dict[int, NodeID] = graph.get_transform_id_map()
+        sink_id_map: dict[SinkName, NodeID] = graph.get_sink_id_map()
+        config_gate_id_map: dict[GateName, NodeID] = graph.get_config_gate_id_map()
+        aggregation_id_map: dict[AggregationName, NodeID] = graph.get_aggregation_id_map()
 
         # Map plugin instances (not config gates or aggregations - they don't have instances)
-        node_to_plugin: dict[str, Any] = {}
+        node_to_plugin: dict[NodeID, Any] = {}
         if source_id is not None:
             node_to_plugin[source_id] = config.source
         for seq, transform in enumerate(config.transforms):
             if seq in transform_id_map:
                 node_to_plugin[transform_id_map[seq]] = transform
         for sink_name, sink in config.sinks.items():
-            if sink_name in sink_id_map:
-                node_to_plugin[sink_id_map[sink_name]] = sink
+            if SinkName(sink_name) in sink_id_map:
+                node_to_plugin[sink_id_map[SinkName(sink_name)]] = sink
 
         # Config gates, aggregations, and coalesce nodes are identified by their node IDs (no plugin instances)
-        config_gate_node_ids = set(config_gate_id_map.values())
-        aggregation_node_ids = set(aggregation_id_map.values())
-        coalesce_id_map = graph.get_coalesce_id_map()
-        coalesce_node_ids = set(coalesce_id_map.values())
+        config_gate_node_ids: set[NodeID] = set(config_gate_id_map.values())
+        aggregation_node_ids: set[NodeID] = set(aggregation_id_map.values())
+        coalesce_id_map: dict[CoalesceName, NodeID] = graph.get_coalesce_id_map()
+        coalesce_node_ids: set[NodeID] = set(coalesce_id_map.values())
 
         # GRAPH phase - register nodes and edges in Landscape
         phase_start = time.perf_counter()
@@ -689,7 +697,7 @@ class Orchestrator:
                     # Direct access - if node_id is in execution_order (from graph.topological_order()),
                     # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
                     # A KeyError here indicates a bug in graph construction or node_to_plugin building.
-                    plugin = node_to_plugin[node_id]
+                    plugin = node_to_plugin[NodeID(node_id)]
 
                     # Extract plugin metadata - all protocols define these attributes,
                     # all base classes provide defaults. Direct access is safe.
@@ -714,7 +722,7 @@ class Orchestrator:
 
             # Register edges from graph - key by (from_node, label) for lookup
             # Gates return route labels, so edge_map is keyed by label
-            edge_map: dict[tuple[str, str], str] = {}
+            edge_map: dict[tuple[NodeID, str], str] = {}
 
             for edge_info in graph.get_edges():
                 edge = recorder.register_edge(
@@ -725,7 +733,7 @@ class Orchestrator:
                     mode=edge_info.mode,
                 )
                 # Key by edge label - gates return route labels, transforms use "continue"
-                edge_map[(edge_info.from_node, edge_info.label)] = edge.edge_id
+                edge_map[(NodeID(edge_info.from_node), edge_info.label)] = edge.edge_id
 
             # Get route resolution map - maps (gate_node, label) -> "continue" | sink_name
             route_resolution_map = graph.get_route_resolution_map()
@@ -811,7 +819,7 @@ class Orchestrator:
         from elspeth.engine.tokens import TokenManager
 
         coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[str, str] = {}
+        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
 
         if settings is not None and settings.coalesce:
             branch_to_coalesce = graph.get_branch_to_coalesce_map()
@@ -828,17 +836,20 @@ class Orchestrator:
             # Direct access: graph was built from same settings, so all coalesce names
             # must exist in map. KeyError here indicates a bug in graph construction.
             for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[coalesce_settings.name]
+                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
         # Compute coalesce step positions
         # Coalesce step = after all transforms and gates
-        coalesce_step_map: dict[str, int] = {}
+        coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
             base_step = len(config.transforms) + len(config.gates)
             for i, cs in enumerate(settings.coalesce):
                 # Each coalesce gets its own step (in case of multiple)
-                coalesce_step_map[cs.name] = base_step + i
+                coalesce_step_map[CoalesceName(cs.name)] = base_step + i
+
+        # Convert aggregation_settings keys from str to NodeID
+        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
 
         # Create processor with config gates info
         processor = RowProcessor(
@@ -850,7 +861,7 @@ class Orchestrator:
             route_resolution_map=route_resolution_map,
             config_gates=config.gates,
             config_gate_id_map=config_gate_id_map,
-            aggregation_settings=config.aggregation_settings,
+            aggregation_settings=typed_aggregation_settings,
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
             coalesce_node_ids=coalesce_id_map,
@@ -887,7 +898,7 @@ class Orchestrator:
         default_last_node_id: str
         if config.gates:
             last_gate_name = config.gates[-1].name
-            default_last_node_id = config_gate_id_map[last_gate_name]
+            default_last_node_id = config_gate_id_map[GateName(last_gate_name)]
         elif config.transforms:
             transform_node_id = config.transforms[-1].node_id
             assert transform_node_id is not None
@@ -1101,7 +1112,7 @@ class Orchestrator:
                 for sink_name, tokens in pending_tokens.items():
                     if tokens and sink_name in config.sinks:
                         sink = config.sinks[sink_name]
-                        sink_node_id = sink_id_map[sink_name]
+                        sink_node_id = sink_id_map[SinkName(sink_name)]
 
                         sink_executor.write(
                             sink=sink,
@@ -1593,7 +1604,9 @@ class Orchestrator:
 
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
-        edge_map = recorder.get_edge_map(run_id)
+        # Convert keys from (str, str) to (NodeID, str) to match RowProcessor's type
+        raw_edge_map = recorder.get_edge_map(run_id)
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(k[0]), k[1]): v for k, v in raw_edge_map.items()}
 
         # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
         # Missing edges = data corruption or incomplete original run registration
@@ -1670,7 +1683,7 @@ class Orchestrator:
         from elspeth.engine.tokens import TokenManager
 
         coalesce_executor: CoalesceExecutor | None = None
-        branch_to_coalesce: dict[str, str] = {}
+        branch_to_coalesce: dict[BranchName, CoalesceName] = {}
 
         if settings is not None and settings.coalesce:
             branch_to_coalesce = graph.get_branch_to_coalesce_map()
@@ -1684,15 +1697,21 @@ class Orchestrator:
             )
 
             for coalesce_settings in settings.coalesce:
-                coalesce_node_id = coalesce_id_map[coalesce_settings.name]
+                coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
         # Compute coalesce step positions
-        coalesce_step_map: dict[str, int] = {}
+        coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
             base_step = len(config.transforms) + len(config.gates)
             for i, cs in enumerate(settings.coalesce):
-                coalesce_step_map[cs.name] = base_step + i
+                coalesce_step_map[CoalesceName(cs.name)] = base_step + i
+
+        # Convert aggregation_settings keys from str to NodeID
+        typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
+
+        # Convert restored_aggregation_state keys from str to NodeID
+        typed_restored_state: dict[NodeID, dict[str, Any]] = {NodeID(k): v for k, v in restored_aggregation_state.items()}
 
         # Create processor with restored aggregation state
         processor = RowProcessor(
@@ -1704,13 +1723,13 @@ class Orchestrator:
             route_resolution_map=route_resolution_map,
             config_gates=config.gates,
             config_gate_id_map=config_gate_id_map,
-            aggregation_settings=config.aggregation_settings,
+            aggregation_settings=typed_aggregation_settings,
             retry_manager=retry_manager,
             coalesce_executor=coalesce_executor,
             coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
-            restored_aggregation_state=restored_aggregation_state,
+            restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
         )
 
@@ -1936,10 +1955,11 @@ class Orchestrator:
         rows_succeeded = 0
         rows_failed = 0
 
-        for agg_node_id, agg_settings in config.aggregation_settings.items():
+        for agg_node_id_str, agg_settings in config.aggregation_settings.items():
             # aggregation_settings is keyed by node_id (set in cli.py)
             # The aggregation name is available via agg_settings.name
             agg_name = agg_settings.name
+            agg_node_id = NodeID(agg_node_id_str)
 
             # Check if there are buffered rows
             buffered_count = processor._aggregation_executor.get_buffer_count(agg_node_id)
@@ -1950,7 +1970,7 @@ class Orchestrator:
             # Only TransformProtocol can have is_batch_aware (gates cannot)
             agg_transform: TransformProtocol | None = None
             for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.node_id == agg_node_id and t.is_batch_aware:
+                if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
                     agg_transform = t
                     break
 
@@ -1963,7 +1983,7 @@ class Orchestrator:
 
             # Compute step_in_pipeline for this aggregation
             agg_step = next(
-                (i for i, t in enumerate(config.transforms) if t.node_id == agg_node_id),
+                (i for i, t in enumerate(config.transforms) if t.node_id == agg_node_id_str),
                 len(config.transforms),
             )
 

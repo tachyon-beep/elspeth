@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
+from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
     from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -46,7 +47,7 @@ class _WorkItem:
     token: TokenInfo
     start_step: int  # Which step in transforms to start from (0-indexed)
     coalesce_at_step: int | None = None  # Step at which to coalesce (if any)
-    coalesce_name: str | None = None  # Name of the coalesce point (if any)
+    coalesce_name: CoalesceName | None = None  # Name of the coalesce point (if any)
 
 
 class RowProcessor:
@@ -84,19 +85,19 @@ class RowProcessor:
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
         run_id: str,
-        source_node_id: str,
+        source_node_id: NodeID,
         *,
-        edge_map: dict[tuple[str, str], str] | None = None,
-        route_resolution_map: dict[tuple[str, str], str] | None = None,
+        edge_map: dict[tuple[NodeID, str], str] | None = None,
+        route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
         config_gates: list[GateSettings] | None = None,
-        config_gate_id_map: dict[str, str] | None = None,
-        aggregation_settings: dict[str, AggregationSettings] | None = None,
+        config_gate_id_map: dict[GateName, NodeID] | None = None,
+        aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
         retry_manager: RetryManager | None = None,
         coalesce_executor: "CoalesceExecutor | None" = None,
-        coalesce_node_ids: dict[str, str] | None = None,
-        branch_to_coalesce: dict[str, str] | None = None,
-        coalesce_step_map: dict[str, int] | None = None,
-        restored_aggregation_state: dict[str, dict[str, Any]] | None = None,
+        coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
+        branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
+        coalesce_step_map: dict[CoalesceName, int] | None = None,
+        restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: Any = None,
     ) -> None:
         """Initialize processor.
@@ -122,15 +123,15 @@ class RowProcessor:
         self._recorder = recorder
         self._spans = span_factory
         self._run_id = run_id
-        self._source_node_id = source_node_id
+        self._source_node_id: NodeID = source_node_id
         self._config_gates = config_gates or []
-        self._config_gate_id_map = config_gate_id_map or {}
+        self._config_gate_id_map: dict[GateName, NodeID] = config_gate_id_map or {}
         self._retry_manager = retry_manager
         self._coalesce_executor = coalesce_executor
-        self._coalesce_node_ids = coalesce_node_ids or {}
-        self._branch_to_coalesce = branch_to_coalesce or {}
-        self._coalesce_step_map = coalesce_step_map or {}
-        self._aggregation_settings = aggregation_settings or {}
+        self._coalesce_node_ids: dict[CoalesceName, NodeID] = coalesce_node_ids or {}
+        self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
+        self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or {}
+        self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
 
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
         self._transform_executor = TransformExecutor(recorder, span_factory)
@@ -174,8 +175,9 @@ class RowProcessor:
             - Single RowResult for single/transform modes
             - List of RowResults for passthrough mode (one per buffered token)
         """
-        node_id = transform.node_id
-        assert node_id is not None
+        raw_node_id = transform.node_id
+        assert raw_node_id is not None
+        node_id = NodeID(raw_node_id)
 
         # Get output_mode from aggregation settings
         # Caller guarantees node_id is in self._aggregation_settings (line 550 check)
@@ -477,7 +479,7 @@ class RowProcessor:
         ctx: PluginContext,
         *,
         coalesce_at_step: int | None = None,
-        coalesce_name: str | None = None,
+        coalesce_name: CoalesceName | None = None,
     ) -> list[RowResult]:
         """Process a row through all transforms.
 
@@ -556,7 +558,7 @@ class RowProcessor:
         ctx: PluginContext,
         *,
         coalesce_at_step: int | None = None,
-        coalesce_name: str | None = None,
+        coalesce_name: CoalesceName | None = None,
     ) -> list[RowResult]:
         """Process an existing row (row already in database, create new token only).
 
@@ -627,7 +629,7 @@ class RowProcessor:
         ctx: PluginContext,
         start_step: int,
         coalesce_at_step: int | None = None,
-        coalesce_name: str | None = None,
+        coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult] | None, list[_WorkItem]]:
         """Process a single token through transforms starting at given step.
 
@@ -688,11 +690,11 @@ class RowProcessor:
                     for child_token in outcome.child_tokens:
                         # Look up coalesce info for this branch
                         branch_name = child_token.branch_name
-                        child_coalesce_name: str | None = None
+                        child_coalesce_name: CoalesceName | None = None
                         child_coalesce_step: int | None = None
 
-                        if branch_name and branch_name in self._branch_to_coalesce:
-                            child_coalesce_name = self._branch_to_coalesce[branch_name]
+                        if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
+                            child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
                             child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
 
                         child_items.append(
@@ -873,7 +875,7 @@ class RowProcessor:
             step = config_gate_start_step + gate_idx
 
             # Get the node_id for this config gate
-            node_id = self._config_gate_id_map[gate_config.name]
+            node_id = self._config_gate_id_map[GateName(gate_config.name)]
 
             outcome = self._gate_executor.execute_config_gate(
                 gate_config=gate_config,
@@ -908,11 +910,11 @@ class RowProcessor:
                 for child_token in outcome.child_tokens:
                     # Look up coalesce info for this branch
                     cfg_branch_name = child_token.branch_name
-                    cfg_coalesce_name: str | None = None
+                    cfg_coalesce_name: CoalesceName | None = None
                     cfg_coalesce_step: int | None = None
 
-                    if cfg_branch_name and cfg_branch_name in self._branch_to_coalesce:
-                        cfg_coalesce_name = self._branch_to_coalesce[cfg_branch_name]
+                    if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
+                        cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
                         cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
 
                     # Children start after ALL transforms, at next config gate

@@ -14,7 +14,7 @@ import typer
 from pydantic import ValidationError
 
 from elspeth import __version__
-from elspeth.contracts import ExecutionResult, ProgressEvent
+from elspeth.contracts import AggregationName, ExecutionResult, ProgressEvent
 from elspeth.contracts.events import (
     PhaseCompleted,
     PhaseError,
@@ -402,7 +402,7 @@ def _execute_pipeline(
         aggregation_settings: dict[str, AggregationSettings] = {}
         agg_id_map = graph.get_aggregation_id_map()
         for agg_config in config.aggregations:
-            node_id = agg_id_map[agg_config.name]
+            node_id = agg_id_map[AggregationName(agg_config.name)]
             aggregation_settings[node_id] = agg_config
 
             # Instantiate the aggregation transform plugin via PluginManager

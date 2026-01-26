@@ -24,6 +24,7 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.enums import RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -65,7 +66,7 @@ class MissingEdgeError(Exception):
     traceable to a registered edge. Silent edge loss is unacceptable.
     """
 
-    def __init__(self, node_id: str, label: str) -> None:
+    def __init__(self, node_id: NodeID, label: str) -> None:
         """Initialize with routing details.
 
         Args:
@@ -324,8 +325,8 @@ class GateExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
-        edge_map: dict[tuple[str, str], str] | None = None,
-        route_resolution_map: dict[tuple[str, str], str] | None = None,
+        edge_map: dict[tuple[NodeID, str], str] | None = None,
+        route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -424,11 +425,11 @@ class GateExecutor:
         elif action.kind == RoutingKind.ROUTE:
             # Gate returned a route label - resolve via routes config
             route_label = action.destinations[0]
-            destination = self._route_resolution_map.get((gate.node_id, route_label))
+            destination = self._route_resolution_map.get((NodeID(gate.node_id), route_label))
 
             if destination is None:
                 # Label not in routes config - this is a configuration error
-                raise MissingEdgeError(node_id=gate.node_id, label=route_label)
+                raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
 
             if destination == "continue":
                 # Route label resolves to "continue" - record routing event (AUD-002)
@@ -697,11 +698,12 @@ class GateExecutor:
         Raises:
             MissingEdgeError: If any destination has no registered edge.
         """
+        typed_node_id = NodeID(node_id)
         if len(action.destinations) == 1:
             dest = action.destinations[0]
-            edge_id = self._edge_map.get((node_id, dest))
+            edge_id = self._edge_map.get((typed_node_id, dest))
             if edge_id is None:
-                raise MissingEdgeError(node_id=node_id, label=dest)
+                raise MissingEdgeError(node_id=typed_node_id, label=dest)
 
             self._recorder.record_routing_event(
                 state_id=state_id,
@@ -713,9 +715,9 @@ class GateExecutor:
             # Multiple destinations (fork)
             routes = []
             for dest in action.destinations:
-                edge_id = self._edge_map.get((node_id, dest))
+                edge_id = self._edge_map.get((typed_node_id, dest))
                 if edge_id is None:
-                    raise MissingEdgeError(node_id=node_id, label=dest)
+                    raise MissingEdgeError(node_id=typed_node_id, label=dest)
                 routes.append(RoutingSpec(edge_id=edge_id, mode=action.mode))
 
             self._recorder.record_routing_events(
@@ -751,7 +753,7 @@ class AggregationExecutor:
         span_factory: SpanFactory,
         run_id: str,
         *,
-        aggregation_settings: dict[str, AggregationSettings] | None = None,
+        aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -765,15 +767,15 @@ class AggregationExecutor:
         self._spans = span_factory
         self._run_id = run_id
         self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
-        self._batch_ids: dict[str, str | None] = {}  # node_id -> current batch_id
-        self._aggregation_settings = aggregation_settings or {}
-        self._trigger_evaluators: dict[str, TriggerEvaluator] = {}
-        self._restored_states: dict[str, dict[str, Any]] = {}  # node_id -> state
+        self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
+        self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
+        self._trigger_evaluators: dict[NodeID, TriggerEvaluator] = {}
+        self._restored_states: dict[NodeID, dict[str, Any]] = {}  # node_id -> state
 
         # Engine-owned row buffers (node_id -> list of row dicts)
-        self._buffers: dict[str, list[dict[str, Any]]] = {}
+        self._buffers: dict[NodeID, list[dict[str, Any]]] = {}
         # Token tracking for audit trail (node_id -> list of TokenInfo)
-        self._buffer_tokens: dict[str, list[TokenInfo]] = {}
+        self._buffer_tokens: dict[NodeID, list[TokenInfo]] = {}
 
         # Create trigger evaluators for each configured aggregation
         for node_id, settings in self._aggregation_settings.items():
@@ -783,7 +785,7 @@ class AggregationExecutor:
 
     def buffer_row(
         self,
-        node_id: str,
+        node_id: NodeID,
         token: TokenInfo,
     ) -> None:
         """Buffer a row for aggregation.
@@ -829,7 +831,7 @@ class AggregationExecutor:
         if evaluator is not None:
             evaluator.record_accept()
 
-    def get_buffered_rows(self, node_id: str) -> list[dict[str, Any]]:
+    def get_buffered_rows(self, node_id: NodeID) -> list[dict[str, Any]]:
         """Get currently buffered rows (does not clear buffer).
 
         Args:
@@ -840,7 +842,7 @@ class AggregationExecutor:
         """
         return list(self._buffers.get(node_id, []))
 
-    def get_buffered_tokens(self, node_id: str) -> list[TokenInfo]:
+    def get_buffered_tokens(self, node_id: NodeID) -> list[TokenInfo]:
         """Get currently buffered tokens (does not clear buffer).
 
         Args:
@@ -851,7 +853,7 @@ class AggregationExecutor:
         """
         return list(self._buffer_tokens.get(node_id, []))
 
-    def _get_buffered_data(self, node_id: str) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
+    def _get_buffered_data(self, node_id: NodeID) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
         """Internal: Get buffered rows and tokens without clearing.
 
         IMPORTANT: This method does NOT record audit trail. Production code
@@ -870,7 +872,7 @@ class AggregationExecutor:
 
     def execute_flush(
         self,
-        node_id: str,
+        node_id: NodeID,
         transform: TransformProtocol,
         ctx: PluginContext,
         step_in_pipeline: int,
@@ -1075,7 +1077,7 @@ class AggregationExecutor:
 
         return result, buffered_tokens
 
-    def _reset_batch_state(self, node_id: str) -> None:
+    def _reset_batch_state(self, node_id: NodeID) -> None:
         """Reset batch tracking state for next batch.
 
         Args:
@@ -1087,7 +1089,7 @@ class AggregationExecutor:
             if batch_id in self._member_counts:
                 del self._member_counts[batch_id]
 
-    def get_buffer_count(self, node_id: str) -> int:
+    def get_buffer_count(self, node_id: NodeID) -> int:
         """Get the number of rows currently buffered for an aggregation.
 
         Args:
@@ -1208,10 +1210,12 @@ class AggregationExecutor:
                 f"This checkpoint may be from a different ELSPETH version."
             )
 
-        for node_id, node_state in state.items():
+        for node_id_str, node_state in state.items():
             # Skip version metadata field
-            if node_id == "_version":
+            if node_id_str == "_version":
                 continue
+            # Convert to typed NodeID for dictionary access
+            node_id = NodeID(node_id_str)
             # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
             if "tokens" not in node_state:
                 raise ValueError(
@@ -1275,14 +1279,14 @@ class AggregationExecutor:
                     # Adjust timer: make it think first accept was N seconds ago
                     evaluator._first_accept_time = time.monotonic() - elapsed_seconds
 
-    def get_batch_id(self, node_id: str) -> str | None:
+    def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
 
         Primarily for testing - production code accesses this via checkpoint state.
         """
         return self._batch_ids.get(node_id)
 
-    def should_flush(self, node_id: str) -> bool:
+    def should_flush(self, node_id: NodeID) -> bool:
         """Check if the aggregation should flush based on trigger config.
 
         Args:
@@ -1296,7 +1300,7 @@ class AggregationExecutor:
             return False
         return evaluator.should_trigger()
 
-    def get_trigger_type(self, node_id: str) -> "TriggerType | None":
+    def get_trigger_type(self, node_id: NodeID) -> "TriggerType | None":
         """Get the TriggerType for the trigger that fired.
 
         Args:
@@ -1310,7 +1314,7 @@ class AggregationExecutor:
             return None
         return evaluator.get_trigger_type()
 
-    def restore_state(self, node_id: str, state: dict[str, Any]) -> None:
+    def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
         """Restore aggregation state from checkpoint.
 
         Called during recovery to restore plugin state. The state is stored
@@ -1322,7 +1326,7 @@ class AggregationExecutor:
         """
         self._restored_states[node_id] = state
 
-    def get_restored_state(self, node_id: str) -> dict[str, Any] | None:
+    def get_restored_state(self, node_id: NodeID) -> dict[str, Any] | None:
         """Get restored state for an aggregation node.
 
         Used by aggregation plugins during recovery to restore their
@@ -1352,7 +1356,7 @@ class AggregationExecutor:
         if batch is None:
             raise ValueError(f"Batch not found: {batch_id}")
 
-        node_id = batch.aggregation_node_id
+        node_id = NodeID(batch.aggregation_node_id)
         self._batch_ids[node_id] = batch_id
 
         # Restore member count from database
