@@ -23,7 +23,10 @@ from elspeth.contracts.audit import (
     Row,
     Run,
     Token,
+    TokenOutcome,
     TokenParent,
+    TransformErrorRecord,
+    ValidationErrorRecord,
 )
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -34,6 +37,7 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     NodeType,
     RoutingMode,
+    RowOutcome,
     RunStatus,
 )
 
@@ -365,3 +369,104 @@ class NodeStateRepository:
             # This branch should be unreachable if NodeStateStatus enum is correct
             # But we include it for defensive completeness - crash on unknown status
             raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
+
+
+class ValidationErrorRepository:
+    """Repository for ValidationErrorRecord records.
+
+    Handles source validation errors (quarantined rows).
+    No enum conversion needed - all fields are primitives or strings.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def load(self, row: Any) -> ValidationErrorRecord:
+        """Load ValidationErrorRecord from database row.
+
+        Args:
+            row: Database row from validation_errors table
+
+        Returns:
+            ValidationErrorRecord with all fields mapped
+        """
+        return ValidationErrorRecord(
+            error_id=row.error_id,
+            run_id=row.run_id,
+            node_id=row.node_id,
+            row_hash=row.row_hash,
+            error=row.error,
+            schema_mode=row.schema_mode,
+            destination=row.destination,
+            created_at=row.created_at,
+            row_data_json=row.row_data_json,
+        )
+
+
+class TransformErrorRepository:
+    """Repository for TransformErrorRecord records.
+
+    Handles transform processing errors.
+    No enum conversion needed - all fields are primitives or strings.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def load(self, row: Any) -> TransformErrorRecord:
+        """Load TransformErrorRecord from database row.
+
+        Args:
+            row: Database row from transform_errors table
+
+        Returns:
+            TransformErrorRecord with all fields mapped
+        """
+        return TransformErrorRecord(
+            error_id=row.error_id,
+            run_id=row.run_id,
+            token_id=row.token_id,
+            transform_id=row.transform_id,
+            row_hash=row.row_hash,
+            destination=row.destination,
+            created_at=row.created_at,
+            row_data_json=row.row_data_json,
+            error_details_json=row.error_details_json,
+        )
+
+
+class TokenOutcomeRepository:
+    """Repository for TokenOutcome records.
+
+    Handles terminal token states. Converts outcome string to RowOutcome enum.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def load(self, row: Any) -> TokenOutcome:
+        """Load TokenOutcome from database row.
+
+        Converts outcome string to RowOutcome enum.
+
+        Args:
+            row: Database row from token_outcomes table
+
+        Returns:
+            TokenOutcome with outcome converted to RowOutcome enum
+        """
+        return TokenOutcome(
+            outcome_id=row.outcome_id,
+            run_id=row.run_id,
+            token_id=row.token_id,
+            outcome=RowOutcome(row.outcome),  # Convert HERE
+            is_terminal=row.is_terminal,
+            recorded_at=row.recorded_at,
+            sink_name=row.sink_name,
+            batch_id=row.batch_id,
+            fork_group_id=row.fork_group_id,
+            join_group_id=row.join_group_id,
+            expand_group_id=row.expand_group_id,
+            error_hash=row.error_hash,
+            context_json=row.context_json,
+        )
