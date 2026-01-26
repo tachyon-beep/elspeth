@@ -38,14 +38,14 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryConfig, RetryManager
 from elspeth.engine.spans import SpanFactory
-from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
+from elspeth.plugins.protocols import GateProtocol, SinkProtocol, SourceProtocol, TransformProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
-# batch-aware transforms (is_batch_aware=True on BaseTransform)
-RowPlugin = BaseTransform | BaseGate
+# batch-aware transforms (is_batch_aware=True on TransformProtocol)
+# Using protocols instead of base classes to support protocol-only plugins.
+RowPlugin = TransformProtocol | GateProtocol
 """Union of all row-processing plugin types for pipeline transforms list."""
 
 if TYPE_CHECKING:
@@ -262,7 +262,7 @@ class Orchestrator:
         # Build reverse lookup: node_id -> gate name
         node_id_to_gate_name: dict[str, str] = {}
         for seq, transform in enumerate(transforms):
-            if isinstance(transform, BaseGate):
+            if isinstance(transform, GateProtocol):
                 node_id = transform_id_map.get(seq)
                 if node_id is not None:
                     node_id_to_gate_name[node_id] = transform.name
@@ -314,11 +314,11 @@ class Orchestrator:
             RouteValidationError: If any transform on_error references a non-existent sink
         """
         for transform in transforms:
-            # Only BaseTransform has _on_error; BaseGate uses routing, not error sinks
-            if not isinstance(transform, BaseTransform):
+            # Only TransformProtocol has _on_error; GateProtocol uses routing, not error sinks
+            if not isinstance(transform, TransformProtocol):
                 continue
 
-            # Access _on_error directly - defined in TransformProtocol and BaseTransform
+            # Access _on_error directly - defined in TransformProtocol
             on_error = transform._on_error
 
             if on_error is None:
@@ -1947,10 +1947,10 @@ class Orchestrator:
                 continue
 
             # Find the batch-aware transform for this aggregation
-            # Only BaseTransform can have is_batch_aware (gates cannot)
-            agg_transform: BaseTransform | None = None
+            # Only TransformProtocol can have is_batch_aware (gates cannot)
+            agg_transform: TransformProtocol | None = None
             for t in config.transforms:
-                if isinstance(t, BaseTransform) and t.node_id == agg_node_id and t.is_batch_aware:
+                if isinstance(t, TransformProtocol) and t.node_id == agg_node_id and t.is_batch_aware:
                     agg_transform = t
                     break
 

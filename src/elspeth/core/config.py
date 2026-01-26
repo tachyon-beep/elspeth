@@ -44,16 +44,24 @@ class TriggerConfig(BaseModel):
     Trigger types:
     - count: Fire after N rows accumulated
     - timeout: Fire after N seconds since first accept
-    - condition: Fire when expression evaluates to true
+    - condition: Fire when expression evaluates to true (batch-level metrics only)
 
     Note: end_of_source is IMPLICIT - always checked at source exhaustion.
     It is not configured here because it always applies.
+
+    Condition Context:
+        Trigger conditions evaluate at BATCH level, not row level. Available variables:
+        - batch_count: Number of rows accumulated in current batch (int)
+        - batch_age_seconds: Time elapsed since first row accepted (float)
+
+        Individual row data is NOT accessible in trigger conditions. For row-level
+        routing decisions, use Gates instead of triggers.
 
     Example YAML (combined triggers):
         trigger:
           count: 1000           # Fire after 1000 rows
           timeout_seconds: 3600         # Or after 1 hour
-          condition: "row['type'] == 'flush_signal'"  # Or on special row
+          condition: "batch_count >= 100 and batch_age_seconds < 30"  # Or batch metrics
     """
 
     model_config = {"frozen": True}
@@ -70,7 +78,7 @@ class TriggerConfig(BaseModel):
     )
     condition: str | None = Field(
         default=None,
-        description="Fire when expression evaluates to true",
+        description="Fire when expression evaluates to true (batch-level: batch_count, batch_age_seconds)",
     )
 
     @field_validator("condition")

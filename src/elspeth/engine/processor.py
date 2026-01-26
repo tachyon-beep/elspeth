@@ -32,8 +32,8 @@ from elspeth.engine.executors import (
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
-from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
@@ -149,7 +149,7 @@ class RowProcessor:
 
     def _process_batch_aggregation_node(
         self,
-        transform: BaseTransform,
+        transform: TransformProtocol,
         current_token: TokenInfo,
         ctx: PluginContext,
         step: int,
@@ -653,8 +653,8 @@ class RowProcessor:
         for step_offset, transform in enumerate(transforms[start_step:]):
             step = start_step + step_offset + 1  # 1-indexed for audit
 
-            # Type-safe plugin detection using base classes
-            if isinstance(transform, BaseGate):
+            # Type-safe plugin detection using protocols (supports protocol-only plugins)
+            if isinstance(transform, GateProtocol):
                 # Gate transform
                 outcome = self._gate_executor.execute_gate(
                     gate=transform,
@@ -725,7 +725,7 @@ class RowProcessor:
             # Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
             # The engine buffers rows and calls Transform.process(rows: list[dict]).
 
-            elif isinstance(transform, BaseTransform):
+            elif isinstance(transform, TransformProtocol):
                 # Check if this is a batch-aware transform at an aggregation node
                 node_id = transform.node_id
                 if transform.is_batch_aware and node_id is not None and node_id in self._aggregation_settings:
