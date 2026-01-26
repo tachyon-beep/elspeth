@@ -1,5 +1,13 @@
 # Bug Report: Resume Forces mode=append For All Sinks, Breaking Non-CSV Sinks
 
+## Status: RESOLVED ✅
+
+**Resolution Date:** 2026-01-26
+**Fixed In:** PR #5 (fix/rc1-bug-burndown-session-5)
+**Resolution:** Implemented polymorphic resume capability - sinks declare `supports_resume` and self-configure via `configure_for_resume()`
+
+---
+
 ## Summary
 
 - Resume unconditionally injects `mode="append"` into every sink config, which violates sink config contracts for JSON/Database sinks and causes resume to fail with config validation errors.
@@ -141,8 +149,68 @@
 
 ## Notes / Links
 
-- Related issues/PRs: N/A
+- Related issues/PRs: PR #5
 - Related design docs:
   - `docs/bugs/BRANCH_BUG_TRIAGE_2026-01-25.md` - Bug triage report
   - `CLAUDE.md` - Three-Tier Trust Model, Plugin System
   - `src/elspeth/plugins/config_base.py` - Config validation
+
+---
+
+## Resolution Evidence
+
+### Actual Fix (Polymorphic Approach)
+
+Instead of the proposed sink-type-specific conditionals in the CLI, we implemented a **polymorphic pattern** that respects plugin encapsulation:
+
+1. **SinkProtocol** now declares resume capability:
+   ```python
+   supports_resume: bool  # Can this sink append on resume?
+   def configure_for_resume(self) -> None: ...  # Self-configure for append
+   ```
+
+2. **Each sink implements its own resume logic**:
+   - `CSVSink`: `supports_resume=True`, sets `_mode="append"`
+   - `DatabaseSink`: `supports_resume=True`, sets `_if_exists="append"`
+   - `JSONSink`: `supports_resume=True` for JSONL (can append lines), `False` for JSON array (must rewrite)
+   - `AzureBlobSink`: `supports_resume=False` (Azure Blobs are immutable)
+
+3. **CLI queries capability instead of injecting fields**:
+   ```python
+   if not sink.supports_resume:
+       typer.echo(f"Error: Cannot resume with sink '{sink_name}'...", err=True)
+       raise typer.Exit(1)
+   sink.configure_for_resume()  # Let sink self-configure
+   ```
+
+### Files Changed
+
+- `src/elspeth/plugins/protocols.py` - Added `supports_resume` and `configure_for_resume` to SinkProtocol
+- `src/elspeth/plugins/base.py` - Added default implementation to BaseSink
+- `src/elspeth/plugins/sinks/csv_sink.py` - Implemented resume capability
+- `src/elspeth/plugins/sinks/database_sink.py` - Implemented resume capability
+- `src/elspeth/plugins/sinks/json_sink.py` - Implemented format-dependent resume
+- `src/elspeth/plugins/azure/blob_sink.py` - Declared no resume support with helpful error
+- `src/elspeth/cli.py` - Replaced hardcoded `mode=append` injection with polymorphic calls
+
+### Tests Added (41 total)
+
+- `tests/plugins/sinks/test_csv_sink_resume.py` (3 tests)
+- `tests/plugins/sinks/test_database_sink_resume.py` (3 tests)
+- `tests/plugins/sinks/test_json_sink_resume.py` (9 tests)
+- `tests/plugins/azure/test_blob_sink_resume.py` (2 tests)
+- `tests/integration/test_cli_resume_sink_capability.py` (12 tests)
+- `tests/integration/test_cli_resume_sink_append.py` (8 tests, updated)
+- `tests/contracts/sink_contracts/test_sink_protocol.py` (2 tests)
+- `tests/plugins/test_base_sink.py` (2 tests)
+
+### Acceptance Criteria Verification
+
+| Criterion | Status |
+|-----------|--------|
+| Resume does not inject unsupported config fields | ✅ No field injection - uses `configure_for_resume()` |
+| CSV sinks resume with `mode="append"` | ✅ `CSVSink.configure_for_resume()` sets `_mode="append"` |
+| Database sinks resume with `if_exists="append"` | ✅ `DatabaseSink.configure_for_resume()` sets `_if_exists="append"` |
+| JSONL sinks resume successfully | ✅ `JSONSink` with JSONL format supports resume |
+| JSON array sinks reject with clear error | ✅ Raises `NotImplementedError` with guidance |
+| Azure Blob sinks reject with clear error | ✅ Raises `NotImplementedError` explaining immutability |
