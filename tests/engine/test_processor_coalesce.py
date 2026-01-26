@@ -13,6 +13,7 @@ Gates are config-driven using GateSettings.
 
 from typing import Any
 
+from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -59,7 +60,7 @@ class TestRowProcessorCoalesce:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             coalesce_executor=coalesce_executor,
         )
         assert processor._coalesce_executor is coalesce_executor
@@ -199,20 +200,20 @@ class TestRowProcessorCoalesce:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             edge_map={
-                (fork_gate.node_id, "path_a"): edge_a.edge_id,
-                (fork_gate.node_id, "path_b"): edge_b.edge_id,
+                (NodeID(fork_gate.node_id), "path_a"): edge_a.edge_id,
+                (NodeID(fork_gate.node_id), "path_b"): edge_b.edge_id,
             },
             coalesce_executor=coalesce_executor,
-            coalesce_node_ids={"merger": coalesce_node.node_id},
+            coalesce_node_ids={CoalesceName("merger"): NodeID(coalesce_node.node_id)},
             config_gates=[fork_gate_config],
-            config_gate_id_map={"splitter": fork_gate.node_id},
+            config_gate_id_map={GateName("splitter"): NodeID(fork_gate.node_id)},
             branch_to_coalesce={
-                "path_a": "merger",
-                "path_b": "merger",
+                BranchName("path_a"): CoalesceName("merger"),
+                BranchName("path_b"): CoalesceName("merger"),
             },
-            coalesce_step_map={"merger": 3},  # transforms(2) + gate(1)
+            coalesce_step_map={CoalesceName("merger"): 3},  # transforms(2) + gate(1)
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -383,20 +384,20 @@ class TestRowProcessorCoalesce:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             edge_map={
-                (fork_gate.node_id, "path_a"): edge_a.edge_id,
-                (fork_gate.node_id, "path_b"): edge_b.edge_id,
+                (NodeID(fork_gate.node_id), "path_a"): edge_a.edge_id,
+                (NodeID(fork_gate.node_id), "path_b"): edge_b.edge_id,
             },
             coalesce_executor=coalesce_executor,
-            coalesce_node_ids={"merger": coalesce_node.node_id},
+            coalesce_node_ids={CoalesceName("merger"): NodeID(coalesce_node.node_id)},
             config_gates=[fork_gate_config],
-            config_gate_id_map={"splitter": fork_gate.node_id},
+            config_gate_id_map={GateName("splitter"): NodeID(fork_gate.node_id)},
             branch_to_coalesce={
-                "path_a": "merger",
-                "path_b": "merger",
+                BranchName("path_a"): CoalesceName("merger"),
+                BranchName("path_b"): CoalesceName("merger"),
             },
-            coalesce_step_map={"merger": 3},  # transforms(2) + gate(1)
+            coalesce_step_map={CoalesceName("merger"): 3},  # transforms(2) + gate(1)
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -539,7 +540,7 @@ class TestRowProcessorCoalesce:
         # Create tokens to simulate fork scenario
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             row_index=0,
             row_data={"text": "ACME earnings report"},
         )
@@ -667,7 +668,7 @@ class TestRowProcessorCoalesce:
         # Create tokens to simulate fork scenario
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             row_index=0,
             row_data={"text": "test input"},
         )
@@ -838,7 +839,7 @@ class TestRowProcessorCoalesce:
         # === Level 0: Create initial token (source row) ===
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             row_index=0,
             row_data={"text": "Document for nested processing"},
         )
@@ -1123,14 +1124,14 @@ class TestRowProcessorCoalesce:
             recorder=recorder,
             span_factory=span_factory,
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             coalesce_executor=coalesce_executor,
         )
 
         # Create initial token and fork it
         initial_token = token_manager.create_initial_token(
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             row_index=0,
             row_data={"text": "test"},
         )
@@ -1171,12 +1172,13 @@ class TestRowProcessorCoalesce:
             transforms=[],  # No transforms needed for this test
             ctx=ctx,
             start_step=0,
-            coalesce_name="test_coalesce",
+            coalesce_name=CoalesceName("test_coalesce"),
             coalesce_at_step=0,  # Changed from 1 to 0 (coalesce immediately)
         )
 
         # Verify fast token merged successfully
         assert result1 is not None
+        assert not isinstance(result1, list), "Expected single RowResult, not list"
         assert result1.outcome == RowOutcome.COALESCED
 
         # Process slow token (late arrival - merge already happened)
@@ -1185,7 +1187,7 @@ class TestRowProcessorCoalesce:
             transforms=[],
             ctx=ctx,
             start_step=0,
-            coalesce_name="test_coalesce",
+            coalesce_name=CoalesceName("test_coalesce"),
             coalesce_at_step=0,  # Changed from 1 to 0 (same as fast token)
         )
 
@@ -1193,6 +1195,7 @@ class TestRowProcessorCoalesce:
 
         # 1. Result is not None (token not held)
         assert result2 is not None, "Late arrival should return result, not be held"
+        assert not isinstance(result2, list), "Expected single RowResult, not list"
 
         # 2. Outcome is FAILED, not COMPLETED
         assert result2.outcome == RowOutcome.FAILED, f"Late arrival should return FAILED, got {result2.outcome}"
@@ -1266,10 +1269,10 @@ class TestCoalesceLinkage:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
-            branch_to_coalesce={"path_a": "merge_point"},
-            coalesce_step_map={"merge_point": 3},
+            source_node_id=NodeID(source.node_id),
+            branch_to_coalesce={BranchName("path_a"): CoalesceName("merge_point")},
+            coalesce_step_map={CoalesceName("merge_point"): 3},
         )
 
-        assert processor._branch_to_coalesce == {"path_a": "merge_point"}
-        assert processor._coalesce_step_map == {"merge_point": 3}
+        assert processor._branch_to_coalesce == {BranchName("path_a"): CoalesceName("merge_point")}
+        assert processor._coalesce_step_map == {CoalesceName("merge_point"): 3}

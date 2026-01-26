@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.contracts import RoutingAction, RoutingKind, TokenInfo
+from elspeth.contracts import NodeID, RoutingAction, RoutingKind, TokenInfo
 from elspeth.engine.executors import GateExecutor, GateOutcome, MissingEdgeError
 from elspeth.plugins.context import PluginContext
 
@@ -34,11 +34,20 @@ class TestGateExecutorRoutingBehavior:
         span_factory.gate_span.return_value.__enter__ = MagicMock(return_value=None)
         span_factory.gate_span.return_value.__exit__ = MagicMock(return_value=False)
 
+        # Convert str keys to NodeID for type compatibility
+        typed_edge_map: dict[tuple[NodeID, str], str] | None = None
+        if edge_map is not None:
+            typed_edge_map = {(NodeID(k[0]), k[1]): v for k, v in edge_map.items()}
+
+        typed_route_map: dict[tuple[NodeID, str], str] | None = None
+        if route_resolution_map is not None:
+            typed_route_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
+
         return GateExecutor(
             recorder=recorder,
             span_factory=span_factory,
-            edge_map=edge_map or {},
-            route_resolution_map=route_resolution_map or {},
+            edge_map=typed_edge_map or {},
+            route_resolution_map=typed_route_map or {},
         )
 
     def _make_token(self) -> TokenInfo:
@@ -266,9 +275,10 @@ class TestRoutingActionKindEnum:
     def test_routing_kind_is_str_enum(self) -> None:
         """RoutingKind is (str, Enum) for serialization."""
         # This enables database storage without explicit .value calls
-        assert RoutingKind.CONTINUE == "continue"  # type: ignore[comparison-overlap]
-        assert RoutingKind.ROUTE == "route"  # type: ignore[comparison-overlap]
-        assert RoutingKind.FORK_TO_PATHS == "fork_to_paths"  # type: ignore[comparison-overlap]
+        # Using .value for explicit string comparison instead of relying on implicit coercion
+        assert RoutingKind.CONTINUE.value == "continue"
+        assert RoutingKind.ROUTE.value == "route"
+        assert RoutingKind.FORK_TO_PATHS.value == "fork_to_paths"
 
     def test_routing_kind_used_for_dispatch(self) -> None:
         """Verify RoutingKind values can be used in if/elif dispatch.
@@ -291,12 +301,13 @@ class TestRoutingActionKindEnum:
         for action, expected_kind in zip(actions, expected_kinds, strict=True):
             # Test the dispatch pattern used in engine
             if action.kind == RoutingKind.CONTINUE:
-                matched_kind = RoutingKind.CONTINUE
+                matched_kind: RoutingKind | None = RoutingKind.CONTINUE
             elif action.kind == RoutingKind.ROUTE:
                 matched_kind = RoutingKind.ROUTE
             elif action.kind == RoutingKind.FORK_TO_PATHS:
                 matched_kind = RoutingKind.FORK_TO_PATHS
             else:
-                matched_kind = None
+                # Exhaustive match - unreachable if all cases handled
+                matched_kind = None  # type: ignore[unreachable]
 
             assert matched_kind is expected_kind

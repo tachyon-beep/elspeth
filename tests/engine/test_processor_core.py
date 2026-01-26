@@ -13,6 +13,7 @@ uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
+from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -89,7 +90,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -120,8 +121,8 @@ class TestRowProcessor:
         # Verify hashes for each state
         for state in states:
             assert state.input_hash is not None, "Input hash should be recorded"
-            assert state.output_hash is not None, "Output hash should be recorded"
             assert state.status.value == "completed", "State should be completed"
+            assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
         # Verify correct step indices (source is 0, transforms start at 1)
         step_indices = {s.step_index for s in states}
@@ -171,7 +172,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -215,7 +216,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -281,7 +282,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         # Without on_error configured, returning error is a bug - should raise
@@ -344,7 +345,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -426,7 +427,7 @@ class TestRowProcessor:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -482,7 +483,7 @@ class TestRowProcessorTokenIdentity:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -558,7 +559,7 @@ class TestRowProcessorTokenIdentity:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         results = processor.process_row(
@@ -623,7 +624,7 @@ class TestRowProcessorUnknownType:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         with pytest.raises(TypeError) as exc_info:

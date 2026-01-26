@@ -108,7 +108,7 @@ class TestModelEnumTier1Rejection:
                 node_id="node-1",
                 run_id="run-1",
                 plugin_name="test",
-                node_type="transform",  # type: ignore[arg-type] - String, not enum
+                node_type="transform",  # type: ignore[arg-type]
                 plugin_version="1.0.0",
                 determinism=Determinism.DETERMINISTIC,
                 config_hash="abc",
@@ -125,7 +125,7 @@ class TestModelEnumTier1Rejection:
                 node_id="node-1",
                 run_id="run-1",
                 plugin_name="test",
-                node_type=1,  # type: ignore[arg-type] - Integer, not enum
+                node_type=1,  # type: ignore[arg-type]
                 plugin_version="1.0.0",
                 determinism=Determinism.DETERMINISTIC,
                 config_hash="abc",
@@ -144,7 +144,7 @@ class TestModelEnumTier1Rejection:
                 plugin_name="test",
                 node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
-                determinism="deterministic",  # type: ignore[arg-type] - String
+                determinism="deterministic",  # type: ignore[arg-type]
                 config_hash="abc",
                 config_json="{}",
                 registered_at=datetime.now(UTC),
@@ -161,7 +161,7 @@ class TestModelEnumTier1Rejection:
                 config_hash="abc",
                 settings_json="{}",
                 canonical_version="v1",
-                status="completed",  # type: ignore[arg-type] - String, not enum
+                status="completed",  # type: ignore[arg-type]
             )
 
     def test_edge_routing_mode_rejects_string(self) -> None:
@@ -175,6 +175,6 @@ class TestModelEnumTier1Rejection:
                 from_node_id="node-1",
                 to_node_id="node-2",
                 label="continue",
-                default_mode="move",  # type: ignore[arg-type] - String
+                default_mode="move",  # type: ignore[arg-type]
                 created_at=datetime.now(UTC),
             )

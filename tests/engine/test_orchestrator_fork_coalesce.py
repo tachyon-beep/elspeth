@@ -19,6 +19,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_test_graph
 
@@ -113,7 +114,7 @@ class TestOrchestratorForkExecution:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

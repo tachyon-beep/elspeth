@@ -49,6 +49,7 @@ class TestRecordCall:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"input": "test"},
         )
@@ -378,6 +379,7 @@ class TestRecordCall:
         state2 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"input": "test"},
         )
@@ -427,6 +429,7 @@ class TestCallPayloadPersistence:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"input": "test"},
         )
@@ -545,3 +548,179 @@ class TestCallPayloadPersistence:
             assert call.request_ref is not None
             # response_ref should be None (no response_data)
             assert call.response_ref is None
+
+
+class TestFindCallByRequestHashRunIsolation:
+    """Tests for cross-run isolation in find_call_by_request_hash.
+
+    These tests verify that find_call_by_request_hash returns calls from the
+    correct run when the same node_id is reused across multiple runs. This is
+    critical for replay mode correctness.
+
+    Background: The nodes table has composite PK (node_id, run_id). When the
+    same pipeline runs twice, node_ids are reused. Queries must filter by
+    run_id to avoid returning calls from the wrong run.
+    """
+
+    def _create_run_with_call(
+        self,
+        recorder: LandscapeRecorder,
+        node_id: str,
+        request_data: dict[str, str],
+        response_data: dict[str, str],
+    ) -> tuple[str, str]:
+        """Create a run with a transform node and an LLM call.
+
+        Args:
+            recorder: LandscapeRecorder instance
+            node_id: Node ID to use (for testing reuse across runs)
+            request_data: Request data for the call
+            response_data: Response data for the call
+
+        Returns:
+            Tuple of (run_id, call_id)
+        """
+        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Register node with specified node_id
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="llm_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=schema,
+            node_id=node_id,  # Explicit node_id for collision testing
+        )
+
+        # Create row, token, and state
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={"input": "test"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            run_id=run.run_id,
+            step_index=0,
+            input_data={"input": "test"},
+        )
+
+        # Record the call
+        call = recorder.record_call(
+            state_id=state.state_id,
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data=request_data,
+            response_data=response_data,
+        )
+
+        return run.run_id, call.call_id
+
+    def test_find_call_returns_call_from_correct_run_with_same_node_ids(self) -> None:
+        """find_call_by_request_hash returns call from requested run only.
+
+        Scenario:
+        - Run A: node_id="llm_1", call with request_hash=H
+        - Run B: node_id="llm_1" (SAME), call with request_hash=H (SAME)
+        - Query for Run B should return Run B's call, NOT Run A's
+
+        This tests the critical cross-run isolation requirement.
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Identical request data = same request_hash
+        request_data = {"model": "gpt-4", "prompt": "Hello"}
+        node_id = "shared_llm_transform_1"
+
+        # Create Run A with call
+        _run_a_id, call_a_id = self._create_run_with_call(
+            recorder,
+            node_id=node_id,
+            request_data=request_data,
+            response_data={"content": "Response from Run A"},
+        )
+
+        # Create Run B with call (same node_id, same request_hash)
+        run_b_id, call_b_id = self._create_run_with_call(
+            recorder,
+            node_id=node_id,
+            request_data=request_data,
+            response_data={"content": "Response from Run B"},
+        )
+
+        # Compute request hash for lookup
+        from elspeth.core.canonical import stable_hash
+
+        request_hash = stable_hash(request_data)
+
+        # Query for Run B's call
+        result = recorder.find_call_by_request_hash(
+            run_id=run_b_id,
+            call_type="llm",
+            request_hash=request_hash,
+        )
+
+        # CRITICAL: Must return Run B's call, not Run A's
+        assert result is not None, "Should find call in Run B"
+        assert result.call_id == call_b_id, (
+            f"Should return Run B's call ({call_b_id}), but got {result.call_id} (Run A's call is {call_a_id})"
+        )
+
+    def test_find_call_returns_none_when_only_other_run_has_call(self) -> None:
+        """find_call_by_request_hash returns None if call only exists in other run.
+
+        Scenario:
+        - Run A: node_id="llm_1", call with request_hash=H
+        - Run B: node_id="llm_1" (SAME), NO calls
+        - Query for Run B should return None, not Run A's call
+
+        This ensures run isolation is complete (not just filtering).
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        request_data = {"model": "gpt-4", "prompt": "Hello"}
+        node_id = "shared_llm_transform_1"
+
+        # Create Run A with call
+        _run_a_id, _ = self._create_run_with_call(
+            recorder,
+            node_id=node_id,
+            request_data=request_data,
+            response_data={"content": "Response from Run A"},
+        )
+
+        # Create Run B WITHOUT any calls (just the node)
+        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        run_b = recorder.begin_run(config={}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run_b.run_id,
+            plugin_name="llm_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=schema,
+            node_id=node_id,
+        )
+
+        # Compute request hash for lookup
+        from elspeth.core.canonical import stable_hash
+
+        request_hash = stable_hash(request_data)
+
+        # Query for Run B's call (should not find Run A's)
+        result = recorder.find_call_by_request_hash(
+            run_id=run_b.run_id,
+            call_type="llm",
+            request_hash=request_hash,
+        )
+
+        # CRITICAL: Must return None, not Run A's call
+        assert result is None, f"Should return None for Run B (no calls), but got call_id={result.call_id if result else 'N/A'}"

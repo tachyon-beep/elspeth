@@ -17,13 +17,16 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
+from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import RowOutcome, SourceRow
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase
+from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
 
 
 # Test helper classes
@@ -91,7 +94,7 @@ class TestForkGroupIDConsistency:
         sink_b = CollectSink()
 
         settings = ElspethSettings(
-            source={"plugin": "list_source"},
+            source={"plugin": "null"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -101,31 +104,42 @@ class TestForkGroupIDConsistency:
                 )
             ],
             sinks={
-                "branch_a": {"plugin": "collect_sink"},
-                "branch_b": {"plugin": "collect_sink"},
+                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
+                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
             },
             default_sink="branch_a",
         )
 
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+        )
+
         config = PipelineConfig(
-            source=source,
+            source=as_source(source),
             transforms=[],
-            gates=[],
-            sinks={"branch_a": sink_a, "branch_b": sink_b},
+            sinks={"branch_a": as_sink(sink_a), "branch_b": as_sink(sink_b)},
+            gates=list(settings.gates),
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.execute_with_settings(settings=settings, config=config)
+        _run = orchestrator.run(config, graph=graph, settings=settings)
 
         # Query tokens table for forked children
         with db.connection() as conn:
             tokens_result = conn.execute(
-                """
+                text("""
                 SELECT token_id, fork_group_id
                 FROM tokens
                 WHERE fork_group_id IS NOT NULL
                 ORDER BY token_id
-                """
+                """)
             ).fetchall()
 
         # Should have 2 forked children
@@ -149,7 +163,7 @@ class TestForkGroupIDConsistency:
         sink_b = CollectSink()
 
         settings = ElspethSettings(
-            source={"plugin": "list_source"},
+            source={"plugin": "null"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -159,41 +173,54 @@ class TestForkGroupIDConsistency:
                 )
             ],
             sinks={
-                "branch_a": {"plugin": "collect_sink"},
-                "branch_b": {"plugin": "collect_sink"},
+                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
+                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
             },
             default_sink="branch_a",
         )
 
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+        )
+
         config = PipelineConfig(
-            source=source,
+            source=as_source(source),
             transforms=[],
-            gates=[],
-            sinks={"branch_a": sink_a, "branch_b": sink_b},
+            sinks={"branch_a": as_sink(sink_a), "branch_b": as_sink(sink_b)},
+            gates=list(settings.gates),
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.execute_with_settings(settings=settings, config=config)
+        _run = orchestrator.run(config, graph=graph, settings=settings)
 
         # Query tokens table for canonical fork_group_id
         with db.connection() as conn:
-            canonical_id = conn.execute(
-                """
+            canonical_row = conn.execute(
+                text("""
                 SELECT fork_group_id
                 FROM tokens
                 WHERE fork_group_id IS NOT NULL
                 LIMIT 1
-                """
-            ).fetchone()[0]
+                """)
+            ).fetchone()
+            assert canonical_row is not None, "Should have at least one token with fork_group_id"
+            canonical_id = canonical_row[0]
 
             # Query token_outcomes for parent's FORKED outcome
             outcome_result = conn.execute(
-                """
+                text("""
                 SELECT fork_group_id
                 FROM token_outcomes
-                WHERE outcome = ?
-                """,
-                (RowOutcome.FORKED.value,),
+                WHERE outcome = :outcome
+                """),
+                {"outcome": RowOutcome.FORKED.value},
             ).fetchone()
 
         assert outcome_result is not None, "Parent should have FORKED outcome recorded"
@@ -219,7 +246,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            source={"plugin": "list_source"},
+            source={"plugin": "null"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -228,35 +255,48 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "collect_sink"}},
-            coalesce={
-                "output": CoalesceSettings(
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            coalesce=[
+                CoalesceSettings(
+                    name="output",
                     branches=["branch_a", "branch_b"],
                     policy="require_all",
                     merge="union",
                 )
-            },
+            ],
             default_sink="output",
         )
 
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
         config = PipelineConfig(
-            source=source,
+            source=as_source(source),
             transforms=[],
-            gates=[],
-            sinks={"output": sink},
+            sinks={"output": as_sink(sink)},
+            gates=list(settings.gates),
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.execute_with_settings(settings=settings, config=config)
+        _run = orchestrator.run(config, graph=graph, settings=settings)
 
         # Query tokens table for merged token (created by coalesce)
         with db.connection() as conn:
             merged_token = conn.execute(
-                """
+                text("""
                 SELECT token_id, join_group_id
                 FROM tokens
                 WHERE join_group_id IS NOT NULL
-                """
+                """)
             ).fetchone()
 
         assert merged_token is not None, "Coalesce should create merged token with join_group_id"
@@ -274,7 +314,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            source={"plugin": "list_source"},
+            source={"plugin": "null"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -283,47 +323,62 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "collect_sink"}},
-            coalesce={
-                "output": CoalesceSettings(
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            coalesce=[
+                CoalesceSettings(
+                    name="output",
                     branches=["branch_a", "branch_b"],
                     policy="require_all",
                     merge="union",
                 )
-            },
+            ],
             default_sink="output",
         )
 
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
         config = PipelineConfig(
-            source=source,
+            source=as_source(source),
             transforms=[],
-            gates=[],
-            sinks={"output": sink},
+            sinks={"output": as_sink(sink)},
+            gates=list(settings.gates),
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.execute_with_settings(settings=settings, config=config)
+        _run = orchestrator.run(config, graph=graph, settings=settings)
 
         # Query tokens table for canonical join_group_id
         with db.connection() as conn:
-            canonical_id = conn.execute(
-                """
+            canonical_row = conn.execute(
+                text("""
                 SELECT join_group_id
                 FROM tokens
                 WHERE join_group_id IS NOT NULL
                 LIMIT 1
-                """
-            ).fetchone()[0]
+                """)
+            ).fetchone()
+            assert canonical_row is not None, "Should have at least one token with join_group_id"
+            canonical_id = canonical_row[0]
 
             # Query token_outcomes for consumed tokens' COALESCED outcomes
             consumed_outcomes = conn.execute(
-                """
+                text("""
                 SELECT token_id, join_group_id
                 FROM token_outcomes
-                WHERE outcome = ?
+                WHERE outcome = :outcome
                 ORDER BY token_id
-                """,
-                (RowOutcome.COALESCED.value,),
+                """),
+                {"outcome": RowOutcome.COALESCED.value},
             ).fetchall()
 
         # Should have outcomes for consumed tokens (parent branches)
@@ -346,7 +401,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            source={"plugin": "list_source"},
+            source={"plugin": "null"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -355,47 +410,62 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "collect_sink"}},
-            coalesce={
-                "output": CoalesceSettings(
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            coalesce=[
+                CoalesceSettings(
+                    name="output",
                     branches=["branch_a", "branch_b"],
                     policy="require_all",
                     merge="union",
                 )
-            },
+            ],
             default_sink="output",
         )
 
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
         config = PipelineConfig(
-            source=source,
+            source=as_source(source),
             transforms=[],
-            gates=[],
-            sinks={"output": sink},
+            sinks={"output": as_sink(sink)},
+            gates=list(settings.gates),
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.execute_with_settings(settings=settings, config=config)
+        _run = orchestrator.run(config, graph=graph, settings=settings)
 
         # Query tokens table for merged token
         with db.connection() as conn:
-            merged_token_id, canonical_id = conn.execute(
-                """
+            merged_row = conn.execute(
+                text("""
                 SELECT token_id, join_group_id
                 FROM tokens
                 WHERE join_group_id IS NOT NULL
                 LIMIT 1
-                """
+                """)
             ).fetchone()
+            assert merged_row is not None, "Should have at least one token with join_group_id"
+            merged_token_id, canonical_id = merged_row
 
             # Query for merged token's own COALESCED outcome
             # (merged token gets BOTH COALESCED outcome AND later COMPLETED outcome at sink)
             merged_outcome = conn.execute(
-                """
+                text("""
                 SELECT join_group_id
                 FROM token_outcomes
-                WHERE token_id = ? AND outcome = ?
-                """,
-                (merged_token_id, RowOutcome.COALESCED.value),
+                WHERE token_id = :token_id AND outcome = :outcome
+                """),
+                {"token_id": merged_token_id, "outcome": RowOutcome.COALESCED.value},
             ).fetchone()
 
         # Merged token should have COALESCED outcome

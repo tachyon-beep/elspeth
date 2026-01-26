@@ -63,6 +63,7 @@ class TestLandscapeRecorderRouting:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -137,6 +138,7 @@ class TestLandscapeRecorderRouting:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )

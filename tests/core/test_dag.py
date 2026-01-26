@@ -723,6 +723,7 @@ class TestExecutionGraphFromConfig:
     def test_get_sink_id_map(self, plugin_manager) -> None:
         """Get explicit sink_name -> node_id mapping."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import SinkName
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
@@ -758,9 +759,9 @@ class TestExecutionGraphFromConfig:
         sink_map = graph.get_sink_id_map()
 
         # Explicit mapping - no substring matching
-        assert "results" in sink_map
-        assert "flagged" in sink_map
-        assert sink_map["results"] != sink_map["flagged"]
+        assert SinkName("results") in sink_map
+        assert SinkName("flagged") in sink_map
+        assert sink_map[SinkName("results")] != sink_map[SinkName("flagged")]
 
     def test_get_transform_id_map(self, plugin_manager) -> None:
         """Get explicit sequence -> node_id mapping for transforms."""
@@ -851,6 +852,7 @@ class TestExecutionGraphRouteMapping:
     def test_get_route_label_for_sink(self, plugin_manager) -> None:
         """Get route label that leads to a sink from a config gate."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
             GateSettings,
@@ -893,7 +895,7 @@ class TestExecutionGraphRouteMapping:
         )
 
         # Get the config gate's node_id
-        gate_node_id = graph.get_config_gate_id_map()["classifier"]
+        gate_node_id = graph.get_config_gate_id_map()[GateName("classifier")]
 
         # Given gate node and sink name, get the route label
         route_label = graph.get_route_label(gate_node_id, "flagged")
@@ -903,6 +905,7 @@ class TestExecutionGraphRouteMapping:
     def test_get_route_label_for_continue(self, plugin_manager) -> None:
         """Continue routes return 'continue' as label."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import GateName
         from elspeth.core.config import (
             ElspethSettings,
             GateSettings,
@@ -940,7 +943,7 @@ class TestExecutionGraphRouteMapping:
             gates=list(config.gates),
             default_sink=config.default_sink,
         )
-        gate_node_id = graph.get_config_gate_id_map()["gate"]
+        gate_node_id = graph.get_config_gate_id_map()[GateName("gate")]
 
         # The edge to output sink uses "continue" label (both routes resolve to continue)
         route_label = graph.get_route_label(gate_node_id, "results")
@@ -953,6 +956,7 @@ class TestExecutionGraphRouteMapping:
         Sink names don't need to match identifier pattern - they're just dict keys.
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import GateName, SinkName
         from elspeth.core.config import (
             ElspethSettings,
             GateSettings,
@@ -997,11 +1001,11 @@ class TestExecutionGraphRouteMapping:
 
         # Verify both hyphenated sinks exist
         sink_ids = graph.get_sink_id_map()
-        assert "output-sink" in sink_ids
-        assert "quarantine-bucket" in sink_ids
+        assert SinkName("output-sink") in sink_ids
+        assert SinkName("quarantine-bucket") in sink_ids
 
         # Verify gate routes to the hyphenated sinks
-        gate_node_id = graph.get_config_gate_id_map()["quality_check"]
+        gate_node_id = graph.get_config_gate_id_map()[GateName("quality_check")]
         assert graph.get_route_label(gate_node_id, "quarantine-bucket") == "false"
 
 
@@ -1187,6 +1191,7 @@ class TestCoalesceNodes:
     def test_from_config_creates_coalesce_node(self, plugin_manager) -> None:
         """Coalesce config should create a coalesce node in the graph."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1240,10 +1245,10 @@ class TestCoalesceNodes:
 
         # Use proper accessor, not string matching
         coalesce_map = graph.get_coalesce_id_map()
-        assert "merge_results" in coalesce_map
+        assert CoalesceName("merge_results") in coalesce_map
 
         # Verify node type
-        node_id = coalesce_map["merge_results"]
+        node_id = coalesce_map[CoalesceName("merge_results")]
         node_info = graph.get_node_info(node_id)
         assert node_info.node_type == "coalesce"
         assert node_info.plugin_name == "coalesce:merge_results"
@@ -1251,7 +1256,7 @@ class TestCoalesceNodes:
     def test_from_config_coalesce_edges_from_fork_branches(self, plugin_manager) -> None:
         """Coalesce node should have edges from fork gate (via branches)."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import CoalesceName, GateName, RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1304,8 +1309,8 @@ class TestCoalesceNodes:
         )
 
         # Get node IDs
-        gate_id = graph.get_config_gate_id_map()["forker"]
-        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
+        gate_id = graph.get_config_gate_id_map()[GateName("forker")]
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
 
         # Verify edges from fork gate to coalesce node
         edges = graph.get_edges()
@@ -1323,6 +1328,7 @@ class TestCoalesceNodes:
     ) -> None:
         """Fork branches not in any coalesce should still route to output sink."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName, GateName, SinkName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1376,9 +1382,9 @@ class TestCoalesceNodes:
         )
 
         # Get node IDs
-        gate_id = graph.get_config_gate_id_map()["forker"]
-        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
-        path_c_sink_id = graph.get_sink_id_map()["path_c"]
+        gate_id = graph.get_config_gate_id_map()[GateName("forker")]
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
+        path_c_sink_id = graph.get_sink_id_map()[SinkName("path_c")]
 
         # Verify path_c goes to path_c sink, not coalesce
         edges = graph.get_edges()
@@ -1395,6 +1401,7 @@ class TestCoalesceNodes:
     def test_get_coalesce_id_map_returns_mapping(self, plugin_manager) -> None:
         """get_coalesce_id_map should return coalesce_name -> node_id."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1454,19 +1461,20 @@ class TestCoalesceNodes:
         coalesce_map = graph.get_coalesce_id_map()
 
         # Should have both coalesce nodes
-        assert "merge_ab" in coalesce_map
-        assert "merge_cd" in coalesce_map
+        assert CoalesceName("merge_ab") in coalesce_map
+        assert CoalesceName("merge_cd") in coalesce_map
 
         # Node IDs should be unique
-        assert coalesce_map["merge_ab"] != coalesce_map["merge_cd"]
+        assert coalesce_map[CoalesceName("merge_ab")] != coalesce_map[CoalesceName("merge_cd")]
 
         # Verify both nodes exist in the graph
-        assert graph.has_node(coalesce_map["merge_ab"])
-        assert graph.has_node(coalesce_map["merge_cd"])
+        assert graph.has_node(coalesce_map[CoalesceName("merge_ab")])
+        assert graph.has_node(coalesce_map[CoalesceName("merge_cd")])
 
     def test_get_branch_to_coalesce_map_returns_mapping(self, plugin_manager) -> None:
         """get_branch_to_coalesce_map should return branch_name -> coalesce_name."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import BranchName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1520,8 +1528,8 @@ class TestCoalesceNodes:
         branch_map = graph.get_branch_to_coalesce_map()
 
         # Should map branches to coalesce_name (not node_id) for processor step lookup
-        assert branch_map["path_a"] == "merge_results"
-        assert branch_map["path_b"] == "merge_results"
+        assert branch_map[BranchName("path_a")] == "merge_results"
+        assert branch_map[BranchName("path_b")] == "merge_results"
 
     def test_branch_to_coalesce_maps_to_coalesce_name_for_step_lookup(self, plugin_manager) -> None:
         """branch_to_coalesce should map to coalesce_name (not node_id) for use with coalesce_step_map.
@@ -1534,6 +1542,7 @@ class TestCoalesceNodes:
         when trying to look up in coalesce_step_map which expects coalesce_name keys.
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import BranchName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1590,8 +1599,12 @@ class TestCoalesceNodes:
         # CRITICAL: Must map to coalesce_name (not node_id) for processor step lookup
         # The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
         # coalesce_step_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
-        assert branch_map["analysis_path"] == "join_point", f"Expected coalesce_name 'join_point', got {branch_map['analysis_path']}"
-        assert branch_map["validation_path"] == "join_point", f"Expected coalesce_name 'join_point', got {branch_map['validation_path']}"
+        assert branch_map[BranchName("analysis_path")] == "join_point", (
+            f"Expected coalesce_name 'join_point', got {branch_map[BranchName('analysis_path')]}"
+        )
+        assert branch_map[BranchName("validation_path")] == "join_point", (
+            f"Expected coalesce_name 'join_point', got {branch_map[BranchName('validation_path')]}"
+        )
 
     def test_duplicate_branch_names_across_coalesces_rejected(self, plugin_manager) -> None:
         """Duplicate branch names across coalesce settings should be rejected."""
@@ -1845,7 +1858,7 @@ class TestCoalesceNodes:
     def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import CoalesceName, RoutingMode, SinkName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1897,8 +1910,8 @@ class TestCoalesceNodes:
             coalesce_settings=settings.coalesce,
         )
 
-        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
-        output_sink_id = graph.get_sink_id_map()["output"]
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
+        output_sink_id = graph.get_sink_id_map()[SinkName("output")]
 
         # Verify edge from coalesce to output sink
         edges = graph.get_edges()
@@ -1911,6 +1924,7 @@ class TestCoalesceNodes:
     def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1964,7 +1978,7 @@ class TestCoalesceNodes:
             coalesce_settings=settings.coalesce,
         )
 
-        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
         node_info = graph.get_node_info(coalesce_id)
 
         # Verify config is stored

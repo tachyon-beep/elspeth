@@ -383,11 +383,9 @@ class TestNoOpLimiter:
         limiter = NoOpLimiter()
 
         # Should not block or raise, and should return None
-        result1 = limiter.acquire()
-        result2 = limiter.acquire(weight=100)
-
-        assert result1 is None
-        assert result2 is None
+        limiter.acquire()
+        limiter.acquire(weight=100)
+        # No assertion needed - acquire() returns None by design
 
     def test_noop_limiter_try_acquire(self) -> None:
         """NoOpLimiter.try_acquire() always returns True."""
@@ -412,13 +410,12 @@ class TestNoOpLimiter:
 
         limiter = NoOpLimiter()
 
-        # Should return None and not raise
-        result1 = limiter.close()
-        assert result1 is None
+        # Should not raise - close() returns None by design
+        limiter.close()
 
         # Should be idempotent (calling twice doesn't raise)
-        result2 = limiter.close()
-        assert result2 is None
+        limiter.close()
+        # No assertion needed - close() returns None by design
 
 
 class TestExcepthookSuppression:

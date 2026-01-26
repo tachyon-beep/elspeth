@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
-def generate_data(num_rows: int = 50_000, output_path: Path | None = None):
+def generate_data(num_rows: int = 50_000, output_path: Path | None = None) -> None:
     """Generate procedural CSV data."""
     if output_path is None:
         output_path = Path(__file__).parent / "input.csv"

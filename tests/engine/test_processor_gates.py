@@ -10,6 +10,7 @@ GateSettings.
 from typing import Any
 
 from elspeth.contracts import RoutingMode
+from elspeth.contracts.types import GateName, NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -62,7 +63,6 @@ class TestRowProcessorGates:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        edge_map = {(gate.node_id, "continue"): continue_edge.edge_id}
 
         class FinalTransform(BaseTransform):
             name = "final"
@@ -88,10 +88,12 @@ class TestRowProcessorGates:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             config_gates=[pass_gate],
-            config_gate_id_map={"pass_gate": gate.node_id},
-            edge_map=edge_map,  # AUD-002: Required for continue routing events
+            config_gate_id_map={GateName("pass_gate"): NodeID(gate.node_id)},
+            edge_map={
+                (NodeID(gate.node_id), "continue"): continue_edge.edge_id,
+            },  # AUD-002: Required for continue routing events
         )
 
         results = processor.process_row(
@@ -163,18 +165,18 @@ class TestRowProcessorGates:
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
-        edge_map = {(gate.node_id, "true"): edge.edge_id}
+        edge_map = {(NodeID(gate.node_id), "true"): edge.edge_id}
         # Route resolution map: label -> sink_name
-        route_resolution_map = {(gate.node_id, "true"): "high_values"}
+        route_resolution_map = {(NodeID(gate.node_id), "true"): "high_values"}
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
             config_gates=[router_gate],
-            config_gate_id_map={"router": gate.node_id},
+            config_gate_id_map={GateName("router"): NodeID(gate.node_id)},
         )
 
         results = processor.process_row(
@@ -264,17 +266,17 @@ class TestRowProcessorGates:
 
         ctx = PluginContext(run_id=run.run_id, config={})
         edge_map = {
-            (gate.node_id, "path_a"): edge_a.edge_id,
-            (gate.node_id, "path_b"): edge_b.edge_id,
+            (NodeID(gate.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate.node_id), "path_b"): edge_b.edge_id,
         }
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             edge_map=edge_map,
             config_gates=[splitter_gate],
-            config_gate_id_map={"splitter": gate.node_id},
+            config_gate_id_map={GateName("splitter"): NodeID(gate.node_id)},
         )
 
         results = processor.process_row(
@@ -443,17 +445,17 @@ class TestRowProcessorNestedForks:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={
-                (gate1_node.node_id, "left"): edge1a.edge_id,
-                (gate1_node.node_id, "right"): edge1b.edge_id,
-                (gate2_node.node_id, "left"): edge2a.edge_id,
-                (gate2_node.node_id, "right"): edge2b.edge_id,
+                (NodeID(gate1_node.node_id), "left"): edge1a.edge_id,
+                (NodeID(gate1_node.node_id), "right"): edge1b.edge_id,
+                (NodeID(gate2_node.node_id), "left"): edge2a.edge_id,
+                (NodeID(gate2_node.node_id), "right"): edge2b.edge_id,
             },
             config_gates=[gate1_config, gate2_config],
             config_gate_id_map={
-                "fork_gate_1": gate1_node.node_id,
-                "fork_gate_2": gate2_node.node_id,
+                GateName("fork_gate_1"): NodeID(gate1_node.node_id),
+                GateName("fork_gate_2"): NodeID(gate2_node.node_id),
             },
         )
 

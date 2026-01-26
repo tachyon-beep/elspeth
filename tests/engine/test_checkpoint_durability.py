@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -38,6 +38,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 
@@ -79,8 +80,8 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     # Use public setter method instead of private field assignment
     # This is test code that needs to set up graph structure, but we still prefer
     # the setattr pattern for better encapsulation when public setters aren't available
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
     graph._default_sink = output_sink
@@ -188,7 +189,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -226,7 +227,7 @@ class TestCheckpointDurability:
 
         # Get sink node_id from graph
         test_graph = _build_test_graph(config)
-        sink_node_id = test_graph.get_sink_id_map()["default"]
+        sink_node_id = test_graph.get_sink_id_map()[SinkName("default")]
 
         # Verify node_states exist for all rows at sink
         with db.engine.connect() as conn:
@@ -461,7 +462,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -529,7 +530,7 @@ class TestCheckpointDurability:
 
         # Get sink node_id from graph
         resume_graph = _build_test_graph(config)
-        sink_node_id = resume_graph.get_sink_id_map()["default"]
+        sink_node_id = resume_graph.get_sink_id_map()[SinkName("default")]
 
         with db.engine.connect() as conn:
             # Verify node_states at sink for resumed rows (3 new rows processed)
@@ -615,7 +616,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -711,13 +712,13 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
         graph = _build_test_graph(config)
         # P3 Fix: Use public API for accessing graph internals
-        sink_node_id = graph.get_sink_id_map()["default"]
+        sink_node_id = graph.get_sink_id_map()[SinkName("default")]
         transform_node_id = graph.get_transform_id_map()[0]
 
         orchestrator = Orchestrator(
@@ -823,7 +824,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -925,7 +926,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -1019,7 +1020,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -1099,7 +1100,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

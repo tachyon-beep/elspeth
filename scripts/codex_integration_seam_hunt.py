@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-from codex_audit_common import (
+from codex_audit_common import (  # type: ignore[import-not-found]
     AsyncTqdm,
     chunked,
     ensure_log_file,
@@ -278,7 +278,7 @@ async def _run_batches(
         if len(failed_files) > 10:
             print(f"  ... and {len(failed_files) - 10} more (see {log_path})", file=sys.stderr)
 
-    summary = generate_summary(output_dir, no_defect_marker="No integration seam defect found")
+    summary: dict[str, int] = generate_summary(output_dir, no_defect_marker="No integration seam defect found")
     summary["gated"] = total_gated
     return summary
 

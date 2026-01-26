@@ -292,7 +292,7 @@ class TestSchemaRecording:
             schema_config=schema_config,
         )
 
-        retrieved = recorder.get_node(node.node_id)
+        retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
         assert retrieved.schema_mode == "dynamic"
         assert retrieved.schema_fields is None
@@ -319,7 +319,7 @@ class TestSchemaRecording:
             schema_config=schema_config,
         )
 
-        retrieved = recorder.get_node(node.node_id)
+        retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
         assert retrieved.schema_mode == "strict"
         assert retrieved.schema_fields is not None
@@ -349,7 +349,7 @@ class TestSchemaRecording:
             schema_config=schema_config,
         )
 
-        retrieved = recorder.get_node(node.node_id)
+        retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
         assert retrieved.schema_mode == "free"
         assert retrieved.schema_fields is not None

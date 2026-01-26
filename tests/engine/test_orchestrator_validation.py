@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import GateName, NodeID, PluginSchema, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
@@ -21,6 +21,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 if TYPE_CHECKING:
@@ -79,11 +80,12 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     if output_sink:
         graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = {}
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal ID maps - cast to proper types for type safety
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    config_gate_id_map: dict[GateName, NodeID] = {}
+    graph._config_gate_id_map = config_gate_id_map
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = output_sink
 
     return graph
@@ -166,7 +168,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -244,7 +246,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={
                 "default": as_sink(sink),
                 "error_archive": as_sink(sink),
@@ -326,7 +328,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -397,7 +399,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -469,7 +471,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={
                 "default": as_sink(default_sink),
                 "error_sink": as_sink(error_sink),  # Valid target for on_error
@@ -560,7 +562,7 @@ class TestTransformErrorSinkValidation:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

@@ -716,3 +716,338 @@ allow_hits:
   reason: 'Trust boundary: JSON schema items field for arrays may be missing'
   safety: Returns list[Any] for untyped arrays
   expires: null
+# === Batch Adapter Integration (2026-01-27) ===
+- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=147
+  owner: architecture
+  reason: 'Optional protocol extension: checking if transform supports batch adapter pattern'
+  safety: Fallback to non-batch processing if attribute missing
+  expires: null
+- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=153
+  owner: architecture
+  reason: 'Optional protocol extension: pool_size is optional on batch-aware transforms'
+  safety: Default value 30 is safe - used for concurrency limiting
+  expires: null
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=224
+  owner: architecture
+  reason: 'Optional protocol extension: checking if transform has accept() method'
+  safety: Non-batch transforms use process() instead - documented fallback
+  expires: null
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=224
+  owner: architecture
+  reason: 'Optional protocol extension: accept method check paired with hasattr'
+  safety: Callable check ensures method is usable if present
+  expires: null
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=265
+  owner: architecture
+  reason: 'Optional protocol extension: batch_wait_timeout is optional on transforms'
+  safety: Default 3600.0 seconds is generous timeout for batch results
+  expires: null
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=295
+  owner: architecture
+  reason: 'Optional protocol extension: evict_submission is optional on batch transforms'
+  safety: None means transform doesn't support submission eviction - gracefully skipped
+  expires: null
+- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=299
+  owner: architecture
+  reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
+  safety: Logged with warning - original timeout error still raised
+  expires: null
+# === Azure LLM Plugin External API Responses ===
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:_process_sequential:line=226
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API response may not include content-type header'
+  safety: Graceful default to 'unknown' - used for error context only
+  expires: null
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:_process_sequential:line=251
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical
+  expires: null
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:_process_sequential:line=262
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API may return different model than requested'
+  safety: Graceful fallback to requested model - audit captures actual
+  expires: null
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:process:line=439
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API response may not include content-type header'
+  safety: Graceful default to 'unknown' - used for error context only
+  expires: null
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:process:line=466
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical
+  expires: null
+- key: plugins/llm/azure.py:R1:AzureLLMTransform:process:line=477
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API may return different model than requested'
+  safety: Graceful fallback to requested model - audit captures actual
+  expires: null
+# === Azure Multi-Query LLM Plugin ===
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=311
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API response may not include content-type header'
+  safety: Graceful default to 'unknown' - used for error context only
+  expires: null
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=341
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical
+  expires: null
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=395
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API may return different model than requested'
+  safety: Graceful fallback to requested model - audit captures actual
+  expires: null
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=449
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): Azure API model field is optional'
+  safety: Graceful fallback to configured model - audit captures actual
+  expires: null
+# === OpenRouter Multi-Query LLM Plugin ===
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=420
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  safety: Graceful fallback to requested model - audit captures actual
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=450
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API model field is optional'
+  safety: Graceful fallback to configured model - audit captures actual
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=504
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  safety: Graceful fallback to configured model - audit captures actual
+  expires: null
+# === Batch Transform Mixin ===
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=230
+  owner: architecture
+  reason: 'Trust boundary: batch processing can fail for many reasons (API errors, timeouts)'
+  safety: Caught, logged, and result emitted with error status for audit trail
+  expires: null
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=281
+  owner: architecture
+  reason: 'Background thread cleanup: iteration failure should not crash release loop'
+  safety: Logged with error, loop continues to process remaining results
+  expires: null
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=294
+  owner: architecture
+  reason: 'Background thread emit: emit failure should not crash release loop'
+  safety: Logged with error, loop continues - waiter will timeout if emit fails
+  expires: null
+# === Landscape Database SQLAlchemy Inspector ===
+- key: core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=137
+  owner: architecture
+  reason: 'Trust boundary: SQLAlchemy inspector FK dict structure from external library'
+  safety: Graceful handling of missing fields in FK metadata
+  expires: null
+# === Post-reformat line number corrections (2026-01-27) ===
+- key: engine/executors.py:R1:GateExecutor:execute_gate:line=530
+  owner: architecture
+  reason: Lookup with explicit None check - raises MissingEdgeError if not found
+  safety: Raises immediately with node_id and label for debugging
+  expires: null
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=807
+  owner: architecture
+  reason: Lookup with explicit None check - raises MissingEdgeError if not found
+  safety: Raises immediately with node_id and label for debugging
+  expires: null
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=821
+  owner: architecture
+  reason: Lookup with explicit None check - raises MissingEdgeError if not found
+  safety: Raises immediately with node_id and label for debugging
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=908
+  owner: architecture
+  reason: Checking if batch exists to decide whether to create one
+  safety: None means create new batch - explicit conditional logic follows
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=933
+  owner: architecture
+  reason: Optional trigger evaluator lookup - not all aggregations have config
+  safety: None means no trigger config - correctly skipped
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=946
+  owner: architecture
+  reason: 'Intentional Optional API: returns empty list for unknown node_id'
+  safety: Empty list is safe default - no rows buffered yet
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=957
+  owner: architecture
+  reason: 'Intentional Optional API: returns empty list for unknown node_id'
+  safety: Empty list is safe default - no tokens buffered yet
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=972
+  owner: architecture
+  reason: 'Intentional Optional API: returns empty list for unknown node_id'
+  safety: Empty list is safe default - no rows buffered
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=973
+  owner: architecture
+  reason: 'Intentional Optional API: returns empty list for unknown node_id'
+  safety: Empty list is safe default - no tokens buffered
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1007
+  owner: architecture
+  reason: 'Explicit existence check: raises RuntimeError if batch_id is None'
+  safety: Raises immediately with node_id for debugging
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1012
+  owner: architecture
+  reason: Existence check paired with explicit RuntimeError if empty
+  safety: Raises immediately if buffer is empty
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1013
+  owner: architecture
+  reason: Token buffer lookup matches row buffer lookup pattern
+  safety: Empty list default paired with row buffer check
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1177
+  owner: architecture
+  reason: Optional trigger evaluator lookup - not all aggregations have trigger config
+  safety: None means no trigger config - correctly skipped
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1189
+  owner: architecture
+  reason: 'Idempotent cleanup: batch_id may not exist if already reset'
+  safety: None means already cleaned up or never existed - correctly skipped
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1204
+  owner: architecture
+  reason: 'Intentional Optional API: returns 0 for unknown node_id'
+  safety: 0 is safe default - no rows buffered
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1244
+  owner: architecture
+  reason: Optional trigger evaluator lookup for elapsed time - not all aggregations have trigger config
+  safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1258
+  owner: architecture
+  reason: 'Intentional Optional API: batch_id lookup for node_id'
+  safety: None is safe - means no batch exists yet, recorded as null in checkpoint
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1306
+  owner: architecture
+  reason: 'Optional field: _version in checkpoint state for migration compatibility'
+  safety: None check with explicit fallback to legacy format
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1355
+  owner: architecture
+  reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
+  safety: None default handled by dataclass
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1364
+  owner: architecture
+  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
+  safety: None check with explicit handling
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1370
+  owner: architecture
+  reason: Optional trigger evaluator lookup - node may not have trigger config
+  safety: None check with conditional elapsed time restoration
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1380
+  owner: architecture
+  reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward compat)'
+  safety: Default 0.0 if missing - safe for fresh checkpoints
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1391
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no batch exists for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1402
+  owner: architecture
+  reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
+  safety: False return is safe default - no flush needed
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1416
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1445
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no state was restored for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R4:SinkExecutor:write:line=1640
+  owner: architecture
+  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
+  safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
+  expires: null
+# === OpenRouter _process_row method ===
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=301
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): HTTP response headers may not include content-type'
+  safety: Graceful default to 'unknown' - used for error reporting only
+  expires: null
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=326
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical for processing
+  expires: null
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=338
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  safety: Graceful fallback to requested model - audit still captures actual value
+  expires: null
+# === TUI explain screen line number update ===
+- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_node_state:line=266
+  owner: architecture
+  reason: 'Trust boundary: loading node state that may fail for incomplete audit trails'
+  safety: Errors logged with exc_info; returns None to detail panel
+  expires: null
+# === Final line number corrections (2026-01-27) ===
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1178
+  owner: architecture
+  reason: Optional trigger evaluator lookup - not all aggregations have trigger config
+  safety: None means no trigger config - correctly skipped
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1190
+  owner: architecture
+  reason: 'Idempotent cleanup: batch_id may not exist if already reset'
+  safety: None means already cleaned up or never existed - correctly skipped
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1205
+  owner: architecture
+  reason: 'Intentional Optional API: returns 0 for unknown node_id'
+  safety: 0 is safe default - no rows buffered
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1245
+  owner: architecture
+  reason: Optional trigger evaluator lookup for elapsed time - not all aggregations have trigger config
+  safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1259
+  owner: architecture
+  reason: 'Intentional Optional API: batch_id lookup for node_id'
+  safety: None is safe - means no batch exists yet, recorded as null in checkpoint
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1307
+  owner: architecture
+  reason: 'Optional field: _version in checkpoint state for migration compatibility'
+  safety: None check with explicit fallback to legacy format
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1356
+  owner: architecture
+  reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
+  safety: None default handled by dataclass
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1365
+  owner: architecture
+  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
+  safety: None check with explicit handling
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1371
+  owner: architecture
+  reason: Optional trigger evaluator lookup - node may not have trigger config
+  safety: None check with conditional elapsed time restoration
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1381
+  owner: architecture
+  reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward compat)'
+  safety: Default 0.0 if missing - safe for fresh checkpoints
+  expires: null

@@ -174,6 +174,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         q_row = quarantined_rows[0]
         assert q_row.is_quarantined is True
         assert q_row.row == {"id": "not_an_int", "name": "Bob"}
+        assert q_row.quarantine_error is not None, "quarantine_error should be present"
         assert "id" in q_row.quarantine_error.lower()
         assert q_row.quarantine_destination == "quarantine_sink"
 

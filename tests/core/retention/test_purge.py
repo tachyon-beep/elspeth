@@ -14,6 +14,7 @@ def _create_state(
     state_id: str,
     token_id: str,
     node_id: str,
+    run_id: str,
 ) -> None:
     """Helper to create a node_state record."""
     conn.execute(
@@ -21,6 +22,7 @@ def _create_state(
             state_id=state_id,
             token_id=token_id,
             node_id=node_id,
+            run_id=run_id,
             step_index=0,
             attempt=0,
             status="completed",
@@ -733,7 +735,7 @@ class TestFindExpiredCallPayloads:
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
-            _create_state(conn, node_states_table, state_id, token_id, node_id)
+            _create_state(conn, node_states_table, state_id, token_id, node_id, run_id)
             _create_call(
                 conn,
                 calls_table,
@@ -780,7 +782,7 @@ class TestFindExpiredCallPayloads:
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
-            _create_state(conn, node_states_table, state_id, token_id, node_id)
+            _create_state(conn, node_states_table, state_id, token_id, node_id, run_id)
             _create_call(
                 conn,
                 calls_table,
@@ -837,7 +839,7 @@ class TestFindExpiredRoutingPayloads:
             _create_node(conn, nodes_table, sink_node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, source_node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
-            _create_state(conn, node_states_table, state_id, token_id, source_node_id)
+            _create_state(conn, node_states_table, state_id, token_id, source_node_id, run_id)
             _create_edge(conn, edges_table, edge_id, run_id, source_node_id, sink_node_id)
             _create_routing_event(
                 conn,
@@ -902,7 +904,7 @@ class TestFindExpiredAllPayloadRefs:
                 source_data_ref="row_payload_ref",
             )
             _create_token(conn, tokens_table, token_id, row_id)
-            _create_state(conn, node_states_table, state_id, token_id, source_node_id)
+            _create_state(conn, node_states_table, state_id, token_id, source_node_id, run_id)
             _create_call(
                 conn,
                 calls_table,
@@ -964,7 +966,7 @@ class TestFindExpiredAllPayloadRefs:
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
-            _create_state(conn, node_states_table, state_id, token_id, node_id)
+            _create_state(conn, node_states_table, state_id, token_id, node_id, run_id)
             _create_call(
                 conn,
                 calls_table,
@@ -1090,7 +1092,7 @@ class TestContentAddressableSharedRefs:
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(conn, rows_table, row_a_id, run_a_id, node_a_id, row_index=0)
             _create_token(conn, tokens_table, token_a_id, row_a_id)
-            _create_state(conn, node_states_table, state_a_id, token_a_id, node_a_id)
+            _create_state(conn, node_states_table, state_a_id, token_a_id, node_a_id, run_a_id)
             _create_call(conn, calls_table, str(uuid4()), state_a_id, response_ref=shared_ref)
 
             # Run B with call using SAME shared ref
@@ -1102,7 +1104,7 @@ class TestContentAddressableSharedRefs:
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(conn, rows_table, row_b_id, run_b_id, node_b_id, row_index=0)
             _create_token(conn, tokens_table, token_b_id, row_b_id)
-            _create_state(conn, node_states_table, state_b_id, token_b_id, node_b_id)
+            _create_state(conn, node_states_table, state_b_id, token_b_id, node_b_id, run_b_id)
             _create_call(conn, calls_table, str(uuid4()), state_b_id, response_ref=shared_ref)
 
         expired = manager.find_expired_payload_refs(retention_days=30)
@@ -1199,3 +1201,251 @@ class TestContentAddressableSharedRefs:
         assert shared_ref not in expired, (
             f"Shared ref {shared_ref} should NOT be returned for deletion because a running run still needs it"
         )
+
+
+class TestCallJoinRunIsolation:
+    """Tests for cross-run isolation in call_join.
+
+    BUG: The call_join uses node_id alone to join node_states to nodes.
+    When the same node_id is used in multiple runs, this creates ambiguous
+    joins that can cause refs from expired runs to incorrectly appear in
+    the active_refs set, preventing their purge.
+
+    The fix: Use node_states.run_id directly instead of joining through
+    nodes table (the run_id is denormalized on node_states for this purpose).
+    """
+
+    def test_expired_call_ref_returned_when_same_node_id_exists_in_recent_run(self) -> None:
+        """BUG TEST: Expired run's call ref should be returned even when recent run has same node_id.
+
+        Scenario:
+        - Run A (60 days old, expired) has node_id="shared-node-id" with call response_ref="ref-A"
+        - Run B (10 days old, recent) has the SAME node_id="shared-node-id" with call response_ref="ref-B"
+
+        Expected (correct behavior):
+        - ref-A should be returned for purge (Run A is expired)
+        - ref-B should NOT be returned (Run B is recent, within retention)
+
+        Bug behavior:
+        The ambiguous join on node_id causes Run A's call to also match Run B's
+        nodes row, which joins to Run B (active). This incorrectly puts ref-A in
+        both expired_refs AND active_refs. Set difference removes it, so ref-A
+        is NOT returned - causing DATA LOSS (refs that should be purged aren't).
+        """
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.schema import (
+            calls_table,
+            node_states_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = LandscapeDB.in_memory()
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Critical: Both runs use the SAME node_id (simulating pipeline reuse)
+        shared_node_id = "shared-node-id-for-isolation-test"
+
+        # Run A: 60 days old (EXPIRED with 30-day retention)
+        run_a_id = "run-A-expired"
+        row_a_id = "row-A"
+        token_a_id = "token-A"
+        state_a_id = "state-A"
+        call_a_id = "call-A"
+        old_completed = datetime.now(UTC) - timedelta(days=60)
+
+        # Run B: 10 days old (RECENT, within 30-day retention)
+        run_b_id = "run-B-recent"
+        row_b_id = "row-B"
+        token_b_id = "token-B"
+        state_b_id = "state-B"
+        call_b_id = "call-B"
+        recent_completed = datetime.now(UTC) - timedelta(days=10)
+
+        with db.connection() as conn:
+            # === Run A (expired) ===
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
+            _create_row(conn, rows_table, row_a_id, run_a_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_a_id, row_a_id)
+            _create_state(conn, node_states_table, state_a_id, token_a_id, shared_node_id, run_a_id)
+            _create_call(conn, calls_table, call_a_id, state_a_id, response_ref="ref-A-should-be-purged")
+
+            # === Run B (recent) ===
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
+            _create_row(conn, rows_table, row_b_id, run_b_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_b_id, row_b_id)
+            _create_state(conn, node_states_table, state_b_id, token_b_id, shared_node_id, run_b_id)
+            _create_call(conn, calls_table, call_b_id, state_b_id, response_ref="ref-B-keep")
+
+        # Find expired refs with 30-day retention
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        # ref-A SHOULD be returned (Run A is expired)
+        # BUG: The ambiguous join causes ref-A to also appear in active_refs,
+        # so set difference removes it and it's NOT returned
+        assert "ref-A-should-be-purged" in expired, (
+            f"BUG DETECTED: ref-A from expired Run A should be returned for purge, "
+            f"but was incorrectly excluded due to ambiguous node_id join. "
+            f"Got expired refs: {expired}"
+        )
+
+        # ref-B should NOT be returned (Run B is recent)
+        assert "ref-B-keep" not in expired, f"ref-B from recent Run B should NOT be returned for purge. Got expired refs: {expired}"
+
+    def test_recent_call_ref_not_returned_when_expired_run_has_same_node_id(self) -> None:
+        """Verify recent run's call ref is protected even when expired run has same node_id.
+
+        This is the inverse scenario - verifying that we don't accidentally purge
+        recent data due to the join ambiguity.
+        """
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.schema import (
+            calls_table,
+            node_states_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = LandscapeDB.in_memory()
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Same node_id in both runs
+        shared_node_id = "shared-node-for-inverse-test"
+
+        # Run A: expired
+        run_a_id = "run-A-old"
+        old_completed = datetime.now(UTC) - timedelta(days=60)
+
+        # Run B: recent
+        run_b_id = "run-B-new"
+        recent_completed = datetime.now(UTC) - timedelta(days=10)
+
+        with db.connection() as conn:
+            # Run A (expired)
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_a_id)
+            row_a_id = str(uuid4())
+            token_a_id = str(uuid4())
+            state_a_id = str(uuid4())
+            _create_row(conn, rows_table, row_a_id, run_a_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_a_id, row_a_id)
+            _create_state(conn, node_states_table, state_a_id, token_a_id, shared_node_id, run_a_id)
+            _create_call(conn, calls_table, str(uuid4()), state_a_id, response_ref="ref-old")
+
+            # Run B (recent)
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_b_id)
+            row_b_id = str(uuid4())
+            token_b_id = str(uuid4())
+            state_b_id = str(uuid4())
+            _create_row(conn, rows_table, row_b_id, run_b_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_b_id, row_b_id)
+            _create_state(conn, node_states_table, state_b_id, token_b_id, shared_node_id, run_b_id)
+            _create_call(conn, calls_table, str(uuid4()), state_b_id, response_ref="ref-new-protect")
+
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        # ref-new-protect should NEVER be returned (Run B is within retention)
+        assert "ref-new-protect" not in expired, f"ref-new-protect from recent Run B should NOT be returned for purge. Got: {expired}"
+
+
+class TestRoutingJoinRunIsolation:
+    """Tests for cross-run isolation in routing_join.
+
+    BUG: The routing_join uses node_id alone to join node_states to nodes.
+    Same bug pattern as call_join - ambiguous joins when node_id is reused.
+
+    The fix: Use node_states.run_id directly instead of joining through nodes.
+    """
+
+    def test_expired_routing_ref_returned_when_same_node_id_exists_in_recent_run(self) -> None:
+        """BUG TEST: Expired run's routing ref should be returned even when recent run has same node_id.
+
+        Same pattern as call_join test - the ambiguous join causes routing refs
+        from expired runs to incorrectly appear in active_refs, preventing purge.
+        """
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.schema import (
+            edges_table,
+            node_states_table,
+            nodes_table,
+            routing_events_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = LandscapeDB.in_memory()
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Both runs use the same node_id
+        shared_node_id = "shared-node-routing-test"
+        sink_node_id_a = "sink-A"  # Different per run (sinks can't be shared)
+        sink_node_id_b = "sink-B"
+
+        # Run A: 60 days old (EXPIRED)
+        run_a_id = "run-routing-A-expired"
+        old_completed = datetime.now(UTC) - timedelta(days=60)
+
+        # Run B: 10 days old (RECENT)
+        run_b_id = "run-routing-B-recent"
+        recent_completed = datetime.now(UTC) - timedelta(days=10)
+
+        with db.connection() as conn:
+            # === Run A (expired) ===
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
+            _create_node(conn, nodes_table, sink_node_id_a, run_a_id)
+            row_a_id = str(uuid4())
+            token_a_id = str(uuid4())
+            state_a_id = str(uuid4())
+            edge_a_id = str(uuid4())
+            event_a_id = str(uuid4())
+            _create_row(conn, rows_table, row_a_id, run_a_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_a_id, row_a_id)
+            _create_state(conn, node_states_table, state_a_id, token_a_id, shared_node_id, run_a_id)
+            _create_edge(conn, edges_table, edge_a_id, run_a_id, shared_node_id, sink_node_id_a)
+            _create_routing_event(
+                conn, routing_events_table, event_a_id, state_a_id, edge_a_id, reason_ref="routing-ref-A-should-be-purged"
+            )
+
+            # === Run B (recent) ===
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
+            _create_node(conn, nodes_table, sink_node_id_b, run_b_id)
+            row_b_id = str(uuid4())
+            token_b_id = str(uuid4())
+            state_b_id = str(uuid4())
+            edge_b_id = str(uuid4())
+            event_b_id = str(uuid4())
+            _create_row(conn, rows_table, row_b_id, run_b_id, shared_node_id, row_index=0)
+            _create_token(conn, tokens_table, token_b_id, row_b_id)
+            _create_state(conn, node_states_table, state_b_id, token_b_id, shared_node_id, run_b_id)
+            _create_edge(conn, edges_table, edge_b_id, run_b_id, shared_node_id, sink_node_id_b)
+            _create_routing_event(conn, routing_events_table, event_b_id, state_b_id, edge_b_id, reason_ref="routing-ref-B-keep")
+
+        # Find expired refs
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        # routing-ref-A SHOULD be returned (Run A is expired)
+        # BUG: Ambiguous join puts it in both expired_refs and active_refs
+        assert "routing-ref-A-should-be-purged" in expired, (
+            f"BUG DETECTED: routing-ref-A from expired Run A should be returned for purge, "
+            f"but was incorrectly excluded due to ambiguous node_id join. "
+            f"Got expired refs: {expired}"
+        )
+
+        # routing-ref-B should NOT be returned (Run B is recent)
+        assert "routing-ref-B-keep" not in expired, f"routing-ref-B from recent Run B should NOT be returned for purge. Got: {expired}"

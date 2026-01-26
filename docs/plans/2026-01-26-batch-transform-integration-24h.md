@@ -1,17 +1,23 @@
-# Batch Transform Integration - 24 Hour Implementation Plan
+# Batch Transform Integration - Implementation Plan
 
-**Goal:** Wire up BatchTransformMixin to TransformExecutor for concurrent LLM processing
-**Timeline:** 24 hours
-**Status:** Ready to execute
-**Pattern:** Shared adapter with per-row synchronization
+**Goal:** Fix batch transform integration with TransformExecutor for concurrent LLM processing
+**Timeline:** ~10 hours (revised from 24h after peer review)
+**Status:** ✅ IMPLEMENTED (2026-01-26)
+**Pattern:** Shared adapter with per-row synchronization via token_id routing
 
 ---
 
 ## Executive Summary
 
-**The Problem:** TransformExecutor calls `process()`, but LLM transforms only have `accept()`. These were never integrated.
+**The Problem:** TransformExecutor has batch transform integration code, but it's **broken**. The existing `BlockingResultAdapter` creates one adapter per row but only connects the first one to the transform's output port. Subsequent rows' adapters never receive results, causing **deadlock**.
 
-**The Solution:** Create SharedBatchAdapter that routes results to per-row waiters. TransformExecutor calls accept() + waits for result.
+**Root Cause:** In `executors.py:201-219`:
+- Row 1: `adapter1` connected via `connect_output()`, sets `_batch_initialized = True`
+- Row 2: `adapter2` created, but `connect_output()` **skipped** because `_batch_initialized = True`
+- All results emit to `adapter1` (the only connected adapter)
+- `adapter2.wait_for_result()` blocks forever → **DEADLOCK**
+
+**The Solution:** Replace `BlockingResultAdapter` with `SharedBatchAdapter` that routes results to the correct waiter by `token_id`. One adapter per transform instance, multiple waiters per adapter.
 
 **Concurrency Model:**
 - Orchestrator submits A, B, C, D sequentially via process()
@@ -25,26 +31,41 @@
 
 ### Current State (BROKEN)
 ```python
-# In TransformExecutor:
-result = transform.process(row, ctx)  # LLM transforms raise NotImplementedError
+# In TransformExecutor (executors.py:201-219):
+if has_accept:
+    adapter = BlockingResultAdapter(expected_token_id=token.token_id)  # New per row!
+    if not getattr(transform, "_batch_initialized", False):
+        transform.connect_output(output=adapter, max_pending=30)  # Only first row!
+    transform.accept(token.row_data, ctx)
+    result = adapter.wait_for_result()  # Row 2+ waits forever - DEADLOCK
 
-# In LLM transforms:
-def process(self, row, ctx):
-    raise NotImplementedError("Use accept() instead")
+# In BlockingResultAdapter.emit():
+def emit(self, token, result):
+    if token.token_id != self._expected_token_id:
+        return  # Ignores results for other rows!
 ```
+
+**Why it deadlocks:** The transform's `_batch_output` is set to `adapter1` on first row. All results emit there. `adapter2`, `adapter3`, etc. are created but never connected - their `wait_for_result()` blocks forever.
 
 ### Target State
 ```python
-# In TransformExecutor:
-result = transform.process(row, ctx)  # Works for ALL transforms
+# In TransformExecutor (one SharedBatchAdapter per transform, reused across rows):
+if has_accept:
+    adapter = self._get_batch_adapter(transform)  # Creates once, reuses after
+    waiter = adapter.register(token.token_id)     # Register waiter for THIS row
+    ctx.token = token
+    transform.accept(token.row_data, ctx)         # Submit work (instant)
+    result = waiter.wait(timeout=300.0)           # Block until THIS row's result
 
-# In LLM transforms:
-def process(self, row, ctx):
-    # Submit to batch (instant)
-    self.accept(row, ctx)
-    # Wait for THIS row's result
-    return self._shared_adapter.wait_for(ctx.token.token_id)
+# In SharedBatchAdapter.emit() - routes by token_id:
+def emit(self, token, result):
+    with self._lock:
+        self._results[token.token_id] = result
+        if token.token_id in self._waiters:
+            self._waiters[token.token_id].set()   # Wake correct waiter
 ```
+
+**Why it works:** Single adapter connected once per transform. Each row registers a waiter by `token_id`. Results are routed to the correct waiter regardless of completion order.
 
 ### How Concurrency Works
 
@@ -65,11 +86,13 @@ Pool: [Worker1: A] [Worker2: B] [Worker3: C] ← ALL CONCURRENT
 
 ---
 
-## Phase 1: Create SharedBatchAdapter (3 hours)
+## Phase 1: Replace BlockingResultAdapter with SharedBatchAdapter (1.5 hours)
+
+> **Migration Note:** This phase replaces the existing broken `BlockingResultAdapter` class in `src/elspeth/engine/batch_adapter.py`. The existing class will be deleted after `SharedBatchAdapter` is verified working.
 
 ### Task 1.1: Implement SharedBatchAdapter
 
-**Create:** `src/elspeth/engine/batch_adapter.py`
+**File:** `src/elspeth/engine/batch_adapter.py` (replace existing content)
 
 ```python
 """Adapter for batch transform integration with TransformExecutor.
@@ -298,13 +321,15 @@ git commit -m "feat(engine): add SharedBatchAdapter for batch transform integrat
 
 ---
 
-## Phase 2: Integrate Adapter with TransformExecutor (4 hours)
+## Phase 2: Fix TransformExecutor Integration (2 hours)
 
-### Task 2.1: Modify TransformExecutor
+> **Note:** This replaces the existing broken integration at `executors.py:193-219`. The existing code creates a new `BlockingResultAdapter` per row and only connects the first one. This fix uses a single `SharedBatchAdapter` per transform that routes results by `token_id`.
+
+### Task 2.1: Replace Existing Integration Code
 
 **File:** `src/elspeth/engine/executors.py`
 
-**Add method to get/create shared adapter:**
+**Add method to get/create shared adapter (replaces per-row adapter creation):**
 
 ```python
     def _get_batch_adapter(self, transform: TransformProtocol) -> SharedBatchAdapter:
@@ -332,11 +357,15 @@ git commit -m "feat(engine): add SharedBatchAdapter for batch transform integrat
         return transform._executor_batch_adapter
 ```
 
-**Modify execute_transform() to detect and handle batch transforms:**
+**Replace the broken integration in execute_transform():**
 
-Find the line `result = transform.process(token.row_data, ctx)` (line 192).
+Replace the existing broken batch handling code (lines 193-219) with:
 
-**Replace with:**
+```python
+# (Delete the existing BlockingResultAdapter-based code)
+```
+
+**New implementation:**
 
 ```python
             # Detect batch-aware transforms (have accept method)
@@ -386,89 +415,22 @@ maintaining concurrent processing."
 
 ---
 
-## Phase 3: Add process() Wrapper to LLM Transforms (3 hours)
+## ~~Phase 3: REMOVED - process() Wrapper~~
 
-### Task 3.1: Azure LLM Transform
-
-**File:** `src/elspeth/plugins/llm/azure.py`
-
-**Replace process() method (lines 225-242):**
-
-```python
-    def process(
-        self,
-        row: dict[str, Any],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process a single row through Azure OpenAI.
-
-        NOTE: This method exists for protocol compliance but should NOT
-        be called directly. TransformExecutor detects batch transforms
-        via accept() method and uses that path instead.
-
-        If called directly (e.g., in tests before executor integration),
-        this falls back to sequential processing without batching.
-
-        Args:
-            row: Row to process
-            ctx: Plugin context
-
-        Returns:
-            TransformResult with LLM output
-        """
-        # Check if we have batch infrastructure initialized
-        if not self._batch_initialized:
-            # Not initialized for batching - use sequential fallback
-            return self._process_row(row, ctx)
-
-        # If called despite having accept(), warn and fall back
-        import warnings
-        warnings.warn(
-            "AzureLLMTransform.process() called directly despite having accept(). "
-            "This bypasses concurrent processing. "
-            "TransformExecutor should use accept() path instead.",
-            stacklevel=2
-        )
-        return self._process_row(row, ctx)
-```
-
-**Note:** We keep accept() unchanged. The executor will call it.
-
-**Commit:**
-```bash
-git add src/elspeth/plugins/llm/azure.py
-git commit -m "fix(azure): add process() fallback for protocol compliance
-
-- process() now has working implementation (sequential fallback)
-- Warns if called when batching is available
-- TransformExecutor will use accept() path instead
-- Tests can call process() directly before integration"
-```
+> **REMOVED (Peer Review Decision):** Adding a `process()` fallback to LLM transforms was rejected because it creates **dual code paths** for the same operation—violating CLAUDE.md's "No Legacy Code Policy."
+>
+> The correct design is:
+> - TransformExecutor detects batch transforms via `hasattr(transform, 'accept')`
+> - Batch transforms: use `accept()` + `SharedBatchAdapter` pattern (Phase 2)
+> - Regular transforms: use `process()` directly
+>
+> LLM transforms should **keep** `process()` raising `NotImplementedError`. The executor handles them via the `accept()` path. No fallback needed.
 
 ---
 
-### Task 3.2: Update All LLM Transforms
+## Phase 3: Test Integration (2 hours)
 
-**Files:**
-- `src/elspeth/plugins/llm/azure_multi_query.py`
-- `src/elspeth/plugins/llm/openrouter.py`
-- `src/elspeth/plugins/llm/openrouter_multi_query.py`
-
-**Same pattern:** Replace NotImplementedError with sequential fallback
-
-**Commit:**
-```bash
-git add src/elspeth/plugins/llm/
-git commit -m "fix(llm): add process() fallback to all LLM transforms
-
-All LLM transforms now have working process() for protocol compliance."
-```
-
----
-
-## Phase 4: Test Integration (4 hours)
-
-### Task 4.1: Test with TransformExecutor
+### Task 3.1: Test with TransformExecutor
 
 **Create:** `tests/engine/test_executor_batch_integration.py`
 
@@ -611,7 +573,7 @@ git commit -m "test(engine): verify TransformExecutor batch integration
 
 ---
 
-### Task 4.2: Unskip Integration Tests
+### Task 3.2: Unskip Integration Tests
 
 **File:** `tests/integration/test_llm_transforms.py`
 
@@ -641,9 +603,9 @@ Integration tests now pass with batch transform integration."
 
 ---
 
-## Phase 5: Update All Tests (4 hours)
+## Phase 4: Update All Tests (2 hours)
 
-### Task 5.1: Update LLM Plugin Tests
+### Task 4.1: Update LLM Plugin Tests
 
 Tests currently use accept()/flush() pattern. They should continue working since accept() is unchanged.
 
@@ -663,9 +625,9 @@ git commit -m "test(llm): verify all LLM plugin tests pass"
 
 ---
 
-## Phase 6: Verify Audit Trail (2 hours)
+## Phase 5: Verify Audit Trail (1 hour)
 
-### Task 6.1: Test Audit Recording
+### Task 5.1: Test Audit Recording
 
 **Create:** `tests/engine/test_batch_audit_trail.py`
 
@@ -805,9 +767,9 @@ git commit -m "test(audit): verify batch transforms record complete audit trail
 
 ---
 
-## Phase 7: Documentation and Cleanup (2 hours)
+## Phase 6: Documentation and Cleanup (1 hour)
 
-### Task 7.1: Update CLAUDE.md
+### Task 6.1: Update CLAUDE.md
 
 **File:** `CLAUDE.md`
 
@@ -854,7 +816,7 @@ git commit -m "docs: document batch transform integration in CLAUDE.md"
 
 ---
 
-### Task 7.2: Update Design Docs
+### Task 6.2: Update Design Docs
 
 **File:** `docs/design/row-level-pipelining-design.md`
 
@@ -868,9 +830,9 @@ git commit -m "docs: update row-level pipelining design for executor integration
 
 ---
 
-## Phase 8: Final Verification (2 hours)
+## Phase 7: Final Verification (1 hour)
 
-### Task 8.1: Full Test Suite
+### Task 7.1: Full Test Suite
 
 ```bash
 # Run all tests
@@ -893,7 +855,7 @@ git commit -m "test: verify full test suite passes"
 
 ---
 
-### Task 8.2: Manual Integration Test
+### Task 7.2: Manual Integration Test
 
 **Create:** `examples/test_batch_integration.py`
 
@@ -967,9 +929,10 @@ transform.close()
 
 ## Success Criteria
 
-- [ ] All transforms implement working `process()`
+- [ ] `BlockingResultAdapter` replaced with `SharedBatchAdapter` (routes by token_id)
 - [ ] TransformExecutor integrates with batch transforms via SharedBatchAdapter
 - [ ] Concurrent row processing works (30 rows × 4 queries = 120 concurrent)
+- [ ] **No deadlocks** when processing multiple rows through batch transforms
 - [ ] Audit trail complete (node_states, external_calls recorded)
 - [ ] All tests pass (unit, integration, executor)
 - [ ] Integration tests unskipped and passing
@@ -984,15 +947,14 @@ transform.close()
 
 | Phase | Hours | Description |
 |-------|-------|-------------|
-| Phase 1 | 3h | Create SharedBatchAdapter |
-| Phase 2 | 4h | Integrate with TransformExecutor |
-| Phase 3 | 3h | Update LLM transforms |
-| Phase 4 | 4h | Test integration |
-| Phase 5 | 4h | Update all tests |
-| Phase 6 | 2h | Verify audit trail |
-| Phase 7 | 2h | Documentation |
-| Phase 8 | 2h | Final verification |
-| **TOTAL** | **24h** | |
+| Phase 1 | 1.5h | Replace BlockingResultAdapter with SharedBatchAdapter |
+| Phase 2 | 2h | Fix TransformExecutor integration |
+| Phase 3 | 2h | Test integration |
+| Phase 4 | 2h | Update all tests |
+| Phase 5 | 1h | Verify audit trail |
+| Phase 6 | 1h | Documentation |
+| Phase 7 | 1h | Final verification |
+| **TOTAL** | **~10.5h** | (reduced from 24h after peer review) |
 
 ---
 
@@ -1000,8 +962,16 @@ transform.close()
 
 If critical issues found:
 
-1. **Before Phase 2 complete:** Revert Phase 1-2, no impact (adapter unused)
-2. **Before Phase 5 complete:** LLM transforms broken, revert all or finish quickly
-3. **After Phase 5:** Tests passing, only docs/cleanup remain - push forward
+1. **Before Phase 2 complete:** Revert Phase 1-2, restore `BlockingResultAdapter`
+2. **Before Phase 4 complete:** Batch transforms broken, revert all or finish quickly
+3. **After Phase 4:** Tests passing, only docs/cleanup remain - push forward
 
 **Git strategy:** One commit per task, easy to bisect and revert.
+
+---
+
+## Migration Notes
+
+1. **Delete `BlockingResultAdapter`** after `SharedBatchAdapter` is verified working
+2. **Update any tests** that directly reference `BlockingResultAdapter` (search for imports)
+3. **Update skip marker reasons** that reference the old line numbers (executors.py:192)

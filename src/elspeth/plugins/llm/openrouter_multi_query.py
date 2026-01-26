@@ -6,6 +6,10 @@ merging all results into a single output row with all-or-nothing error handling.
 
 Uses HTTP-based communication (AuditedHTTPClient) rather than SDK-based
 communication like the Azure variant.
+
+Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
+with FIFO output ordering) and PooledExecutor for query-level concurrency
+(parallel LLM queries within each row).
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.multi_query import CaseStudyConfig, CriterionConfig, QuerySpec
@@ -124,7 +129,7 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
 OpenRouterMultiQueryConfig.model_rebuild()
 
 
-class OpenRouterMultiQueryLLMTransform(BaseTransform):
+class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
     """LLM transform that executes case_studies x criteria queries per row via OpenRouter.
 
     For each row, expands the cross-product of case studies and criteria
@@ -133,6 +138,33 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
 
     Uses HTTP-based communication via AuditedHTTPClient, unlike the Azure
     variant which uses the OpenAI SDK.
+
+    Architecture:
+        Uses two layers of concurrency:
+        1. Row-level pipelining (BatchTransformMixin): Multiple rows in flight,
+           FIFO output ordering, backpressure when buffer is full.
+        2. Query-level concurrency (PooledExecutor): Parallel LLM queries within
+           each row, AIMD backoff on rate limits.
+
+        Flow:
+            Orchestrator → accept() → [RowReorderBuffer] → [Worker Pool]
+                → _process_row() → PooledExecutor → OpenRouter API
+                → emit() → OutputPort (sink or next transform)
+
+    Usage:
+        # 1. Instantiate
+        transform = OpenRouterMultiQueryLLMTransform(config)
+
+        # 2. Connect output port (required before accept())
+        transform.connect_output(output_port, max_pending=30)
+
+        # 3. Feed rows (blocks on backpressure)
+        for row in source:
+            transform.accept(row, ctx)
+
+        # 4. Flush and close
+        transform.flush_batch_processing()
+        transform.close()
 
     Configuration example:
         transforms:
@@ -167,7 +199,6 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
     """
 
     name = "openrouter_multi_query_llm"
-    is_batch_aware = True
     creates_tokens = False  # Does not create new tokens (1 row in -> 1 row out)
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     plugin_version = "1.0.0"
@@ -183,6 +214,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
         self._api_key = cfg.api_key
         self._base_url = cfg.base_url
         self._timeout = cfg.timeout_seconds
+        self._pool_size = cfg.pool_size
+        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
         self._model = cfg.model
 
         # Store template settings
@@ -225,6 +258,38 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
         self._recorder: LandscapeRecorder | None = None
         self._http_clients: dict[str, AuditedHTTPClient] = {}
         self._http_clients_lock = Lock()
+
+        # Batch processing state (initialized by connect_output)
+        self._batch_initialized = False
+
+    def connect_output(
+        self,
+        output: OutputPort,
+        max_pending: int = 30,
+    ) -> None:
+        """Connect output port and initialize batch processing.
+
+        Call this after __init__ but before accept(). The output port
+        receives results in FIFO order (submission order, not completion order).
+
+        Args:
+            output: Output port to emit results to (sink adapter or next transform)
+            max_pending: Maximum rows in flight before accept() blocks (backpressure)
+
+        Raises:
+            RuntimeError: If called more than once
+        """
+        if self._batch_initialized:
+            raise RuntimeError("connect_output() already called")
+
+        self.init_batch_processing(
+            max_pending=max_pending,
+            output=output,
+            name=self.name,
+            max_workers=max_pending,  # Match workers to max_pending
+            batch_wait_timeout=float(self._max_capacity_retry_seconds),
+        )
+        self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution."""
@@ -447,24 +512,75 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
 
         return TransformResult.success(output)
 
+    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+        """Accept a row for processing.
+
+        Submits the row to the batch processing pipeline. Returns quickly
+        unless backpressure is applied (buffer full). Results flow through
+        the output port in FIFO order.
+
+        Args:
+            row: Input row with all case study fields
+            ctx: Plugin context with token and landscape
+
+        Raises:
+            RuntimeError: If connect_output() was not called
+            ValueError: If ctx.token is None
+        """
+        if not self._batch_initialized:
+            raise RuntimeError("connect_output() must be called before accept(). This wires up the output port for result emission.")
+
+        # Capture recorder on first row (same as on_start)
+        if self._recorder is None and ctx.landscape is not None:
+            self._recorder = ctx.landscape
+
+        self.accept_row(row, ctx, self._process_row)
+
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: dict[str, Any],
         ctx: PluginContext,
     ) -> TransformResult:
-        """Process row(s) with all queries in parallel.
+        """Not supported - use accept() for row-level pipelining.
 
-        For single row: executes all (case_study x criterion) queries,
-        merges results into one output row.
+        This transform uses BatchTransformMixin for concurrent row processing
+        with FIFO output ordering. Call accept() instead of process().
 
-        For batch: processes each row independently (batch of multi-query rows).
+        Raises:
+            NotImplementedError: Always, directing callers to use accept()
         """
-        # Batch dispatch
-        if isinstance(row, list):
-            return self._process_batch(row, ctx)
+        raise NotImplementedError(
+            f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
+        )
 
-        # Single row processing
-        return self._process_single_row(row, ctx)
+    def _process_row(
+        self,
+        row: dict[str, Any],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Process a single row with all queries. Called by worker threads.
+
+        This is the processor function passed to accept_row(). It runs in
+        the BatchTransformMixin's worker pool and calls through to the
+        existing _process_single_row_internal() which uses PooledExecutor
+        for query-level parallelism.
+
+        Args:
+            row: Input row with all case study fields
+            ctx: Plugin context with state_id for audit trail
+
+        Returns:
+            TransformResult with all query results merged, or error
+        """
+        if ctx.state_id is None:
+            raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
+
+        try:
+            return self._process_single_row_internal(row, ctx.state_id)
+        finally:
+            # Clean up cached clients for this state_id
+            with self._http_clients_lock:
+                self._http_clients.pop(ctx.state_id, None)
 
     def _process_single_row_internal(
         self,
@@ -510,37 +626,6 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
                 output.update(result.row)
 
         return TransformResult.success(output)
-
-    def _process_single_row(
-        self,
-        row: dict[str, Any],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process a single row with all queries in parallel.
-
-        Executes all (case_study x criterion) queries for this row.
-        All-or-nothing: if any query fails, the entire row fails.
-
-        Args:
-            row: Input row with all case study fields
-            ctx: Plugin context with landscape and state_id
-
-        Returns:
-            TransformResult with all query results merged, or error
-        """
-        if ctx.landscape is None or ctx.state_id is None:
-            raise RuntimeError("Multi-query transform requires landscape recorder and state_id.")
-
-        # Capture recorder for pooled execution
-        if self._recorder is None:
-            self._recorder = ctx.landscape
-
-        try:
-            return self._process_single_row_internal(row, ctx.state_id)
-        finally:
-            # Clean up cached clients for this state_id
-            with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
 
     def _execute_queries_parallel(
         self,
@@ -626,185 +711,16 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform):
 
         return results
 
-    def _process_batch(
-        self,
-        rows: list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process batch of rows with concurrent row processing.
-
-        All (rows x queries) are executed in parallel up to pool_size limit.
-        Failed rows get _error marker while successful rows continue.
-
-        With pool_size=100 and 10 queries/row, processes 10 rows simultaneously
-        instead of sequentially (full pool utilization).
-
-        Args:
-            rows: List of input rows
-            ctx: Plugin context with landscape and state_id
-
-        Returns:
-            TransformResult.success_multi with all row results, or
-            TransformResult.success for empty batch
-        """
-        if not rows:
-            return TransformResult.success({"batch_empty": True, "row_count": 0})
-
-        if ctx.landscape is None or ctx.state_id is None:
-            raise RuntimeError("Batch processing requires landscape recorder and state_id.")
-
-        if self._recorder is None:
-            self._recorder = ctx.landscape
-
-        # Fast path: No pooled executor, process sequentially
-        if self._executor is None:
-            try:
-                return self._process_batch_sequential(rows, ctx)
-            finally:
-                # Clean up batch client after all rows processed
-                with self._http_clients_lock:
-                    self._http_clients.pop(ctx.state_id, None)
-
-        # Concurrent row processing using PooledExecutor
-        try:
-            output_rows = self._process_batch_concurrent(rows, ctx)
-        finally:
-            # Clean up batch client after all rows processed
-            with self._http_clients_lock:
-                self._http_clients.pop(ctx.state_id, None)
-
-        return TransformResult.success_multi(output_rows)
-
-    def _process_batch_sequential(
-        self,
-        rows: list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Sequential batch processing (fallback when no executor).
-
-        Args:
-            rows: List of input rows
-            ctx: Plugin context
-
-        Returns:
-            TransformResult with all rows processed
-        """
-        if ctx.state_id is None:
-            raise ValueError("state_id is required for batch processing")
-
-        output_rows: list[dict[str, Any]] = []
-
-        for row in rows:
-            result = self._process_single_row_internal(row, ctx.state_id)
-
-            if result.status == "success" and result.row is not None:
-                output_rows.append(result.row)
-            else:
-                # Row failed - include original with error marker
-                error_row = dict(row)
-                error_row["_error"] = result.reason
-                output_rows.append(error_row)
-
-        return TransformResult.success_multi(output_rows)
-
-    def _process_batch_concurrent(
-        self,
-        rows: list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> list[dict[str, Any]]:
-        """Concurrent batch processing via PooledExecutor.
-
-        Flattens (N rows x M queries) into single work list, executes in parallel,
-        then groups results back by row and checks atomicity.
-
-        Args:
-            rows: List of input rows
-            ctx: Plugin context with state_id
-
-        Returns:
-            List of output rows (success or error)
-        """
-        from elspeth.plugins.pooling.executor import RowContext
-
-        if self._executor is None:
-            raise RuntimeError("executor not initialized - call on_start() first")
-        if ctx.state_id is None:
-            raise ValueError("state_id is required for batch processing")
-
-        queries_per_row = len(self._query_specs)
-
-        # Flatten: (N rows x M queries) -> single work list
-        # All queries share ctx.state_id (FK constraint to node_states)
-        # Uniqueness comes from call_index in AuditedHTTPClient
-        contexts = []
-        for row_idx, row in enumerate(rows):
-            for query_idx, spec in enumerate(self._query_specs):
-                work_idx = row_idx * queries_per_row + query_idx
-                contexts.append(
-                    RowContext(
-                        row={
-                            "original_row": row,
-                            "spec": spec,
-                            "row_idx": row_idx,  # Track which row this belongs to
-                        },
-                        state_id=ctx.state_id,  # Shared state_id (satisfies FK)
-                        row_index=work_idx,
-                    )
-                )
-
-        # Execute all queries for all rows with AIMD retry
-        # All queries share one HTTP client (no memory leak)
-        all_results = self._executor.execute_batch(
-            contexts=contexts,
-            process_fn=lambda work, work_state_id: self._process_single_query(
-                work["original_row"],
-                work["spec"],
-                work_state_id,
-            ),
-        )
-
-        # Group results back by row (M queries per row)
-        output_rows: list[dict[str, Any]] = []
-
-        for row_idx, original_row in enumerate(rows):
-            start = row_idx * queries_per_row
-            end = start + queries_per_row
-            row_results = all_results[start:end]
-
-            # Check atomicity: all-or-nothing per row
-            failed = [r for r in row_results if r.status != "success"]
-
-            if failed:
-                # ANY query failed → row fails
-                error_row = dict(original_row)
-                error_row["_error"] = {
-                    "reason": "query_failed",
-                    "failed_queries": [
-                        {
-                            "query": self._query_specs[i].output_prefix,
-                            "error": r.reason,
-                        }
-                        for i, r in enumerate(row_results)
-                        if r.status != "success"
-                    ],
-                    "succeeded_count": len(row_results) - len(failed),
-                    "total_count": len(row_results),
-                }
-                output_rows.append(error_row)
-            else:
-                # ALL queries succeeded → merge outputs
-                output = dict(original_row)
-                for result in row_results:
-                    if result.row is not None:
-                        output.update(result.row)
-                output_rows.append(output)
-
-        return output_rows
-
     def close(self) -> None:
         """Release resources."""
+        # Shutdown batch processing infrastructure first
+        if self._batch_initialized:
+            self.shutdown_batch_processing()
+
+        # Then shutdown query-level executor
         if self._executor is not None:
             self._executor.shutdown(wait=True)
+
         self._recorder = None
         with self._http_clients_lock:
             self._http_clients.clear()

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import (
@@ -255,11 +255,11 @@ def _build_test_graph_with_config_gates(
     output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
     graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal maps with proper types
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = output_sink
 
     return graph
@@ -375,6 +375,7 @@ class TestConfigGateIntegration:
                 {"run_id": result.run_id},
             ).fetchone()
 
+            assert gate_node is not None, "Gate node should exist"
             routing_events = conn.execute(
                 text("""
                     SELECT re.event_id, e.label, e.to_node_id
@@ -702,11 +703,11 @@ class TestConfigGateFromSettings:
 
         # Config gate should be in the graph
         config_gate_map = graph.get_config_gate_id_map()
-        assert "quality_check" in config_gate_map
+        assert GateName("quality_check") in config_gate_map
 
         # Route resolution should include the gate
         route_map = graph.get_route_resolution_map()
-        gate_id = config_gate_map["quality_check"]
+        gate_id = config_gate_map[GateName("quality_check")]
         assert (gate_id, "true") in route_map
         assert route_map[(gate_id, "true")] == "continue"
         assert (gate_id, "false") in route_map

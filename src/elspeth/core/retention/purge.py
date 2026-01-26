@@ -16,7 +16,6 @@ from sqlalchemy import and_, or_, select, union
 from elspeth.core.landscape.schema import (
     calls_table,
     node_states_table,
-    nodes_table,
     routing_events_table,
     rows_table,
     runs_table,
@@ -175,10 +174,11 @@ class PurgeManager:
         )
 
         # 2. Call payloads from expired runs
-        call_join = (
-            calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
-            .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)
-            .join(runs_table, nodes_table.c.run_id == runs_table.c.run_id)
+        # NOTE: Use node_states.run_id directly (denormalized column) instead of
+        # joining through nodes table. The nodes table has composite PK (node_id, run_id),
+        # so joining on node_id alone would be ambiguous when node_id is reused across runs.
+        call_join = calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id).join(
+            runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
 
         call_request_expired_query = (
@@ -194,10 +194,9 @@ class PurgeManager:
         )
 
         # 3. Routing payloads from expired runs
-        routing_join = (
-            routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
-            .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)
-            .join(runs_table, nodes_table.c.run_id == runs_table.c.run_id)
+        # NOTE: Same pattern as call_join - use node_states.run_id directly
+        routing_join = routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id).join(
+            runs_table, node_states_table.c.run_id == runs_table.c.run_id
         )
 
         routing_expired_query = (

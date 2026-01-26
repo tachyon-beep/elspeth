@@ -20,10 +20,10 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.engine.artifacts import ArtifactDescriptor
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
@@ -332,11 +332,11 @@ def _build_test_graph_with_config_gates(
     if not graph._graph.has_edge(prev, output_sink_node, key="continue"):
         graph.add_edge(prev, output_sink_node, label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal maps - cast to proper types for type safety
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = output_sink
 
     return graph
@@ -629,7 +629,7 @@ class TestRouteLabelResolution:
         # Verify route resolution map
         route_map = graph.get_route_resolution_map()
         config_gate_map = graph.get_config_gate_id_map()
-        gate_id = config_gate_map["quality_router"]
+        gate_id = config_gate_map[GateName("quality_router")]
 
         # Check route resolution
         assert (gate_id, "true") in route_map
@@ -828,7 +828,7 @@ class TestForkCreatesChildTokens:
 
         # Verify gate node exists with fork config
         config_gate_map = graph.get_config_gate_id_map()
-        gate_id = config_gate_map["parallel_processor"]
+        gate_id = config_gate_map[GateName("parallel_processor")]
         node_info = graph.get_node_info(gate_id)
 
         assert node_info.config["fork_to"] == ["analysis_a", "analysis_b"]
@@ -1184,7 +1184,7 @@ class TestEndToEndPipeline:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(high_conf_sink), "low_conf": as_sink(low_conf_sink)},
             gates=[gate],
         )
@@ -1224,12 +1224,12 @@ class TestEndToEndPipeline:
             mode=RoutingMode.MOVE,
         )
 
-        graph._sink_id_map = {"default": "sink_default", "low_conf": "sink_low_conf"}
-        graph._transform_id_map = {0: "transform_0"}
-        graph._config_gate_id_map = {"confidence_gate": "config_gate_confidence_gate"}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink_default"), SinkName("low_conf"): NodeID("sink_low_conf")}
+        graph._transform_id_map = {0: NodeID("transform_0")}
+        graph._config_gate_id_map = {GateName("confidence_gate"): NodeID("config_gate_confidence_gate")}
         graph._route_resolution_map = {
-            ("config_gate_confidence_gate", "true"): "continue",
-            ("config_gate_confidence_gate", "false"): "low_conf",
+            (NodeID("config_gate_confidence_gate"), "true"): "continue",
+            (NodeID("config_gate_confidence_gate"), "false"): "low_conf",
         }
         graph._default_sink = "default"
 
@@ -1624,14 +1624,16 @@ class TestGateRuntimeErrors:
         )
 
         span_factory = SpanFactory()  # No tracer = no-op spans
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(node.node_id), "continue"): continue_edge.edge_id}
+        route_resolution_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(node.node_id), "true"): "continue",
+            (NodeID(node.node_id), "false"): "continue",
+        }
         executor = GateExecutor(
             recorder=recorder,
             span_factory=span_factory,
-            edge_map={(node.node_id, "continue"): continue_edge.edge_id},
-            route_resolution_map={
-                (node.node_id, "true"): "continue",
-                (node.node_id, "false"): "continue",
-            },
+            edge_map=edge_map,
+            route_resolution_map=route_resolution_map,
         )
 
         gate_config = GateSettings(

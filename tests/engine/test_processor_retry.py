@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from elspeth.contracts import RoutingMode
+from elspeth.contracts.types import GateName, NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -57,7 +58,7 @@ class TestRowProcessorWorkQueue:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
         )
 
         # Create a mock _process_single_token that always re-enqueues work
@@ -174,13 +175,13 @@ class TestRowProcessorWorkQueue:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={
-                (gate_node.node_id, "path_a"): edge_a.edge_id,
-                (gate_node.node_id, "path_b"): edge_b.edge_id,
+                (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+                (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
             },
             config_gates=[splitter_gate],
-            config_gate_id_map={"splitter": gate_node.node_id},
+            config_gate_id_map={GateName("splitter"): NodeID(gate_node.node_id)},
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -227,7 +228,7 @@ class TestRowProcessorRetry:
             recorder=Mock(),
             span_factory=Mock(),
             run_id="test-run",
-            source_node_id="source-node",
+            source_node_id=NodeID("source-node"),
             retry_manager=retry_manager,
         )
 
@@ -266,7 +267,7 @@ class TestRowProcessorRetry:
             recorder=Mock(),
             span_factory=Mock(),
             run_id="test-run",
-            source_node_id="source",
+            source_node_id=NodeID("source"),
             retry_manager=RetryManager(RetryConfig(max_attempts=3, base_delay=0.01)),
         )
 
@@ -312,7 +313,7 @@ class TestRowProcessorRetry:
             recorder=Mock(),
             span_factory=Mock(),
             run_id="test-run",
-            source_node_id="source",
+            source_node_id=NodeID("source"),
             retry_manager=None,  # No retry
         )
 
@@ -381,7 +382,7 @@ class TestRowProcessorRetry:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             retry_manager=RetryManager(RetryConfig(max_attempts=2, base_delay=0.01)),
         )
 
@@ -422,21 +423,21 @@ class TestRowProcessorRecovery:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         restored_state = {
-            "agg_node": {"buffer": [1, 2], "count": 2},
+            NodeID("agg_node"): {"buffer": [1, 2], "count": 2},
         }
 
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id="source",
+            source_node_id=NodeID("source"),
             edge_map={},
             route_resolution_map={},
             restored_aggregation_state=restored_state,  # New parameter
         )
 
         # Verify state was passed to executor
-        assert processor._aggregation_executor.get_restored_state("agg_node") == {
+        assert processor._aggregation_executor.get_restored_state(NodeID("agg_node")) == {
             "buffer": [1, 2],
             "count": 2,
         }

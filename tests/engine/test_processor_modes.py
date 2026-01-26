@@ -12,6 +12,7 @@ Extracted from test_processor.py to improve test organization.
 
 from typing import Any
 
+from elspeth.contracts.types import NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -75,7 +76,7 @@ class TestProcessorPassthroughMode:
         )
 
         aggregation_settings = {
-            enricher_node.node_id: AggregationSettings(
+            NodeID(enricher_node.node_id): AggregationSettings(
                 name="batch_enrich",
                 plugin="passthrough_enricher",
                 trigger=TriggerConfig(count=3),
@@ -87,7 +88,7 @@ class TestProcessorPassthroughMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -195,7 +196,7 @@ class TestProcessorPassthroughMode:
         )
 
         aggregation_settings = {
-            bad_node.node_id: AggregationSettings(
+            NodeID(bad_node.node_id): AggregationSettings(
                 name="bad_batch",
                 plugin="bad_passthrough",
                 trigger=TriggerConfig(count=3),
@@ -207,7 +208,7 @@ class TestProcessorPassthroughMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -302,7 +303,7 @@ class TestProcessorPassthroughMode:
         )
 
         aggregation_settings = {
-            enricher_node.node_id: AggregationSettings(
+            NodeID(enricher_node.node_id): AggregationSettings(
                 name="batch_enrich",
                 plugin="enricher",
                 trigger=TriggerConfig(count=2),
@@ -314,7 +315,7 @@ class TestProcessorPassthroughMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -417,7 +418,7 @@ class TestProcessorTransformMode:
         )
 
         aggregation_settings = {
-            splitter_node.node_id: AggregationSettings(
+            NodeID(splitter_node.node_id): AggregationSettings(
                 name="group_split",
                 plugin="splitter",
                 trigger=TriggerConfig(count=5),
@@ -429,7 +430,7 @@ class TestProcessorTransformMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -538,7 +539,7 @@ class TestProcessorTransformMode:
         )
 
         aggregation_settings = {
-            agg_node.node_id: AggregationSettings(
+            NodeID(agg_node.node_id): AggregationSettings(
                 name="batch_sum",
                 plugin="aggregator",
                 trigger=TriggerConfig(count=3),
@@ -550,7 +551,7 @@ class TestProcessorTransformMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -668,7 +669,7 @@ class TestProcessorTransformMode:
         )
 
         aggregation_settings = {
-            splitter_node.node_id: AggregationSettings(
+            NodeID(splitter_node.node_id): AggregationSettings(
                 name="group_split",
                 plugin="splitter",
                 trigger=TriggerConfig(count=3),
@@ -680,7 +681,7 @@ class TestProcessorTransformMode:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,

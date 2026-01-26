@@ -8,6 +8,7 @@ Tests the full quarantine flow including:
 
 from typing import Any
 
+from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -85,7 +86,7 @@ class TestQuarantineIntegration:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         # Process 5 rows: [10, -5, 20, -1, 30]
@@ -183,7 +184,7 @@ class TestQuarantineIntegration:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         # Process an invalid row (missing required_field)

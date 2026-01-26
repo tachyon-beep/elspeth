@@ -11,6 +11,7 @@ import pytest
 
 from elspeth.contracts import NodeType, RowOutcome
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.types import GateName, NodeID
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
@@ -458,7 +459,7 @@ class TestEngineIntegrationOutcomes:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -482,7 +483,7 @@ class TestEngineIntegrationOutcomes:
         state = states[0]
         assert state.status.value == "completed", "Transform should complete successfully"
         assert state.input_hash is not None, "Input hash should be recorded"
-        assert state.output_hash is not None, "Output hash should be recorded"
+        assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
     def test_processor_records_quarantined_outcome_with_error_hash(self) -> None:
         """RowProcessor should record QUARANTINED outcome with error_hash."""
@@ -542,7 +543,7 @@ class TestEngineIntegrationOutcomes:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -640,13 +641,13 @@ class TestEngineIntegrationOutcomes:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
             edge_map={
-                (gate.node_id, "path_a"): edge_a.edge_id,
-                (gate.node_id, "path_b"): edge_b.edge_id,
+                (NodeID(gate.node_id), "path_a"): edge_a.edge_id,
+                (NodeID(gate.node_id), "path_b"): edge_b.edge_id,
             },
             config_gates=[splitter_gate],
-            config_gate_id_map={"splitter": gate.node_id},
+            config_gate_id_map={GateName("splitter"): NodeID(gate.node_id)},
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})

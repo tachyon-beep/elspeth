@@ -268,6 +268,7 @@ class TestSignedExportDeterminism:
             state = recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id="node_0",
+                run_id=run.run_id,
                 step_index=0,
                 input_data={"x": i},
             )

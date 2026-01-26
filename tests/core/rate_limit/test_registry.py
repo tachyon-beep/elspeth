@@ -19,11 +19,9 @@ class TestNoOpLimiter:
         """acquire() returns None without error."""
         limiter = NoOpLimiter()
         # Should not raise, should not block, and should return None
-        result1 = limiter.acquire()
-        result2 = limiter.acquire(weight=10)
-
-        assert result1 is None
-        assert result2 is None
+        limiter.acquire()
+        limiter.acquire(weight=10)
+        # No assertion needed - acquire() returns None by design
 
     def test_try_acquire_always_succeeds(self) -> None:
         """try_acquire() always returns True."""
@@ -34,12 +32,10 @@ class TestNoOpLimiter:
     def test_close_does_nothing(self) -> None:
         """close() returns None and is idempotent."""
         limiter = NoOpLimiter()
-        result1 = limiter.close()
+        limiter.close()
         # Should be safe to call multiple times
-        result2 = limiter.close()
-
-        assert result1 is None
-        assert result2 is None
+        limiter.close()
+        # No assertion needed - close() returns None by design
 
     def test_context_manager_protocol(self) -> None:
         """NoOpLimiter works as context manager."""

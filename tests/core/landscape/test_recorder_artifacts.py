@@ -38,6 +38,7 @@ class TestLandscapeRecorderArtifacts:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -80,6 +81,7 @@ class TestLandscapeRecorderArtifacts:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -141,6 +143,7 @@ class TestLandscapeRecorderArtifacts:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -202,6 +205,7 @@ class TestLandscapeRecorderArtifacts:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -317,12 +321,14 @@ class TestLandscapeRecorderArtifacts:
         recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node1.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
         recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node2.node_id,
+            run_id=run.run_id,
             step_index=1,
             input_data={},
         )

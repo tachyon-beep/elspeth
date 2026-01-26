@@ -141,6 +141,7 @@ class TestExplainFunction:
         node_state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform_node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"input": "test"},
         )
@@ -176,6 +177,9 @@ class TestExplainFunction:
 
         # Query lineage
         result = explain(recorder, run_id=run.run_id, token_id=token.token_id)
+
+        # Verify result is not None before accessing attributes
+        assert result is not None, "explain() should return a result"
 
         # Verify node_states
         assert len(result.node_states) >= 1, "Should have at least one node_state"

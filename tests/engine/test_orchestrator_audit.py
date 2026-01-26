@@ -12,13 +12,15 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeID, RoutingMode, SinkName, SourceRow
+from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_test_graph
 
@@ -95,7 +97,7 @@ class TestOrchestratorAuditTrail:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -138,8 +140,9 @@ class TestOrchestratorAuditTrail:
         for state in node_states:
             # All node states should have input_hash (proves we captured input)
             assert state.input_hash is not None, f"Node state {state.state_id} missing input_hash"
-            # Successful states should have output_hash
+            # Successful states should have output_hash - narrow the type first
             if state.status == "completed":
+                assert isinstance(state, NodeStateCompleted)
                 assert state.output_hash is not None, f"Completed node state {state.state_id} missing output_hash"
 
         # Verify token outcomes have correct terminal outcome and sink_name
@@ -742,7 +745,7 @@ class TestOrchestratorConfigRecording:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
             config=resolved_config,  # Pass the resolved config
         )
@@ -758,8 +761,8 @@ class TestOrchestratorConfigRecording:
         # settings_json is stored as a JSON string, parse it
         settings = json.loads(run_record.settings_json)
         assert settings != {}
-        assert "datasource" in settings
-        assert settings["datasource"]["plugin"] == "csv"
+        assert "source" in settings
+        assert settings["source"]["plugin"] == "csv"
 
     def test_run_with_empty_config_records_empty(self) -> None:
         """Run with no config passed should record empty dict (current behavior)."""
@@ -918,7 +921,7 @@ class TestNodeMetadataFromPlugin:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -929,8 +932,8 @@ class TestNodeMetadataFromPlugin:
         graph.add_node("sink", node_type="sink", plugin_name="versioned_sink")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"default": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
@@ -1033,7 +1036,7 @@ class TestNodeMetadataFromPlugin:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -1044,8 +1047,8 @@ class TestNodeMetadataFromPlugin:
         graph.add_node("sink", node_type="sink", plugin_name="test_sink")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"default": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)

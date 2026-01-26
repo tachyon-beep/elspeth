@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import GateName, NodeID, RoutingMode, SinkName
 from elspeth.plugins.base import BaseGate
 
 if TYPE_CHECKING:
@@ -119,11 +119,11 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     if output_sink:
         graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal ID maps - cast to proper types for type safety
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = output_sink
 
     return graph
@@ -173,9 +173,9 @@ def build_fork_test_graph(
     if "default" in sink_ids:
         graph.add_edge(prev, sink_ids["default"], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
+    # Populate internal maps - cast to proper types for type safety
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
     graph._default_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
 
     # Build route resolution map with fork support
@@ -190,6 +190,6 @@ def build_fork_test_graph(
             next_node = f"transform_{i + 1}" if i + 1 < len(config.transforms) else sink_ids["default"]
             graph.add_edge(gate_id, next_node, label=path_name, mode=RoutingMode.COPY)
 
-    graph._route_resolution_map = route_resolution_map
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
 
     return graph

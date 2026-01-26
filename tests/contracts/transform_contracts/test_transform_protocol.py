@@ -125,6 +125,12 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: process() MUST return TransformResult."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(valid_input, ctx)
         assert isinstance(result, TransformResult), f"process() returned {type(result).__name__}, expected TransformResult"
 
@@ -135,6 +141,12 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: TransformResult MUST have status field."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(valid_input, ctx)
         assert hasattr(result, "status")
         assert result.status in ("success", "error")
@@ -146,6 +158,12 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: Success results MUST have output data (row or rows)."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(valid_input, ctx)
         if result.status == "success":
             assert result.has_output_data, (
@@ -159,6 +177,12 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: Success single-row output MUST be a dict."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(valid_input, ctx)
         if result.status == "success" and result.row is not None:
             assert isinstance(result.row, dict), f"TransformResult.row is {type(result.row).__name__}, expected dict"
@@ -170,6 +194,12 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: Success multi-row output MUST be a list of dicts."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(valid_input, ctx)
         if result.status == "success" and result.rows is not None:
             assert isinstance(result.rows, list), f"TransformResult.rows is {type(result.rows).__name__}, expected list"
@@ -187,8 +217,11 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: close() MUST be safe to call multiple times."""
-        # Process something first
-        transform.process(valid_input, ctx)
+        # Process something first (skip process() for batch transforms)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if not isinstance(transform, BatchTransformMixin):
+            transform.process(valid_input, ctx)
 
         # close() should not raise on first call
         transform.close()
@@ -212,7 +245,11 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: on_complete() lifecycle hook MUST not raise."""
-        transform.process(valid_input, ctx)
+        # Process something first (skip process() for batch transforms)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if not isinstance(transform, BatchTransformMixin):
+            transform.process(valid_input, ctx)
         transform.on_complete(ctx)
 
 
@@ -241,6 +278,12 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
 
         Extra fields are ignored per PluginSchema (extra="ignore").
         """
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         input_with_extra = {**valid_input, extra_field: "extra_value"}
         result = transform.process(input_with_extra, ctx)
         assert isinstance(result, TransformResult)

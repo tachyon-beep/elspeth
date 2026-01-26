@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeStateCompleted, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
@@ -26,6 +26,7 @@ from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
     _TestSourceBase,
+    as_sink,
     as_source,
     as_transform,
 )
@@ -188,11 +189,11 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
     graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal ID maps with proper types
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = output_sink
 
     return graph
@@ -316,8 +317,8 @@ class TestEngineIntegration:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -366,6 +367,7 @@ class TestEngineIntegration:
                     assert state.input_hash, f"Node state {state.state_id} missing input_hash"
                     # Only completed states have output_hash
                     if state.status == "completed":
+                        assert isinstance(state, NodeStateCompleted)
                         assert state.output_hash, f"Completed node state {state.state_id} missing output_hash"
                     # Failed states have error_json, not output_hash, and that's OK
                     if hasattr(state, "error_json"):
@@ -463,8 +465,8 @@ class TestEngineIntegration:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[t1, t2],
-            sinks={"default": sink},
+            transforms=[as_transform(t1), as_transform(t2)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -586,7 +588,7 @@ class TestEngineIntegration:
         config = PipelineConfig(
             source=as_source(source),
             transforms=[],
-            sinks={"default": default_sink, "even": even_sink},
+            sinks={"default": as_sink(default_sink), "even": as_sink(even_sink)},
             gates=[even_odd_gate],
         )
 
@@ -718,7 +720,7 @@ class TestNoSilentAuditLoss:
         config = PipelineConfig(
             source=as_source(source),
             transforms=[],
-            sinks={"default": sink},  # Note: "phantom" is NOT configured
+            sinks={"default": as_sink(sink)},  # Note: "phantom" is NOT configured
             gates=[misrouting_gate],
         )
 
@@ -747,7 +749,7 @@ class TestNoSilentAuditLoss:
         # For now, just verify it's a plain Exception subclass
 
         # Create an instance and verify attributes
-        error = MissingEdgeError(node_id="gate_1", label="nonexistent")
+        error = MissingEdgeError(node_id=NodeID("gate_1"), label="nonexistent")
         assert error.node_id == "gate_1"
         assert error.label == "nonexistent"
         assert "gate_1" in str(error)
@@ -819,8 +821,8 @@ class TestNoSilentAuditLoss:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -898,8 +900,8 @@ class TestNoSilentAuditLoss:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -982,8 +984,8 @@ class TestAuditTrailCompleteness:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -1066,7 +1068,7 @@ class TestAuditTrailCompleteness:
         config = PipelineConfig(
             source=as_source(source),
             transforms=[],
-            sinks={"default": default_sink, "high": high_sink},
+            sinks={"default": as_sink(default_sink), "high": as_sink(high_sink)},
             gates=[split_gate],
         )
 
@@ -1191,15 +1193,15 @@ class TestForkIntegration:
         )
 
         # Build edge_map for GateExecutor
-        edge_map = {
-            (gate_node.node_id, "path_a"): edge_a.edge_id,
-            (gate_node.node_id, "path_b"): edge_b.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
         }
 
         # Route resolution map: fork paths resolve to "fork"
-        route_resolution_map: dict[tuple[str, str], str] = {
-            (gate_node.node_id, "path_a"): "fork",
-            (gate_node.node_id, "path_b"): "fork",
+        route_resolution_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): "fork",
+            (NodeID(gate_node.node_id), "path_b"): "fork",
         }
 
         # Config-driven fork gate: forks every row into two parallel paths
@@ -1215,11 +1217,11 @@ class TestForkIntegration:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
             config_gates=[fork_gate],
-            config_gate_id_map={"fork_gate": gate_node.node_id},
+            config_gate_id_map={GateName("fork_gate"): NodeID(gate_node.node_id)},
         )
 
         # Create context
@@ -1429,15 +1431,15 @@ class TestForkCoalescePipelineIntegration:
         )
 
         # Build edge_map for GateExecutor
-        edge_map = {
-            (gate_node.node_id, "sentiment"): edge_sentiment.edge_id,
-            (gate_node.node_id, "entities"): edge_entity.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "sentiment"): edge_sentiment.edge_id,
+            (NodeID(gate_node.node_id), "entities"): edge_entity.edge_id,
         }
 
         # Route resolution map: fork paths resolve to "fork"
-        route_resolution_map: dict[tuple[str, str], str] = {
-            (gate_node.node_id, "sentiment"): "fork",
-            (gate_node.node_id, "entities"): "fork",
+        route_resolution_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "sentiment"): "fork",
+            (NodeID(gate_node.node_id), "entities"): "fork",
         }
 
         # Config-driven fork gate: forks every row into sentiment and entity branches
@@ -1632,7 +1634,7 @@ class TestForkCoalescePipelineIntegration:
         # Step 4: Write merged token to sink
         sink_executor = SinkExecutor(recorder, span_factory, run_id)
         artifact = sink_executor.write(
-            sink=sink,
+            sink=as_sink(sink),
             tokens=[outcome2.merged_token],
             ctx=ctx,
             step_in_pipeline=4,
@@ -1757,13 +1759,13 @@ class TestForkCoalescePipelineIntegration:
             mode=RoutingMode.COPY,
         )
 
-        edge_map = {
-            (gate_node.node_id, "path_a"): edge_a.edge_id,
-            (gate_node.node_id, "path_b"): edge_b.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
         }
-        route_resolution_map = {
-            (gate_node.node_id, "path_a"): "fork",
-            (gate_node.node_id, "path_b"): "fork",
+        route_resolution_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): "fork",
+            (NodeID(gate_node.node_id), "path_b"): "fork",
         }
 
         # Config-driven fork gate: forks every row into path_a and path_b
@@ -1878,7 +1880,7 @@ class TestForkCoalescePipelineIntegration:
         # Write to sink
         sink_executor = SinkExecutor(recorder, span_factory, run_id)
         sink_executor.write(
-            sink=sink,
+            sink=as_sink(sink),
             tokens=merged_tokens,
             ctx=ctx,
             step_in_pipeline=3,
@@ -2027,15 +2029,15 @@ class TestComplexDAGIntegration:
         )
 
         # Edge map for gate executor
-        edge_map = {
-            (fork_gate_node.node_id, "sentiment_path"): edge_to_sentiment.edge_id,
-            (fork_gate_node.node_id, "entity_path"): edge_to_entity.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(fork_gate_node.node_id), "sentiment_path"): edge_to_sentiment.edge_id,
+            (NodeID(fork_gate_node.node_id), "entity_path"): edge_to_entity.edge_id,
         }
 
         # Route resolution map for fork
-        route_resolution_map: dict[tuple[str, str], str] = {
-            (fork_gate_node.node_id, "sentiment_path"): "fork",
-            (fork_gate_node.node_id, "entity_path"): "fork",
+        route_resolution_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(fork_gate_node.node_id), "sentiment_path"): "fork",
+            (NodeID(fork_gate_node.node_id), "entity_path"): "fork",
         }
 
         # Config-driven fork gate
@@ -2237,7 +2239,7 @@ class TestComplexDAGIntegration:
 
         # Step 5: Write merged token to sink
         artifact = sink_executor.write(
-            sink=sink,
+            sink=as_sink(sink),
             tokens=[outcome2.merged_token],
             ctx=ctx,
             step_in_pipeline=4,
@@ -2437,8 +2439,8 @@ class TestComplexDAGIntegration:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": default_sink, "routed": routed_sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(default_sink), "routed": as_sink(routed_sink)},
             gates=[routing_gate],
         )
 
@@ -2635,8 +2637,8 @@ class TestRetryIntegration:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         # Create settings with retry enabled (fast delays for testing)
@@ -2799,8 +2801,8 @@ class TestRetryIntegration:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         # Create settings with retry enabled (max 3 attempts, fast delays)
@@ -2959,6 +2961,7 @@ class TestExplainQuery:
         state1 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform_node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data=source_data,
         )
@@ -2974,6 +2977,7 @@ class TestExplainQuery:
         state2 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink_node.node_id,
+            run_id=run.run_id,
             step_index=1,
             input_data=transformed_data,
         )
@@ -3072,6 +3076,7 @@ class TestExplainQuery:
             state = recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=agg_node.node_id,
+                run_id=run.run_id,
                 step_index=0,
                 input_data={"value": (i + 1) * 10},
             )
@@ -3222,6 +3227,7 @@ class TestExplainQuery:
         gate_state = recorder.begin_node_state(
             token_id=parent_token.token_id,
             node_id=gate_node.node_id,
+            run_id=run_id,
             step_index=0,
             input_data=source_data,
         )
@@ -3246,6 +3252,7 @@ class TestExplainQuery:
             branch_state = recorder.begin_node_state(
                 token_id=child.token_id,
                 node_id=f"transform_{child.branch_name}",  # Pseudo-node
+                run_id=run_id,
                 step_index=1,
                 input_data=source_data,
             )
@@ -3268,6 +3275,7 @@ class TestExplainQuery:
         coalesce_state = recorder.begin_node_state(
             token_id=merged_token.token_id,
             node_id=coalesce_node.node_id,
+            run_id=run.run_id,
             step_index=2,
             input_data={"path_a_result": True, "path_b_result": True},
         )
@@ -3282,6 +3290,7 @@ class TestExplainQuery:
         sink_state = recorder.begin_node_state(
             token_id=merged_token.token_id,
             node_id=sink_node.node_id,
+            run_id=run.run_id,
             step_index=3,
             input_data={"merged": True},
         )
@@ -3442,8 +3451,8 @@ class TestErrorRecovery:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
@@ -3562,8 +3571,8 @@ class TestErrorRecovery:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
-            sinks={"default": sink},
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)

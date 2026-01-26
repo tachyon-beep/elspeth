@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode, SourceRow
+from elspeth.contracts import GateName, NodeID, RoutingMode, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_test_graph
 
@@ -137,7 +138,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -237,7 +238,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -326,7 +327,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -453,7 +454,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"good": as_sink(good_sink), "bad": as_sink(bad_sink)},
             gates=[gate_config],
         )
@@ -479,12 +480,12 @@ class TestOrchestratorCheckpointing:
         graph.add_edge("config_gate_split", "sink_good", label="true", mode=RoutingMode.MOVE)
         graph.add_edge("config_gate_split", "sink_bad", label="false", mode=RoutingMode.MOVE)
 
-        graph._sink_id_map = {"good": "sink_good", "bad": "sink_bad"}
-        graph._transform_id_map = {0: "transform_0"}
-        graph._config_gate_id_map = {"split": "config_gate_split"}
+        graph._sink_id_map = {SinkName("good"): NodeID("sink_good"), SinkName("bad"): NodeID("sink_bad")}
+        graph._transform_id_map = {0: NodeID("transform_0")}
+        graph._config_gate_id_map = {GateName("split"): NodeID("config_gate_split")}
         graph._route_resolution_map = {
-            ("config_gate_split", "true"): "good",
-            ("config_gate_split", "false"): "bad",
+            (NodeID("config_gate_split"), "true"): "good",
+            (NodeID("config_gate_split"), "false"): "bad",
         }
         graph._default_sink = "good"
 
@@ -604,7 +605,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -688,7 +689,7 @@ class TestOrchestratorCheckpointing:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

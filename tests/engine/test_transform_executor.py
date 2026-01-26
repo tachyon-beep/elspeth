@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_transform
 
@@ -138,6 +139,7 @@ class TestTransformExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "failed"
+        assert isinstance(state, NodeStateFailed), "Failed state should be NodeStateFailed"
         assert state.duration_ms is not None
 
         # Verify transform error is recorded with correct attribution
@@ -206,6 +208,7 @@ class TestTransformExecutor:
         state = states[0]
         assert state.status == "failed"
         # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+        assert isinstance(state, NodeStateFailed), "Failed state should be NodeStateFailed"
         assert state.duration_ms is not None
 
     def test_execute_transform_updates_token_row_data(self) -> None:
@@ -326,6 +329,7 @@ class TestTransformExecutor:
         state = states[0]
         assert state.status == "completed"
         # NodeStateCompleted has input_hash and output_hash - access directly (no hasattr guards)
+        assert isinstance(state, NodeStateCompleted), "Completed state should be NodeStateCompleted"
         assert state.input_hash is not None
         assert state.output_hash is not None
         # Same input/output data means same hashes for identity transform
@@ -393,6 +397,7 @@ class TestTransformExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "failed"
+        assert isinstance(state, NodeStateFailed), "Failed state should be NodeStateFailed"
         assert state.duration_ms is not None
 
         # Verify transform error is recorded with correct destination

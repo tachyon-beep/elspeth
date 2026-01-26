@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from elspeth.contracts import NodeID, SinkName
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator
 
@@ -26,7 +27,7 @@ class TestNodeIdAssignment:
                 source=source,  # type: ignore[arg-type]
                 transforms=[],
                 sinks={},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},
                 sink_id_map={},
             )
@@ -43,7 +44,7 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[],
             sinks={},
-            source_id="source-1",
+            source_id=NodeID("source-1"),
             transform_id_map={},
             sink_id_map={},
         )
@@ -67,8 +68,8 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[t1, t2],
             sinks={},
-            source_id="source-1",
-            transform_id_map={0: "transform-0", 1: "transform-1"},
+            source_id=NodeID("source-1"),
+            transform_id_map={0: NodeID("transform-0"), 1: NodeID("transform-1")},
             sink_id_map={},
         )
 
@@ -92,9 +93,9 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[],
             sinks={"output": sink1, "errors": sink2},
-            source_id="source-1",
+            source_id=NodeID("source-1"),
             transform_id_map={},
-            sink_id_map={"output": "sink-output", "errors": "sink-errors"},
+            sink_id_map={SinkName("output"): NodeID("sink-output"), SinkName("errors"): NodeID("sink-errors")},
         )
 
         assert sink1.node_id == "sink-output"
@@ -116,7 +117,7 @@ class TestNodeIdAssignment:
                 source=source,
                 transforms=[t1],
                 sinks={},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},  # Missing mapping for sequence 0
                 sink_id_map={},
             )
@@ -137,7 +138,7 @@ class TestNodeIdAssignment:
                 source=source,
                 transforms=[],
                 sinks={"output": sink},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},
                 sink_id_map={},  # Missing mapping for "output"
             )
@@ -164,9 +165,9 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[t1, t2],
             sinks={"default": sink1, "errors": sink2},
-            source_id="src-001",
-            transform_id_map={0: "xform-0", 1: "xform-1"},
-            sink_id_map={"default": "sink-default", "errors": "sink-errors"},
+            source_id=NodeID("src-001"),
+            transform_id_map={0: NodeID("xform-0"), 1: NodeID("xform-1")},
+            sink_id_map={SinkName("default"): NodeID("sink-default"), SinkName("errors"): NodeID("sink-errors")},
         )
 
         # Verify all assignments
@@ -207,8 +208,8 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[t1, t2, t3],
             sinks={},
-            source_id="source-1",
-            transform_id_map={0: "transform-0", 2: "transform-2"},  # No entry for seq 1
+            source_id=NodeID("source-1"),
+            transform_id_map={0: NodeID("transform-0"), 2: NodeID("transform-2")},  # No entry for seq 1
             sink_id_map={},
         )
 

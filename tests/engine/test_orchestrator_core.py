@@ -15,13 +15,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, RoutingMode, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_test_graph
 
@@ -106,7 +107,7 @@ class TestOrchestrator:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -274,7 +275,7 @@ class TestOrchestratorMultipleTransforms:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform1, transform2],
+            transforms=[as_transform(transform1), as_transform(transform2)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -417,7 +418,7 @@ class TestOrchestratorEmptyPipeline:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -515,7 +516,7 @@ class TestOrchestratorAcceptsGraph:
 
         # Sink should have node_id set from graph's sink_id_map
         sink_id_map = graph.get_sink_id_map()
-        expected_sink_id = sink_id_map["output"]
+        expected_sink_id = sink_id_map[SinkName("output")]
         assert mock_sink.node_id == expected_sink_id, f"Sink node_id not set: expected {expected_sink_id}, got {mock_sink.node_id}"
 
     def test_orchestrator_run_accepts_graph(self) -> None:

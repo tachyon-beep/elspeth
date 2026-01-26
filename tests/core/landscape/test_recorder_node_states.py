@@ -38,6 +38,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=source.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"value": 42},
         )
@@ -82,6 +83,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data=input_data,
         )
@@ -130,6 +132,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"x": 1},
         )
@@ -172,6 +175,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -217,6 +221,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -262,6 +267,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -309,6 +315,7 @@ class TestLandscapeRecorderNodeStates:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
             context_before={},  # Empty dict context
@@ -344,6 +351,7 @@ class TestLandscapeRecorderNodeStates:
         state1 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
             attempt=0,
@@ -354,6 +362,7 @@ class TestLandscapeRecorderNodeStates:
         state2 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
             attempt=1,
@@ -406,6 +415,7 @@ class TestNodeStateIntegrityValidation:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"test": "data"},
         )
@@ -468,6 +478,7 @@ class TestNodeStateIntegrityValidation:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"test": "data"},
         )
@@ -547,6 +558,7 @@ class TestNodeStateOrderingWithRetries:
         state_0_attempt_1 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node1.node_id,
+            run_id=run.run_id,
             step_index=0,
             attempt=1,  # Second attempt first!
             input_data={"test": "data"},
@@ -561,6 +573,7 @@ class TestNodeStateOrderingWithRetries:
         state_0_attempt_0 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node1.node_id,
+            run_id=run.run_id,
             step_index=0,
             attempt=0,  # First attempt second!
             input_data={"test": "data"},
@@ -576,6 +589,7 @@ class TestNodeStateOrderingWithRetries:
         state_1_attempt_0 = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node2.node_id,  # Different node for step 1
+            run_id=run.run_id,
             step_index=1,
             attempt=0,
             input_data={"test": "data2"},

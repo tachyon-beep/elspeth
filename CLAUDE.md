@@ -315,6 +315,41 @@ SENSE (Sources) → DECIDE (Transforms/Gates) → ACT (Sinks)
 | **Payload Store** | Separates large blobs from audit tables with retention policies |
 | **Configuration** | Dynaconf + Pydantic with multi-source precedence |
 
+### Composite Primary Key Pattern: nodes Table
+
+**CRITICAL:** The `nodes` table has a composite primary key `(node_id, run_id)`. This means the same `node_id` can exist in multiple runs when the same pipeline runs multiple times.
+
+**Queries touching `node_states` must use `node_states.run_id` directly:**
+
+```python
+# WRONG - Ambiguous join when node_id is reused across runs
+query = (
+    select(calls_table)
+    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+    .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)  # BUG!
+    .where(nodes_table.c.run_id == run_id)
+)
+
+# CORRECT - Use denormalized run_id on node_states
+query = (
+    select(calls_table)
+    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+    .where(node_states_table.c.run_id == run_id)  # Direct filter, no ambiguous join
+)
+```
+
+**Why:** The `node_states` table has a denormalized `run_id` column (schema comment: "Added for composite FK"). Use it directly instead of joining through `nodes` table. The join on `node_id` alone would match multiple nodes rows when `node_id` is reused.
+
+**If you MUST access columns from `nodes` table:** Use composite join with BOTH keys:
+
+```python
+.join(
+    nodes_table,
+    (node_states_table.c.node_id == nodes_table.c.node_id) &
+    (node_states_table.c.run_id == nodes_table.c.run_id)
+)
+```
+
 ### DAG Execution Model
 
 Pipelines compile to DAGs. Linear pipelines are degenerate DAGs (single `continue` path). Token identity tracks row instances through forks/joins:

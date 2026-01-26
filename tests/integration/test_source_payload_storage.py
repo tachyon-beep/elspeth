@@ -16,7 +16,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.row_data import RowDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine import Orchestrator, PipelineConfig
-from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_source
+from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
@@ -24,22 +24,22 @@ if TYPE_CHECKING:
 
 def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build minimal graph: source -> sink."""
-    from elspeth.contracts import RoutingMode
+    from elspeth.contracts import NodeID, RoutingMode, SinkName
     from elspeth.core.dag import ExecutionGraph
 
     graph = ExecutionGraph()
     graph.add_node("source", node_type="source", plugin_name=config.source.name)
 
     # Build sink nodes and ID mapping
-    sink_ids: dict[str, str] = {}
+    sink_ids: dict[SinkName, NodeID] = {}
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
+        sink_ids[SinkName(sink_name)] = NodeID(node_id)
         graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
         graph.add_edge("source", node_id, label="continue", mode=RoutingMode.MOVE)
 
     # Set the internal mappings that orchestrator expects
-    graph._sink_id_map = dict(sink_ids)
+    graph._sink_id_map = sink_ids
     graph._transform_id_map = {}  # No transforms in this simple test
     graph._default_sink = next(iter(config.sinks.keys()))  # Use first sink as output
 
@@ -112,7 +112,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path) -> None:
     config = PipelineConfig(
         source=as_source(test_source),
         transforms=[],
-        sinks={"output": test_sink},
+        sinks={"output": as_sink(test_sink)},
         config={},
     )
 

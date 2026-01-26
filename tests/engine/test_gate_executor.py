@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeID, RoutingMode
+from elspeth.contracts.audit import NodeStateFailed
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_gate
 
@@ -53,7 +54,7 @@ class TestGateExecutor:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        edge_map = {(gate_node.node_id, "continue"): continue_edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
 
         # Mock gate that continues
         class PassThroughGate:
@@ -173,9 +174,9 @@ class TestGateExecutor:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Edge map: (node_id, label) -> edge_id
-        edge_map = {(gate_node.node_id, "above"): edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "above"): edge.edge_id}
         # Route resolution map: (node_id, label) -> sink_name
-        route_resolution_map = {(gate_node.node_id, "above"): "high_values"}
+        route_resolution_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "above"): "high_values"}
         executor = GateExecutor(recorder, SpanFactory(), edge_map, route_resolution_map)
 
         token = TokenInfo(
@@ -353,9 +354,9 @@ class TestGateExecutor:
         gate = SplitterGate()
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        edge_map = {
-            (gate_node.node_id, "path_a"): edge_a.edge_id,
-            (gate_node.node_id, "path_b"): edge_b.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
         }
         executor = GateExecutor(recorder, SpanFactory(), edge_map)
         token_manager = TokenManager(recorder)
@@ -474,9 +475,9 @@ class TestGateExecutor:
         gate = SplitterGate()
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        edge_map = {
-            (gate_node.node_id, "path_a"): edge_a.edge_id,
-            (gate_node.node_id, "path_b"): edge_b.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
         }
         executor = GateExecutor(recorder, SpanFactory(), edge_map)
 
@@ -563,7 +564,8 @@ class TestGateExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "failed"
-        # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+        # NodeStateFailed has duration_ms - narrow type before accessing
+        assert isinstance(state, NodeStateFailed)
         assert state.duration_ms is not None
 
     def test_gate_context_has_state_id_for_call_recording(self) -> None:
@@ -602,7 +604,7 @@ class TestGateExecutor:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        edge_map = {(gate_node.node_id, "continue"): continue_edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
 
         # Mock gate that makes external call during evaluation
         class APIGate:
@@ -701,7 +703,7 @@ class TestConfigGateExecutor:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        edge_map = {(gate_node.node_id, "continue"): continue_edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
 
         # Config-driven gate that checks confidence
         gate_config = GateSettings(
@@ -801,7 +803,7 @@ class TestConfigGateExecutor:
             routes={"true": "continue", "false": "review_sink"},
         )
 
-        edge_map = {(gate_node.node_id, "false"): edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "false"): edge.edge_id}
         ctx = PluginContext(run_id=run.run_id, config={})
         executor = GateExecutor(recorder, SpanFactory(), edge_map)
 
@@ -883,7 +885,7 @@ class TestConfigGateExecutor:
             routes={"high": "high_priority_sink", "low": "continue"},
         )
 
-        edge_map = {(gate_node.node_id, "high"): edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "high"): edge.edge_id}
         ctx = PluginContext(run_id=run.run_id, config={})
         executor = GateExecutor(recorder, SpanFactory(), edge_map)
 
@@ -973,9 +975,9 @@ class TestConfigGateExecutor:
             fork_to=["path_a", "path_b"],
         )
 
-        edge_map = {
-            (gate_node.node_id, "path_a"): edge_a.edge_id,
-            (gate_node.node_id, "path_b"): edge_b.edge_id,
+        edge_map: dict[tuple[NodeID, str], str] = {
+            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
+            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
         }
         ctx = PluginContext(run_id=run.run_id, config={})
         executor = GateExecutor(recorder, SpanFactory(), edge_map)
@@ -1289,7 +1291,7 @@ class TestConfigGateExecutor:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        edge_map = {(gate_node.node_id, "continue"): continue_edge.edge_id}
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
 
         gate_config = GateSettings(
             name="audit_gate",

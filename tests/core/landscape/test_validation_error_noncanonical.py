@@ -111,6 +111,7 @@ class TestValidationErrorNonCanonical:
         assert record.row_hash == expected_hash, f"row_hash mismatch: expected {expected_hash}, got {record.row_hash}"
 
         # Verify row_data_json is canonical JSON
+        assert record.row_data_json is not None, "row_data_json should be present"
         row_data = json.loads(record.row_data_json)
         assert row_data == row_value
 
@@ -207,6 +208,7 @@ class TestValidationErrorNonCanonical:
         assert record.row_hash == expected_hash, f"row_hash mismatch for NaN: expected repr_hash {expected_hash}, got {record.row_hash}"
 
         # Verify row_data_json contains NonCanonicalMetadata structure
+        assert record.row_data_json is not None, "row_data_json should be present"
         row_data = json.loads(record.row_data_json)
         assert "__repr__" in row_data, "NaN should use repr fallback metadata"
         assert "__type__" in row_data

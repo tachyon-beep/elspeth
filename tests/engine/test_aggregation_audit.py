@@ -13,8 +13,10 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import BatchPendingError, TokenInfo
+from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.enums import BatchStatus, NodeStateStatus, TriggerType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import AggregationExecutor
@@ -122,7 +124,7 @@ def run_id(recorder: LandscapeRecorder) -> str:
 
 
 @pytest.fixture
-def aggregation_node_id(recorder: LandscapeRecorder, run_id: str) -> str:
+def aggregation_node_id(recorder: LandscapeRecorder, run_id: str) -> NodeID:
     """Register an aggregation node and return its ID."""
     node = recorder.register_node(
         run_id=run_id,
@@ -132,7 +134,7 @@ def aggregation_node_id(recorder: LandscapeRecorder, run_id: str) -> str:
         config={},
         schema_config=DYNAMIC_SCHEMA,
     )
-    return node.node_id
+    return NodeID(node.node_id)
 
 
 @pytest.fixture
@@ -156,7 +158,7 @@ def ctx(run_id: str) -> PluginContext:
 
 
 @pytest.fixture
-def aggregation_settings(aggregation_node_id: str) -> dict[str, AggregationSettings]:
+def aggregation_settings(aggregation_node_id: NodeID) -> dict[NodeID, AggregationSettings]:
     """Create aggregation settings with a count trigger."""
     settings = AggregationSettings(
         name="test_aggregation",
@@ -170,7 +172,7 @@ def aggregation_settings(aggregation_node_id: str) -> dict[str, AggregationSetti
 def aggregation_executor(
     recorder: LandscapeRecorder,
     run_id: str,
-    aggregation_settings: dict[str, AggregationSettings],
+    aggregation_settings: dict[NodeID, AggregationSettings],
 ) -> AggregationExecutor:
     """Create an AggregationExecutor instance."""
     return AggregationExecutor(
@@ -219,7 +221,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -262,6 +264,7 @@ class TestAggregationFlushAuditTrail:
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "completed"
+        assert isinstance(agg_state, NodeStateCompleted)
 
         # Verify audit fields: input_hash computed from batch input
         # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
@@ -288,7 +291,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -328,7 +331,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -368,6 +371,7 @@ class TestAggregationFlushAuditTrail:
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "failed"
+        assert isinstance(agg_state, NodeStateFailed)
 
         # Verify failed state has input_hash (batch input was captured before failure)
         # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
@@ -395,7 +399,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -441,6 +445,7 @@ class TestAggregationFlushAuditTrail:
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "failed"
+        assert isinstance(agg_state, NodeStateFailed)
 
         # Verify failed state has input_hash (batch input was captured)
         # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
@@ -471,7 +476,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -506,7 +511,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -548,7 +553,7 @@ class TestAggregationFlushAuditTrail:
         recorder: LandscapeRecorder,
         run_id: str,
         source_node_id: str,
-        aggregation_node_id: str,
+        aggregation_node_id: NodeID,
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
@@ -619,8 +624,8 @@ class TestAggregationFlushAuditTrail:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        node_id = node.node_id
-        transform.node_id = node_id
+        node_id = NodeID(node.node_id)
+        transform.node_id = node.node_id
 
         executor = AggregationExecutor(
             recorder=recorder,
@@ -760,6 +765,7 @@ class TestAggregationFlushAuditTrail:
         state_open = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run_id,
             step_index=1,
             attempt=1,
             input_data={"x": 42},

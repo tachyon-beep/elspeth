@@ -203,7 +203,7 @@ class TestAcceptResultDeleted:
     def test_accept_result_deleted_from_contracts(self) -> None:
         """AcceptResult should be deleted from contracts.results."""
         with pytest.raises(ImportError):
-            from elspeth.contracts.results import AcceptResult  # noqa: F401
+            from elspeth.contracts.results import AcceptResult  # type: ignore[attr-defined] # noqa: F401
 
     def test_accept_result_not_exported(self) -> None:
         """AcceptResult should NOT be exported from elspeth.contracts."""

@@ -151,7 +151,8 @@ class TestLineageResultDefaults:
         # Should be different list instances (not shared)
         assert result1.validation_errors is not result2.validation_errors, "Each LineageResult should have its own validation_errors list"
         # Mutation on one should not affect the other
-        result1.validation_errors.append("test")
+        # Note: Intentionally appending wrong type to test list isolation, not type correctness
+        result1.validation_errors.append("test")  # type: ignore[arg-type]
         assert result2.validation_errors == [], "Shared mutable default detected"
 
 

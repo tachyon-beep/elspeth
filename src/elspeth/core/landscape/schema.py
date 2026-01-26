@@ -10,9 +10,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
+    PrimaryKeyConstraint,
     String,
     Table,
     Text,
@@ -53,7 +55,7 @@ runs_table = Table(
 nodes_table = Table(
     "nodes",
     metadata,
-    Column("node_id", String(64), primary_key=True),
+    Column("node_id", String(64), nullable=False),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("plugin_name", String(128), nullable=False),
     Column("node_type", String(32), nullable=False),
@@ -67,6 +69,9 @@ nodes_table = Table(
     # Schema configuration for audit trail (WP-11.99)
     Column("schema_mode", String(16)),  # "dynamic", "strict", "free", "parse", or NULL
     Column("schema_fields_json", Text),  # JSON array of field definitions, or NULL
+    # Composite PK: same node config can exist in multiple runs
+    # This allows running the same pipeline multiple times against the same database
+    PrimaryKeyConstraint("node_id", "run_id"),
 )
 
 # === Edges ===
@@ -76,12 +81,15 @@ edges_table = Table(
     metadata,
     Column("edge_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("from_node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
-    Column("to_node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("from_node_id", String(64), nullable=False),
+    Column("to_node_id", String(64), nullable=False),
     Column("label", String(64), nullable=False),
     Column("default_mode", String(16), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("run_id", "from_node_id", "label"),
+    # Composite FKs to nodes (node_id, run_id)
+    ForeignKeyConstraint(["from_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
+    ForeignKeyConstraint(["to_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
 # === Source Rows ===
@@ -91,12 +99,14 @@ rows_table = Table(
     metadata,
     Column("row_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("source_node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("source_node_id", String(64), nullable=False),
     Column("row_index", Integer, nullable=False),
     Column("source_data_hash", String(64), nullable=False),
     Column("source_data_ref", String(256)),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("run_id", "row_index"),
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(["source_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
 # === Tokens ===
@@ -171,7 +181,8 @@ node_states_table = Table(
     metadata,
     Column("state_id", String(64), primary_key=True),
     Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
-    Column("node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),  # Added for composite FK
+    Column("node_id", String(64), nullable=False),
     Column("step_index", Integer, nullable=False),
     Column("attempt", Integer, nullable=False, default=0),
     Column("status", String(32), nullable=False),
@@ -185,6 +196,8 @@ node_states_table = Table(
     Column("completed_at", DateTime(timezone=True)),
     UniqueConstraint("token_id", "node_id", "attempt"),
     UniqueConstraint("token_id", "step_index", "attempt"),
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(["node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
 # === External Calls ===
@@ -220,13 +233,15 @@ artifacts_table = Table(
         ForeignKey("node_states.state_id"),
         nullable=False,
     ),
-    Column("sink_node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("sink_node_id", String(64), nullable=False),
     Column("artifact_type", String(64), nullable=False),
     Column("path_or_uri", String(512), nullable=False),
     Column("content_hash", String(64), nullable=False),
     Column("size_bytes", Integer, nullable=False),
     Column("idempotency_key", String(256)),  # For retry deduplication
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(["sink_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
 # === Routing Events ===
@@ -253,7 +268,7 @@ batches_table = Table(
     metadata,
     Column("batch_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("aggregation_node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("aggregation_node_id", String(64), nullable=False),
     Column("aggregation_state_id", String(64), ForeignKey("node_states.state_id")),
     Column("trigger_reason", String(128)),
     Column("trigger_type", String(32)),  # TriggerType enum value
@@ -261,6 +276,8 @@ batches_table = Table(
     Column("status", String(32), nullable=False),  # draft, executing, completed, failed
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(["aggregation_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
 batch_members_table = Table(
@@ -309,13 +326,19 @@ validation_errors_table = Table(
     metadata,
     Column("error_id", String(32), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("node_id", String(64), ForeignKey("nodes.node_id", ondelete="RESTRICT")),  # Source node where validation failed
+    Column("node_id", String(64)),  # Source node where validation failed (nullable)
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),  # Store the row for debugging
     Column("error", Text, nullable=False),
     Column("schema_mode", String(16), nullable=False),  # "strict", "free", "dynamic", "parse"
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite FK to nodes (node_id, run_id) - nullable node_id supported
+    ForeignKeyConstraint(
+        ["node_id", "run_id"],
+        ["nodes.node_id", "nodes.run_id"],
+        ondelete="RESTRICT",
+    ),
 )
 
 Index("ix_validation_errors_run", validation_errors_table.c.run_id)
@@ -329,12 +352,18 @@ transform_errors_table = Table(
     Column("error_id", String(32), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("token_id", String(64), ForeignKey("tokens.token_id", ondelete="RESTRICT"), nullable=False),
-    Column("transform_id", String(64), ForeignKey("nodes.node_id", ondelete="RESTRICT"), nullable=False),
+    Column("transform_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),
     Column("error_details_json", Text),  # From TransformResult.error()
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite FK to nodes (transform_id, run_id)
+    ForeignKeyConstraint(
+        ["transform_id", "run_id"],
+        ["nodes.node_id", "nodes.run_id"],
+        ondelete="RESTRICT",
+    ),
 )
 
 Index("ix_transform_errors_run", transform_errors_table.c.run_id)
@@ -349,13 +378,18 @@ checkpoints_table = Table(
     Column("checkpoint_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
-    Column("node_id", String(64), ForeignKey("nodes.node_id"), nullable=False),
+    Column("node_id", String(64), nullable=False),  # Part of composite FK to nodes
     Column("sequence_number", Integer, nullable=False),  # Monotonic progress marker
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Topology validation (topological checkpoint compatibility)
     Column("upstream_topology_hash", String(64), nullable=False),  # Hash of nodes + edges upstream of checkpoint
     Column("checkpoint_node_config_hash", String(64), nullable=False),  # Hash of checkpoint node config only
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(
+        ["node_id", "run_id"],
+        ["nodes.node_id", "nodes.run_id"],
+    ),
 )
 
 Index("ix_checkpoints_run", checkpoints_table.c.run_id)

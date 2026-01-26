@@ -173,6 +173,7 @@ class CoalesceExecutor:
             state = self._recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=node_id,
+                run_id=self._run_id,
                 step_index=step_in_pipeline,
                 input_data=token.row_data,
             )
@@ -213,6 +214,7 @@ class CoalesceExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
+            run_id=self._run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )

@@ -251,9 +251,9 @@ class TestElspethSettingsAggregations:
     def test_elspeth_settings_aggregations_default_empty(self) -> None:
         """Aggregations defaults to empty list."""
         from elspeth.core.config import (
-            SourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         settings = ElspethSettings(
@@ -267,9 +267,9 @@ class TestElspethSettingsAggregations:
         """Aggregations can be configured."""
         from elspeth.core.config import (
             AggregationSettings,
-            SourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
             TriggerConfig,
         )
 
@@ -292,9 +292,9 @@ class TestElspethSettingsAggregations:
         """Aggregation names must be unique."""
         from elspeth.core.config import (
             AggregationSettings,
-            SourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
             TriggerConfig,
         )
 

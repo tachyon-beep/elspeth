@@ -193,7 +193,7 @@ NEW_ENTRIES = [
 ]
 
 
-def main():
+def main() -> None:
     allowlist_path = Path("config/cicd/no_bug_hiding.yaml")
 
     # Load current allowlist

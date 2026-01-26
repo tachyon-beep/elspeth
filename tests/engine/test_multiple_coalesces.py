@@ -7,6 +7,7 @@ work correctly when using the production path (ExecutionGraph.from_plugin_instan
 from __future__ import annotations
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts import BranchName, CoalesceName
 from elspeth.core.config import (
     CoalesceSettings,
     ElspethSettings,
@@ -102,12 +103,12 @@ class TestMultipleCoalescePoints:
         branch_to_coalesce = graph.get_branch_to_coalesce_map()
 
         # First fork's branches should map to first coalesce
-        assert branch_to_coalesce["path_a"] == "merge1", "path_a should map to merge1 name"
-        assert branch_to_coalesce["path_b"] == "merge1", "path_b should map to merge1 name"
+        assert branch_to_coalesce[BranchName("path_a")] == CoalesceName("merge1"), "path_a should map to merge1 name"
+        assert branch_to_coalesce[BranchName("path_b")] == CoalesceName("merge1"), "path_b should map to merge1 name"
 
         # Second fork's branches should map to second coalesce
-        assert branch_to_coalesce["path_c"] == "merge2", "path_c should map to merge2 name"
-        assert branch_to_coalesce["path_d"] == "merge2", "path_d should map to merge2 name"
+        assert branch_to_coalesce[BranchName("path_c")] == CoalesceName("merge2"), "path_c should map to merge2 name"
+        assert branch_to_coalesce[BranchName("path_d")] == CoalesceName("merge2"), "path_d should map to merge2 name"
 
         # Verify all 4 branches are mapped (no missing/extra)
         assert len(branch_to_coalesce) == 4, "Should have exactly 4 branches mapped"

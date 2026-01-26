@@ -19,7 +19,14 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
-from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import (
+    _TestSchema,
+    _TestSinkBase,
+    _TestSourceBase,
+    as_sink,
+    as_source,
+    as_transform,
+)
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -94,7 +101,7 @@ class TestPhaseErrorEmission:
         # Build graph using public API (P2 fix)
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
@@ -103,7 +110,7 @@ class TestPhaseErrorEmission:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

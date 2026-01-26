@@ -25,6 +25,8 @@ class SchemaCompatibilityError(Exception):
 # Used by _validate_schema() to detect outdated SQLite databases.
 _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("tokens", "expand_group_id"),
+    # Added for composite FK to nodes (node_id, run_id) - enables run-isolated queries
+    ("node_states", "run_id"),
 ]
 
 # Required foreign keys for audit integrity (Tier 1 trust).

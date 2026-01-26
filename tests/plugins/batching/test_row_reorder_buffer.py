@@ -97,7 +97,7 @@ class TestBackpressure:
         buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=2)
 
         t1 = buffer.submit("row-1")
-        t2 = buffer.submit("row-2")
+        buffer.submit("row-2")
 
         # Third submit should block
         submit_completed = threading.Event()
@@ -234,6 +234,102 @@ class TestConcurrency:
 
         # Results should be in submission order (0, 1, 2, ...)
         assert results == list(range(num_rows))
+
+
+class TestEviction:
+    """Tests for evicting abandoned entries (timeout/retry scenarios)."""
+
+    def test_evict_removes_entry_and_advances_release_sequence(self):
+        """Evicting an entry allows subsequent entries to be released.
+
+        This is the core retry scenario:
+        1. Row A submitted (seq 0)
+        2. Row A times out, retry happens
+        3. Row A retry submitted (seq 1)
+        4. Row A retry completes
+        5. Without eviction, seq 1 is blocked waiting for seq 0
+        6. With eviction, seq 0 is removed and seq 1 can be released
+        """
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        # Original attempt
+        ticket_original = buffer.submit("row-A-original")
+        assert ticket_original.sequence == 0
+
+        # Retry attempt (gets new sequence)
+        ticket_retry = buffer.submit("row-A-retry")
+        assert ticket_retry.sequence == 1
+
+        # Retry completes
+        buffer.complete(ticket_retry, "retry-result")
+
+        # Without eviction, release would block forever waiting for seq 0
+        # With eviction, we can skip seq 0 and release seq 1
+        evicted = buffer.evict(ticket_original)
+        assert evicted is True
+
+        # Now seq 1 should be releasable
+        entry = buffer.wait_for_next_release(timeout=1.0)
+        assert entry.result == "retry-result"
+        assert entry.sequence == 1
+
+    def test_evict_already_completed_returns_false(self):
+        """Evicting an already-completed entry returns False."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket = buffer.submit("row-1")
+        buffer.complete(ticket, "result-1")
+
+        # Already completed - evict should fail
+        assert buffer.evict(ticket) is False
+
+    def test_evict_already_released_returns_false(self):
+        """Evicting an already-released entry returns False."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        ticket = buffer.submit("row-1")
+        buffer.complete(ticket, "result-1")
+        buffer.wait_for_next_release(timeout=1.0)
+
+        # Already released - evict should fail (not in pending)
+        assert buffer.evict(ticket) is False
+
+    def test_evict_advances_past_multiple_evicted(self):
+        """Evicting multiple entries advances past all of them."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=10)
+
+        t0 = buffer.submit("row-0")
+        t1 = buffer.submit("row-1")
+        t2 = buffer.submit("row-2")
+        t3 = buffer.submit("row-3")
+
+        # Complete only t3
+        buffer.complete(t3, "result-3")
+
+        # Evict t0, t1, t2
+        assert buffer.evict(t0) is True
+        assert buffer.evict(t1) is True
+        assert buffer.evict(t2) is True
+
+        # t3 should now be releasable
+        entry = buffer.wait_for_next_release(timeout=1.0)
+        assert entry.result == "result-3"
+        assert entry.sequence == 3
+
+    def test_evict_releases_backpressure(self):
+        """Evicting an entry frees up a slot for new submissions."""
+        buffer: RowReorderBuffer[str] = RowReorderBuffer(max_pending=2)
+
+        t0 = buffer.submit("row-0")
+        buffer.submit("row-1")  # Fill buffer, t1 not needed
+
+        # Buffer is full - third submit would block
+        # Evict t0 to free up space
+        buffer.evict(t0)
+
+        # Now we should be able to submit another row
+        t2 = buffer.submit("row-2", timeout=0.1)  # Would timeout if still full
+        assert t2.sequence == 2
 
 
 class TestPropertyBased:

@@ -10,7 +10,6 @@ Coordinates:
 """
 
 import hashlib
-import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -927,8 +926,8 @@ class RowProcessor:
                         )
                     )
 
-                # Generate fork group ID linking parent to children
-                cfg_fork_group_id = uuid.uuid4().hex[:16]
+                # Use canonical fork_group_id from recorder (all children share same ID)
+                cfg_fork_group_id = outcome.child_tokens[0].fork_group_id
                 self._recorder.record_token_outcome(
                     run_id=self._run_id,
                     token_id=current_token.token_id,

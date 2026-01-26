@@ -132,6 +132,8 @@ class TestSinkExecutor:
         assert artifacts[0].artifact_id == artifact.artifact_id
 
         # Verify node_state created for EACH token (COMPLETED terminal state derivation)
+        from elspeth.contracts.audit import NodeStateCompleted
+
         for token in tokens:
             states = recorder.get_node_states_for_token(token.token_id)
             assert len(states) == 1
@@ -139,6 +141,7 @@ class TestSinkExecutor:
             assert state.status == "completed"
             assert state.node_id == sink_node.node_id
             # NodeStateCompleted has duration_ms - access directly (no hasattr guards)
+            assert isinstance(state, NodeStateCompleted)
             assert state.duration_ms is not None
 
     def test_write_empty_tokens_returns_none(self) -> None:
@@ -243,12 +246,15 @@ class TestSinkExecutor:
             )
 
         # Verify failure recorded for ALL tokens
+        from elspeth.contracts.audit import NodeStateFailed
+
         for token in tokens:
             states = recorder.get_node_states_for_token(token.token_id)
             assert len(states) == 1
             state = states[0]
             assert state.status == "failed"
             # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+            assert isinstance(state, NodeStateFailed)
             assert state.duration_ms is not None
 
         # Verify no artifact recorded (write failed)

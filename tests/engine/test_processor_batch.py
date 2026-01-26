@@ -13,6 +13,7 @@ because the processor uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
+from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -76,7 +77,7 @@ class TestProcessorBatchTransforms:
         )
 
         aggregation_settings = {
-            sum_node.node_id: AggregationSettings(
+            NodeID(sum_node.node_id): AggregationSettings(
                 name="sum_batch",
                 plugin="sum",
                 trigger=TriggerConfig(count=3),
@@ -87,7 +88,7 @@ class TestProcessorBatchTransforms:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -172,7 +173,7 @@ class TestProcessorBatchTransforms:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings={},  # Empty - not an aggregation node
@@ -244,7 +245,7 @@ class TestProcessorBatchTransforms:
         )
 
         aggregation_settings = {
-            sum_node.node_id: AggregationSettings(
+            NodeID(sum_node.node_id): AggregationSettings(
                 name="sum_batch",
                 plugin="sum",
                 trigger=TriggerConfig(count=3),  # Trigger at 3
@@ -254,14 +255,14 @@ class TestProcessorBatchTransforms:
         # Create rows and tokens that will be referenced by the checkpoint
         row0 = recorder.create_row(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             row_index=0,
             data={"value": 1},
         )
         token0 = recorder.create_token(row_id=row0.row_id)
         row1 = recorder.create_row(
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             row_index=1,
             data={"value": 2},
         )
@@ -300,7 +301,7 @@ class TestProcessorBatchTransforms:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
             edge_map={},
             route_resolution_map={},
             aggregation_settings=aggregation_settings,
@@ -382,7 +383,7 @@ class TestProcessorDeaggregation:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -461,7 +462,7 @@ class TestProcessorDeaggregation:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source_node.node_id,
+            source_node_id=NodeID(source_node.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})

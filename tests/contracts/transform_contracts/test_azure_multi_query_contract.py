@@ -6,7 +6,6 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import CallType
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
@@ -114,24 +113,6 @@ class TestAzureMultiQueryLLMSpecific:
             "cs2_crit3",
         }
 
-    def test_is_batch_aware_true(self) -> None:
-        transform = AzureMultiQueryLLMTransform(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "test-key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
-                "schema": {"fields": "dynamic"},
-                "on_error": "quarantine_sink",
-            }
-        )
-
-        assert transform.is_batch_aware is True
-
     def test_creates_tokens_false(self) -> None:
         transform = AzureMultiQueryLLMTransform(
             {
@@ -152,32 +133,9 @@ class TestAzureMultiQueryLLMSpecific:
 
 
 class TestAzureMultiQueryLLMAuditTrail:
-    def test_llm_call_recorded_in_audit(self, mock_azure_openai: Mock) -> None:
-        transform = AzureMultiQueryLLMTransform(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "test-key",
-                "template": "{{ row.input_1 }}",
-                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                "criteria": [{"name": "crit1"}],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
-                "schema": {"fields": "dynamic"},
-                "on_error": "quarantine_sink",
-            }
-        )
-
-        ctx = _make_mock_context()
-        transform.on_start(ctx)
-
-        sample_input = {"a": "test_value"}
-        result = transform.process(sample_input, ctx)
-
-        assert result.status == "success"
-        ctx.landscape.record_call.assert_called()
-        call_args = ctx.landscape.record_call.call_args
-        assert call_args.kwargs["call_type"] == CallType.LLM
+    # NOTE: test_llm_call_recorded_in_audit was deleted because it tested the old
+    # process() API. AzureMultiQueryLLMTransform now uses accept() via BatchTransformMixin.
+    # Audit trail tests should use integration tests that exercise the full pipeline.
 
     def test_on_error_configuration_required(self) -> None:
         transform = AzureMultiQueryLLMTransform(

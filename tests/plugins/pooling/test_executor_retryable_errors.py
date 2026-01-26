@@ -120,6 +120,7 @@ class TestRetryableErrorHandling:
         assert len(results) == 1
         assert results[0].status == "error"
         assert call_count[0] == 1  # Only called once, no retry
+        assert results[0].reason is not None
         assert results[0].reason["reason"] == "permanent_error"
         assert "ContentPolicyError" in results[0].reason["error_type"]
 
@@ -142,6 +143,7 @@ class TestRetryableErrorHandling:
         assert len(results) == 1
         assert results[0].status == "error"
         assert call_count[0] == 1  # Only called once, no retry
+        assert results[0].reason is not None
         assert results[0].reason["reason"] == "permanent_error"
 
     def test_client_error_401_fails_immediately_no_retry(
@@ -163,6 +165,7 @@ class TestRetryableErrorHandling:
         assert len(results) == 1
         assert results[0].status == "error"
         assert call_count[0] == 1  # Only called once, no retry
+        assert results[0].reason is not None
         assert "401" in results[0].reason["error"]
 
     def test_retryable_error_timeout_after_max_retry_seconds(
@@ -184,6 +187,7 @@ class TestRetryableErrorHandling:
 
         assert len(results) == 1
         assert results[0].status == "error"
+        assert results[0].reason is not None
         assert results[0].reason["reason"] == "retry_timeout"
         assert results[0].reason["error_type"] == "NetworkError"
         # Should timeout around 1 second (max_capacity_retry_seconds)
@@ -231,6 +235,7 @@ class TestRetryableErrorHandling:
         # Row 1: Failed immediately (no retry)
         assert results[1].status == "error"
         assert call_counts[1][0] == 1
+        assert results[1].reason is not None
         assert results[1].reason["reason"] == "permanent_error"
 
         # Row 2: Immediate success
@@ -275,6 +280,7 @@ class TestRetryableErrorHandling:
 
         assert len(results) == 1
         assert results[0].status == "error"
+        assert results[0].reason is not None
         assert results[0].reason["reason"] == "retry_timeout"
         assert results[0].reason["status_code"] == 429  # Should include status_code
 
@@ -294,6 +300,7 @@ class TestRetryableErrorHandling:
 
         assert len(results) == 1
         assert results[0].status == "error"
+        assert results[0].reason is not None
         assert results[0].reason["reason"] == "retry_timeout"
         assert "status_code" not in results[0].reason  # Should NOT include status_code
         assert results[0].reason["error_type"] == "NetworkError"

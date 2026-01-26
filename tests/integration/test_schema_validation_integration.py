@@ -23,10 +23,10 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     """
     from elspeth.cli_helpers import instantiate_plugins_from_config
     from elspeth.core.config import (
-        SourceSettings,
         ElspethSettings,
-        TransformSettings,
         SinkSettings,
+        SourceSettings,
+        TransformSettings,
     )
     from elspeth.core.dag import ExecutionGraph
 

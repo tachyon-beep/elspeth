@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
 
 # Dynamic schema for tests that don't care about specific fields
@@ -101,9 +102,9 @@ class TestAggregationExecutorRestore:
 
         state = {"buffer": [1, 2, 3], "sum": 6, "count": 3}
 
-        executor.restore_state("agg_node", state)
+        executor.restore_state(NodeID("agg_node"), state)
 
-        assert executor.get_restored_state("agg_node") == state
+        assert executor.get_restored_state(NodeID("agg_node")) == state
 
     def test_restore_state_returns_none_for_unknown_node(self) -> None:
         """get_restored_state() returns None for nodes without restored state."""
@@ -121,7 +122,7 @@ class TestAggregationExecutorRestore:
             run_id=run.run_id,
         )
 
-        assert executor.get_restored_state("unknown_node") is None
+        assert executor.get_restored_state(NodeID("unknown_node")) is None
 
     def test_restore_batch_sets_current_batch(self) -> None:
         """restore_batch() makes batch the current batch for its node."""
@@ -137,7 +138,7 @@ class TestAggregationExecutorRestore:
         # Register aggregation node
         recorder.register_node(
             run_id=run.run_id,
-            node_id="agg_node",
+            node_id=NodeID("agg_node"),
             plugin_name="test",
             node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
@@ -149,7 +150,7 @@ class TestAggregationExecutorRestore:
         # Create a batch
         batch = recorder.create_batch(
             run_id=run.run_id,
-            aggregation_node_id="agg_node",
+            aggregation_node_id=NodeID("agg_node"),
         )
 
         # Create executor for this run
@@ -163,7 +164,7 @@ class TestAggregationExecutorRestore:
         executor.restore_batch(batch.batch_id)
 
         # Assert
-        assert executor.get_batch_id("agg_node") == batch.batch_id
+        assert executor.get_batch_id(NodeID("agg_node")) == batch.batch_id
 
     def test_restore_batch_not_found_raises_error(self) -> None:
         """restore_batch() raises ValueError for unknown batch_id."""
@@ -231,6 +232,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -242,7 +244,7 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Buffer 3 rows
@@ -260,10 +262,10 @@ class TestAggregationExecutorBuffering:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
         # Check buffer
-        buffered = executor.get_buffered_rows(agg_node.node_id)
+        buffered = executor.get_buffered_rows(node_id)
         assert len(buffered) == 3
         assert [r["value"] for r in buffered] == [0, 1, 2]
 
@@ -286,6 +288,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -297,7 +300,7 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Buffer rows
@@ -315,16 +318,16 @@ class TestAggregationExecutorBuffering:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
         # _get_buffered_data() returns data WITHOUT clearing (internal method)
-        buffered_rows, buffered_tokens = executor._get_buffered_data(agg_node.node_id)
+        buffered_rows, buffered_tokens = executor._get_buffered_data(node_id)
         assert len(buffered_rows) == 2
         assert len(buffered_tokens) == 2
 
         # Buffer should still contain data (not cleared by _get_buffered_data)
-        assert executor.get_buffered_rows(agg_node.node_id) == buffered_rows
-        assert executor.get_buffered_tokens(agg_node.node_id) == buffered_tokens
+        assert executor.get_buffered_rows(node_id) == buffered_rows
+        assert executor.get_buffered_tokens(node_id) == buffered_tokens
 
     def test_buffered_tokens_are_tracked(self) -> None:
         """Executor tracks TokenInfo objects alongside buffered rows."""
@@ -345,6 +348,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -356,7 +360,7 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Buffer 2 rows
@@ -374,10 +378,10 @@ class TestAggregationExecutorBuffering:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
         # Check buffered tokens
-        tokens = executor.get_buffered_tokens(agg_node.node_id)
+        tokens = executor.get_buffered_tokens(node_id)
         assert len(tokens) == 2
         assert tokens[0].token_id == "token-0"
         assert tokens[1].token_id == "token-1"
@@ -401,6 +405,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -412,11 +417,11 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # No batch yet
-        assert executor.get_batch_id(agg_node.node_id) is None
+        assert executor.get_batch_id(node_id) is None
 
         # Buffer first row
         token = TokenInfo(
@@ -432,10 +437,10 @@ class TestAggregationExecutorBuffering:
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-        executor.buffer_row(agg_node.node_id, token)
+        executor.buffer_row(node_id, token)
 
         # Batch should now exist
-        batch_id = executor.get_batch_id(agg_node.node_id)
+        batch_id = executor.get_batch_id(node_id)
         assert batch_id is not None
 
         # Batch should be in landscape
@@ -462,6 +467,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -473,7 +479,7 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Buffer 2 rows - should not trigger
@@ -491,9 +497,9 @@ class TestAggregationExecutorBuffering:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
-        assert executor.should_flush(agg_node.node_id) is False
+        assert executor.should_flush(node_id) is False
 
         # Buffer 3rd row - should trigger
         token = TokenInfo(
@@ -509,9 +515,9 @@ class TestAggregationExecutorBuffering:
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-        executor.buffer_row(agg_node.node_id, token)
+        executor.buffer_row(node_id, token)
 
-        assert executor.should_flush(agg_node.node_id) is True
+        assert executor.should_flush(node_id) is True
 
     def test_get_buffered_data_returns_both_rows_and_tokens(self) -> None:
         """_get_buffered_data() returns tuple of (rows, tokens) for passthrough mode."""
@@ -532,6 +538,7 @@ class TestAggregationExecutorBuffering:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -543,7 +550,7 @@ class TestAggregationExecutorBuffering:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Buffer 2 rows with distinct tokens
@@ -567,10 +574,10 @@ class TestAggregationExecutorBuffering:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
         # _get_buffered_data() returns tuple of (rows, tokens) without clearing
-        rows, tokens = executor._get_buffered_data(agg_node.node_id)
+        rows, tokens = executor._get_buffered_data(node_id)
 
         # Verify rows
         assert len(rows) == 2
@@ -583,8 +590,8 @@ class TestAggregationExecutorBuffering:
         assert tokens[1].token_id == "token-2"
 
         # Buffer should NOT be cleared (_get_buffered_data is internal, doesn't clear)
-        assert executor.get_buffered_rows(agg_node.node_id) == rows
-        assert executor.get_buffered_tokens(agg_node.node_id) == tokens
+        assert executor.get_buffered_rows(node_id) == rows
+        assert executor.get_buffered_tokens(node_id) == tokens
 
 
 class TestAggregationExecutorCheckpoint:
@@ -609,6 +616,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -620,7 +628,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Add tokens with all metadata
@@ -647,16 +655,16 @@ class TestAggregationExecutorCheckpoint:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor.buffer_row(agg_node.node_id, token)
+            executor.buffer_row(node_id, token)
 
         # Get checkpoint
         checkpoint = executor.get_checkpoint_state()
 
         # VERIFY: Full TokenInfo stored, not just IDs
-        assert "tokens" in checkpoint[agg_node.node_id], "Should have 'tokens' key, not 'token_ids'"
-        assert "token_ids" not in checkpoint[agg_node.node_id], "Old 'token_ids' format should be gone"
+        assert "tokens" in checkpoint[node_id], "Should have 'tokens' key, not 'token_ids'"
+        assert "token_ids" not in checkpoint[node_id], "Old 'token_ids' format should be gone"
 
-        tokens_data = checkpoint[agg_node.node_id]["tokens"]
+        tokens_data = checkpoint[node_id]["tokens"]
         assert len(tokens_data) == 2
 
         # Verify first token has ALL fields
@@ -672,7 +680,7 @@ class TestAggregationExecutorCheckpoint:
         assert tokens_data[1]["branch_name"] is None
 
         # Verify batch_id present in checkpoint
-        assert "batch_id" in checkpoint[agg_node.node_id]
+        assert "batch_id" in checkpoint[node_id]
 
         # Verify checkpoint is JSON serializable (required for persistence)
         import json
@@ -699,6 +707,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -710,7 +719,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Don't buffer anything
@@ -736,6 +745,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -747,13 +757,13 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Checkpoint state with new format (full TokenInfo data)
         checkpoint_state = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "tokens": [
                     {
                         "token_id": "token-101",
@@ -776,16 +786,16 @@ class TestAggregationExecutorCheckpoint:
         executor.restore_from_checkpoint(checkpoint_state)
 
         # VERIFY: Full TokenInfo objects reconstructed
-        assert len(executor._buffer_tokens[agg_node.node_id]) == 2
+        assert len(executor._buffer_tokens[node_id]) == 2
 
-        token1 = executor._buffer_tokens[agg_node.node_id][0]
+        token1 = executor._buffer_tokens[node_id][0]
         assert isinstance(token1, TokenInfo)
         assert token1.token_id == "token-101"
         assert token1.row_id == "row-1"
         assert token1.row_data == {"name": "Alice", "score": 95}
         assert token1.branch_name == "high_score"
 
-        token2 = executor._buffer_tokens[agg_node.node_id][1]
+        token2 = executor._buffer_tokens[node_id][1]
         assert isinstance(token2, TokenInfo)
         assert token2.token_id == "token-102"
         assert token2.row_id == "row-2"
@@ -793,12 +803,12 @@ class TestAggregationExecutorCheckpoint:
         assert token2.branch_name is None
 
         # VERIFY: _buffers also populated with row_data
-        assert len(executor._buffers[agg_node.node_id]) == 2
-        assert executor._buffers[agg_node.node_id][0] == {"name": "Alice", "score": 95}
-        assert executor._buffers[agg_node.node_id][1] == {"name": "Bob", "score": 42}
+        assert len(executor._buffers[node_id]) == 2
+        assert executor._buffers[node_id][0] == {"name": "Alice", "score": 95}
+        assert executor._buffers[node_id][1] == {"name": "Bob", "score": 42}
 
         # VERIFY: batch_id restored
-        assert executor.get_batch_id(agg_node.node_id) == "batch-123"
+        assert executor.get_batch_id(node_id) == "batch-123"
 
     def test_restore_from_checkpoint_restores_trigger_count(self) -> None:
         """restore_from_checkpoint() restores trigger evaluator count."""
@@ -818,6 +828,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -829,13 +840,13 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Simulate checkpoint state with 4 rows buffered (new format)
         checkpoint_state = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "tokens": [
                     {
                         "token_id": f"token-{i}",
@@ -853,10 +864,10 @@ class TestAggregationExecutorCheckpoint:
 
         # Trigger evaluator should reflect restored count (4 rows)
         # Should NOT trigger yet (need 5)
-        assert executor.should_flush(agg_node.node_id) is False
+        assert executor.should_flush(node_id) is False
 
         # Trigger evaluator internal count should be 4
-        evaluator = executor._trigger_evaluators[agg_node.node_id]
+        evaluator = executor._trigger_evaluators[node_id]
         assert evaluator.batch_count == 4
 
     def test_checkpoint_roundtrip(self) -> None:
@@ -880,6 +891,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -892,7 +904,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         for i in range(3):
@@ -909,7 +921,7 @@ class TestAggregationExecutorCheckpoint:
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-            executor1.buffer_row(agg_node.node_id, token)
+            executor1.buffer_row(node_id, token)
 
         # Get checkpoint state and serialize (simulates crash)
         state = executor1.get_checkpoint_state()
@@ -920,18 +932,18 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         restored_state = json.loads(serialized)
         executor2.restore_from_checkpoint(restored_state)
 
         # Verify buffer restored correctly
-        buffered = executor2.get_buffered_rows(agg_node.node_id)
+        buffered = executor2.get_buffered_rows(node_id)
         assert buffered == [{"value": 0}, {"value": 10}, {"value": 20}]
 
         # Verify trigger count restored
-        evaluator = executor2._trigger_evaluators[agg_node.node_id]
+        evaluator = executor2._trigger_evaluators[node_id]
         assert evaluator.batch_count == 3
 
     def test_checkpoint_restore_then_flush_succeeds(self) -> None:
@@ -961,8 +973,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        node_id = agg_node.node_id
-        assert node_id is not None  # Narrowing for type checker
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -978,7 +989,7 @@ class TestAggregationExecutorCheckpoint:
         )
 
         # Create batch in landscape (must exist before flush)
-        batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=node_id)
+        batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=agg_node.node_id)
 
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
         checkpoint_state: dict[str, Any] = {
@@ -1072,8 +1083,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        node_id = agg_node.node_id
-        assert node_id is not None  # Narrowing for type checker
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1135,6 +1145,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1146,7 +1157,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create large row_data to exceed 1MB when serialized
@@ -1169,7 +1180,7 @@ class TestAggregationExecutorCheckpoint:
                 )
             )
 
-        executor._buffer_tokens[agg_node.node_id] = tokens
+        executor._buffer_tokens[node_id] = tokens
 
         # Capture log output
         import logging
@@ -1208,6 +1219,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1219,7 +1231,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create very large row_data to exceed 10MB when serialized
@@ -1240,7 +1252,7 @@ class TestAggregationExecutorCheckpoint:
                 )
             )
 
-        executor._buffer_tokens[agg_node.node_id] = tokens
+        executor._buffer_tokens[node_id] = tokens
 
         # VERIFY: Getting checkpoint raises RuntimeError
         with pytest.raises(RuntimeError, match=r"Checkpoint size.*exceeds 10MB limit"):
@@ -1265,6 +1277,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1276,7 +1289,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create checkpoint > 10MB
@@ -1290,7 +1303,7 @@ class TestAggregationExecutorCheckpoint:
             )
             for i in range(6000)
         ]
-        executor._buffer_tokens[agg_node.node_id] = tokens
+        executor._buffer_tokens[node_id] = tokens
 
         # Capture error message
         with pytest.raises(RuntimeError) as exc_info:
@@ -1324,6 +1337,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1335,7 +1349,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create checkpoint just under 1MB
@@ -1356,7 +1370,7 @@ class TestAggregationExecutorCheckpoint:
                 )
             )
 
-        executor._buffer_tokens[agg_node.node_id] = tokens
+        executor._buffer_tokens[node_id] = tokens
 
         # Capture log output
         import logging
@@ -1372,7 +1386,7 @@ class TestAggregationExecutorCheckpoint:
 
             # VERIFY: Checkpoint was created successfully
             assert checkpoint is not None
-            assert agg_node.node_id in checkpoint
+            assert node_id in checkpoint
 
     def test_checkpoint_size_warning_but_no_error_between_thresholds(self) -> None:
         """Checkpoint between 1MB and 10MB logs warning but does not raise error."""
@@ -1395,6 +1409,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1406,7 +1421,7 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create checkpoint ~5MB (between 1MB and 10MB thresholds)
@@ -1426,7 +1441,7 @@ class TestAggregationExecutorCheckpoint:
                 )
             )
 
-        executor._buffer_tokens[agg_node.node_id] = tokens
+        executor._buffer_tokens[node_id] = tokens
 
         # Capture log output
         import logging
@@ -1442,7 +1457,7 @@ class TestAggregationExecutorCheckpoint:
 
             # VERIFY: No exception raised (checkpoint created successfully)
             assert checkpoint is not None
-            assert agg_node.node_id in checkpoint
+            assert node_id in checkpoint
 
     def test_restore_from_checkpoint_handles_empty_state(self) -> None:
         """Restore from checkpoint handles empty state gracefully."""
@@ -1463,6 +1478,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1474,17 +1490,17 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Restore from empty checkpoint (only version, no aggregation buffers)
         executor.restore_from_checkpoint({"_version": "1.0"})
 
         # VERIFY: No errors, buffers remain empty (but initialized for the node)
-        assert agg_node.node_id in executor._buffers
-        assert len(executor._buffers[agg_node.node_id]) == 0
-        assert agg_node.node_id in executor._buffer_tokens
-        assert len(executor._buffer_tokens[agg_node.node_id]) == 0
+        assert node_id in executor._buffers
+        assert len(executor._buffers[node_id]) == 0
+        assert node_id in executor._buffer_tokens
+        assert len(executor._buffer_tokens[node_id]) == 0
 
     def test_restore_from_checkpoint_crashes_on_missing_tokens_key(self) -> None:
         """Restore crashes with clear error when checkpoint missing 'tokens' key."""
@@ -1507,6 +1523,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1518,13 +1535,13 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Old checkpoint format (missing 'tokens' key)
         invalid_checkpoint = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "rows": [{"value": 10}],  # Old format
                 "token_ids": ["token-1"],  # Old format
                 "batch_id": None,
@@ -1556,6 +1573,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1567,13 +1585,13 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Invalid checkpoint (tokens is not a list)
         invalid_checkpoint = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "tokens": "not-a-list",  # Wrong type
                 "batch_id": None,
             },
@@ -1604,6 +1622,7 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = NodeID(agg_node.node_id)
 
         settings = AggregationSettings(
             name="test_agg",
@@ -1615,13 +1634,13 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Invalid checkpoint (token missing row_data field)
         invalid_checkpoint = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "tokens": [
                     {
                         "token_id": 101,

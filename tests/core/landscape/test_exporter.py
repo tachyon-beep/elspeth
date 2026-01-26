@@ -244,6 +244,7 @@ class TestLandscapeExporterComplexRun:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"x": 1},
         )
@@ -289,6 +290,7 @@ class TestLandscapeExporterComplexRun:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=sink.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -429,6 +431,7 @@ class TestLandscapeExporterComplexRun:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={},
         )
@@ -645,6 +648,7 @@ class TestLandscapeExporterSigning:
                     state = recorder.begin_node_state(
                         token_id=token.token_id,
                         node_id=node_id,
+                        run_id=run.run_id,
                         step_index=k,
                         input_data={"x": i * j},
                     )
@@ -757,6 +761,7 @@ class TestLandscapeExporterCallRecords:
         state = recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node.node_id,
+            run_id=run.run_id,
             step_index=0,
             input_data={"text": "test"},
         )

@@ -10,6 +10,7 @@ Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
 
 from typing import Any
 
+from elspeth.contracts import NodeID
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -142,7 +143,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -150,7 +151,8 @@ class TestProcessorRejectsDuckTypedPlugins:
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedTransform()
         assert hasattr(duck, "process"), "Duck type has process method"
-        assert not isinstance(duck, BaseTransform), "But is not a BaseTransform"
+        # Runtime check that duck is not a BaseTransform - mypy knows these are incompatible
+        assert not isinstance(duck, BaseTransform), "But is not a BaseTransform"  # type: ignore[unreachable]
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(
@@ -199,7 +201,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            source_node_id=source.node_id,
+            source_node_id=NodeID(source.node_id),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -207,7 +209,8 @@ class TestProcessorRejectsDuckTypedPlugins:
         # The duck-typed object has the method, but processor should reject it
         duck = DuckTypedGate()
         assert hasattr(duck, "evaluate"), "Duck type has evaluate method"
-        assert not isinstance(duck, BaseGate), "But is not a BaseGate"
+        # Runtime check that duck is not a BaseGate - mypy knows these are incompatible
+        assert not isinstance(duck, BaseGate), "But is not a BaseGate"  # type: ignore[unreachable]
 
         with pytest.raises(TypeError, match="Unknown transform type"):
             processor.process_row(

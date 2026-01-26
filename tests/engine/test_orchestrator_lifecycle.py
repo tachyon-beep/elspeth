@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeID, RoutingMode, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -23,6 +23,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ class TestLifecycleHooks:
 
         config = PipelineConfig(
             source=mock_source,
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"output": mock_sink},
         )
 
@@ -103,8 +104,8 @@ class TestLifecycleHooks:
         graph.add_node("sink", node_type="sink", plugin_name="csv")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
@@ -176,7 +177,7 @@ class TestLifecycleHooks:
 
         config = PipelineConfig(
             source=mock_source,
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"output": mock_sink},
         )
 
@@ -186,8 +187,8 @@ class TestLifecycleHooks:
         graph.add_node("sink", node_type="sink", plugin_name="csv")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
@@ -257,7 +258,7 @@ class TestLifecycleHooks:
 
         config = PipelineConfig(
             source=mock_source,
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"output": mock_sink},
         )
 
@@ -267,8 +268,8 @@ class TestLifecycleHooks:
         graph.add_node("sink", node_type="sink", plugin_name="csv")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
@@ -338,8 +339,8 @@ class TestSourceLifecycleHooks:
         graph.add_node("source", node_type="source", plugin_name="tracked_source")
         graph.add_node("sink", node_type="sink", plugin_name="csv")
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {}  # type: ignore[assignment]
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
@@ -404,7 +405,7 @@ class TestSinkLifecycleHooks:
         config = PipelineConfig(
             source=mock_source,
             transforms=[],
-            sinks={"output": sink},
+            sinks={"output": as_sink(sink)},
         )
 
         # Minimal graph
@@ -412,8 +413,8 @@ class TestSinkLifecycleHooks:
         graph.add_node("source", node_type="source", plugin_name="csv")
         graph.add_node("sink", node_type="sink", plugin_name="tracked_sink")
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {}  # type: ignore[assignment]
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
@@ -492,8 +493,8 @@ class TestSinkLifecycleHooks:
 
         config = PipelineConfig(
             source=mock_source,
-            transforms=[transform],
-            sinks={"output": sink},
+            transforms=[as_transform(transform)],
+            sinks={"output": as_sink(sink)},
         )
 
         graph = ExecutionGraph()
@@ -502,8 +503,8 @@ class TestSinkLifecycleHooks:
         graph.add_node("sink", node_type="sink", plugin_name="tracked_sink")
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
-        graph._transform_id_map = {0: "transform"}
-        graph._sink_id_map = {"output": "sink"}
+        graph._transform_id_map = {0: NodeID("transform")}
+        graph._sink_id_map = {SinkName("output"): NodeID("sink")}
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)

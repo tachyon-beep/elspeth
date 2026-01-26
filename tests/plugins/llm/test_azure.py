@@ -1,5 +1,5 @@
 # tests/plugins/llm/test_azure.py
-"""Tests for Azure OpenAI LLM transform."""
+"""Tests for Azure OpenAI LLM transform with row-level pipelining."""
 
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -8,7 +8,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import Determinism
+from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.identity import TokenInfo
+from elspeth.engine.batch_adapter import ExceptionResult
+from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
@@ -65,6 +68,15 @@ def mock_azure_openai_client(
             mock_client.chat.completions.create.return_value = mock_response
         mock_azure_class.return_value = mock_client
         yield mock_client
+
+
+def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
+    """Create a TokenInfo for testing."""
+    return TokenInfo(
+        row_id=row_id,
+        token_id=token_id or f"token-{row_id}",
+        row_data={},  # Not used in these tests
+    )
 
 
 class TestAzureOpenAIConfig:
@@ -304,12 +316,28 @@ class TestAzureLLMTransformInit:
                 }
             )
 
+    def test_process_raises_not_implemented(self) -> None:
+        """process() raises NotImplementedError directing to accept()."""
+        transform = AzureLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-deployment",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        ctx = PluginContext(run_id="test-run", config={})
 
-class TestAzureLLMTransformProcess:
-    """Tests for AzureLLMTransform processing.
+        with pytest.raises(NotImplementedError, match="row-level pipelining"):
+            transform.process({"text": "hello"}, ctx)
 
-    These tests verify that AzureLLMTransform creates its own AuditedLLMClient
-    and processes rows correctly. The tests mock openai.AzureOpenAI.
+
+class TestAzureLLMTransformPipelining:
+    """Tests for AzureLLMTransform with row-level pipelining.
+
+    These tests verify the new accept() API that uses BatchTransformMixin
+    for concurrent row processing with FIFO output ordering.
     """
 
     @pytest.fixture
@@ -320,19 +348,26 @@ class TestAzureLLMTransformProcess:
         return recorder
 
     @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
+
+    @pytest.fixture
     def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id."""
+        """Create plugin context with landscape, state_id, and token."""
+        token = make_token("row-1")
         return PluginContext(
             run_id="test-run",
             config={},
             landscape=mock_recorder,
             state_id="test-state-id",
+            token=token,
         )
 
     @pytest.fixture
-    def transform(self) -> AzureLLMTransform:
-        """Create a basic Azure transform."""
-        return AzureLLMTransform(
+    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[AzureLLMTransform, None, None]:
+        """Create and initialize Azure transform with pipelining."""
+        t = AzureLLMTransform(
             {
                 "deployment_name": "my-gpt4o-deployment",
                 "endpoint": "https://my-resource.openai.azure.com",
@@ -341,16 +376,31 @@ class TestAzureLLMTransformProcess:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        # Initialize with recorder reference
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        t.on_start(init_ctx)
+        # Connect output port
+        t.connect_output(collector, max_pending=10)
+        yield t
+        # Cleanup
+        t.close()
 
-    def test_successful_llm_call_returns_enriched_row(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
-        """Successful LLM call returns row with response."""
+    def test_successful_llm_call_emits_enriched_row(
+        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Successful LLM call emits row with response to output port."""
         with mock_azure_openai_client(
             content="The analysis is positive.",
             model="my-gpt4o-deployment",
             usage={"prompt_tokens": 10, "completion_tokens": 25},
         ):
-            result = transform.process({"text": "hello world"}, ctx)
+            transform.accept({"text": "hello world"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _token, result, _state_id = collector.results[0]
+
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response"] == "The analysis is positive."
@@ -364,64 +414,101 @@ class TestAzureLLMTransformProcess:
         # Original data preserved
         assert result.row["text"] == "hello world"
 
-    def test_model_passed_to_azure_client_is_deployment_name(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
+    def test_model_passed_to_azure_client_is_deployment_name(
+        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """deployment_name is used as model in Azure client calls."""
         with mock_azure_openai_client() as mock_client:
-            transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
             call_args = mock_client.chat.completions.create.call_args
             assert call_args.kwargs["model"] == "my-gpt4o-deployment"
 
-    def test_template_rendering_error_returns_transform_error(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
-        """Template rendering failure returns TransformResult.error()."""
+    def test_template_rendering_error_emits_error(
+        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Template rendering failure emits TransformResult.error()."""
         # Missing required 'text' field triggers template error
         with mock_azure_openai_client():
-            result = transform.process({"other_field": "value"}, ctx)
+            transform.accept({"other_field": "value"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "template_rendering_failed"
         assert "template_hash" in result.reason
 
-    def test_llm_client_error_returns_transform_error(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
-        """LLM client failure returns TransformResult.error()."""
-        # Mock the underlying client to raise an exception
+    def test_llm_client_error_emits_error(self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort) -> None:
+        """LLM client failure emits TransformResult.error()."""
         with mock_azure_openai_client(side_effect=Exception("API Error")):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "llm_call_failed"
         assert "API Error" in result.reason["error"]
         assert result.retryable is False
 
-    def test_rate_limit_error_is_retryable(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
+    def test_rate_limit_error_is_retryable(self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort) -> None:
         """Rate limit errors marked retryable=True."""
-        # Rate limit errors contain "rate" or "429" in the message
         with mock_azure_openai_client(side_effect=Exception("Rate limit exceeded 429")):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "rate_limited"
         assert result.retryable is True
 
-    def test_missing_landscape_raises_runtime_error(self, transform: AzureLLMTransform) -> None:
-        """Missing landscape in context raises RuntimeError."""
-        ctx = PluginContext(run_id="test-run", config={}, state_id="test-state")
-        ctx.landscape = None
+    def test_missing_state_id_propagates_exception(
+        self, mock_recorder: Mock, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Missing state_id causes exception propagation, not error result.
 
-        with pytest.raises(RuntimeError, match="requires landscape recorder"):
-            transform.process({"text": "hello"}, ctx)
+        Per CLAUDE.md crash-on-exception policy: a missing state_id is a bug
+        in calling code (our internal code, not user data), so it should crash
+        rather than be converted to an error result.
 
-    def test_missing_state_id_raises_runtime_error(self, mock_recorder: Mock, transform: AzureLLMTransform) -> None:
-        """Missing state_id in context raises RuntimeError."""
-        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_recorder, state_id=None)
+        BatchTransformMixin wraps such exceptions in ExceptionResult for
+        propagation through the async pattern. In production, TransformExecutor
+        would re-raise this exception. In tests using collector directly,
+        we see the ExceptionResult wrapper.
+        """
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id=None,  # Missing state_id - calling code bug
+            token=token,
+        )
 
-        with pytest.raises(RuntimeError, match="requires landscape recorder"):
-            transform.process({"text": "hello"}, ctx)
+        transform.accept({"text": "hello"}, ctx)
+        transform.flush_batch_processing(timeout=10.0)
 
-    def test_system_prompt_included_in_messages(self, ctx: PluginContext) -> None:
+        assert len(collector.results) == 1
+        _output_token, result, _state_id = collector.results[0]
+
+        # Exception propagates via ExceptionResult wrapper (not TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, RuntimeError)
+        assert "state_id" in str(result.exception)
+
+    def test_system_prompt_included_in_messages(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """System prompt is included when configured."""
         transform = AzureLLMTransform(
             {
@@ -433,20 +520,35 @@ class TestAzureLLMTransformProcess:
                 "system_prompt": "You are a helpful assistant.",
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_azure_openai_client() as mock_client:
-            transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            # Verify messages passed to client
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            assert len(messages) == 2
-            assert messages[0]["role"] == "system"
-            assert messages[0]["content"] == "You are a helpful assistant."
-            assert messages[1]["role"] == "user"
-            assert messages[1]["content"] == "hello"
+        try:
+            with mock_azure_openai_client() as mock_client:
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_temperature_and_max_tokens_passed_to_client(self, ctx: PluginContext) -> None:
+                call_args = mock_client.chat.completions.create.call_args
+                messages = call_args.kwargs["messages"]
+                assert len(messages) == 2
+                assert messages[0]["role"] == "system"
+                assert messages[0]["content"] == "You are a helpful assistant."
+                assert messages[1]["role"] == "user"
+                assert messages[1]["content"] == "hello"
+        finally:
+            transform.close()
+
+    def test_temperature_and_max_tokens_passed_to_client(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Temperature and max_tokens are passed to Azure client."""
         transform = AzureLLMTransform(
             {
@@ -459,16 +561,32 @@ class TestAzureLLMTransformProcess:
                 "max_tokens": 500,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_azure_openai_client() as mock_client:
-            transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            call_args = mock_client.chat.completions.create.call_args
-            assert call_args.kwargs["model"] == "my-gpt4o-deployment"
-            assert call_args.kwargs["temperature"] == 0.7
-            assert call_args.kwargs["max_tokens"] == 500
+        try:
+            with mock_azure_openai_client() as mock_client:
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_custom_response_field(self, ctx: PluginContext) -> None:
+                call_args = mock_client.chat.completions.create.call_args
+                assert call_args.kwargs["model"] == "my-gpt4o-deployment"
+                assert call_args.kwargs["temperature"] == 0.7
+                assert call_args.kwargs["max_tokens"] == 500
+        finally:
+            transform.close()
+
+    def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Custom response_field name is used."""
         transform = AzureLLMTransform(
             {
@@ -480,10 +598,30 @@ class TestAzureLLMTransformProcess:
                 "response_field": "analysis",
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_azure_openai_client(content="Result"):
-            result = transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            with mock_azure_openai_client(content="Result"):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["analysis"] == "Result"
@@ -492,14 +630,55 @@ class TestAzureLLMTransformProcess:
         assert "analysis_variables_hash" in result.row
         assert "analysis_model" in result.row
 
-    def test_close_is_noop(self, transform: AzureLLMTransform) -> None:
-        """close() does nothing but doesn't raise."""
-        transform.close()  # Should not raise
+    def test_connect_output_required_before_accept(self) -> None:
+        """accept() raises RuntimeError if connect_output() not called."""
+        transform = AzureLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-deployment",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
 
-    def test_azure_client_created_with_correct_credentials(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            state_id="test-state-id",
+            token=token,
+        )
+
+        with pytest.raises(RuntimeError, match="connect_output"):
+            transform.accept({"text": "hello"}, ctx)
+
+    def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
+        """connect_output() raises if called more than once."""
+        transform = AzureLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-deployment",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            with pytest.raises(RuntimeError, match="already called"):
+                transform.connect_output(collector, max_pending=10)
+        finally:
+            transform.close()
+
+    def test_azure_client_created_with_correct_credentials(
+        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """AzureOpenAI client is created with correct credentials."""
         with patch("openai.AzureOpenAI") as mock_azure_class:
-            # Set up the mock to return a properly configured client
             mock_client = Mock()
             mock_usage = Mock()
             mock_usage.prompt_tokens = 10
@@ -516,7 +695,8 @@ class TestAzureLLMTransformProcess:
             mock_client.chat.completions.create.return_value = mock_response
             mock_azure_class.return_value = mock_client
 
-            transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
             # Verify AzureOpenAI was called with correct args
             mock_azure_class.assert_called_once_with(
@@ -537,16 +717,11 @@ class TestAzureLLMTransformIntegration:
         return recorder
 
     @pytest.fixture
-    def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id."""
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
 
-    def test_azure_config_with_default_api_version(self, ctx: PluginContext) -> None:
+    def test_azure_config_with_default_api_version(self) -> None:
         """azure_config uses default api_version when not specified."""
         transform = AzureLLMTransform(
             {
@@ -561,7 +736,7 @@ class TestAzureLLMTransformIntegration:
         config = transform.azure_config
         assert config["api_version"] == "2024-10-21"
 
-    def test_complex_template_with_multiple_variables(self, ctx: PluginContext) -> None:
+    def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Complex template with multiple variables works correctly."""
         transform = AzureLLMTransform(
             {
@@ -579,23 +754,43 @@ class TestAzureLLMTransformIntegration:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_azure_openai_client(content="Summary text") as mock_client:
-            result = transform.process(
-                {"name": "Test Item", "score": 95, "category": "A"},
-                ctx,
-            )
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            assert result.status == "success"
-            # Check the prompt was rendered correctly
-            call_args = mock_client.chat.completions.create.call_args
-            messages = call_args.kwargs["messages"]
-            user_message = messages[0]["content"]
-            assert "Test Item" in user_message
-            assert "95" in user_message
-            assert "A" in user_message
+        try:
+            with mock_azure_openai_client(content="Summary text") as mock_client:
+                transform.accept(
+                    {"name": "Test Item", "score": 95, "category": "A"},
+                    ctx,
+                )
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_calls_are_recorded_to_landscape(self, ctx: PluginContext) -> None:
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
+                assert result.status == "success"
+
+                # Check the prompt was rendered correctly
+                call_args = mock_client.chat.completions.create.call_args
+                messages = call_args.kwargs["messages"]
+                user_message = messages[0]["content"]
+                assert "Test Item" in user_message
+                assert "95" in user_message
+                assert "A" in user_message
+        finally:
+            transform.close()
+
+    def test_calls_are_recorded_to_landscape(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """LLM calls are recorded via AuditedLLMClient."""
         transform = AzureLLMTransform(
             {
@@ -606,218 +801,32 @@ class TestAzureLLMTransformIntegration:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_azure_openai_client():
-            transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
+
+        try:
+            with mock_azure_openai_client():
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
         # Verify record_call was called (by AuditedLLMClient)
-        assert ctx.landscape is not None
-        assert ctx.landscape.record_call.called  # type: ignore[attr-defined]
+        assert mock_recorder.record_call.called
 
 
-class TestAzureLLMTransformPooledExecution:
-    """Tests for Azure LLM transform with pooled execution support."""
-
-    def test_pool_size_1_does_not_create_executor(self) -> None:
-        """pool_size=1 should not create executor (sequential mode)."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 1,  # Sequential
-            }
-        )
-
-        assert transform._executor is None
-        transform.close()
-
-    def test_pool_size_greater_than_1_creates_executor(self) -> None:
-        """pool_size > 1 should create pooled executor."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 5,
-            }
-        )
-
-        assert transform._executor is not None
-        assert transform._executor.pool_size == 5
-
-        transform.close()
-
-    def test_on_start_captures_recorder(self) -> None:
-        """on_start() should capture recorder reference for pooled execution."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 3,
-            }
-        )
-
-        # Verify _recorder starts as None (use local var to avoid mypy type narrowing)
-        initial_recorder = transform._recorder
-        assert initial_recorder is None
-
-        mock_recorder = Mock()
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
-        transform.on_start(ctx)
-
-        # Verify recorder was captured
-        assert transform._recorder is not None
-        # Use id() comparison to verify same object (avoids mypy type narrowing issues)
-        assert id(transform._recorder) == id(mock_recorder)
-
-        transform.close()
-
-    def test_close_shuts_down_executor(self) -> None:
-        """close() should shut down executor and clear recorder."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 3,
-            }
-        )
-
-        mock_recorder = Mock()
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
-        transform.on_start(ctx)
-
-        assert transform._executor is not None
-        assert transform._recorder is not None
-
-        transform.close()
-
-        assert transform._recorder is None
-        # Executor should be shut down (can't easily verify, but shouldn't raise)
-
-    def test_process_single_with_state_raises_capacity_error_on_rate_limit(self) -> None:
-        """_process_single_with_state should raise CapacityError on rate limits."""
-        from elspeth.plugins.clients.llm import RateLimitError
-        from elspeth.plugins.pooling import CapacityError
-
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 3,
-            }
-        )
-
-        mock_recorder = Mock()
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
-        transform.on_start(ctx)
-
-        # Mock Azure client to raise rate limit error
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = Exception("Rate limit exceeded")
-            mock_azure_class.return_value = mock_client
-
-            # Patch the AuditedLLMClient to raise RateLimitError
-            with patch(
-                "elspeth.plugins.clients.llm.AuditedLLMClient.chat_completion",
-                side_effect=RateLimitError("Rate limit exceeded"),
-            ):
-                with pytest.raises(CapacityError) as exc_info:
-                    transform._process_single_with_state({"text": "hello"}, "test-state")
-
-                assert exc_info.value.status_code == 429
-
-        transform.close()
-
-    def test_process_single_with_state_returns_error_on_llm_client_error(self) -> None:
-        """_process_single_with_state should return error on non-rate-limit failures."""
-        from elspeth.plugins.clients.llm import LLMClientError
-
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 3,
-            }
-        )
-
-        mock_recorder = Mock()
-        ctx = PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
-        transform.on_start(ctx)
-
-        # Patch the AuditedLLMClient to raise LLMClientError
-        with patch(
-            "elspeth.plugins.clients.llm.AuditedLLMClient.chat_completion",
-            side_effect=LLMClientError("API error", retryable=False),
-        ):
-            result = transform._process_single_with_state({"text": "hello"}, "test-state")
-
-            assert result.status == "error"
-            assert result.reason is not None
-            assert result.reason["reason"] == "llm_call_failed"
-            assert result.retryable is False
-
-        transform.close()
-
-    def test_process_single_with_state_requires_recorder(self) -> None:
-        """_process_single_with_state should raise if recorder not set."""
-        transform = AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "{{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-                "pool_size": 3,
-            }
-        )
-
-        # Don't call on_start, so _recorder is None
-        with pytest.raises(RuntimeError, match="on_start was called"):
-            transform._process_single_with_state({"text": "hello"}, "test-state")
-
-        transform.close()
-
-
-class TestAzureBatchProcessing:
-    """Tests for Azure LLM transform batch processing support."""
+class TestAzureLLMTransformConcurrency:
+    """Tests for concurrent row processing via BatchTransformMixin."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -827,30 +836,12 @@ class TestAzureBatchProcessing:
         return recorder
 
     @pytest.fixture
-    def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id."""
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
 
-    @pytest.fixture
-    def transform(self) -> AzureLLMTransform:
-        """Create a basic Azure transform."""
-        return AzureLLMTransform(
-            {
-                "deployment_name": "my-gpt4o-deployment",
-                "endpoint": "https://my-resource.openai.azure.com",
-                "api_key": "azure-api-key",
-                "template": "Analyze: {{ row.text }}",
-                "schema": DYNAMIC_SCHEMA,
-            }
-        )
-
-    def test_is_batch_aware_is_true(self) -> None:
-        """AzureLLMTransform should have is_batch_aware=True."""
+    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Multiple rows are emitted in submission order (FIFO)."""
         transform = AzureLLMTransform(
             {
                 "deployment_name": "my-gpt4o-deployment",
@@ -860,131 +851,84 @@ class TestAzureBatchProcessing:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
-        assert transform.is_batch_aware is True
-
-    def test_process_accepts_list_of_rows(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
-        """process() should accept a list of rows and return success_multi."""
-        # Initialize transform with recorder reference
-        transform.on_start(ctx)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
         rows = [
-            {"text": "hello"},
-            {"text": "world"},
-            {"text": "test"},
+            {"text": "first"},
+            {"text": "second"},
+            {"text": "third"},
         ]
 
-        with mock_azure_openai_client(
-            content="Response text",
-            model="my-gpt4o-deployment",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
-        ):
-            result = transform.process(rows, ctx)
+        try:
+            with mock_azure_openai_client(content="Response"):
+                for i, row in enumerate(rows):
+                    token = make_token(f"row-{i}")
+                    ctx = PluginContext(
+                        run_id="test-run",
+                        config={},
+                        landscape=mock_recorder,
+                        state_id=f"state-{i}",
+                        token=token,
+                    )
+                    transform.accept(row, ctx)
 
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 3
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
-        # Each row should have the response fields
-        for i, output_row in enumerate(result.rows):
-            assert output_row["text"] == rows[i]["text"]
-            assert output_row["llm_response"] == "Response text"
-            assert "llm_response_usage" in output_row
-            assert "llm_response_template_hash" in output_row
-            assert "llm_response_model" in output_row
+        # Results should be in FIFO order
+        assert len(collector.results) == 3
+        for i, (_token, result, _state_id) in enumerate(collector.results):
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+            assert result.row is not None
+            assert result.row["text"] == rows[i]["text"]
 
-    def test_batch_with_partial_failures(self, ctx: PluginContext) -> None:
-        """Batch processing should handle partial failures gracefully."""
+    def test_on_start_captures_recorder(self, mock_recorder: Mock) -> None:
+        """on_start() captures recorder reference for LLM client creation."""
         transform = AzureLLMTransform(
             {
                 "deployment_name": "my-gpt4o-deployment",
                 "endpoint": "https://my-resource.openai.azure.com",
                 "api_key": "azure-api-key",
-                "template": "Analyze: {{ row.text }}",
+                "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
-        # Initialize transform with recorder reference
+
+        # Verify _recorder starts as None
+        assert transform._recorder is None
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+        )
         transform.on_start(ctx)
 
-        rows = [
-            {"text": "good1"},
-            {"other_field": "missing_text"},  # Will fail template rendering
-            {"text": "good2"},
-        ]
+        # Verify recorder was captured
+        assert transform._recorder is mock_recorder
 
-        with mock_azure_openai_client(
-            content="Success response",
-            model="my-gpt4o-deployment",
-            usage={"prompt_tokens": 10, "completion_tokens": 5},
-        ):
-            result = transform.process(rows, ctx)
-
-        # Should succeed overall because not all rows failed
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 3
-
-        # First row should succeed
-        assert result.rows[0]["llm_response"] == "Success response"
-
-        # Second row should have error field
-        assert result.rows[1]["llm_response"] is None
-        assert "llm_response_error" in result.rows[1]
-        assert result.rows[1]["llm_response_error"]["reason"] == "template_rendering_failed"
-
-        # Third row should succeed
-        assert result.rows[2]["llm_response"] == "Success response"
-
-    def test_batch_with_all_failures_returns_error(self, ctx: PluginContext) -> None:
-        """Batch processing should return error if ALL rows fail."""
+    def test_close_clears_recorder_and_clients(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """close() clears recorder reference and cached clients."""
         transform = AzureLLMTransform(
             {
                 "deployment_name": "my-gpt4o-deployment",
                 "endpoint": "https://my-resource.openai.azure.com",
                 "api_key": "azure-api-key",
-                "template": "Analyze: {{ row.text }}",
+                "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        # All rows missing required 'text' field
-        rows = [
-            {"other": "value1"},
-            {"other": "value2"},
-        ]
+        assert transform._recorder is not None
 
-        with mock_azure_openai_client():
-            result = transform.process(rows, ctx)
+        transform.close()
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "all_rows_failed"
-        assert result.reason["row_count"] == 2
-
-    def test_empty_batch_returns_success(self, ctx: PluginContext, transform: AzureLLMTransform) -> None:
-        """Empty batch should return success with batch_empty flag."""
-        result = transform.process([], ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["batch_empty"] is True
-        assert result.row["row_count"] == 0
-
-    def test_batch_requires_landscape(self, transform: AzureLLMTransform) -> None:
-        """Batch processing requires landscape in context."""
-        ctx = PluginContext(run_id="test-run", config={}, state_id="test-state")
-        ctx.landscape = None
-
-        rows = [{"text": "hello"}]
-
-        with pytest.raises(RuntimeError, match="requires landscape recorder"):
-            transform.process(rows, ctx)
-
-    def test_batch_requires_state_id(self, mock_recorder: Mock, transform: AzureLLMTransform) -> None:
-        """Batch processing requires state_id in context."""
-        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_recorder, state_id=None)
-
-        rows = [{"text": "hello"}]
-
-        with pytest.raises(RuntimeError, match="requires landscape recorder"):
-            transform.process(rows, ctx)
+        assert transform._recorder is None

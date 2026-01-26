@@ -533,7 +533,7 @@ class TestCoalesceExecutorQuorum:
         def fake_monotonic() -> float:
             return fake_time[0]
 
-        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -740,7 +740,10 @@ class TestCoalesceExecutorQuorum:
             # Verify node state indicates failure
             assert coalesce_state.status == "failed", f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
 
-            # Verify error_json explains the failure
+            # Verify error_json explains the failure (type narrow to NodeStateFailed)
+            from elspeth.contracts import NodeStateFailed
+
+            assert isinstance(coalesce_state, NodeStateFailed), "Failed state should be NodeStateFailed"
             assert coalesce_state.error_json is not None, f"Token {token.token_id} failed node state must have error_json populated"
 
             import json
@@ -850,7 +853,7 @@ class TestCoalesceExecutorQuorum:
 
         held_state_a = coalesce_states_a[0]
         # Held tokens have status="open" (in-progress, not completed yet)
-        from elspeth.contracts.audit import NodeStateStatus
+        from elspeth.contracts import NodeStateStatus
 
         assert held_state_a.status == NodeStateStatus.OPEN, (
             f"Held token should have status='open' (in-progress), got '{held_state_a.status}'"
@@ -899,7 +902,7 @@ class TestCoalesceExecutorBestEffort:
         def fake_monotonic() -> float:
             return fake_time[0]
 
-        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)

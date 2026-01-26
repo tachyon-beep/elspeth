@@ -14,7 +14,7 @@ from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
-from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 
 
 class ValueSchema(PluginSchema):
@@ -134,7 +134,7 @@ class TestOrchestratorCleanup:
         # P2 Fix: Use from_plugin_instances instead of private field mutation
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
@@ -143,7 +143,7 @@ class TestOrchestratorCleanup:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -170,7 +170,7 @@ class TestOrchestratorCleanup:
         # P2 Fix: Use from_plugin_instances instead of private field mutation
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
@@ -179,7 +179,7 @@ class TestOrchestratorCleanup:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -222,7 +222,7 @@ class TestOrchestratorCleanup:
         # P2 Fix: Use from_plugin_instances instead of private field mutation
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
@@ -231,7 +231,7 @@ class TestOrchestratorCleanup:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -261,7 +261,7 @@ class TestOrchestratorCleanup:
         # P2 Fix: Use from_plugin_instances instead of private field mutation
         graph = ExecutionGraph.from_plugin_instances(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
@@ -270,7 +270,7 @@ class TestOrchestratorCleanup:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 

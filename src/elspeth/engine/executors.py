@@ -43,6 +43,7 @@ from elspeth.plugins.results import (
 )
 
 if TYPE_CHECKING:
+    from elspeth.engine.batch_adapter import SharedBatchAdapter
     from elspeth.engine.tokens import TokenManager
 
 __all__ = [
@@ -128,6 +129,33 @@ class TransformExecutor:
         self._recorder = recorder
         self._spans = span_factory
 
+    def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
+        """Get or create shared batch adapter for transform.
+
+        Creates adapter once per transform instance and stores it as an
+        instance attribute for reuse across rows. This solves the deadlock
+        where per-row adapters were created but only the first was connected.
+
+        Args:
+            transform: The batch-aware transform
+
+        Returns:
+            SharedBatchAdapter for this transform
+        """
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        if not hasattr(transform, "_executor_batch_adapter"):
+            adapter = SharedBatchAdapter()
+            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]
+
+            # Connect output (one-time setup)
+            # Use _pool_size stored by LLM transforms, default to 30
+            max_pending = getattr(transform, "_pool_size", 30)
+            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
+            transform._batch_initialized = True  # type: ignore[attr-defined]
+
+        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]
+
     def execute_transform(
         self,
         transform: TransformProtocol,
@@ -142,6 +170,11 @@ class TransformExecutor:
         responsibility (e.g., RetryManager wraps this for retryable transforms).
         Each attempt gets its own node_state record with attempt number tracked
         by the caller.
+
+        Supports two execution modes:
+        1. Synchronous: transform.process() returns TransformResult immediately
+        2. Asynchronous (BatchTransformMixin): transform.accept() submits work,
+           results flow through output port and are awaited synchronously
 
         Error Routing:
         - TransformResult.error() is a LEGITIMATE processing failure
@@ -174,6 +207,7 @@ class TransformExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform.node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
             attempt=attempt,
@@ -185,11 +219,55 @@ class TransformExecutor:
         ctx.node_id = transform.node_id
         ctx._call_index = 0  # Reset call index for this state
 
+        # Detect batch transforms (those using BatchTransformMixin)
+        # They have accept() method and process() raises NotImplementedError
+        has_accept = hasattr(transform, "accept") and callable(getattr(transform, "accept", None))
+
         # Execute with timing and span
         with self._spans.transform_span(transform.name, input_hash=input_hash):
             start = time.perf_counter()
             try:
-                result = transform.process(token.row_data, ctx)
+                if has_accept:
+                    # Batch transform: use accept() with SharedBatchAdapter
+                    # One adapter per transform, multiple waiters per adapter
+                    adapter = self._get_batch_adapter(transform)
+
+                    # Register waiter for THIS token AND attempt (before accept!)
+                    # Using (token_id, state_id) ensures retry safety: if a timeout
+                    # occurs and retry happens, the new attempt's waiter won't receive
+                    # stale results from the previous attempt.
+                    waiter = adapter.register(token.token_id, state.state_id)
+
+                    # Set token on context for BatchTransformMixin
+                    ctx.token = token
+
+                    # Submit work - this returns immediately
+                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]
+
+                    # Block until THIS row's result arrives.
+                    #
+                    # DESIGN DECISION: Sequential row processing
+                    # The orchestrator processes rows one at a time, blocking here
+                    # until each row completes. This is intentional:
+                    # - Concurrency happens WITHIN each row (multi-query transforms
+                    #   make 10+ LLM calls concurrently for a single row)
+                    # - Across rows, processing is sequential for:
+                    #   1. Simpler audit ordering (deterministic state progression)
+                    #   2. Natural backpressure (no unbounded queue growth)
+                    #   3. Single-threaded orchestrator (easier to reason about)
+                    #
+                    # For true cross-row parallelism, the orchestrator would need
+                    # to be async/await or multi-threaded, which adds complexity.
+                    #
+                    # Timeout is derived from transform's batch_wait_timeout config
+                    # (default 3600s = 1 hour) to allow for sustained rate limiting
+                    # and AIMD backoff during capacity errors.
+                    wait_timeout = getattr(transform, "_batch_wait_timeout", 3600.0)
+                    result = waiter.wait(timeout=wait_timeout)
+                else:
+                    # Regular transform: synchronous process()
+                    result = transform.process(token.row_data, ctx)
+
                 duration_ms = (time.perf_counter() - start) * 1000
             except Exception as e:
                 duration_ms = (time.perf_counter() - start) * 1000
@@ -204,6 +282,29 @@ class TransformExecutor:
                     duration_ms=duration_ms,
                     error=error,
                 )
+
+                # For TimeoutError on batch transforms, evict the buffer entry
+                # to prevent FIFO blocking on retry attempts.
+                #
+                # The eviction flow:
+                # 1. First attempt times out at waiter.wait()
+                # 2. We call evict_submission() to remove buffer entry
+                # 3. Retry attempt gets new sequence number and can proceed
+                # 4. Original worker may still complete, but result is discarded
+                if isinstance(e, TimeoutError) and has_accept:
+                    evict_fn = getattr(transform, "evict_submission", None)
+                    if evict_fn is not None:
+                        try:
+                            evict_fn(token.token_id, state.state_id)
+                        except Exception as evict_err:
+                            # Eviction failure is logged but doesn't change the
+                            # original exception - timeout is still the root cause
+                            logger.warning(
+                                "Failed to evict timed-out submission for token %s: %s",
+                                token.token_id,
+                                evict_err,
+                            )
+
                 raise
 
         # Populate audit fields
@@ -372,6 +473,7 @@ class GateExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )
@@ -536,6 +638,7 @@ class GateExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )
@@ -942,6 +1045,7 @@ class AggregationExecutor:
         state = self._recorder.begin_node_state(
             token_id=representative_token.token_id,
             node_id=node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=batch_input,
             attempt=0,
@@ -1457,6 +1561,7 @@ class SinkExecutor:
             state = self._recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=sink_node_id,
+                run_id=ctx.run_id,
                 step_index=step_in_pipeline,
                 input_data=token.row_data,
             )

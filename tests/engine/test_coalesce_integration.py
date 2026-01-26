@@ -17,7 +17,15 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode, SourceRow
+from elspeth.contracts import (
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    RoutingMode,
+    SinkName,
+    SourceRow,
+)
 from elspeth.core.config import (
     CoalesceSettings,
     ElspethSettings,
@@ -36,6 +44,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 
@@ -231,13 +240,13 @@ def _build_fork_coalesce_graph(
     if not settings.gates or not any(g.fork_to for g in settings.gates):
         graph.add_edge(prev, output_sink_id, label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._coalesce_id_map = coalesce_ids
-    graph._branch_to_coalesce = branch_to_coalesce
-    graph._route_resolution_map = route_resolution_map
+    # Populate internal ID maps with proper types
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._coalesce_id_map = {CoalesceName(k): NodeID(v) for k, v in coalesce_ids.items()}
+    graph._branch_to_coalesce = {BranchName(k): CoalesceName(v) for k, v in branch_to_coalesce.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = settings.default_sink
 
     return graph
@@ -441,7 +450,7 @@ class TestForkCoalescePipeline:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"output": as_sink(sink)},
             gates=settings.gates,
             coalesce_settings=settings.coalesce,
@@ -661,7 +670,9 @@ class TestCoalesceAuditTrail:
             # P1: Verify token_parents for merged token (should have 2 parents with proper ordinals)
             # Find the merged token by looking in tokens table for token with same join_group_id
             # that is NOT one of the consumed tokens
-            canonical_join_group_id = recorder.get_token_outcome(consumed_token_ids[0]).join_group_id
+            consumed_outcome = recorder.get_token_outcome(consumed_token_ids[0])
+            assert consumed_outcome is not None, "Consumed token must have outcome"
+            canonical_join_group_id = consumed_outcome.join_group_id
             merged_tokens = [t for t in all_tokens if t.join_group_id == canonical_join_group_id and t.token_id not in consumed_token_ids]
             assert len(merged_tokens) == 1, f"Should have exactly 1 merged token, got {len(merged_tokens)}"
             merged_token_id = merged_tokens[0].token_id

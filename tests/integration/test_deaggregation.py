@@ -238,8 +238,8 @@ class TestDeaggregationAuditTrail:
         )
 
         # Instantiate plugins
-        source = JSONSource(dict(settings.datasource.options))
-        transform = JSONExplode(dict(settings.row_plugins[0].options))
+        source = JSONSource(dict(settings.source.options))
+        transform = JSONExplode(dict(settings.transforms[0].options))
         sink = JSONSink(dict(settings.sinks["output"].options))
 
         # Build pipeline config

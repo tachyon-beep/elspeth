@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span, Tracer
 
     from elspeth.contracts import Call, CallStatus, CallType
+    from elspeth.contracts.identity import TokenInfo
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.payload_store import PayloadStore
     from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -87,6 +88,13 @@ class PluginContext:
     # Additional metadata
     node_id: str | None = field(default=None)
     plugin_name: str | None = field(default=None)
+
+    # === Row-Level Pipelining (BatchTransformMixin) ===
+    # Set by orchestrator/executor when calling accept() on batch transforms.
+    # Used by RowReorderBuffer for FIFO ordering and audit attribution.
+    # IMPORTANT: This is derivative state - the executor must keep it synchronized
+    # with the authoritative token flowing through the pipeline.
+    token: "TokenInfo | None" = field(default=None)
 
     # === Phase 6: State & Call Recording ===
     # Set by executor to enable transforms to record external calls

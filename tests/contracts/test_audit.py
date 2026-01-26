@@ -1,6 +1,8 @@
 """Tests for audit trail contracts."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
@@ -1473,8 +1475,8 @@ class TestFrozenDataclassImmutability:
     )
     def test_frozen_dataclass_rejects_mutation(
         self,
-        create_instance: callable,
-        field_name: str,  # type: ignore[valid-type]
+        create_instance: "Callable[[], Any]",
+        field_name: str,
     ) -> None:
         """Frozen dataclasses reject attribute mutation."""
         import dataclasses

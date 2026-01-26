@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode, RunStatus
+from elspeth.contracts import NodeID, RoutingMode, RunStatus, SinkName
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -215,8 +215,8 @@ class TestOrchestratorResumeRowProcessing:
 
         # Set internal ID maps needed by orchestrator (normally done by from_plugin_instances)
         # These are required for the orchestrator to resolve nodes during execution
-        graph._sink_id_map = {"default": "sink-node"}
-        graph._transform_id_map = {0: "transform-node"}
+        graph._sink_id_map = {SinkName("default"): NodeID("sink-node")}
+        graph._transform_id_map = {0: NodeID("transform-node")}
         graph._config_gate_id_map = {}
         graph._route_resolution_map = {}
         graph._default_sink = "default"

@@ -738,17 +738,22 @@ class LandscapeRecorder:
             schema_fields=schema_fields,
         )
 
-    def get_node(self, node_id: str) -> Node | None:
-        """Get a node by ID.
+    def get_node(self, node_id: str, run_id: str) -> Node | None:
+        """Get a node by its composite primary key (node_id, run_id).
+
+        NOTE: The nodes table has a composite PK (node_id, run_id). The same
+        node_id can exist in multiple runs, so run_id is required to identify
+        the specific node.
 
         Args:
             node_id: Node ID to retrieve
+            run_id: Run ID the node belongs to
 
         Returns:
             Node model or None if not found
         """
         with self._db.connection() as conn:
-            result = conn.execute(select(nodes_table).where(nodes_table.c.node_id == node_id))
+            result = conn.execute(select(nodes_table).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id)))
             row = result.fetchone()
 
         if row is None:
@@ -1129,6 +1134,7 @@ class LandscapeRecorder:
         self,
         token_id: str,
         node_id: str,
+        run_id: str,
         step_index: int,
         input_data: dict[str, Any],
         *,
@@ -1141,6 +1147,7 @@ class LandscapeRecorder:
         Args:
             token_id: Token being processed
             node_id: Node processing the token
+            run_id: Run ID for composite FK to nodes table
             step_index: Position in token's execution path
             input_data: Input data for hashing
             state_id: Optional state ID (generated if not provided)
@@ -1174,6 +1181,7 @@ class LandscapeRecorder:
                     state_id=state.state_id,
                     token_id=state.token_id,
                     node_id=state.node_id,
+                    run_id=run_id,  # Added for composite FK to nodes
                     step_index=state.step_index,
                     attempt=state.attempt,
                     status=state.status.value,
@@ -2798,15 +2806,17 @@ class LandscapeRecorder:
             If multiple calls match (same request made twice), returns
             the first one chronologically (ordered by created_at).
         """
-        # Need to join through node_states to get to run_id
+        # Join to node_states to filter by run_id
+        # NOTE: Use node_states.run_id directly (denormalized column) instead of
+        # joining through nodes table. The nodes table has composite PK (node_id, run_id),
+        # so joining on node_id alone would be ambiguous when node_id is reused across runs.
         query = (
             select(calls_table)
             .join(
                 node_states_table,
                 calls_table.c.state_id == node_states_table.c.state_id,
             )
-            .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)
-            .where(nodes_table.c.run_id == run_id)
+            .where(node_states_table.c.run_id == run_id)
             .where(calls_table.c.call_type == call_type)
             .where(calls_table.c.request_hash == request_hash)
             .order_by(calls_table.c.created_at)
