@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-1. Core architecture and audit trail are complete. External integrations (LLMs, databases, Azure) are complete.
+**Current Status:** RC-1. Core architecture, a core set of plugins and the audit trail are complete. Missing features are being patched in and a significant bug hunt is underway.
 
 ## Auditability Standard
 
@@ -513,20 +513,6 @@ def test_fork_coalesce_production_path():
 3. Profile configuration (`profiles/production.yaml`)
 4. Plugin pack defaults (`packs/llm/defaults.yaml`)
 5. System defaults
-
-## Implementation Phases
-
-**Design principle:** Prove the DAG infrastructure with deterministic transforms before adding external calls. LLMs are Phase 6, not Phase 1.
-
-| Phase | Priority | Scope |
-| ----- | -------- | ----- |
-| 1 | P0 | Foundation: Canonical (rfc8785), Landscape, Config, DAG validation (NetworkX) |
-| 2 | P0 | Plugin System: hookspecs, base classes, schema contracts |
-| 3 | P0 | SDA Engine: RowProcessor, Orchestrator, OpenTelemetry spans |
-| 4 | P1 | CLI (Typer + Textual), basic sources/sinks (CSV, JSON, database) |
-| 5 | P1 | Production: Checkpointing, rate limiting (pyrate-limiter), retention |
-| 6 | P2 | External calls: LLM pack (LiteLLM), record/replay/verify (DeepDiff) |
-| 7 | P2 | Advanced: A/B testing, Azure pack, multi-destination routing |
 
 ## The Attributability Test
 
