@@ -82,7 +82,15 @@ class NodeRepository:
         """Load Node from database row.
 
         Converts node_type and determinism strings to enums.
+        Parses schema_fields_json back to list.
         """
+        import json
+
+        # Parse schema_fields_json back to list
+        schema_fields: list[dict[str, object]] | None = None
+        if row.schema_fields_json is not None:
+            schema_fields = json.loads(row.schema_fields_json)
+
         return Node(
             node_id=row.node_id,
             run_id=row.run_id,
@@ -95,6 +103,8 @@ class NodeRepository:
             registered_at=row.registered_at,
             schema_hash=row.schema_hash,
             sequence_in_pipeline=row.sequence_in_pipeline,
+            schema_mode=row.schema_mode,
+            schema_fields=schema_fields,
         )
 
 
@@ -241,6 +251,7 @@ class BatchRepository:
             status=BatchStatus(row.status),  # Convert HERE
             created_at=row.created_at,
             aggregation_state_id=row.aggregation_state_id,
+            trigger_type=row.trigger_type,
             trigger_reason=row.trigger_reason,
             completed_at=row.completed_at,
         )
@@ -450,6 +461,7 @@ class TokenOutcomeRepository:
         """Load TokenOutcome from database row.
 
         Converts outcome string to RowOutcome enum.
+        Converts is_terminal from DB integer (0/1) to bool.
 
         Args:
             row: Database row from token_outcomes table
@@ -462,7 +474,7 @@ class TokenOutcomeRepository:
             run_id=row.run_id,
             token_id=row.token_id,
             outcome=RowOutcome(row.outcome),  # Convert HERE
-            is_terminal=row.is_terminal,
+            is_terminal=row.is_terminal == 1,  # DB stores as Integer
             recorded_at=row.recorded_at,
             sink_name=row.sink_name,
             batch_id=row.batch_id,

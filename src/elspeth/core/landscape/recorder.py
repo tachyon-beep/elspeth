@@ -55,7 +55,25 @@ from elspeth.contracts import (
     ValidationErrorRecord,
 )
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
+from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.repositories import (
+    ArtifactRepository,
+    BatchMemberRepository,
+    BatchRepository,
+    CallRepository,
+    EdgeRepository,
+    NodeRepository,
+    NodeStateRepository,
+    RoutingEventRepository,
+    RowRepository,
+    RunRepository,
+    TokenOutcomeRepository,
+    TokenParentRepository,
+    TokenRepository,
+    TransformErrorRepository,
+    ValidationErrorRepository,
+)
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.landscape.schema import (
     artifacts_table,
@@ -113,103 +131,6 @@ def _coerce_enum(value: str | E, enum_type: type[E]) -> E:
     return enum_type(value)
 
 
-def _row_to_node_state(row: Any) -> NodeState:
-    """Convert a database row to the appropriate NodeState type.
-
-    Uses discriminated union pattern - status field determines the concrete type.
-
-    Args:
-        row: Database row from node_states table
-
-    Returns:
-        NodeStateOpen, NodeStatePending, NodeStateCompleted, or NodeStateFailed depending on status
-    """
-    status = NodeStateStatus(row.status)
-
-    if status == NodeStateStatus.OPEN:
-        return NodeStateOpen(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.OPEN,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            context_before_json=row.context_before_json,
-        )
-    elif status == NodeStateStatus.PENDING:
-        # Pending states must have completed_at, duration_ms (but no output_hash yet)
-        # Validate required fields - None indicates audit integrity violation
-        if row.duration_ms is None:
-            raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStatePending(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.PENDING,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    elif status == NodeStateStatus.COMPLETED:
-        # Completed states must have output_hash, completed_at, duration_ms
-        # Validate required fields - None indicates audit integrity violation
-        if row.output_hash is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL output_hash - audit integrity violation")
-        if row.duration_ms is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStateCompleted(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.COMPLETED,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            output_hash=row.output_hash,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    elif status == NodeStateStatus.FAILED:
-        # Failed states must have completed_at, duration_ms (error_json and output_hash are optional)
-        # Validate required fields - None indicates audit integrity violation
-        if row.duration_ms is None:
-            raise ValueError(f"FAILED state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"FAILED state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStateFailed(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.FAILED,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            error_json=row.error_json,
-            output_hash=row.output_hash,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    else:
-        raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
-
-
 class LandscapeRecorder:
     """High-level API for recording audit trail entries.
 
@@ -243,6 +164,27 @@ class LandscapeRecorder:
         # Ensures UNIQUE(state_id, call_index) across all client types and retries
         self._call_indices: dict[str, int] = {}  # state_id → next_index
         self._call_index_lock: Lock = Lock()
+
+        # Database operations helper for reduced boilerplate
+        self._ops = DatabaseOps(db)
+
+        # Repository instances for row-to-object conversions
+        # Session is passed per-call so we pass None here
+        self._run_repo = RunRepository(None)
+        self._node_repo = NodeRepository(None)
+        self._edge_repo = EdgeRepository(None)
+        self._row_repo = RowRepository(None)
+        self._token_repo = TokenRepository(None)
+        self._token_parent_repo = TokenParentRepository(None)
+        self._call_repo = CallRepository(None)
+        self._routing_event_repo = RoutingEventRepository(None)
+        self._batch_repo = BatchRepository(None)
+        self._node_state_repo = NodeStateRepository(None)
+        self._validation_error_repo = ValidationErrorRepository(None)
+        self._transform_error_repo = TransformErrorRepository(None)
+        self._token_outcome_repo = TokenOutcomeRepository(None)
+        self._artifact_repo = ArtifactRepository(None)
+        self._batch_member_repo = BatchMemberRepository(None)
 
     # === Run Management ===
 
@@ -356,29 +298,11 @@ class LandscapeRecorder:
         Returns:
             Run model or None if not found
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(runs_table).where(runs_table.c.run_id == run_id))
-            row = result.fetchone()
-
+        query = select(runs_table).where(runs_table.c.run_id == run_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Run(
-            run_id=row.run_id,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            config_hash=row.config_hash,
-            settings_json=row.settings_json,
-            canonical_version=row.canonical_version,
-            status=RunStatus(row.status),  # Coerce DB string to enum
-            reproducibility_grade=row.reproducibility_grade,
-            # Use explicit is not None check - empty string should raise, not become None (Tier 1)
-            export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
-            export_error=row.export_error,
-            exported_at=row.exported_at,
-            export_format=row.export_format,
-            export_sink=row.export_sink,
-        )
+        return self._run_repo.load(row)
 
     def get_source_schema(self, run_id: str) -> str:
         """Get source schema JSON for a run (for resume/type restoration).
@@ -428,8 +352,8 @@ class LandscapeRecorder:
             This encapsulates Landscape schema access for Orchestrator resume.
             Edge IDs are required for FK integrity when recording routing events.
         """
-        with self._db.connection() as conn:
-            edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
+        query = select(edges_table).where(edges_table.c.run_id == run_id)
+        edges = self._ops.execute_fetchall(query)
 
         edge_map: dict[tuple[str, str], str] = {}
         for edge in edges:
@@ -479,29 +403,8 @@ class LandscapeRecorder:
             status_enum = _coerce_enum(status, RunStatus)
             query = query.where(runs_table.c.status == status_enum.value)
 
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Run(
-                run_id=row.run_id,
-                started_at=row.started_at,
-                completed_at=row.completed_at,
-                config_hash=row.config_hash,
-                settings_json=row.settings_json,
-                canonical_version=row.canonical_version,
-                status=RunStatus(row.status),  # Coerce DB string to enum
-                reproducibility_grade=row.reproducibility_grade,
-                # Use explicit is not None check - empty string should raise, not become None (Tier 1)
-                export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
-                export_error=row.export_error,
-                exported_at=row.exported_at,
-                export_format=row.export_format,
-                export_sink=row.export_sink,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._run_repo.load(row) for row in rows]
 
     def set_export_status(
         self,
@@ -708,36 +611,6 @@ class LandscapeRecorder:
 
         return edge
 
-    def _row_to_node(self, row: Any) -> Node:
-        """Convert a database row to a Node model.
-
-        Args:
-            row: Database row from nodes table
-
-        Returns:
-            Node model with all fields including schema info
-        """
-        # Parse schema_fields_json back to list
-        schema_fields: list[dict[str, object]] | None = None
-        if row.schema_fields_json is not None:
-            schema_fields = json.loads(row.schema_fields_json)
-
-        return Node(
-            node_id=row.node_id,
-            run_id=row.run_id,
-            plugin_name=row.plugin_name,
-            node_type=NodeType(row.node_type),  # Coerce DB string to enum
-            plugin_version=row.plugin_version,
-            determinism=Determinism(row.determinism),  # Coerce DB string to enum
-            config_hash=row.config_hash,
-            config_json=row.config_json,
-            schema_hash=row.schema_hash,
-            sequence_in_pipeline=row.sequence_in_pipeline,
-            registered_at=row.registered_at,
-            schema_mode=row.schema_mode,
-            schema_fields=schema_fields,
-        )
-
     def get_node(self, node_id: str, run_id: str) -> Node | None:
         """Get a node by its composite primary key (node_id, run_id).
 
@@ -752,14 +625,11 @@ class LandscapeRecorder:
         Returns:
             Node model or None if not found
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(nodes_table).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id)))
-            row = result.fetchone()
-
+        query = select(nodes_table).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id))
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return self._row_to_node(row)
+        return self._node_repo.load(row)
 
     def get_nodes(self, run_id: str) -> list[Node]:
         """Get all nodes for a run.
@@ -770,17 +640,15 @@ class LandscapeRecorder:
         Returns:
             List of Node models, ordered by sequence (NULL sequences last)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(nodes_table)
-                .where(nodes_table.c.run_id == run_id)
-                # Use nullslast() for consistent NULL handling across databases
-                # Nodes without sequence (e.g., dynamically added) sort last
-                .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
-            )
-            rows = result.fetchall()
-
-        return [self._row_to_node(row) for row in rows]
+        query = (
+            select(nodes_table)
+            .where(nodes_table.c.run_id == run_id)
+            # Use nullslast() for consistent NULL handling across databases
+            # Nodes without sequence (e.g., dynamically added) sort last
+            .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._node_repo.load(row) for row in rows]
 
     def get_edges(self, run_id: str) -> list[Edge]:
         """Get all edges for a run.
@@ -793,23 +661,8 @@ class LandscapeRecorder:
             for deterministic export signatures.
         """
         query = select(edges_table).where(edges_table.c.run_id == run_id).order_by(edges_table.c.created_at, edges_table.c.edge_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Edge(
-                edge_id=r.edge_id,
-                run_id=r.run_id,
-                from_node_id=r.from_node_id,
-                to_node_id=r.to_node_id,
-                label=r.label,
-                default_mode=RoutingMode(r.default_mode),  # Coerce DB string to enum
-                created_at=r.created_at,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._edge_repo.load(row) for row in rows]
 
     # === Row and Token Management ===
 
@@ -1305,14 +1158,11 @@ class LandscapeRecorder:
         Returns:
             NodeState (union of Open, Completed, or Failed) or None
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id))
-            row = result.fetchone()
-
+        query = select(node_states_table).where(node_states_table.c.state_id == state_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return _row_to_node_state(row)
+        return self._node_state_repo.load(row)
 
     # === Routing Event Recording ===
 
@@ -1599,25 +1449,11 @@ class LandscapeRecorder:
         Returns:
             Batch model or None
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id))
-            row = result.fetchone()
-
+        query = select(batches_table).where(batches_table.c.batch_id == batch_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Batch(
-            batch_id=row.batch_id,
-            run_id=row.run_id,
-            aggregation_node_id=row.aggregation_node_id,
-            aggregation_state_id=row.aggregation_state_id,
-            trigger_type=row.trigger_type,
-            trigger_reason=row.trigger_reason,
-            attempt=row.attempt,
-            status=BatchStatus(row.status),  # Coerce DB string to enum
-            created_at=row.created_at,
-            completed_at=row.completed_at,
-        )
+        return self._batch_repo.load(row)
 
     def get_batches(
         self,
@@ -1646,26 +1482,8 @@ class LandscapeRecorder:
 
         # Order for deterministic export signatures
         query = query.order_by(batches_table.c.created_at, batches_table.c.batch_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Batch(
-                batch_id=row.batch_id,
-                run_id=row.run_id,
-                aggregation_node_id=row.aggregation_node_id,
-                aggregation_state_id=row.aggregation_state_id,
-                trigger_type=row.trigger_type,
-                trigger_reason=row.trigger_reason,
-                attempt=row.attempt,
-                status=BatchStatus(row.status),  # Coerce DB string to enum
-                created_at=row.created_at,
-                completed_at=row.completed_at,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_repo.load(row) for row in rows]
 
     def get_incomplete_batches(self, run_id: str) -> list[Batch]:
         """Get batches that need recovery (draft, executing, or failed).
@@ -1682,29 +1500,14 @@ class LandscapeRecorder:
             List of Batch objects with status in (draft, executing, failed),
             ordered by created_at ascending (oldest first for deterministic recovery)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(batches_table)
-                .where(batches_table.c.run_id == run_id)
-                .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
-                .order_by(batches_table.c.created_at.asc())
-            ).fetchall()
-
-        return [
-            Batch(
-                batch_id=row.batch_id,
-                run_id=row.run_id,
-                aggregation_node_id=row.aggregation_node_id,
-                attempt=row.attempt,
-                status=BatchStatus(row.status),
-                created_at=row.created_at,
-                aggregation_state_id=row.aggregation_state_id,
-                trigger_type=row.trigger_type,
-                trigger_reason=row.trigger_reason,
-                completed_at=row.completed_at,
-            )
-            for row in result
-        ]
+        query = (
+            select(batches_table)
+            .where(batches_table.c.run_id == run_id)
+            .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
+            .order_by(batches_table.c.created_at.asc())
+        )
+        result = self._ops.execute_fetchall(query)
+        return [self._batch_repo.load(row) for row in result]
 
     def get_batch_members(self, batch_id: str) -> list[BatchMember]:
         """Get all members of a batch.
@@ -1715,20 +1518,9 @@ class LandscapeRecorder:
         Returns:
             List of BatchMember models (ordered by ordinal)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
-            )
-            rows = result.fetchall()
-
-        return [
-            BatchMember(
-                batch_id=row.batch_id,
-                token_id=row.token_id,
-                ordinal=row.ordinal,
-            )
-            for row in rows
-        ]
+        query = select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_member_repo.load(row) for row in rows]
 
     def retry_batch(self, batch_id: str) -> Batch:
         """Create a new batch attempt from a failed batch.
@@ -1854,25 +1646,8 @@ class LandscapeRecorder:
         if sink_node_id:
             query = query.where(artifacts_table.c.sink_node_id == sink_node_id)
 
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Artifact(
-                artifact_id=row.artifact_id,
-                run_id=row.run_id,
-                produced_by_state_id=row.produced_by_state_id,
-                sink_node_id=row.sink_node_id,
-                artifact_type=row.artifact_type,
-                path_or_uri=row.path_or_uri,
-                content_hash=row.content_hash,
-                size_bytes=row.size_bytes,
-                created_at=row.created_at,
-                idempotency_key=row.idempotency_key,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._artifact_repo.load(row) for row in rows]
 
     # === Row and Token Query Methods ===
 
@@ -1886,23 +1661,8 @@ class LandscapeRecorder:
             List of Row models, ordered by row_index
         """
         query = select(rows_table).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            Row(
-                row_id=r.row_id,
-                run_id=r.run_id,
-                source_node_id=r.source_node_id,
-                row_index=r.row_index,
-                source_data_hash=r.source_data_hash,
-                source_data_ref=r.source_data_ref,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._row_repo.load(r) for r in db_rows]
 
     def get_tokens(self, row_id: str) -> list[Token]:
         """Get all tokens for a row.
@@ -1915,24 +1675,8 @@ class LandscapeRecorder:
             for deterministic export signatures.
         """
         query = select(tokens_table).where(tokens_table.c.row_id == row_id).order_by(tokens_table.c.created_at, tokens_table.c.token_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            Token(
-                token_id=r.token_id,
-                row_id=r.row_id,
-                fork_group_id=r.fork_group_id,
-                join_group_id=r.join_group_id,
-                expand_group_id=r.expand_group_id,
-                branch_name=r.branch_name,
-                step_in_pipeline=r.step_in_pipeline,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_repo.load(r) for r in db_rows]
 
     def get_node_states_for_token(self, token_id: str) -> list[NodeState]:
         """Get all node states for a token.
@@ -1950,12 +1694,8 @@ class LandscapeRecorder:
             .where(node_states_table.c.token_id == token_id)
             .order_by(node_states_table.c.step_index, node_states_table.c.attempt)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [_row_to_node_state(r) for r in db_rows]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._node_state_repo.load(r) for r in db_rows]
 
     def get_row(self, row_id: str) -> Row | None:
         """Get a row by ID.
@@ -1967,23 +1707,10 @@ class LandscapeRecorder:
             Row model or None if not found
         """
         query = select(rows_table).where(rows_table.c.row_id == row_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            r = result.fetchone()
-
+        r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-
-        return Row(
-            row_id=r.row_id,
-            run_id=r.run_id,
-            source_node_id=r.source_node_id,
-            row_index=r.row_index,
-            source_data_hash=r.source_data_hash,
-            source_data_ref=r.source_data_ref,
-            created_at=r.created_at,
-        )
+        return self._row_repo.load(r)
 
     def get_row_data(self, row_id: str) -> RowDataResult:
         """Get the payload data for a row with explicit state.
@@ -2026,24 +1753,10 @@ class LandscapeRecorder:
             Token model or None if not found
         """
         query = select(tokens_table).where(tokens_table.c.token_id == token_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            r = result.fetchone()
-
+        r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-
-        return Token(
-            token_id=r.token_id,
-            row_id=r.row_id,
-            fork_group_id=r.fork_group_id,
-            join_group_id=r.join_group_id,
-            expand_group_id=r.expand_group_id,
-            branch_name=r.branch_name,
-            step_in_pipeline=r.step_in_pipeline,
-            created_at=r.created_at,
-        )
+        return self._token_repo.load(r)
 
     def get_token_parents(self, token_id: str) -> list[TokenParent]:
         """Get parent relationships for a token.
@@ -2055,19 +1768,8 @@ class LandscapeRecorder:
             List of TokenParent models (ordered by ordinal)
         """
         query = select(token_parents_table).where(token_parents_table.c.token_id == token_id).order_by(token_parents_table.c.ordinal)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            TokenParent(
-                token_id=r.token_id,
-                parent_token_id=r.parent_token_id,
-                ordinal=r.ordinal,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_parent_repo.load(r) for r in db_rows]
 
     def get_routing_events(self, state_id: str) -> list[RoutingEvent]:
         """Get routing events for a node state.
@@ -2084,25 +1786,8 @@ class LandscapeRecorder:
             .where(routing_events_table.c.state_id == state_id)
             .order_by(routing_events_table.c.ordinal, routing_events_table.c.event_id)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            RoutingEvent(
-                event_id=r.event_id,
-                state_id=r.state_id,
-                edge_id=r.edge_id,
-                routing_group_id=r.routing_group_id,
-                ordinal=r.ordinal,
-                mode=RoutingMode(r.mode),  # Coerce DB string to enum
-                reason_hash=r.reason_hash,
-                reason_ref=r.reason_ref,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._routing_event_repo.load(r) for r in db_rows]
 
     def get_calls(self, state_id: str) -> list[Call]:
         """Get external calls for a node state.
@@ -2114,28 +1799,8 @@ class LandscapeRecorder:
             List of Call models, ordered by call_index
         """
         query = select(calls_table).where(calls_table.c.state_id == state_id).order_by(calls_table.c.call_index)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            Call(
-                call_id=r.call_id,
-                state_id=r.state_id,
-                call_index=r.call_index,
-                call_type=CallType(r.call_type),
-                status=CallStatus(r.status),
-                request_hash=r.request_hash,
-                request_ref=r.request_ref,
-                response_hash=r.response_hash,
-                response_ref=r.response_ref,
-                error_json=r.error_json,
-                latency_ms=r.latency_ms,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
 
     def allocate_call_index(self, state_id: str) -> int:
         """Allocate next call index for a state_id (thread-safe).
@@ -2437,38 +2102,20 @@ class LandscapeRecorder:
         Returns:
             TokenOutcome dataclass or None if no outcome recorded
         """
-        with self._db.connection() as conn:
-            # Get most recent outcome (terminal preferred)
-            result = conn.execute(
-                select(token_outcomes_table)
-                .where(token_outcomes_table.c.token_id == token_id)
-                .order_by(
-                    token_outcomes_table.c.is_terminal.desc(),  # Terminal first
-                    token_outcomes_table.c.recorded_at.desc(),  # Then by time
-                )
-                .limit(1)
-            ).fetchone()
-
-            if result is None:
-                return None
-
-            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
-            # If is_terminal is not 0 or 1, that's an audit integrity violation.
-            return TokenOutcome(
-                outcome_id=result.outcome_id,
-                run_id=result.run_id,
-                token_id=result.token_id,
-                outcome=RowOutcome(result.outcome),
-                is_terminal=result.is_terminal == 1,  # DB stores as Integer
-                recorded_at=result.recorded_at,
-                sink_name=result.sink_name,
-                batch_id=result.batch_id,
-                fork_group_id=result.fork_group_id,
-                join_group_id=result.join_group_id,
-                expand_group_id=result.expand_group_id,
-                error_hash=result.error_hash,
-                context_json=result.context_json,
+        # Get most recent outcome (terminal preferred)
+        query = (
+            select(token_outcomes_table)
+            .where(token_outcomes_table.c.token_id == token_id)
+            .order_by(
+                token_outcomes_table.c.is_terminal.desc(),  # Terminal first
+                token_outcomes_table.c.recorded_at.desc(),  # Then by time
             )
+            .limit(1)
+        )
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            return None
+        return self._token_outcome_repo.load(result)
 
     def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
         """Get all token outcomes for a row in a single query.
@@ -2484,54 +2131,33 @@ class LandscapeRecorder:
             List of TokenOutcome objects, empty if no outcomes recorded.
             Ordered by recorded_at for deterministic behavior.
         """
-        with self._db.connection() as conn:
-            # Single JOIN query: tokens + outcomes
-            query = (
-                select(
-                    token_outcomes_table.c.outcome_id,
-                    token_outcomes_table.c.run_id,
-                    token_outcomes_table.c.token_id,
-                    token_outcomes_table.c.outcome,
-                    token_outcomes_table.c.is_terminal,
-                    token_outcomes_table.c.recorded_at,
-                    token_outcomes_table.c.sink_name,
-                    token_outcomes_table.c.batch_id,
-                    token_outcomes_table.c.fork_group_id,
-                    token_outcomes_table.c.join_group_id,
-                    token_outcomes_table.c.expand_group_id,
-                    token_outcomes_table.c.error_hash,
-                    token_outcomes_table.c.context_json,
-                )
-                .join(
-                    tokens_table,
-                    token_outcomes_table.c.token_id == tokens_table.c.token_id,
-                )
-                .where(tokens_table.c.row_id == row_id)
-                .where(token_outcomes_table.c.run_id == run_id)
-                .order_by(token_outcomes_table.c.recorded_at)
+        # Single JOIN query: tokens + outcomes
+        query = (
+            select(
+                token_outcomes_table.c.outcome_id,
+                token_outcomes_table.c.run_id,
+                token_outcomes_table.c.token_id,
+                token_outcomes_table.c.outcome,
+                token_outcomes_table.c.is_terminal,
+                token_outcomes_table.c.recorded_at,
+                token_outcomes_table.c.sink_name,
+                token_outcomes_table.c.batch_id,
+                token_outcomes_table.c.fork_group_id,
+                token_outcomes_table.c.join_group_id,
+                token_outcomes_table.c.expand_group_id,
+                token_outcomes_table.c.error_hash,
+                token_outcomes_table.c.context_json,
             )
-
-            rows = conn.execute(query).fetchall()
-
-            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
-            return [
-                TokenOutcome(
-                    outcome_id=r.outcome_id,
-                    run_id=r.run_id,
-                    token_id=r.token_id,
-                    outcome=RowOutcome(r.outcome),
-                    is_terminal=r.is_terminal == 1,
-                    recorded_at=r.recorded_at,
-                    sink_name=r.sink_name,
-                    batch_id=r.batch_id,
-                    fork_group_id=r.fork_group_id,
-                    join_group_id=r.join_group_id,
-                    expand_group_id=r.expand_group_id,
-                    error_hash=r.error_hash,
-                    context_json=r.context_json,
-                )
-                for r in rows
-            ]
+            .join(
+                tokens_table,
+                token_outcomes_table.c.token_id == tokens_table.c.token_id,
+            )
+            .where(tokens_table.c.row_id == row_id)
+            .where(token_outcomes_table.c.run_id == run_id)
+            .order_by(token_outcomes_table.c.recorded_at)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._token_outcome_repo.load(r) for r in rows]
 
     # === Validation Error Recording (WP-11.99) ===
 
@@ -2665,25 +2291,8 @@ class LandscapeRecorder:
             validation_errors_table.c.run_id == run_id,
             validation_errors_table.c.row_hash == row_hash,
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            ValidationErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                node_id=r.node_id,
-                row_hash=r.row_hash,
-                error=r.error,
-                schema_mode=r.schema_mode,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_repo.load(r) for r in rows]
 
     def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
         """Get all validation errors for a run.
@@ -2697,25 +2306,8 @@ class LandscapeRecorder:
         query = (
             select(validation_errors_table).where(validation_errors_table.c.run_id == run_id).order_by(validation_errors_table.c.created_at)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            ValidationErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                node_id=r.node_id,
-                row_hash=r.row_hash,
-                error=r.error,
-                schema_mode=r.schema_mode,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_repo.load(r) for r in rows]
 
     def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
         """Get transform errors for a specific token.
@@ -2729,25 +2321,8 @@ class LandscapeRecorder:
         query = select(transform_errors_table).where(
             transform_errors_table.c.token_id == token_id,
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            TransformErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                transform_id=r.transform_id,
-                row_hash=r.row_hash,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-                error_details_json=r.error_details_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_repo.load(r) for r in rows]
 
     def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
         """Get all transform errors for a run.
@@ -2761,25 +2336,8 @@ class LandscapeRecorder:
         query = (
             select(transform_errors_table).where(transform_errors_table.c.run_id == run_id).order_by(transform_errors_table.c.created_at)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            TransformErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                transform_id=r.transform_id,
-                row_hash=r.row_hash,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-                error_details_json=r.error_details_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_repo.load(r) for r in rows]
 
     # === Call Lookup Methods (for Replay Mode) ===
 
@@ -2822,28 +2380,10 @@ class LandscapeRecorder:
             .order_by(calls_table.c.created_at)
             .limit(1)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            row = result.fetchone()
-
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Call(
-            call_id=row.call_id,
-            state_id=row.state_id,
-            call_index=row.call_index,
-            call_type=CallType(row.call_type),
-            status=CallStatus(row.status),
-            request_hash=row.request_hash,
-            request_ref=row.request_ref,
-            response_hash=row.response_hash,
-            response_ref=row.response_ref,
-            error_json=row.error_json,
-            latency_ms=row.latency_ms,
-            created_at=row.created_at,
-        )
+        return self._call_repo.load(row)
 
     def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
         """Retrieve the response data for a call.
