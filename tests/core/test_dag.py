@@ -499,14 +499,14 @@ class TestExecutionGraphFromConfig:
         """Build graph from minimal config (source -> sink only)."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -538,14 +538,14 @@ class TestExecutionGraphFromConfig:
         """Graph from valid config passes validation."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -575,15 +575,15 @@ class TestExecutionGraphFromConfig:
         """Build graph with transform chain."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -592,9 +592,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            row_plugins=[
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
-                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             default_sink="output",
         )
@@ -629,15 +629,15 @@ class TestExecutionGraphFromConfig:
         """Build graph with config-driven gate routing to multiple sinks."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -680,15 +680,15 @@ class TestExecutionGraphFromConfig:
         """Config gate routes must reference existing sinks."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -724,14 +724,14 @@ class TestExecutionGraphFromConfig:
         """Get explicit sink_name -> node_id mapping."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -766,15 +766,15 @@ class TestExecutionGraphFromConfig:
         """Get explicit sequence -> node_id mapping for transforms."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -783,9 +783,9 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            row_plugins=[
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
-                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             default_sink="output",
         )
@@ -810,14 +810,14 @@ class TestExecutionGraphFromConfig:
         """Get the output sink name."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -852,15 +852,15 @@ class TestExecutionGraphRouteMapping:
         """Get route label that leads to a sink from a config gate."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -904,15 +904,15 @@ class TestExecutionGraphRouteMapping:
         """Continue routes return 'continue' as label."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -954,15 +954,15 @@ class TestExecutionGraphRouteMapping:
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1100,15 +1100,15 @@ class TestMultiEdgeScenarios:
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1189,15 +1189,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1254,15 +1254,15 @@ class TestCoalesceNodes:
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1325,15 +1325,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1397,15 +1397,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1469,15 +1469,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1536,15 +1536,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1598,15 +1598,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1661,15 +1661,15 @@ class TestCoalesceNodes:
 
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         # Pydantic validates min_length=2 for branches field
         with pytest.raises(ValidationError, match="at least 2 items"):
             ElspethSettings(
-                datasource=DatasourceSettings(
+                source=SourceSettings(
                     plugin="csv",
                     options={
                         "path": "test.csv",
@@ -1696,15 +1696,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1758,16 +1758,16 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1779,8 +1779,8 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
-            row_plugins=[
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
             gates=[
                 GateSettings(
@@ -1824,7 +1824,7 @@ class TestCoalesceNodes:
 
         # Simulate what orchestrator does (build coalesce_step_map)
         coalesce_step_map: dict[str, int] = {}
-        base_step = len(settings.row_plugins) + len(settings.gates)
+        base_step = len(settings.transforms) + len(settings.gates)
         for i, cs in enumerate(settings.coalesce):
             coalesce_step_map[cs.name] = base_step + i
 
@@ -1848,15 +1848,15 @@ class TestCoalesceNodes:
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -1913,15 +1913,15 @@ class TestCoalesceNodes:
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2265,7 +2265,7 @@ def test_from_plugin_instances_extracts_schemas():
     from elspeth.core.dag import ExecutionGraph
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -2275,7 +2275,7 @@ datasource:
         - "value: float"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -2293,7 +2293,7 @@ sinks:
         fields:
           - "value: float"
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -2520,15 +2520,15 @@ class TestDeterministicNodeIDs:
         """Node IDs must be deterministic for checkpoint/resume compatibility."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2536,8 +2536,8 @@ class TestDeterministicNodeIDs:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            row_plugins=[
-                RowPluginSettings(
+            transforms=[
+                TransformSettings(
                     plugin="passthrough",
                     options={"schema": {"fields": "dynamic"}},
                 )
@@ -2577,14 +2577,14 @@ class TestDeterministicNodeIDs:
         """Node IDs should change if plugin config changes."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         config1 = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2592,13 +2592,13 @@ class TestDeterministicNodeIDs:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            row_plugins=[],
+            transforms=[],
             sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             default_sink="out",
         )
 
         config2 = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -2606,7 +2606,7 @@ class TestDeterministicNodeIDs:
                     "schema": {"mode": "strict", "fields": ["id: int"]},  # Different!
                 },
             ),
-            row_plugins=[],
+            transforms=[],
             sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             default_sink="out",
         )
@@ -2618,7 +2618,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins1["sinks"],
             aggregations=plugins1["aggregations"],
             gates=list(config1.gates),
-            default_sink=config1.output_sink,
+            default_sink=config1.default_sink,
         )
 
         plugins2 = instantiate_plugins_from_config(config2)
@@ -2628,7 +2628,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins2["sinks"],
             aggregations=plugins2["aggregations"],
             gates=list(config2.gates),
-            default_sink=config2.output_sink,
+            default_sink=config2.default_sink,
         )
 
         # Source node IDs should differ (different config)
