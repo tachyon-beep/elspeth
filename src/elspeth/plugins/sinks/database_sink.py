@@ -74,6 +74,17 @@ class DatabaseSink(BaseSink):
     plugin_version = "1.0.0"
     # determinism inherited from BaseSink (IO_WRITE)
 
+    # Resume capability: Database can append to existing tables
+    supports_resume: bool = True
+
+    def configure_for_resume(self) -> None:
+        """Configure database sink for resume mode.
+
+        Switches from replace mode to append mode so resume operations
+        add to existing table instead of dropping and recreating.
+        """
+        self._if_exists = "append"
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = DatabaseSinkConfig.from_dict(config)
