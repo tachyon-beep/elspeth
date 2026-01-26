@@ -490,6 +490,7 @@ class ExecutionGraph:
 
             for coalesce_config in coalesce_settings:
                 # Coalesce merges - no schema transformation
+                # Note: Pydantic validates min_length=2 for branches field
                 config_dict: dict[str, Any] = {
                     "branches": list(coalesce_config.branches),
                     "policy": coalesce_config.policy,
@@ -505,9 +506,18 @@ class ExecutionGraph:
                 cid = node_id("coalesce", coalesce_config.name, config_dict)
                 coalesce_ids[coalesce_config.name] = cid
 
-                # Map branches to this coalesce
+                # Map branches to this coalesce - check for duplicates
                 for branch_name in coalesce_config.branches:
-                    branch_to_coalesce[branch_name] = cid
+                    if branch_name in branch_to_coalesce:
+                        # Branch already mapped to another coalesce
+                        existing_coalesce = branch_to_coalesce[branch_name]
+                        raise GraphValidationError(
+                            f"Duplicate branch name '{branch_name}' found in coalesce settings.\n"
+                            f"Branch '{branch_name}' is already mapped to coalesce '{existing_coalesce}', "
+                            f"but coalesce '{coalesce_config.name}' also declares it.\n"
+                            f"Each fork branch can only merge at one coalesce point."
+                        )
+                    branch_to_coalesce[branch_name] = coalesce_config.name
 
                 graph.add_node(
                     cid,
@@ -529,7 +539,8 @@ class ExecutionGraph:
                 for branch_name in gate_config.fork_to:
                     if branch_name in branch_to_coalesce:
                         # Explicit coalesce destination
-                        coalesce_id = branch_to_coalesce[branch_name]
+                        coalesce_name = branch_to_coalesce[branch_name]
+                        coalesce_id = coalesce_ids[coalesce_name]
                         graph.add_edge(gate_id, coalesce_id, label=branch_name, mode=RoutingMode.COPY)
                     elif branch_name in sink_ids:
                         # Explicit sink destination (branch name matches sink name)
@@ -545,6 +556,28 @@ class ExecutionGraph:
                             f"Available coalesce branches: {sorted(branch_to_coalesce.keys())}\n"
                             f"Available sinks: {sorted(sink_ids.keys())}"
                         )
+
+        # ===== VALIDATE COALESCE BRANCHES ARE PRODUCED BY GATES =====
+        # All branches declared in coalesce settings must be produced by some fork gate
+        if coalesce_settings and branch_to_coalesce:
+            # Collect all branches produced by gates
+            produced_branches: set[str] = set()
+            for _gate_id, gate_config in gate_sequence:
+                if gate_config.fork_to:
+                    produced_branches.update(gate_config.fork_to)
+
+            # Check that all coalesce branches are produced
+            for branch_name, coalesce_name in branch_to_coalesce.items():
+                if branch_name not in produced_branches:
+                    raise GraphValidationError(
+                        f"Coalesce '{coalesce_name}' declares branch '{branch_name}', "
+                        f"but no gate produces this branch.\n"
+                        f"Branches must be listed in a gate's fork_to list to be valid.\n"
+                        f"\n"
+                        f"Branches produced by gates: {sorted(produced_branches) if produced_branches else '(none)'}\n"
+                        f"Coalesce '{coalesce_name}' expects branches: "
+                        f"{sorted([b for b, c in branch_to_coalesce.items() if c == coalesce_name])}"
+                    )
 
         # ===== CONNECT GATE CONTINUE ROUTES =====
         # CRITICAL FIX: Handle ALL continue routes, not just "true"

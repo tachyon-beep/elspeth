@@ -913,7 +913,7 @@ class RowProcessor:
 
                     if cfg_branch_name and cfg_branch_name in self._branch_to_coalesce:
                         cfg_coalesce_name = self._branch_to_coalesce[cfg_branch_name]
-                        cfg_coalesce_step = self._coalesce_step_map.get(cfg_coalesce_name)
+                        cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
 
                     # Children start after ALL transforms, at next config gate
                     child_items.append(

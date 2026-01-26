@@ -452,6 +452,60 @@ Never store secrets - use HMAC fingerprints:
 fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
 ```
 
+### Test Path Integrity
+
+**Never bypass production code paths in tests.** When integration tests manually construct objects instead of using production factories, bugs hide in the untested path.
+
+**The Dual Code Path Problem:**
+
+```python
+# WRONG - Manual construction in tests bypasses production logic
+def test_fork_coalesce_manually_built():
+    graph = ExecutionGraph()
+    graph.add_node("source", ...)
+    graph._branch_to_coalesce = {"path_a": "merge1"}  # Manual assignment
+    # This test passes even when from_plugin_instances() is broken!
+```
+
+```python
+# CORRECT - Uses production path
+def test_fork_coalesce_production_path():
+    graph = ExecutionGraph.from_plugin_instances(  # Production factory
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
+        gates=gates,
+        coalesce_settings=coalesce_settings,
+        output_sink="output",
+    )
+    branch_map = graph.get_branch_to_coalesce_map()
+    # This test FAILS if from_plugin_instances() is broken!
+```
+
+**Why this matters:**
+
+- **BUG-LINEAGE-01** hid for weeks because tests manually built graphs
+- Manual construction had `branch_to_coalesce[branch] = coalesce_config.name` (correct)
+- Production path had `branch_to_coalesce[branch] = cid` (node_id - wrong!)
+- Tests passed, production was broken
+
+**Rules:**
+
+- ✅ Use `ExecutionGraph.from_plugin_instances()` in integration tests
+- ✅ Use `instantiate_plugins_from_config()` to get real plugin instances
+- ✅ Exercise the same code path that production uses
+- ❌ Manual `graph.add_node()` / `graph._field = value` bypasses validation
+- ❌ Direct attribute assignment skips production logic
+- ❌ "It's easier to test this way" creates blind spots
+
+**When manual construction is acceptable:**
+
+- Unit tests of graph algorithms (topological sort, cycle detection)
+- Testing graph visualization/rendering
+- Testing helper methods that don't depend on construction path
+
+**For integration tests:** Always use production factories.
+
 ## Configuration Precedence (High to Low)
 
 1. Runtime overrides (CLI flags, env vars)

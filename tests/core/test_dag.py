@@ -1518,11 +1518,329 @@ class TestCoalesceNodes:
             coalesce_settings=settings.coalesce,
         )
         branch_map = graph.get_branch_to_coalesce_map()
-        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
 
-        # Should map branches to coalesce node ID
-        assert branch_map["path_a"] == coalesce_id
-        assert branch_map["path_b"] == coalesce_id
+        # Should map branches to coalesce_name (not node_id) for processor step lookup
+        assert branch_map["path_a"] == "merge_results"
+        assert branch_map["path_b"] == "merge_results"
+
+    def test_branch_to_coalesce_maps_to_coalesce_name_for_step_lookup(self, plugin_manager) -> None:
+        """branch_to_coalesce should map to coalesce_name (not node_id) for use with coalesce_step_map.
+
+        BUG-LINEAGE-01: The processor needs to look up coalesce step position using:
+            coalesce_name = branch_to_coalesce[branch_name]
+            step = coalesce_step_map[coalesce_name]
+
+        But branch_to_coalesce was mapping branch_name -> node_id, causing KeyError
+        when trying to look up in coalesce_step_map which expects coalesce_name keys.
+        """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            DatasourceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+            },
+            output_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["analysis_path", "validation_path"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="join_point",
+                    branches=["analysis_path", "validation_path"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        branch_map = graph.get_branch_to_coalesce_map()
+
+        # CRITICAL: Must map to coalesce_name (not node_id) for processor step lookup
+        # The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
+        # coalesce_step_map has keys like "join_point", NOT node_ids like "coalesce_join_point_abc123"
+        assert branch_map["analysis_path"] == "join_point", f"Expected coalesce_name 'join_point', got {branch_map['analysis_path']}"
+        assert branch_map["validation_path"] == "join_point", f"Expected coalesce_name 'join_point', got {branch_map['validation_path']}"
+
+    def test_duplicate_branch_names_across_coalesces_rejected(self, plugin_manager) -> None:
+        """Duplicate branch names across coalesce settings should be rejected."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            DatasourceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        settings = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+            },
+            output_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b", "path_x"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_ab",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+                CoalesceSettings(
+                    name="merge_xy",
+                    branches=["path_a", "path_x"],  # path_a duplicated!
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        with pytest.raises(GraphValidationError, match="Duplicate branch name 'path_a'"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                output_sink=settings.output_sink,
+                coalesce_settings=settings.coalesce,
+            )
+
+    def test_empty_coalesce_branches_rejected(self, plugin_manager) -> None:
+        """Coalesce with empty branches list should be rejected by Pydantic."""
+        from pydantic import ValidationError
+
+        from elspeth.core.config import (
+            CoalesceSettings,
+            DatasourceSettings,
+            ElspethSettings,
+            SinkSettings,
+        )
+
+        # Pydantic validates min_length=2 for branches field
+        with pytest.raises(ValidationError, match="at least 2 items"):
+            ElspethSettings(
+                datasource=DatasourceSettings(
+                    plugin="csv",
+                    options={
+                        "path": "test.csv",
+                        "on_validation_failure": "discard",
+                        "schema": {"fields": "dynamic"},
+                    },
+                ),
+                sinks={
+                    "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                },
+                output_sink="output",
+                coalesce=[
+                    CoalesceSettings(
+                        name="empty_merge",
+                        branches=[],  # Invalid! Pydantic requires min_length=2
+                        policy="require_all",
+                        merge="union",
+                    ),
+                ],
+            )
+
+    def test_coalesce_branch_not_produced_by_any_gate_rejected(self, plugin_manager) -> None:
+        """Coalesce referencing non-existent fork branches should be rejected."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            DatasourceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        settings = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+            },
+            output_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],  # path_b goes to sink, path_a goes to coalesce
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_x"],  # path_x not in fork_to!
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        with pytest.raises(GraphValidationError, match=r"branch 'path_x'.*no gate produces"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                output_sink=settings.output_sink,
+                coalesce_settings=settings.coalesce,
+            )
+
+    def test_fork_coalesce_contract_branch_map_compatible_with_step_map(self, plugin_manager) -> None:
+        """Contract test: branch_to_coalesce values must be usable as coalesce_step_map keys.
+
+        This is the CRITICAL contract between DAG builder and Processor.
+        The processor does: coalesce_step_map[branch_to_coalesce[branch_name]]
+        This test ensures the production path (`from_plugin_instances`) produces compatible mappings.
+        """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            DatasourceSettings,
+            ElspethSettings,
+            GateSettings,
+            RowPluginSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+            },
+            output_sink="output",
+            row_plugins=[
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+            ],
+            gates=[
+                GateSettings(
+                    name="analysis_fork",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b", "path_c", "path_d"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_ab",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+                CoalesceSettings(
+                    name="merge_cd",
+                    branches=["path_c", "path_d"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        # Use production path
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        # Get the mappings that processor would use
+        branch_to_coalesce = graph.get_branch_to_coalesce_map()
+
+        # Simulate what orchestrator does (build coalesce_step_map)
+        coalesce_step_map: dict[str, int] = {}
+        base_step = len(settings.row_plugins) + len(settings.gates)
+        for i, cs in enumerate(settings.coalesce):
+            coalesce_step_map[cs.name] = base_step + i
+
+        # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_step_map
+        # This is what processor relies on at lines 695-696
+        for branch_name, coalesce_name in branch_to_coalesce.items():
+            assert coalesce_name in coalesce_step_map, (
+                f"Contract violation: branch_to_coalesce['{branch_name}'] = '{coalesce_name}', "
+                f"but '{coalesce_name}' not in coalesce_step_map keys: {list(coalesce_step_map.keys())}"
+            )
+
+            # Also verify it's the coalesce_name, not a node_id
+            assert not coalesce_name.startswith("coalesce_"), (
+                f"Contract violation: branch_to_coalesce['{branch_name}'] = '{coalesce_name}' "
+                f"looks like a node_id (starts with 'coalesce_'), should be coalesce name"
+            )
 
     def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
