@@ -41,7 +41,7 @@ def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     # Set the internal mappings that orchestrator expects
     graph._sink_id_map = dict(sink_ids)
     graph._transform_id_map = {}  # No transforms in this simple test
-    graph._output_sink = next(iter(config.sinks.keys()))  # Use first sink as output
+    graph._default_sink = next(iter(config.sinks.keys()))  # Use first sink as output
 
     return graph
 

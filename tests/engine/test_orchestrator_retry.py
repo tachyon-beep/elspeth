@@ -110,7 +110,7 @@ class TestOrchestratorRetry:
                 },
             ),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="default",
+            default_sink="default",
             retry=RetrySettings(
                 max_attempts=3,
                 initial_delay_seconds=0.01,  # Fast for testing
@@ -218,7 +218,7 @@ class TestOrchestratorRetry:
                 },
             ),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="default",
+            default_sink="default",
             retry=RetrySettings(
                 max_attempts=2,  # Will try twice then fail
                 initial_delay_seconds=0.01,

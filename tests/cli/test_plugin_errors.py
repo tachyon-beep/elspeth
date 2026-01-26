@@ -56,7 +56,7 @@ def test_unknown_transform_plugin_error():
         },
         "row_plugins": [{"plugin": "nonexistent_transform", "options": {}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"fields": "dynamic"}}}},
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -122,7 +122,7 @@ def test_schema_extraction_from_instance():
             "options": {"path": "test.csv", "schema": {"mode": "strict", "fields": ["value: float"]}, "on_validation_failure": "discard"},
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "strict", "fields": ["value: float"]}}}},
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)

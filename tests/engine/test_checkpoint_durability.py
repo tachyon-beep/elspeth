@@ -83,7 +83,7 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     graph._transform_id_map = transform_ids
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 

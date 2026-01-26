@@ -16,7 +16,7 @@
 #   # Then update sign: true below
 #   uv run elspeth run -s examples/audit_export/settings.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/audit_export/input.csv
@@ -56,7 +56,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: non_corporate
+default_sink: non_corporate
 
 # Audit trail configuration
 landscape:

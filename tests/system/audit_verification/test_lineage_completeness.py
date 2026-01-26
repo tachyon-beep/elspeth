@@ -115,7 +115,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     # Populate internal maps
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
+    graph._default_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
     graph._route_resolution_map = {}
 
     return graph

@@ -81,7 +81,7 @@ class TestDeaggregationPipeline:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -212,7 +212,7 @@ class TestDeaggregationAuditTrail:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 
@@ -234,7 +234,7 @@ class TestDeaggregationAuditTrail:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Instantiate plugins
@@ -382,7 +382,7 @@ class TestSourceSchemaValidation:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 

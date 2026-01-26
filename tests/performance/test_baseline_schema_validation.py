@@ -119,7 +119,7 @@ output_sink: output
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         graph.validate()
         graph_time = time.perf_counter() - start
@@ -182,7 +182,7 @@ output_sink: output
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         graph.validate()
 

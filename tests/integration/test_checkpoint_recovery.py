@@ -487,7 +487,7 @@ class TestCheckpointRecoveryIntegration:
         # the graph manually (not from config)
         graph._sink_id_map = {"default": "sink"}
         graph._transform_id_map = {0: "xform"}
-        graph._output_sink = "default"
+        graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,

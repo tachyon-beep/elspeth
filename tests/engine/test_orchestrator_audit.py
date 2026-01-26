@@ -249,7 +249,7 @@ class TestOrchestratorLandscapeExport:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             landscape=LandscapeSettings(
                 url="sqlite:///:memory:",
                 export=LandscapeExportSettings(
@@ -280,7 +280,7 @@ class TestOrchestratorLandscapeExport:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -379,7 +379,7 @@ class TestOrchestratorLandscapeExport:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             landscape=LandscapeSettings(
                 url="sqlite:///:memory:",
                 export=LandscapeExportSettings(
@@ -410,7 +410,7 @@ class TestOrchestratorLandscapeExport:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
@@ -507,7 +507,7 @@ class TestOrchestratorLandscapeExport:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             landscape=LandscapeSettings(
                 url="sqlite:///:memory:",
                 export=LandscapeExportSettings(
@@ -538,7 +538,7 @@ class TestOrchestratorLandscapeExport:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
@@ -625,7 +625,7 @@ class TestOrchestratorLandscapeExport:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "audit": SinkSettings(plugin="csv", options={"path": "audit.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             landscape=LandscapeSettings(
                 url="sqlite:///:memory:",
                 # export.enabled defaults to False
@@ -651,7 +651,7 @@ class TestOrchestratorLandscapeExport:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
@@ -737,7 +737,7 @@ class TestOrchestratorConfigRecording:
         resolved_config = {
             "datasource": {"plugin": "csv", "options": {"path": "test.csv"}},
             "sinks": {"default": {"plugin": "csv"}},
-            "output_sink": "default",
+            "default_sink": "default",
         }
 
         config = PipelineConfig(
@@ -931,7 +931,7 @@ class TestNodeMetadataFromPlugin:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"default": "sink"}
-        graph._output_sink = "default"
+        graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
         run_result = orchestrator.run(config, graph=graph)
@@ -1046,7 +1046,7 @@ class TestNodeMetadataFromPlugin:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"default": "sink"}
-        graph._output_sink = "default"
+        graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
         run_result = orchestrator.run(config, graph=graph)

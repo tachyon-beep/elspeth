@@ -70,7 +70,7 @@ class ExecutionGraph:
         self._aggregation_id_map: dict[AggregationName, NodeID] = {}  # agg_name -> node_id
         self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = {}  # branch_name -> coalesce_name
-        self._output_sink: str = ""
+        self._default_sink: str = ""
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
 
@@ -310,7 +310,7 @@ class ExecutionGraph:
         sinks: dict[str, SinkProtocol],
         aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
         gates: list[GateSettings],
-        output_sink: str,
+        default_sink: str,
         coalesce_settings: list[CoalesceSettings] | None = None,
     ) -> ExecutionGraph:
         """Build ExecutionGraph from plugin instances.
@@ -324,7 +324,7 @@ class ExecutionGraph:
             sinks: Dict of sink_name -> instantiated sink
             aggregations: Dict of agg_name -> (transform_instance, AggregationSettings)
             gates: Config-driven gate settings
-            output_sink: Default output sink name
+            default_sink: Default output sink name
             coalesce_settings: Coalesce configs for fork/join patterns
 
         Returns:
@@ -395,7 +395,7 @@ class ExecutionGraph:
             )
 
         graph._sink_id_map = dict(sink_ids)
-        graph._output_sink = output_sink
+        graph._default_sink = default_sink
 
         # Build transform chain
         transform_ids: dict[int, NodeID] = {}
@@ -598,26 +598,26 @@ class ExecutionGraph:
                 if i + 1 < len(gate_sequence):
                     next_node_id = gate_sequence[i + 1][0]
                 else:
-                    if SinkName(output_sink) not in sink_ids:
+                    if SinkName(default_sink) not in sink_ids:
                         raise GraphValidationError(
                             f"Gate '{gate_config.name}' has 'continue' route but is the last gate "
-                            f"and output_sink '{output_sink}' is not in configured sinks. "
+                            f"and default_sink '{default_sink}' is not in configured sinks. "
                             f"Available sinks: {sorted(sink_ids.keys())}"
                         )
-                    next_node_id = sink_ids[SinkName(output_sink)]
+                    next_node_id = sink_ids[SinkName(default_sink)]
 
                 if not graph._graph.has_edge(gid, next_node_id, key="continue"):
                     graph.add_edge(gid, next_node_id, label="continue", mode=RoutingMode.MOVE)
 
         # ===== CONNECT FINAL NODE TO OUTPUT (NO GATES CASE) =====
-        if not gates and SinkName(output_sink) in sink_ids:
-            graph.add_edge(prev_node_id, sink_ids[SinkName(output_sink)], label="continue", mode=RoutingMode.MOVE)
+        if not gates and SinkName(default_sink) in sink_ids:
+            graph.add_edge(prev_node_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
 
         # ===== CONNECT COALESCE TO OUTPUT =====
         if coalesce_settings:
             for coalesce_id in coalesce_ids.values():
-                if SinkName(output_sink) in sink_ids:
-                    graph.add_edge(coalesce_id, sink_ids[SinkName(output_sink)], label="continue", mode=RoutingMode.MOVE)
+                if SinkName(default_sink) in sink_ids:
+                    graph.add_edge(coalesce_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
 
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
@@ -674,9 +674,9 @@ class ExecutionGraph:
         """
         return dict(self._branch_to_coalesce)
 
-    def get_output_sink(self) -> str:
-        """Get the output sink name."""
-        return self._output_sink
+    def get_default_sink(self) -> str:
+        """Get the default sink name."""
+        return self._default_sink
 
     def get_route_label(self, from_node_id: str, sink_name: str) -> str:
         """Get the route label for an edge from a gate to a sink.

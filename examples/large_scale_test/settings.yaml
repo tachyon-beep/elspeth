@@ -12,7 +12,7 @@
 # Explore lineage:
 #   elspeth explain --run latest --row 1234
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/large_scale_test/input.csv
@@ -53,7 +53,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail
 landscape:

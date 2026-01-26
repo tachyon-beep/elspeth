@@ -5,7 +5,7 @@
 # Run with:
 #   uv run elspeth run -s examples/boolean_routing/settings.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/boolean_routing/input.csv
@@ -37,7 +37,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: rejected
+default_sink: rejected
 
 landscape:
   url: sqlite:///examples/boolean_routing/runs/audit.db

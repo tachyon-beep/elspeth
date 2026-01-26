@@ -515,7 +515,7 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -525,7 +525,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Should have: source -> output_sink
@@ -554,7 +554,7 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -564,7 +564,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Should not raise
@@ -596,7 +596,7 @@ class TestExecutionGraphFromConfig:
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
                 RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
-            output_sink="output",
+            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -606,7 +606,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Should have: source -> passthrough -> field_mapper -> output_sink
@@ -656,7 +656,7 @@ class TestExecutionGraphFromConfig:
                     routes={"true": "flagged", "false": "continue"},
                 ),
             ],
-            output_sink="results",
+            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -666,7 +666,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Should have:
@@ -704,7 +704,7 @@ class TestExecutionGraphFromConfig:
                     routes={"true": "nonexistent_sink", "false": "continue"},
                 ),
             ],
-            output_sink="output",
+            default_sink="output",
         )
 
         with pytest.raises(GraphValidationError) as exc_info:
@@ -715,7 +715,7 @@ class TestExecutionGraphFromConfig:
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(config.gates),
-                output_sink=config.output_sink,
+                default_sink=config.default_sink,
             )
 
         assert "nonexistent_sink" in str(exc_info.value)
@@ -743,7 +743,7 @@ class TestExecutionGraphFromConfig:
                 "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
                 "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="results",
+            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -753,7 +753,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         sink_map = graph.get_sink_id_map()
 
@@ -787,7 +787,7 @@ class TestExecutionGraphFromConfig:
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
                 RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
-            output_sink="output",
+            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -797,7 +797,7 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         transform_map = graph.get_transform_id_map()
 
@@ -806,7 +806,7 @@ class TestExecutionGraphFromConfig:
         assert 1 in transform_map  # field_mapper
         assert transform_map[0] != transform_map[1]
 
-    def test_get_output_sink(self, plugin_manager) -> None:
+    def test_get_default_sink(self, plugin_manager) -> None:
         """Get the output sink name."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -829,7 +829,7 @@ class TestExecutionGraphFromConfig:
                 "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
                 "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="results",
+            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -839,10 +839,10 @@ class TestExecutionGraphFromConfig:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
-        assert graph.get_output_sink() == "results"
+        assert graph.get_default_sink() == "results"
 
 
 class TestExecutionGraphRouteMapping:
@@ -879,7 +879,7 @@ class TestExecutionGraphRouteMapping:
                     routes={"true": "flagged", "false": "continue"},
                 ),
             ],
-            output_sink="results",
+            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -889,7 +889,7 @@ class TestExecutionGraphRouteMapping:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Get the config gate's node_id
@@ -928,7 +928,7 @@ class TestExecutionGraphRouteMapping:
                     routes={"true": "continue", "false": "continue"},
                 ),
             ],
-            output_sink="results",
+            default_sink="results",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -938,7 +938,7 @@ class TestExecutionGraphRouteMapping:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         gate_node_id = graph.get_config_gate_id_map()["gate"]
 
@@ -981,7 +981,7 @@ class TestExecutionGraphRouteMapping:
                     routes={"true": "output-sink", "false": "quarantine-bucket"},
                 ),
             ],
-            output_sink="output-sink",
+            default_sink="output-sink",
         )
 
         # DAG compilation should succeed with hyphenated sink names
@@ -992,7 +992,7 @@ class TestExecutionGraphRouteMapping:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Verify both hyphenated sinks exist
@@ -1129,7 +1129,7 @@ class TestMultiEdgeScenarios:
                     fork_to=["path_a", "path_b"],
                 ),
             ],
-            output_sink="output",
+            default_sink="output",
         )
 
         plugins = instantiate_plugins_from_config(config)
@@ -1139,7 +1139,7 @@ class TestMultiEdgeScenarios:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Validate graph is still valid (DAG, has source and sink)
@@ -1208,7 +1208,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1234,7 +1234,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1273,7 +1273,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1299,7 +1299,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1345,7 +1345,7 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "path_c": SinkSettings(plugin="csv", options={"path": "path_c.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1371,7 +1371,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1416,7 +1416,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1448,7 +1448,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         coalesce_map = graph.get_coalesce_id_map()
@@ -1488,7 +1488,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1514,7 +1514,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
         branch_map = graph.get_branch_to_coalesce_map()
@@ -1555,7 +1555,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1581,7 +1581,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1617,7 +1617,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1651,7 +1651,7 @@ class TestCoalesceNodes:
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                output_sink=settings.output_sink,
+                default_sink=settings.default_sink,
                 coalesce_settings=settings.coalesce,
             )
 
@@ -1680,7 +1680,7 @@ class TestCoalesceNodes:
                 sinks={
                     "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 },
-                output_sink="output",
+                default_sink="output",
                 coalesce=[
                     CoalesceSettings(
                         name="empty_merge",
@@ -1716,7 +1716,7 @@ class TestCoalesceNodes:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1744,7 +1744,7 @@ class TestCoalesceNodes:
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                output_sink=settings.output_sink,
+                default_sink=settings.default_sink,
                 coalesce_settings=settings.coalesce,
             )
 
@@ -1778,7 +1778,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             row_plugins=[
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
@@ -1815,7 +1815,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1867,7 +1867,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1893,7 +1893,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -1932,7 +1932,7 @@ class TestCoalesceNodes:
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -1960,7 +1960,7 @@ class TestCoalesceNodes:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -2310,7 +2310,7 @@ output_sink: output
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
 
@@ -2543,7 +2543,7 @@ class TestDeterministicNodeIDs:
                 )
             ],
             sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="out",
+            default_sink="out",
         )
 
         # Build graph twice with same config
@@ -2554,7 +2554,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins1["sinks"],
             aggregations=plugins1["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         plugins2 = instantiate_plugins_from_config(config)
@@ -2564,7 +2564,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins2["sinks"],
             aggregations=plugins2["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
 
         # Node IDs must be identical
@@ -2594,7 +2594,7 @@ class TestDeterministicNodeIDs:
             ),
             row_plugins=[],
             sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="out",
+            default_sink="out",
         )
 
         config2 = ElspethSettings(
@@ -2608,7 +2608,7 @@ class TestDeterministicNodeIDs:
             ),
             row_plugins=[],
             sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="out",
+            default_sink="out",
         )
 
         plugins1 = instantiate_plugins_from_config(config1)
@@ -2618,7 +2618,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins1["sinks"],
             aggregations=plugins1["aggregations"],
             gates=list(config1.gates),
-            output_sink=config1.output_sink,
+            default_sink=config1.output_sink,
         )
 
         plugins2 = instantiate_plugins_from_config(config2)
@@ -2628,7 +2628,7 @@ class TestDeterministicNodeIDs:
             sinks=plugins2["sinks"],
             aggregations=plugins2["aggregations"],
             gates=list(config2.gates),
-            output_sink=config2.output_sink,
+            default_sink=config2.output_sink,
         )
 
         # Source node IDs should differ (different config)

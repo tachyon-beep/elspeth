@@ -19,7 +19,7 @@
 # Run with:
 #   uv run elspeth run -s examples/deaggregation/settings.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/deaggregation/input.csv
@@ -53,7 +53,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:///examples/deaggregation/runs/audit.db

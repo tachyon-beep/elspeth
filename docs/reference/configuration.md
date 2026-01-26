@@ -154,7 +154,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output  # Default destination
+default_sink: output  # Default destination
 ```
 
 | Field | Type | Required | Description |
@@ -670,7 +670,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Transforms
 row_plugins:

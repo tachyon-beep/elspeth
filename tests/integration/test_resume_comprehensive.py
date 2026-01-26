@@ -248,7 +248,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,
@@ -351,7 +351,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,
@@ -539,7 +539,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -726,7 +726,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -909,7 +909,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -1092,7 +1092,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         # Write partial output (row 0 already written before crash)
         with open(output_path, "w") as f:
@@ -1260,7 +1260,7 @@ class TestResumeComprehensive:
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {"default": "sink"}
         resume_graph._transform_id_map = {0: "xform"}
-        resume_graph._output_sink = "default"
+        resume_graph._default_sink = "default"
 
         # CRITICAL: Must crash with clear error, not silently degrade to str
         with pytest.raises(ValueError, match=r"unsupported type 'geo-point'"):

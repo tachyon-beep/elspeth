@@ -219,7 +219,7 @@ class TestOrchestratorResumeRowProcessing:
         graph._transform_id_map = {0: "transform-node"}
         graph._config_gate_id_map = {}
         graph._route_resolution_map = {}
-        graph._output_sink = "default"
+        graph._default_sink = "default"
 
         # Create checkpoint at row 2 (rows 3-4 are unprocessed)
         checkpoint_manager.create_checkpoint(

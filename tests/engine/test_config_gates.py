@@ -260,7 +260,7 @@ def _build_test_graph_with_config_gates(
     graph._transform_id_map = transform_ids
     graph._config_gate_id_map = config_gate_ids
     graph._route_resolution_map = route_resolution_map
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 
@@ -435,7 +435,7 @@ class TestConfigGateIntegration:
                 "a_sink": SinkSettings(plugin="csv", options={"path": "a.csv", "schema": {"fields": "dynamic"}}),
                 "b_sink": SinkSettings(plugin="csv", options={"path": "b.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="a_sink",
+            default_sink="a_sink",
             gates=[
                 GateSettingsConfig(
                     name="category_router",
@@ -458,7 +458,7 @@ class TestConfigGateIntegration:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Build PipelineConfig with actual plugin instances
@@ -537,7 +537,7 @@ class TestConfigGateIntegration:
                 "priority_1": SinkSettings(plugin="csv", options={"path": "priority_1.csv", "schema": {"fields": "dynamic"}}),
                 "priority_2": SinkSettings(plugin="csv", options={"path": "priority_2.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="priority_1",
+            default_sink="priority_1",
             gates=[
                 GateSettingsConfig(
                     name="priority_router",
@@ -560,7 +560,7 @@ class TestConfigGateIntegration:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Build PipelineConfig with actual plugin instances
@@ -677,7 +677,7 @@ class TestConfigGateFromSettings:
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
                 "review": SinkSettings(plugin="csv", options={"path": "review.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="quality_check",
@@ -694,7 +694,7 @@ class TestConfigGateFromSettings:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Should have: source, config_gate, output_sink, review_sink
@@ -733,7 +733,7 @@ class TestConfigGateFromSettings:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="bad_gate",
@@ -751,7 +751,7 @@ class TestConfigGateFromSettings:
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                output_sink=settings.output_sink,
+                default_sink=settings.default_sink,
             )
 
         assert "nonexistent_sink" in str(exc_info.value)
@@ -778,7 +778,7 @@ class TestConfigGateFromSettings:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             row_plugins=[
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
@@ -798,7 +798,7 @@ class TestConfigGateFromSettings:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
         order = graph.topological_order()
 

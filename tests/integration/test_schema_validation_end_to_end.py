@@ -379,7 +379,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "options": {"path": "out.csv", "schema": {"fields": "dynamic"}},
             }
         },
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -396,5 +396,5 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )

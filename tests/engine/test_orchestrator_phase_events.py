@@ -98,7 +98,7 @@ class TestPhaseErrorEmission:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            output_sink="default",
+            default_sink="default",
         )
 
         config = PipelineConfig(
@@ -188,7 +188,7 @@ class TestPhaseErrorEmission:
             sinks={"default": as_sink(sink)},
             aggregations={},
             gates=[],
-            output_sink="default",
+            default_sink="default",
         )
 
         config = PipelineConfig(

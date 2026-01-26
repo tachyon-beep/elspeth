@@ -488,7 +488,7 @@ class TestPurgeCommand:
         settings = {
             "datasource": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {
                 "backend": "filesystem",
@@ -527,7 +527,7 @@ class TestPurgeCommand:
         settings = {
             "datasource": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {
                 "backend": "azure_blob",  # Unsupported backend
@@ -818,7 +818,7 @@ output_sink: output
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings_config.gates),
-            output_sink=settings_config.output_sink,
+            default_sink=settings_config.default_sink,
             coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
         )
         graph.validate()

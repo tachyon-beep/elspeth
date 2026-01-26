@@ -104,7 +104,7 @@ class TestForkGroupIDConsistency:
                 "branch_a": {"plugin": "collect_sink"},
                 "branch_b": {"plugin": "collect_sink"},
             },
-            output_sink="branch_a",
+            default_sink="branch_a",
         )
 
         config = PipelineConfig(
@@ -162,7 +162,7 @@ class TestForkGroupIDConsistency:
                 "branch_a": {"plugin": "collect_sink"},
                 "branch_b": {"plugin": "collect_sink"},
             },
-            output_sink="branch_a",
+            default_sink="branch_a",
         )
 
         config = PipelineConfig(
@@ -236,7 +236,7 @@ class TestJoinGroupIDConsistency:
                     merge="union",
                 )
             },
-            output_sink="output",
+            default_sink="output",
         )
 
         config = PipelineConfig(
@@ -291,7 +291,7 @@ class TestJoinGroupIDConsistency:
                     merge="union",
                 )
             },
-            output_sink="output",
+            default_sink="output",
         )
 
         config = PipelineConfig(
@@ -363,7 +363,7 @@ class TestJoinGroupIDConsistency:
                     merge="union",
                 )
             },
-            output_sink="output",
+            default_sink="output",
         )
 
         config = PipelineConfig(

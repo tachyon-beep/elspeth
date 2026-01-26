@@ -458,7 +458,7 @@ class TestOrchestratorAcceptsGraph:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -468,7 +468,7 @@ class TestOrchestratorAcceptsGraph:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 

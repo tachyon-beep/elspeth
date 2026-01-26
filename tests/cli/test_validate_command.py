@@ -35,7 +35,7 @@ class TestValidateCommand:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
         }
         config_file = tmp_path / "valid.yaml"
         config_file.write_text(yaml.dump(config))
@@ -61,7 +61,7 @@ class TestValidateCommand:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
         }
         config_file = tmp_path / "missing_datasource.yaml"
         config_file.write_text(yaml.dump(config))
@@ -88,7 +88,7 @@ class TestValidateCommand:
                     },
                 },
             },
-            "output_sink": "nonexistent",  # References non-existent sink
+            "default_sink": "nonexistent",  # References non-existent sink
         }
         config_file = tmp_path / "invalid_output_sink.yaml"
         config_file.write_text(yaml.dump(config))

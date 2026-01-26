@@ -193,7 +193,7 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     graph._transform_id_map = transform_ids
     graph._config_gate_id_map = config_gate_ids
     graph._route_resolution_map = route_resolution_map
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 
@@ -2645,7 +2645,7 @@ class TestRetryIntegration:
         settings = ElspethSettings(
             datasource={"plugin": "memory"},
             sinks={"default": {"plugin": "memory"}},
-            output_sink="default",
+            default_sink="default",
             retry={
                 "max_attempts": 5,
                 "initial_delay_seconds": 0.001,
@@ -2809,7 +2809,7 @@ class TestRetryIntegration:
         settings = ElspethSettings(
             datasource={"plugin": "memory"},
             sinks={"default": {"plugin": "memory"}},
-            output_sink="default",
+            default_sink="default",
             retry={
                 "max_attempts": 3,
                 "initial_delay_seconds": 0.001,

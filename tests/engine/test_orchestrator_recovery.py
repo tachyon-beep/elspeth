@@ -242,7 +242,7 @@ class TestOrchestratorResume:
                 options={"schema": {"fields": "dynamic"}},
             ),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="default",
+            default_sink="default",
         )
         plugins = instantiate_plugins_from_config(settings)
         return ExecutionGraph.from_plugin_instances(
@@ -251,7 +251,7 @@ class TestOrchestratorResume:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
 

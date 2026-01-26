@@ -128,7 +128,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:///examples/openrouter_multi_query_assessment/runs/audit.db

@@ -193,7 +193,7 @@ def _build_fork_coalesce_graph(
         )
 
     # Create edges from fork gates to coalesce nodes (for branches in coalesce)
-    output_sink_id = sink_ids[settings.output_sink]
+    output_sink_id = sink_ids[settings.default_sink]
 
     for gate_config in settings.gates:
         if gate_config.fork_to:
@@ -238,7 +238,7 @@ def _build_fork_coalesce_graph(
     graph._coalesce_id_map = coalesce_ids
     graph._branch_to_coalesce = branch_to_coalesce
     graph._route_resolution_map = route_resolution_map
-    graph._output_sink = settings.output_sink
+    graph._default_sink = settings.default_sink
 
     return graph
 
@@ -268,7 +268,7 @@ class TestForkCoalescePipeline:
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -329,7 +329,7 @@ class TestForkCoalescePipeline:
                 options={},
             ),
             sinks={"output": SinkSettings(plugin="collect_sink", options={})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -416,7 +416,7 @@ class TestForkCoalescePipeline:
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -479,7 +479,7 @@ class TestForkCoalescePipeline:
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -550,7 +550,7 @@ class TestCoalesceAuditTrail:
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",

@@ -105,7 +105,7 @@ class TestLifecycleHooks:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
         orchestrator.run(config, graph=graph)
@@ -188,7 +188,7 @@ class TestLifecycleHooks:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
         orchestrator.run(config, graph=graph)
@@ -269,7 +269,7 @@ class TestLifecycleHooks:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
 
@@ -340,7 +340,7 @@ class TestSourceLifecycleHooks:
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
         orchestrator.run(config, graph=graph)
@@ -414,7 +414,7 @@ class TestSinkLifecycleHooks:
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
         orchestrator.run(config, graph=graph)
@@ -504,7 +504,7 @@ class TestSinkLifecycleHooks:
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: "transform"}
         graph._sink_id_map = {"output": "sink"}
-        graph._output_sink = "output"
+        graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
 

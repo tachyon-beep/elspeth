@@ -486,7 +486,7 @@ class TestOrchestratorCheckpointing:
             ("config_gate_split", "true"): "good",
             ("config_gate_split", "false"): "bad",
         }
-        graph._output_sink = "good"
+        graph._default_sink = "good"
 
         orchestrator = Orchestrator(
             db=db,

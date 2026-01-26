@@ -49,7 +49,7 @@ class TestCLIIntegration:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             # Use temp-path DB to avoid polluting CWD during tests
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
@@ -172,7 +172,7 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -229,7 +229,7 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"

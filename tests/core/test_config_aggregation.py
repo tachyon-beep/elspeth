@@ -259,7 +259,7 @@ class TestElspethSettingsAggregations:
         settings = ElspethSettings(
             datasource=DatasourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
-            output_sink="output",
+            default_sink="output",
         )
         assert settings.aggregations == []
 
@@ -276,7 +276,7 @@ class TestElspethSettingsAggregations:
         settings = ElspethSettings(
             datasource=DatasourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
-            output_sink="output",
+            default_sink="output",
             aggregations=[
                 AggregationSettings(
                     name="batch_stats",
@@ -302,7 +302,7 @@ class TestElspethSettingsAggregations:
             ElspethSettings(
                 datasource=DatasourceSettings(plugin="csv"),
                 sinks={"output": SinkSettings(plugin="csv")},
-                output_sink="output",
+                default_sink="output",
                 aggregations=[
                     AggregationSettings(
                         name="batch_stats",

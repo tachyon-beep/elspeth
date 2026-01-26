@@ -477,7 +477,7 @@ class TestNodeTypeMetadata:
                 "high": SinkSettings(plugin="csv", options={"path": "high.csv", "schema": {"fields": "dynamic"}}),
                 "low": SinkSettings(plugin="csv", options={"path": "low.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="low",
+            default_sink="low",
             gates=[
                 GateSettings(
                     name="priority_gate",
@@ -494,7 +494,7 @@ class TestNodeTypeMetadata:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         config = PipelineConfig(

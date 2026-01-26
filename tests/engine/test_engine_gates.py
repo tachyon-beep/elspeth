@@ -337,7 +337,7 @@ def _build_test_graph_with_config_gates(
     graph._transform_id_map = transform_ids
     graph._config_gate_id_map = config_gate_ids
     graph._route_resolution_map = route_resolution_map
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 
@@ -602,7 +602,7 @@ class TestRouteLabelResolution:
                 "review_queue": SinkSettings(plugin="csv", options={"path": "review_queue.csv", "schema": {"fields": "dynamic"}}),
                 "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="main_output",
+            default_sink="main_output",
             gates=[
                 GateSettingsConfig(
                     name="quality_router",
@@ -623,7 +623,7 @@ class TestRouteLabelResolution:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Verify route resolution map
@@ -670,7 +670,7 @@ class TestRouteLabelResolution:
                 "premium_sink": SinkSettings(plugin="csv", options={"path": "premium.csv", "schema": {"fields": "dynamic"}}),
                 "standard_sink": SinkSettings(plugin="csv", options={"path": "standard.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="standard_sink",
+            default_sink="standard_sink",
             gates=[
                 GateSettingsConfig(
                     name="category_router",
@@ -691,7 +691,7 @@ class TestRouteLabelResolution:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         source = ListSource(
@@ -804,7 +804,7 @@ class TestForkCreatesChildTokens:
                 "analysis_a": SinkSettings(plugin="csv", options={"path": "analysis_a.csv", "schema": {"fields": "dynamic"}}),
                 "analysis_b": SinkSettings(plugin="csv", options={"path": "analysis_b.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettingsConfig(
                     name="parallel_processor",
@@ -823,7 +823,7 @@ class TestForkCreatesChildTokens:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Verify gate node exists with fork config
@@ -877,7 +877,7 @@ class TestForkCreatesChildTokens:
                     fork_to=["path_a", "path_b"],
                 ),
             ],
-            output_sink="path_a",  # Default, but fork should override for path_b
+            default_sink="path_a",  # Default, but fork should override for path_b
         )
 
         plugins = instantiate_plugins_from_config(settings)
@@ -888,7 +888,7 @@ class TestForkCreatesChildTokens:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         config = PipelineConfig(
@@ -963,7 +963,7 @@ class TestForkCreatesChildTokens:
                     fork_to=["analysis", "archive"],
                 ),
             ],
-            output_sink="analysis",
+            default_sink="analysis",
         )
 
         plugins = instantiate_plugins_from_config(settings)
@@ -974,7 +974,7 @@ class TestForkCreatesChildTokens:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         config = PipelineConfig(
@@ -1231,7 +1231,7 @@ class TestEndToEndPipeline:
             ("config_gate_confidence_gate", "true"): "continue",
             ("config_gate_confidence_gate", "false"): "low_conf",
         }
-        graph._output_sink = "default"
+        graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
         result = orchestrator.run(config, graph=graph)
@@ -1785,7 +1785,7 @@ class TestErrorHandling:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettingsConfig(
                     name="bad_route",
@@ -1803,5 +1803,5 @@ class TestErrorHandling:
                 sinks=plugins["sinks"],
                 aggregations=plugins["aggregations"],
                 gates=list(settings.gates),
-                output_sink=settings.output_sink,
+                default_sink=settings.default_sink,
             )

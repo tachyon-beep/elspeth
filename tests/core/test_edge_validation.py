@@ -207,7 +207,7 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
             sinks={"out": as_sink(MockSink())},
             aggregations={},
             gates=[],
-            output_sink="out",
+            default_sink="out",
         )
 
 

@@ -195,7 +195,7 @@ def run(
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
@@ -215,15 +215,15 @@ def run(
 
         if dry_run:
             typer.echo("Dry run mode - would execute:")
-            typer.echo(f"  Source: {config.datasource.plugin}")
-            typer.echo(f"  Transforms: {len(config.row_plugins)}")
+            typer.echo(f"  Source: {config.source.plugin}")
+            typer.echo(f"  Transforms: {len(config.transforms)}")
             typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
             return
 
         # Safety check: require explicit --execute flag
         if not execute:
             typer.echo("Pipeline configuration valid.")
-            typer.echo(f"  Source: {config.datasource.plugin}")
+            typer.echo(f"  Source: {config.source.plugin}")
             typer.echo("")
             typer.echo("To execute, add --execute (or -x) flag:", err=True)
             typer.echo(f"  elspeth run -s {settings} --execute", err=True)
@@ -364,8 +364,8 @@ def _execute_pipeline(
     manager = _get_plugin_manager()
 
     # Instantiate source via PluginManager
-    source_plugin = config.datasource.plugin
-    source_options = dict(config.datasource.options)
+    source_plugin = config.source.plugin
+    source_options = dict(config.source.options)
 
     source_cls = manager.get_source_by_name(source_plugin)
     source = source_cls(source_options)
@@ -384,9 +384,9 @@ def _execute_pipeline(
     db = LandscapeDB.from_url(db_url)
 
     try:
-        # Instantiate transforms from row_plugins via PluginManager
+        # Instantiate transforms from transforms via PluginManager
         transforms: list[BaseTransform] = []
-        for plugin_config in config.row_plugins:
+        for plugin_config in config.transforms:
             plugin_name = plugin_config.plugin
             plugin_options = dict(plugin_config.options)
 
@@ -838,7 +838,7 @@ def validate(
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
@@ -852,8 +852,8 @@ def validate(
         raise typer.Exit(1) from None
 
     typer.echo("✅ Pipeline configuration valid!")
-    typer.echo(f"  Source: {config.datasource.plugin}")
-    typer.echo(f"  Transforms: {len(config.row_plugins)}")
+    typer.echo(f"  Source: {config.source.plugin}")
+    typer.echo(f"  Transforms: {len(config.transforms)}")
     typer.echo(f"  Aggregations: {len(config.aggregations)}")
     typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
     typer.echo(f"  Graph: {graph.node_count} nodes, {graph.edge_count} edges")
@@ -1242,7 +1242,7 @@ def _build_validation_graph(settings_config: ElspethSettings) -> ExecutionGraph:
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=list(settings_config.gates),
-        output_sink=settings_config.output_sink,
+        default_sink=settings_config.default_sink,
         coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
     )
 
@@ -1274,7 +1274,7 @@ def _build_execution_graph(settings_config: ElspethSettings) -> ExecutionGraph:
         sinks=resume_plugins["sinks"],
         aggregations=resume_plugins["aggregations"],
         gates=list(settings_config.gates),
-        output_sink=settings_config.output_sink,
+        default_sink=settings_config.default_sink,
         coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
     )
 

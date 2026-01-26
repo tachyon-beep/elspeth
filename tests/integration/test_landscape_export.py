@@ -66,7 +66,7 @@ class TestLandscapeExport:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -181,7 +181,7 @@ class TestLandscapeExport:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -329,7 +329,7 @@ class TestSignedExportDeterminism:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -401,7 +401,7 @@ class TestSignedExportDeterminism:
                         },
                     },
                 },
-                "output_sink": "output",
+                "default_sink": "output",
                 "landscape": {
                     "url": f"sqlite:///{db_path}",
                     "export": {

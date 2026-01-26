@@ -60,7 +60,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
                 },
             ),
         },
-        output_sink="output",
+        default_sink="output",
     )
 
     # Build graph with real PluginManager
@@ -75,7 +75,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=list(config.gates),
-        output_sink=config.output_sink,
+        default_sink=config.default_sink,
     )
 
     # Validation should pass (schemas are compatible)
@@ -217,7 +217,7 @@ def test_static_schema_validation(plugin_manager):
         sinks={"output": as_sink(sink)},
         aggregations={},
         gates=[],
-        output_sink="output",
+        default_sink="output",
     )
 
     # Validation should pass (schemas are compatible - all use StaticSchema)

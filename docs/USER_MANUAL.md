@@ -361,7 +361,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:///runs/audit.db
@@ -400,7 +400,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:///runs/audit.db
@@ -437,7 +437,7 @@ sinks:
     options:
       path: output/needs_review.csv
 
-output_sink: approved
+default_sink: approved
 
 landscape:
   url: sqlite:///runs/audit.db

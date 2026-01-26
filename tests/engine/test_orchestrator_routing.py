@@ -129,7 +129,7 @@ class TestOrchestratorOutputSinkRouting:
 
         db = LandscapeDB.in_memory()
 
-        # Config with output_sink="results" (NOT "default")
+        # Config with default_sink="results" (NOT "default")
         settings = ElspethSettings(
             datasource=DatasourceSettings(
                 plugin="csv",
@@ -143,7 +143,7 @@ class TestOrchestratorOutputSinkRouting:
                 "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
                 "errors": SinkSettings(plugin="csv", options={"path": "errors.csv", "schema": {"fields": "dynamic"}}),
             },
-            output_sink="results",
+            default_sink="results",
         )
         plugins = instantiate_plugins_from_config(settings)
 
@@ -153,7 +153,7 @@ class TestOrchestratorOutputSinkRouting:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 

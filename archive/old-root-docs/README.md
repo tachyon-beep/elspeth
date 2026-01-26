@@ -106,7 +106,7 @@ row_plugins:
       model: gpt-4o-mini
       prompt: "Evaluate this submission: {{ text }}"
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true

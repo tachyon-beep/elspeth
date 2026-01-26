@@ -117,7 +117,7 @@ def plugin_manager() -> PluginManager:
 
                 gates=list(config.gates),
 
-                output_sink=config.output_sink,
+                default_sink=config.default_sink,
 
             )
     """

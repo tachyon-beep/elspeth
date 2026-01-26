@@ -162,7 +162,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -224,7 +224,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -299,7 +299,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -333,7 +333,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -403,7 +403,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -462,7 +462,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -504,7 +504,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -565,7 +565,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -637,7 +637,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -696,7 +696,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 
@@ -752,7 +752,7 @@ class TestCoalesceWiring:
                 },
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="output",
+            default_sink="output",
             row_plugins=[
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
                 RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 1
@@ -823,7 +823,7 @@ class TestCoalesceWiring:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
             coalesce_settings=settings.coalesce,
         )
 

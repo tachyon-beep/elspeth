@@ -123,7 +123,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail
 landscape:
@@ -274,7 +274,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail
 landscape:

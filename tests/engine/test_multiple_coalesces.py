@@ -44,7 +44,7 @@ class TestMultipleCoalescePoints:
                     options={"schema": {"fields": "dynamic"}},
                 ),
             ],
-            output_sink="output",
+            default_sink="output",
             sinks={
                 "output": SinkSettings(
                     plugin="json",
@@ -95,7 +95,7 @@ class TestMultipleCoalescePoints:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             coalesce_settings=list(settings.coalesce),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # CRITICAL: Verify branch_to_coalesce mapping is correct for multiple coalesce points

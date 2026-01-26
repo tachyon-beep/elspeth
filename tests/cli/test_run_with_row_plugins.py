@@ -135,7 +135,7 @@ class TestRunWithTransforms:
                     "options": {"path": str(output_csv), "schema": DYNAMIC_SCHEMA},
                 }
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path}/audit.db"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -170,7 +170,7 @@ class TestRunWithTransforms:
                     "options": {"path": str(output_csv), "schema": DYNAMIC_SCHEMA},
                 }
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path}/audit.db"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -210,7 +210,7 @@ class TestRunWithTransforms:
                     "options": {"path": str(output_csv), "schema": DYNAMIC_SCHEMA},
                 }
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path}/audit.db"},
         }
         settings_file = tmp_path / "settings.yaml"

@@ -775,7 +775,7 @@ class Orchestrator:
         sink_id_map = graph.get_sink_id_map()
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
-        output_sink_name = graph.get_output_sink()
+        default_sink_name = graph.get_default_sink()
 
         # Assign node_ids to all plugins
         self._assign_plugin_node_ids(
@@ -992,7 +992,7 @@ class Orchestrator:
                         if result.outcome == RowOutcome.COMPLETED:
                             rows_succeeded += 1
                             # Fork children route to branch-named sink if it exists
-                            sink_name = output_sink_name
+                            sink_name = default_sink_name
                             if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                                 sink_name = result.token.branch_name
 
@@ -1025,7 +1025,7 @@ class Orchestrator:
                         elif result.outcome == RowOutcome.COALESCED:
                             # Merged token from coalesce - route to output sink
                             rows_coalesced += 1
-                            pending_tokens[output_sink_name].append(result.token)
+                            pending_tokens[default_sink_name].append(result.token)
                         elif result.outcome == RowOutcome.EXPANDED:
                             # Deaggregation parent token - children counted separately
                             rows_expanded += 1
@@ -1065,7 +1065,7 @@ class Orchestrator:
                         processor=processor,
                         ctx=ctx,
                         pending_tokens=pending_tokens,
-                        output_sink_name=output_sink_name,
+                        default_sink_name=default_sink_name,
                         run_id=run_id,
                         recorder=recorder,
                         checkpoint=False,  # Checkpointing now happens after sink write
@@ -1085,7 +1085,7 @@ class Orchestrator:
                         if outcome.merged_token is not None:
                             # Successful merge - route to output sink
                             rows_coalesced += 1
-                            pending_tokens[output_sink_name].append(outcome.merged_token)
+                            pending_tokens[default_sink_name].append(outcome.merged_token)
                         elif outcome.failure_reason:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
                             # Audit trail recorded by executor: each consumed token has
@@ -1600,7 +1600,7 @@ class Orchestrator:
         transform_id_map = graph.get_transform_id_map()
         config_gate_id_map = graph.get_config_gate_id_map()
         coalesce_id_map = graph.get_coalesce_id_map()
-        output_sink_name = graph.get_output_sink()
+        default_sink_name = graph.get_default_sink()
 
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
@@ -1775,7 +1775,7 @@ class Orchestrator:
                 for result in results:
                     if result.outcome == RowOutcome.COMPLETED:
                         rows_succeeded += 1
-                        sink_name = output_sink_name
+                        sink_name = default_sink_name
                         if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                             sink_name = result.token.branch_name
 
@@ -1803,7 +1803,7 @@ class Orchestrator:
                         pass
                     elif result.outcome == RowOutcome.COALESCED:
                         rows_coalesced += 1
-                        pending_tokens[output_sink_name].append(result.token)
+                        pending_tokens[default_sink_name].append(result.token)
                     elif result.outcome == RowOutcome.EXPANDED:
                         rows_expanded += 1
                     elif result.outcome == RowOutcome.BUFFERED:
@@ -1818,7 +1818,7 @@ class Orchestrator:
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
-                    output_sink_name=output_sink_name,
+                    default_sink_name=default_sink_name,
                     run_id=run_id,
                     recorder=recorder,
                     checkpoint=False,  # No checkpointing during resume
@@ -1834,7 +1834,7 @@ class Orchestrator:
                 for outcome in pending_outcomes:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
-                        pending_tokens[output_sink_name].append(outcome.merged_token)
+                        pending_tokens[default_sink_name].append(outcome.merged_token)
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
                         rows_coalesce_failed += 1
@@ -1919,7 +1919,7 @@ class Orchestrator:
         processor: RowProcessor,
         ctx: PluginContext,
         pending_tokens: dict[str, list[TokenInfo]],
-        output_sink_name: str,
+        default_sink_name: str,
         run_id: str,
         recorder: LandscapeRecorder,
         checkpoint: bool = True,
@@ -1935,7 +1935,7 @@ class Orchestrator:
             processor: RowProcessor with aggregation executor
             ctx: Plugin context for transform execution
             pending_tokens: Dict of sink_name -> tokens to append results to
-            output_sink_name: Default sink for aggregation output
+            default_sink_name: Default sink for aggregation output
             run_id: Current run ID (for checkpointing)
             recorder: LandscapeRecorder for recording outcomes
             checkpoint: Whether to create checkpoints for flushed tokens
@@ -2012,10 +2012,10 @@ class Orchestrator:
                         run_id=run_id,
                         token_id=output_token.token_id,
                         outcome=RowOutcome.COMPLETED,
-                        sink_name=output_sink_name,
+                        sink_name=default_sink_name,
                     )
 
-                    pending_tokens[output_sink_name].append(output_token)
+                    pending_tokens[default_sink_name].append(output_token)
                     rows_succeeded += 1
 
                     # Checkpoint the flushed aggregation token
@@ -2038,10 +2038,10 @@ class Orchestrator:
                             run_id=run_id,
                             token_id=exp_token.token_id,
                             outcome=RowOutcome.COMPLETED,
-                            sink_name=output_sink_name,
+                            sink_name=default_sink_name,
                         )
 
-                        pending_tokens[output_sink_name].append(exp_token)
+                        pending_tokens[default_sink_name].append(exp_token)
                         rows_succeeded += 1
 
                         # Checkpoint each expanded token

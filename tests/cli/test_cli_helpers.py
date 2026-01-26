@@ -84,7 +84,7 @@ def test_instantiate_plugins_raises_on_invalid_plugin():
     config_dict = {
         "datasource": {"plugin": "nonexistent", "options": {}},
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)

@@ -121,7 +121,7 @@ class TestRunCommand:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{landscape_db}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -389,7 +389,7 @@ class TestRunCommandResourceCleanup:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{landscape_db}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -446,7 +446,7 @@ class TestRunCommandResourceCleanup:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{landscape_db}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -513,7 +513,7 @@ class TestRunCommandProgress:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{landscape_db}"},
         }
         settings_file = tmp_path / "settings.yaml"
@@ -684,7 +684,7 @@ landscape:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(config.gates),
-            output_sink=config.output_sink,
+            default_sink=config.default_sink,
         )
         # Use public API instead of private _graph attribute
         rebuilt_node_ids = set(rebuilt_graph.get_nx_graph().nodes())

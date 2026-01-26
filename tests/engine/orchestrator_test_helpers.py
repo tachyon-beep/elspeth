@@ -124,7 +124,7 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     graph._transform_id_map = transform_ids
     graph._config_gate_id_map = config_gate_ids
     graph._route_resolution_map = route_resolution_map
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 
@@ -176,7 +176,7 @@ def build_fork_test_graph(
     # Populate internal maps
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
+    graph._default_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
 
     # Build route resolution map with fork support
     route_resolution_map: dict[tuple[str, str], str] = {}

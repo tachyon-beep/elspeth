@@ -72,20 +72,20 @@ class TestElspethSettings:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
-        assert settings.datasource.plugin == "csv"
+        assert settings.source.plugin == "csv"
         assert settings.retry.max_attempts == 3  # default
 
     def test_nested_config(self) -> None:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             retry={"max_attempts": 5},
         )
         assert settings.retry.max_attempts == 5
@@ -94,12 +94,12 @@ class TestElspethSettings:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
         with pytest.raises(ValidationError):
-            settings.output_sink = "other"  # type: ignore[misc]
+            settings.default_sink = "other"  # type: ignore[misc]
 
 
 class TestLoadSettings:
@@ -110,7 +110,7 @@ class TestLoadSettings:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: "csv"
   options:
     path: "input.csv"
@@ -119,13 +119,13 @@ sinks:
     plugin: "csv"
     options:
       path: "output.csv"
-output_sink: "output"
+default_sink: "output"
 retry:
   max_attempts: 5
 """)
         settings = load_settings(config_file)
-        assert settings.datasource.plugin == "csv"
-        assert settings.datasource.options == {"path": "input.csv"}
+        assert settings.source.plugin == "csv"
+        assert settings.source.options == {"path": "input.csv"}
         assert settings.retry.max_attempts == 5
 
     def test_load_with_env_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,30 +133,30 @@ retry:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: "csv"
 sinks:
   output:
     plugin: "csv"
-output_sink: "output"
+default_sink: "output"
 """)
         # Environment variable should override YAML
-        monkeypatch.setenv("ELSPETH_DATASOURCE__PLUGIN", "json")
+        monkeypatch.setenv("ELSPETH_SOURCE__PLUGIN", "json")
 
         settings = load_settings(config_file)
-        assert settings.datasource.plugin == "json"
+        assert settings.source.plugin == "json"
 
     def test_load_validates_schema(self, tmp_path: Path) -> None:
         from elspeth.core.config import load_settings
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: "csv"
 sinks:
   output:
     plugin: "csv"
-output_sink: "output"
+default_sink: "output"
 concurrency:
   max_workers: -1
 """)
@@ -183,62 +183,62 @@ retry:
             load_settings(missing_file)
 
 
-class TestDatasourceSettings:
-    """DatasourceSettings matches architecture specification."""
+class TestSourceSettings:
+    """SourceSettings matches architecture specification."""
 
-    def test_datasource_settings_structure(self) -> None:
-        """DatasourceSettings has plugin and options."""
-        from elspeth.core.config import DatasourceSettings
+    def test_source_settings_structure(self) -> None:
+        """SourceSettings has plugin and options."""
+        from elspeth.core.config import SourceSettings
 
-        ds = DatasourceSettings(plugin="csv_local", options={"path": "data/input.csv"})
+        ds = SourceSettings(plugin="csv_local", options={"path": "data/input.csv"})
         assert ds.plugin == "csv_local"
         assert ds.options == {"path": "data/input.csv"}
 
-    def test_datasource_settings_options_default_empty(self) -> None:
+    def test_source_settings_options_default_empty(self) -> None:
         """Options defaults to empty dict."""
-        from elspeth.core.config import DatasourceSettings
+        from elspeth.core.config import SourceSettings
 
-        ds = DatasourceSettings(plugin="csv")
+        ds = SourceSettings(plugin="csv")
         assert ds.options == {}
 
-    def test_datasource_settings_frozen(self) -> None:
-        """DatasourceSettings is immutable."""
-        from elspeth.core.config import DatasourceSettings
+    def test_source_settings_frozen(self) -> None:
+        """SourceSettings is immutable."""
+        from elspeth.core.config import SourceSettings
 
-        ds = DatasourceSettings(plugin="csv")
+        ds = SourceSettings(plugin="csv")
         with pytest.raises(ValidationError):
             ds.plugin = "json"  # type: ignore[misc]
 
 
-class TestRowPluginSettings:
-    """RowPluginSettings matches architecture specification."""
+class TestTransformSettings:
+    """TransformSettings matches architecture specification."""
 
-    def test_row_plugin_settings_structure(self) -> None:
-        """RowPluginSettings has plugin and options (transforms only)."""
-        from elspeth.core.config import RowPluginSettings
+    def test_transform_settings_structure(self) -> None:
+        """TransformSettings has plugin and options (transforms only)."""
+        from elspeth.core.config import TransformSettings
 
-        # RowPluginSettings is now transform-only (gates are config-driven)
-        rp = RowPluginSettings(
+        # TransformSettings is now transform-only (gates are config-driven)
+        rp = TransformSettings(
             plugin="field_mapper",
             options={"field": "confidence", "min": 0.8},
         )
         assert rp.plugin == "field_mapper"
         assert rp.options == {"field": "confidence", "min": 0.8}
 
-    def test_row_plugin_settings_defaults(self) -> None:
-        """RowPluginSettings defaults: options is empty dict."""
-        from elspeth.core.config import RowPluginSettings
+    def test_transform_settings_defaults(self) -> None:
+        """TransformSettings defaults: options is empty dict."""
+        from elspeth.core.config import TransformSettings
 
-        rp = RowPluginSettings(plugin="passthrough")
+        rp = TransformSettings(plugin="passthrough")
         assert rp.plugin == "passthrough"
         assert rp.options == {}
 
-    def test_row_plugin_settings_requires_plugin(self) -> None:
+    def test_transform_settings_requires_plugin(self) -> None:
         """Plugin name is required."""
-        from elspeth.core.config import RowPluginSettings
+        from elspeth.core.config import TransformSettings
 
         with pytest.raises(ValidationError):
-            RowPluginSettings(options={})  # type: ignore[call-arg]
+            TransformSettings(options={})  # type: ignore[call-arg]
 
 
 class TestSinkSettings:
@@ -379,7 +379,7 @@ class TestLoadSettingsArchitecture:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_local
   options:
     path: data/submissions.csv
@@ -401,7 +401,7 @@ gates:
       "true": flagged
       "false": continue
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true
@@ -411,12 +411,12 @@ landscape:
 
         settings = load_settings(config_file)
 
-        assert settings.datasource.plugin == "csv_local"
-        assert settings.datasource.options["path"] == "data/submissions.csv"
+        assert settings.source.plugin == "csv_local"
+        assert settings.source.options["path"] == "data/submissions.csv"
         assert len(settings.sinks) == 2
         assert len(settings.gates) == 1
         assert settings.gates[0].name == "safety_check"
-        assert settings.output_sink == "results"
+        assert settings.default_sink == "results"
         assert settings.landscape.backend == "sqlite"
 
     def test_load_minimal_config(self, tmp_path: Path) -> None:
@@ -425,19 +425,19 @@ landscape:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
-        assert settings.datasource.plugin == "csv"
+        assert settings.source.plugin == "csv"
         assert settings.landscape.enabled is True  # Default
         assert settings.concurrency.max_workers == 4  # Default
 
@@ -449,20 +449,20 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   results:
     plugin: csv
 
-output_sink: nonexistent
+default_sink: nonexistent
 """)
 
         with pytest.raises(ValidationError) as exc_info:
             load_settings(config_file)
 
-        assert "output_sink" in str(exc_info.value)
+        assert "default_sink" in str(exc_info.value)
 
 
 class TestExportSinkValidation:
@@ -474,9 +474,9 @@ class TestExportSinkValidation:
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+                source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-                output_sink="output",
+                default_sink="output",
                 landscape={
                     "export": {
                         "enabled": True,
@@ -493,9 +493,9 @@ class TestExportSinkValidation:
 
         # Should not raise
         settings = ElspethSettings(
-            datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+            source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-            output_sink="output",
+            default_sink="output",
             landscape={
                 "export": {"enabled": False}  # No sink required
             },
@@ -508,9 +508,9 @@ class TestExportSinkValidation:
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+                source={"plugin": "csv", "options": {"path": "input.csv"}},
                 sinks={"output": {"plugin": "csv", "options": {"path": "out.csv"}}},
-                output_sink="output",
+                default_sink="output",
                 landscape={
                     "export": {
                         "enabled": True,
@@ -527,12 +527,12 @@ class TestExportSinkValidation:
 
         # Should not raise
         settings = ElspethSettings(
-            datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+            source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={
                 "output": {"plugin": "csv", "options": {"path": "out.csv"}},
                 "audit_archive": {"plugin": "csv", "options": {"path": "audit.csv"}},
             },
-            output_sink="output",
+            default_sink="output",
             landscape={
                 "export": {
                     "enabled": True,
@@ -625,58 +625,58 @@ class TestElspethSettingsArchitecture:
 
         errors = exc_info.value.errors()
         missing_fields = {e["loc"][0] for e in errors if e["type"] == "missing"}
-        assert "datasource" in missing_fields
+        assert "source" in missing_fields
         assert "sinks" in missing_fields
-        assert "output_sink" in missing_fields
+        assert "default_sink" in missing_fields
 
     def test_elspeth_settings_minimal_valid(self) -> None:
         """Minimal valid configuration."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "in.csv"}),
+            source=SourceSettings(plugin="csv", options={"path": "in.csv"}),
             sinks={"results": SinkSettings(plugin="csv", options={"path": "out.csv"})},
-            output_sink="results",
+            default_sink="results",
         )
 
-        assert settings.datasource.plugin == "csv"
+        assert settings.source.plugin == "csv"
         assert "results" in settings.sinks
-        assert settings.output_sink == "results"
+        assert settings.default_sink == "results"
         # Defaults applied
-        assert settings.row_plugins == []
+        assert settings.transforms == []
         assert settings.landscape.enabled is True
         assert settings.concurrency.max_workers == 4
 
     def test_elspeth_settings_output_sink_must_exist(self) -> None:
         """output_sink must reference a defined sink."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource=DatasourceSettings(plugin="csv"),
+                source=SourceSettings(plugin="csv"),
                 sinks={"results": SinkSettings(plugin="csv")},
-                output_sink="nonexistent",  # Not in sinks!
+                default_sink="nonexistent",  # Not in sinks!
             )
 
-        assert "output_sink" in str(exc_info.value)
+        assert "default_sink" in str(exc_info.value)
 
     def test_elspeth_settings_at_least_one_sink(self) -> None:
         """At least one sink is required."""
-        from elspeth.core.config import DatasourceSettings, ElspethSettings
+        from elspeth.core.config import ElspethSettings, SourceSettings
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource=DatasourceSettings(plugin="csv"),
+                source=SourceSettings(plugin="csv"),
                 sinks={},  # Empty!
-                output_sink="results",
+                default_sink="results",
             )
 
         assert "sink" in str(exc_info.value).lower()
@@ -800,27 +800,27 @@ class TestResolveConfig:
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+            source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-            output_sink="output",
+            default_sink="output",
         )
 
         resolved = resolve_config(settings)
 
         assert isinstance(resolved, dict)
-        assert "datasource" in resolved
-        assert resolved["datasource"]["plugin"] == "csv"
-        assert "output_sink" in resolved
-        assert resolved["output_sink"] == "output"
+        assert "source" in resolved
+        assert resolved["source"]["plugin"] == "csv"
+        assert "default_sink" in resolved
+        assert resolved["default_sink"] == "output"
 
     def test_resolve_config_includes_defaults(self) -> None:
         """resolve_config includes default values for audit completeness."""
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
 
         resolved = resolve_config(settings)
@@ -840,9 +840,9 @@ class TestResolveConfig:
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv", "options": {"path": "input.csv"}},
+            source={"plugin": "csv", "options": {"path": "input.csv"}},
             sinks={"output": {"plugin": "csv", "options": {"path": "output.csv"}}},
-            output_sink="output",
+            default_sink="output",
         )
 
         resolved = resolve_config(settings)
@@ -852,15 +852,15 @@ class TestResolveConfig:
         assert isinstance(json_str, str)
         assert len(json_str) > 0
 
-    def test_resolve_config_preserves_row_plugins(self) -> None:
+    def test_resolve_config_preserves_transforms(self) -> None:
         """resolve_config includes row_plugins configuration."""
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
-            row_plugins=[
+            default_sink="output",
+            transforms=[
                 {
                     "plugin": "field_mapper",
                     "type": "transform",
@@ -871,9 +871,9 @@ class TestResolveConfig:
 
         resolved = resolve_config(settings)
 
-        assert "row_plugins" in resolved
-        assert len(resolved["row_plugins"]) == 1
-        assert resolved["row_plugins"][0]["plugin"] == "field_mapper"
+        assert "transforms" in resolved
+        assert len(resolved["transforms"]) == 1
+        assert resolved["transforms"][0]["plugin"] == "field_mapper"
 
 
 class TestGateSettings:
@@ -1161,9 +1161,9 @@ class TestElspethSettingsWithGates:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
         assert settings.gates == []
 
@@ -1172,9 +1172,9 @@ class TestElspethSettingsWithGates:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}, "review": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 {
                     "name": "quality_check",
@@ -1191,9 +1191,9 @@ class TestElspethSettingsWithGates:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 {
                     "name": "gate_1",
@@ -1219,9 +1219,9 @@ class TestElspethSettingsWithGates:
 
         with pytest.raises(ValidationError, match=r"(?i)duplicate.*gate.*name"):
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 gates=[
                     {
                         "name": "my_gate",
@@ -1244,9 +1244,9 @@ class TestElspethSettingsWithGates:
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 gates=[
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
                     {"name": "gate_a", "condition": "True", "routes": {"true": "continue", "false": "output"}},
@@ -1265,9 +1265,9 @@ class TestElspethSettingsWithGates:
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 {
                     "name": "quality_check",
@@ -1294,7 +1294,7 @@ class TestLoadSettingsWithGates:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
@@ -1303,7 +1303,7 @@ sinks:
   review:
     plugin: csv
 
-output_sink: output
+default_sink: output
 
 gates:
   - name: quality_check
@@ -1325,14 +1325,14 @@ gates:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 
 gates:
   - name: parallel_analysis
@@ -1591,15 +1591,15 @@ class TestElspethSettingsWithCoalesce:
         """ElspethSettings should accept coalesce configuration."""
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv_local", options={"path": "test.csv"}),
+            source=SourceSettings(plugin="csv_local", options={"path": "test.csv"}),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "out.csv"})},
-            output_sink="default",
+            default_sink="default",
             coalesce=[
                 CoalesceSettings(
                     name="merge_results",
@@ -1618,9 +1618,9 @@ class TestElspethSettingsWithCoalesce:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
         assert settings.coalesce == []
 
@@ -1629,9 +1629,9 @@ class TestElspethSettingsWithCoalesce:
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             coalesce=[
                 {
                     "name": "merge_results",
@@ -1656,9 +1656,9 @@ class TestElspethSettingsWithCoalesce:
 
         with pytest.raises(ValidationError, match=r"(?i)duplicate.*coalesce.*name"):
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 coalesce=[
                     {
                         "name": "my_coalesce",
@@ -1683,9 +1683,9 @@ class TestElspethSettingsWithCoalesce:
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 coalesce=[
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
                     {"name": "coal_a", "branches": ["x", "y"], "policy": "require_all", "merge": "union"},
@@ -1716,7 +1716,7 @@ class TestSecretFieldFingerprinting:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: http_source
   options:
     api_key: sk-secret-key-12345
@@ -1726,14 +1726,14 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
         # API key should be preserved for runtime (transforms need it!)
-        assert "api_key" in settings.datasource.options
-        assert settings.datasource.options["api_key"] == "sk-secret-key-12345"
+        assert "api_key" in settings.source.options
+        assert settings.source.options["api_key"] == "sk-secret-key-12345"
 
     def test_api_key_is_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """API keys should be fingerprinted when creating audit copy."""
@@ -1743,7 +1743,7 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: http_source
   options:
     api_key: sk-secret-key-12345
@@ -1753,16 +1753,16 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
         audit_config = resolve_config(settings)
 
         # API key should be removed in audit copy
-        assert "api_key" not in audit_config["datasource"]["options"]
+        assert "api_key" not in audit_config["source"]["options"]
         # Should have a 64-char hex fingerprint
-        fingerprint = audit_config["datasource"]["options"].get("api_key_fingerprint")
+        fingerprint = audit_config["source"]["options"].get("api_key_fingerprint")
         assert fingerprint is not None
         assert len(fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in fingerprint)
@@ -1775,20 +1775,20 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: webhook_source
   options:
     token: bearer-token-xyz
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
-        assert "token" in settings.datasource.options
-        assert settings.datasource.options["token"] == "bearer-token-xyz"
+        assert "token" in settings.source.options
+        assert settings.source.options["token"] == "bearer-token-xyz"
 
     def test_token_is_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Token fields should be fingerprinted in audit copy."""
@@ -1798,21 +1798,21 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: webhook_source
   options:
     token: bearer-token-xyz
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
         audit_config = resolve_config(settings)
 
-        assert "token" not in audit_config["datasource"]["options"]
-        assert "token_fingerprint" in audit_config["datasource"]["options"]
+        assert "token" not in audit_config["source"]["options"]
+        assert "token_fingerprint" in audit_config["source"]["options"]
 
     def test_secret_suffix_preserved_at_load_time(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fields ending in _secret should be preserved for runtime."""
@@ -1822,20 +1822,20 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: custom_source
   options:
     database_secret: my-db-password
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
-        assert "database_secret" in settings.datasource.options
-        assert settings.datasource.options["database_secret"] == "my-db-password"
+        assert "database_secret" in settings.source.options
+        assert settings.source.options["database_secret"] == "my-db-password"
 
     def test_secret_suffix_is_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fields ending in _secret should be fingerprinted in audit copy."""
@@ -1845,21 +1845,21 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: custom_source
   options:
     database_secret: my-db-password
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
         audit_config = resolve_config(settings)
 
-        assert "database_secret" not in audit_config["datasource"]["options"]
-        assert "database_secret_fingerprint" in audit_config["datasource"]["options"]
+        assert "database_secret" not in audit_config["source"]["options"]
+        assert "database_secret_fingerprint" in audit_config["source"]["options"]
 
     def test_sink_options_preserved_at_load_time(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secret fields in sink options should be preserved for runtime."""
@@ -1869,14 +1869,14 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_source
 sinks:
   output:
     plugin: database_sink
     options:
       password: super-secret-password
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
@@ -1892,14 +1892,14 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_source
 sinks:
   output:
     plugin: database_sink
     options:
       password: super-secret-password
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
@@ -1916,7 +1916,7 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_source
   options:
     path: input.csv
@@ -1926,14 +1926,14 @@ sinks:
     plugin: csv_sink
     options:
       path: output.csv
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
         # Regular fields should be preserved
-        assert settings.datasource.options["path"] == "input.csv"
-        assert settings.datasource.options["delimiter"] == ","
+        assert settings.source.options["path"] == "input.csv"
+        assert settings.source.options["delimiter"] == ","
 
     def test_row_plugin_options_preserved_at_load_time(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secret fields in row_plugins options should be preserved for runtime."""
@@ -1943,13 +1943,13 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_source
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
-row_plugins:
+default_sink: output
+transforms:
   - plugin: llm_transform
     options:
       api_key: openai-key-123
@@ -1959,10 +1959,10 @@ row_plugins:
         settings = load_settings(config_file)
 
         # Secrets preserved for runtime
-        assert "api_key" in settings.row_plugins[0].options
-        assert settings.row_plugins[0].options["api_key"] == "openai-key-123"
+        assert "api_key" in settings.transforms[0].options
+        assert settings.transforms[0].options["api_key"] == "openai-key-123"
         # Non-secret field preserved
-        assert settings.row_plugins[0].options["model"] == "gpt-4"
+        assert settings.transforms[0].options["model"] == "gpt-4"
 
     def test_row_plugin_options_are_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secret fields in row_plugins options should be fingerprinted in audit copy."""
@@ -1972,13 +1972,13 @@ row_plugins:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv_source
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
-row_plugins:
+default_sink: output
+transforms:
   - plugin: llm_transform
     options:
       api_key: openai-key-123
@@ -1988,10 +1988,10 @@ row_plugins:
         settings = load_settings(config_file)
         audit_config = resolve_config(settings)
 
-        assert "api_key" not in audit_config["row_plugins"][0]["options"]
-        assert "api_key_fingerprint" in audit_config["row_plugins"][0]["options"]
+        assert "api_key" not in audit_config["transforms"][0]["options"]
+        assert "api_key_fingerprint" in audit_config["transforms"][0]["options"]
         # Non-secret field preserved
-        assert audit_config["row_plugins"][0]["options"]["model"] == "gpt-4"
+        assert audit_config["transforms"][0]["options"]["model"] == "gpt-4"
 
     # === Tests for recursive/nested fingerprinting ===
 
@@ -2071,19 +2071,19 @@ row_plugins:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: http_source
   options:
     api_key: sk-secret-key
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         # load_settings succeeds even without fingerprint key
         settings = load_settings(config_file)
-        assert settings.datasource.options["api_key"] == "sk-secret-key"
+        assert settings.source.options["api_key"] == "sk-secret-key"
 
     def test_missing_key_raises_error_on_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """resolve_config should raise SecretFingerprintError when key missing."""
@@ -2098,14 +2098,14 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: http_source
   options:
     api_key: sk-secret-key
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
@@ -2139,21 +2139,21 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: http_source
   options:
     api_key: sk-secret-key
 sinks:
   output:
     plugin: csv_sink
-output_sink: output
+default_sink: output
 """)
 
         settings = load_settings(config_file)
 
         # In dev mode, secrets are kept unchanged so plugins can use them
-        assert settings.datasource.options.get("api_key") == "sk-secret-key"
-        assert "api_key_redacted" not in settings.datasource.options
+        assert settings.source.options.get("api_key") == "sk-secret-key"
+        assert "api_key_redacted" not in settings.source.options
 
     # === Tests for DSN password handling ===
 
@@ -2223,7 +2223,7 @@ output_sink: output
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
             "datasource": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
-            "output_sink": "output",
+            "default_sink": "output",
         }
 
         result = _fingerprint_config_for_audit(config_dict)
@@ -2244,7 +2244,7 @@ output_sink: output
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
             "datasource": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
-            "output_sink": "output",
+            "default_sink": "output",
         }
 
         result = _fingerprint_config_for_audit(config_dict)
@@ -2263,9 +2263,9 @@ class TestRunModeSettings:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
 
         assert settings.run_mode == RunMode.LIVE
@@ -2277,98 +2277,98 @@ class TestRunModeSettings:
 
         # Test live mode
         settings_live = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="live",
         )
         assert settings_live.run_mode == RunMode.LIVE
 
         # Test replay mode (with required source run ID)
         settings_replay = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="replay",
-            replay_source_run_id="run-abc123",
+            replay_from="run-abc123",
         )
         assert settings_replay.run_mode == RunMode.REPLAY
 
         # Test verify mode (with required source run ID)
         settings_verify = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="verify",
-            replay_source_run_id="run-abc123",
+            replay_from="run-abc123",
         )
         assert settings_verify.run_mode == RunMode.VERIFY
 
     def test_replay_mode_requires_source_run_id(self) -> None:
-        """Replay mode requires replay_source_run_id."""
+        """Replay mode requires replay_from."""
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 run_mode="replay",
-                # Missing replay_source_run_id
+                # Missing replay_from
             )
 
-        assert "replay_source_run_id is required" in str(exc_info.value)
+        assert "replay_from is required" in str(exc_info.value)
         assert "replay" in str(exc_info.value)
 
     def test_verify_mode_requires_source_run_id(self) -> None:
-        """Verify mode requires replay_source_run_id."""
+        """Verify mode requires replay_from."""
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 run_mode="verify",
-                # Missing replay_source_run_id
+                # Missing replay_from
             )
 
-        assert "replay_source_run_id is required" in str(exc_info.value)
+        assert "replay_from is required" in str(exc_info.value)
         assert "verify" in str(exc_info.value)
 
     def test_live_mode_ignores_source_run_id(self) -> None:
-        """Live mode doesn't require replay_source_run_id."""
+        """Live mode doesn't require replay_from."""
         from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         # Should not raise - live mode doesn't require source run ID
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="live",
-            # No replay_source_run_id
+            # No replay_from
         )
 
         assert settings.run_mode == RunMode.LIVE
-        assert settings.replay_source_run_id is None
+        assert settings.replay_from is None
 
     def test_live_mode_accepts_source_run_id(self) -> None:
-        """Live mode accepts but ignores replay_source_run_id if provided."""
+        """Live mode accepts but ignores replay_from if provided."""
         from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         # Should not raise - live mode ignores source run ID
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="live",
-            replay_source_run_id="run-abc123",  # Provided but not required
+            replay_from="run-abc123",  # Provided but not required
         )
 
         assert settings.run_mode == RunMode.LIVE
-        assert settings.replay_source_run_id == "run-abc123"
+        assert settings.replay_from == "run-abc123"
 
     def test_run_mode_invalid_value_rejected(self) -> None:
         """Invalid run_mode values should be rejected."""
@@ -2376,9 +2376,9 @@ class TestRunModeSettings:
 
         with pytest.raises(ValidationError):
             ElspethSettings(
-                datasource={"plugin": "csv"},
+                source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
-                output_sink="output",
+                default_sink="output",
                 run_mode="invalid_mode",
             )
 
@@ -2387,9 +2387,9 @@ class TestRunModeSettings:
         from elspeth.core.config import ElspethSettings
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
         )
 
         with pytest.raises(ValidationError):
@@ -2400,19 +2400,19 @@ class TestRunModeSettings:
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
-            datasource={"plugin": "csv"},
+            source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
-            output_sink="output",
+            default_sink="output",
             run_mode="replay",
-            replay_source_run_id="run-abc123",
+            replay_from="run-abc123",
         )
 
         resolved = resolve_config(settings)
 
         assert "run_mode" in resolved
         assert resolved["run_mode"] == "replay"
-        assert "replay_source_run_id" in resolved
-        assert resolved["replay_source_run_id"] == "run-abc123"
+        assert "replay_from" in resolved
+        assert resolved["replay_from"] == "run-abc123"
 
 
 class TestExpandTemplateFiles:
@@ -2637,20 +2637,20 @@ class TestLoadSettingsWithRunMode:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 run_mode: live
 """)
         settings = load_settings(config_file)
 
         assert settings.run_mode == RunMode.LIVE
-        assert settings.replay_source_run_id is None
+        assert settings.replay_from is None
 
     def test_load_settings_with_replay_mode(self, tmp_path: Path) -> None:
         """Load YAML with replay mode."""
@@ -2659,21 +2659,21 @@ run_mode: live
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 run_mode: replay
-replay_source_run_id: run-abc123
+replay_from: run-abc123
 """)
         settings = load_settings(config_file)
 
         assert settings.run_mode == RunMode.REPLAY
-        assert settings.replay_source_run_id == "run-abc123"
+        assert settings.replay_from == "run-abc123"
 
     def test_load_settings_with_verify_mode(self, tmp_path: Path) -> None:
         """Load YAML with verify mode."""
@@ -2682,21 +2682,21 @@ replay_source_run_id: run-abc123
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 run_mode: verify
-replay_source_run_id: run-xyz789
+replay_from: run-xyz789
 """)
         settings = load_settings(config_file)
 
         assert settings.run_mode == RunMode.VERIFY
-        assert settings.replay_source_run_id == "run-xyz789"
+        assert settings.replay_from == "run-xyz789"
 
     def test_load_settings_replay_without_source_run_id_fails(self, tmp_path: Path) -> None:
         """Loading replay mode without source_run_id should fail."""
@@ -2704,20 +2704,20 @@ replay_source_run_id: run-xyz789
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: output
+default_sink: output
 run_mode: replay
 """)
         with pytest.raises(ValidationError) as exc_info:
             load_settings(config_file)
 
-        assert "replay_source_run_id is required" in str(exc_info.value)
+        assert "replay_from is required" in str(exc_info.value)
 
 
 class TestLoadSettingsTemplateFileExpansion:
@@ -2736,7 +2736,7 @@ class TestLoadSettingsTemplateFileExpansion:
         # Create settings file
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text("""
-datasource:
+source:
   plugin: csv_local
   options:
     path: test.csv
@@ -2747,9 +2747,9 @@ sinks:
     options:
       path: out.csv
 
-output_sink: output
+default_sink: output
 
-row_plugins:
+transforms:
   - plugin: openrouter_llm
     options:
       model: test
@@ -2762,7 +2762,7 @@ row_plugins:
         settings = load_settings(settings_file)
 
         # Check that files were expanded
-        plugin_opts = settings.row_plugins[0].options
+        plugin_opts = settings.transforms[0].options
         assert plugin_opts["template"] == "Hello {{ row.name }}"
         assert plugin_opts["template_source"] == "prompts/test.j2"
         assert plugin_opts["lookup"] == {"greetings": ["Hello"]}
