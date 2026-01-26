@@ -19,6 +19,7 @@ from threading import Semaphore
 from typing import Any
 
 from elspeth.contracts import TransformResult
+from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.pooling.config import PoolConfig
 from elspeth.plugins.pooling.errors import CapacityError
 from elspeth.plugins.pooling.reorder_buffer import ReorderBuffer
@@ -268,22 +269,44 @@ class PooledExecutor:
                     result = process_fn(row, state_id)
                     self._throttle.on_success()
                     return (buffer_idx, result)
-                except CapacityError as e:
-                    # Check if we've exceeded max retry time
-                    if time.monotonic() >= max_time:
-                        elapsed = time.monotonic() - start_time
+                except (CapacityError, LLMClientError) as e:
+                    # CRITICAL: Only expected retryable errors are caught here
+                    # - CapacityError: Rate limiting from pooling infrastructure
+                    # - LLMClientError: Errors from LLM API calls (network, server errors, etc.)
+                    # All other exceptions (KeyError, TypeError, etc.) crash immediately
+                    # This prevents masking programming bugs in process_fn
+
+                    # Check if error is non-retryable (e.g., ContentPolicyError)
+                    if isinstance(e, LLMClientError) and not e.retryable:
+                        # Permanent error - return immediately without retry
                         return (
                             buffer_idx,
                             TransformResult.error(
                                 {
-                                    "reason": "capacity_retry_timeout",
+                                    "reason": "permanent_error",
                                     "error": str(e),
-                                    "status_code": e.status_code,
-                                    "elapsed_seconds": elapsed,
-                                    "max_seconds": self._max_capacity_retry_seconds,
+                                    "error_type": type(e).__name__,
                                 },
                                 retryable=False,
                             ),
+                        )
+
+                    # Check if we've exceeded max retry time
+                    if time.monotonic() >= max_time:
+                        elapsed = time.monotonic() - start_time
+                        error_data = {
+                            "reason": "retry_timeout",
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                            "elapsed_seconds": elapsed,
+                            "max_seconds": self._max_capacity_retry_seconds,
+                        }
+                        # Add status_code if it's a CapacityError
+                        if isinstance(e, CapacityError):
+                            error_data["status_code"] = e.status_code
+                        return (
+                            buffer_idx,
+                            TransformResult.error(error_data, retryable=False),
                         )
 
                     # Trigger throttle backoff

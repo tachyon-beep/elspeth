@@ -396,58 +396,49 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         row: dict[str, Any],
         state_id: str,
     ) -> list[TransformResult]:
-        """Execute queries in parallel via ThreadPoolExecutor.
+        """Execute queries in parallel via PooledExecutor with AIMD retry.
 
-        This method uses ThreadPoolExecutor directly for per-row query parallelism
-        rather than PooledExecutor.execute_batch(). The distinction:
-
-        - PooledExecutor.execute_batch(): Designed for cross-row batching with AIMD
-          throttling to adaptively manage rate limits across many rows.
-        - ThreadPoolExecutor here: Simple parallel execution within a single row.
-          All queries share the same underlying AzureOpenAI client which handles
-          its own rate limiting, so AIMD overhead is unnecessary.
+        Uses PooledExecutor.execute_batch() to get:
+        - Automatic retry on capacity errors with AIMD backoff
+        - Timeout after max_capacity_retry_seconds
+        - Proper audit trail for all retry attempts
 
         Args:
             row: The input row data
-            state_id: State ID for audit trail
+            state_id: State ID for audit trail (shared across all queries for this row)
 
         Returns:
             List of TransformResults in query spec order
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from elspeth.plugins.pooling.executor import RowContext
 
         # Type narrowing - caller ensures executor is not None
         assert self._executor is not None
 
-        results_by_index: dict[int, TransformResult] = {}
+        # Build RowContext for each query
+        # All queries share the same state_id (FK constraint)
+        # Uniqueness comes from call_index allocated by recorder
+        contexts = [
+            RowContext(
+                row={"original_row": row, "spec": spec},
+                state_id=state_id,
+                row_index=i,
+            )
+            for i, spec in enumerate(self._query_specs)
+        ]
 
-        with ThreadPoolExecutor(max_workers=self._executor.pool_size) as executor:
-            futures = {
-                executor.submit(
-                    self._process_single_query,
-                    row,
-                    spec,
-                    state_id,
-                ): i
-                for i, spec in enumerate(self._query_specs)
-            }
+        # Execute all queries with retry support
+        # PooledExecutor handles capacity errors with AIMD backoff
+        results = self._executor.execute_batch(
+            contexts=contexts,
+            process_fn=lambda work, work_state_id: self._process_single_query(
+                work["original_row"],
+                work["spec"],
+                work_state_id,
+            ),
+        )
 
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    results_by_index[idx] = future.result()
-                except CapacityError as e:
-                    # If capacity error escapes, treat as error
-                    results_by_index[idx] = TransformResult.error(
-                        {
-                            "reason": "capacity_exhausted",
-                            "query": self._query_specs[idx].output_prefix,
-                            "error": str(e),
-                        }
-                    )
-
-        # Return in submission order
-        return [results_by_index[i] for i in range(len(self._query_specs))]
+        return results
 
     def _execute_queries_sequential(
         self,
@@ -455,6 +446,9 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         state_id: str,
     ) -> list[TransformResult]:
         """Execute queries sequentially (fallback when no executor).
+
+        Without PooledExecutor, capacity errors are not retried - they immediately
+        fail the query. This is acceptable for the fallback path.
 
         Args:
             row: The input row data
@@ -469,6 +463,7 @@ class AzureMultiQueryLLMTransform(BaseTransform):
             try:
                 result = self._process_single_query(row, spec, state_id)
             except CapacityError as e:
+                # No retry in sequential mode - fail immediately
                 result = TransformResult.error(
                     {
                         "reason": "rate_limited",
@@ -485,11 +480,13 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         rows: list[dict[str, Any]],
         ctx: PluginContext,
     ) -> TransformResult:
-        """Process batch of rows (aggregation mode).
+        """Process batch of rows with concurrent row processing.
 
-        Each row is processed independently. Failed rows get _error marker
-        while successful rows continue. This implements partial success semantics
-        for batch processing.
+        All (rows x queries) are executed in parallel up to pool_size limit.
+        Failed rows get _error marker while successful rows continue.
+
+        With pool_size=100 and 10 queries/row, processes 10 rows simultaneously
+        instead of sequentially (full pool utilization).
 
         Args:
             rows: List of input rows
@@ -508,32 +505,141 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         if self._recorder is None:
             self._recorder = ctx.landscape
 
-        # BUG-AZURE-02 FIX: Use ONE LLM client for entire batch
-        # All rows share ctx.state_id, ensuring FK constraint satisfaction
-        # and maintaining call_index continuity across all queries.
-        # The client is cached by _get_llm_client(), so all rows reuse the same instance.
+        # Fast path: No pooled executor, process sequentially
+        if self._executor is None:
+            return self._process_batch_sequential(rows, ctx)
 
-        output_rows: list[dict[str, Any]] = []
-
+        # Concurrent row processing using PooledExecutor
         try:
-            for _i, row in enumerate(rows):
-                # BUG-AZURE-02 FIX: Use shared state_id for all rows in batch
-                # (removed synthetic row_state_id creation)
-                result = self._process_single_row_internal(row, ctx.state_id)
-
-                if result.status == "success" and result.row is not None:
-                    output_rows.append(result.row)
-                else:
-                    # Row failed - include original with error marker
-                    error_row = dict(row)
-                    error_row["_error"] = result.reason
-                    output_rows.append(error_row)
+            output_rows = self._process_batch_concurrent(rows, ctx)
         finally:
             # Clean up batch client after all rows processed
             with self._llm_clients_lock:
                 self._llm_clients.pop(ctx.state_id, None)
 
         return TransformResult.success_multi(output_rows)
+
+    def _process_batch_sequential(
+        self,
+        rows: list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Sequential batch processing (fallback when no executor).
+
+        Args:
+            rows: List of input rows
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with all rows processed
+        """
+        assert ctx.state_id is not None
+        output_rows: list[dict[str, Any]] = []
+
+        for row in rows:
+            result = self._process_single_row_internal(row, ctx.state_id)
+
+            if result.status == "success" and result.row is not None:
+                output_rows.append(result.row)
+            else:
+                # Row failed - include original with error marker
+                error_row = dict(row)
+                error_row["_error"] = result.reason
+                output_rows.append(error_row)
+
+        return TransformResult.success_multi(output_rows)
+
+    def _process_batch_concurrent(
+        self,
+        rows: list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> list[dict[str, Any]]:
+        """Concurrent batch processing via PooledExecutor.
+
+        Flattens (N rows x M queries) into single work list, executes in parallel,
+        then groups results back by row and checks atomicity.
+
+        Args:
+            rows: List of input rows
+            ctx: Plugin context with state_id
+
+        Returns:
+            List of output rows (success or error)
+        """
+        from elspeth.plugins.pooling.executor import RowContext
+
+        assert self._executor is not None
+        assert ctx.state_id is not None
+
+        queries_per_row = len(self._query_specs)
+
+        # Flatten: (N rows x M queries) -> single work list
+        # All queries share ctx.state_id (FK constraint to node_states)
+        # Uniqueness comes from call_index in AuditedLLMClient
+        contexts = []
+        for row_idx, row in enumerate(rows):
+            for query_idx, spec in enumerate(self._query_specs):
+                work_idx = row_idx * queries_per_row + query_idx
+                contexts.append(
+                    RowContext(
+                        row={
+                            "original_row": row,
+                            "spec": spec,
+                            "row_idx": row_idx,  # Track which row this belongs to
+                        },
+                        state_id=ctx.state_id,  # Shared state_id (satisfies FK)
+                        row_index=work_idx,
+                    )
+                )
+
+        # Execute all queries for all rows with AIMD retry
+        # All queries share one LLM client (no memory leak)
+        all_results = self._executor.execute_batch(
+            contexts=contexts,
+            process_fn=lambda work, work_state_id: self._process_single_query(
+                work["original_row"],
+                work["spec"],
+                work_state_id,
+            ),
+        )
+
+        # Group results back by row (M queries per row)
+        output_rows: list[dict[str, Any]] = []
+
+        for row_idx, original_row in enumerate(rows):
+            start = row_idx * queries_per_row
+            end = start + queries_per_row
+            row_results = all_results[start:end]
+
+            # Check atomicity: all-or-nothing per row
+            failed = [r for r in row_results if r.status != "success"]
+
+            if failed:
+                # ANY query failed → row fails
+                error_row = dict(original_row)
+                error_row["_error"] = {
+                    "reason": "query_failed",
+                    "failed_queries": [
+                        {
+                            "query": self._query_specs[i].output_prefix,
+                            "error": r.reason,
+                        }
+                        for i, r in enumerate(row_results)
+                        if r.status != "success"
+                    ],
+                    "succeeded_count": len(row_results) - len(failed),
+                    "total_count": len(row_results),
+                }
+                output_rows.append(error_row)
+            else:
+                # ALL queries succeeded → merge outputs
+                output = dict(original_row)
+                for result in row_results:
+                    if result.row is not None:
+                        output.update(result.row)
+                output_rows.append(output)
+
+        return output_rows
 
     def close(self) -> None:
         """Release resources."""

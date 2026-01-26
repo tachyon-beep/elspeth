@@ -512,15 +512,14 @@ class TestBatchProcessing:
             assert result.row["row_count"] == 0
 
     def test_process_batch_uses_shared_state_id(self) -> None:
-        """All rows in batch use shared state_id (BUG-AZURE-02 fix).
+        """Batch processing uses shared state_id (FK constraint fix).
 
-        BEFORE BUG-AZURE-02 fix: Each row got synthetic state_id like
-        "batch-001_row0", "batch-001_row1" which violated FK constraints.
+        All queries share ctx.state_id to satisfy FK constraint:
+        - calls.state_id must reference existing node_states.state_id
+        - Uniqueness comes from call_index allocated by recorder
+        - Single LLM client cached per batch (not per query)
 
-        AFTER BUG-AZURE-02 fix: All rows share ctx.state_id, ensuring:
-        - FK constraints satisfied (all calls reference valid state_id)
-        - Single LLM client cached per batch (not per row)
-        - Call index continuity across all queries
+        This prevents FK violations and memory leaks from per-query clients.
         """
         # 2 rows x 4 queries = 8 responses needed
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
@@ -562,9 +561,7 @@ class TestBatchProcessing:
 
             transform.process(rows, ctx)
 
-            # BUG-AZURE-02 FIX: All queries should use the SAME state_id
-            # _get_llm_client is called once per query (8 times for 2 rows x 4 queries)
-            # but all calls use the shared state_id, not synthetic per-row IDs
+            # All queries use shared state_id (FK constraint)
             assert len(created_state_ids) > 0, "Should have tracked state_ids"
 
             # Verify ALL calls use the shared state_id from context
@@ -572,9 +569,10 @@ class TestBatchProcessing:
             assert len(unique_state_ids) == 1, f"Expected all calls to use shared state_id, but got multiple: {unique_state_ids}"
             assert unique_state_ids == {"batch-001"}, f"Expected shared state_id 'batch-001', got {unique_state_ids}"
 
-            # Verify NO synthetic per-row state_ids were created
+            # Verify NO synthetic per-query state_ids were created
             for state_id in created_state_ids:
-                assert "_row" not in state_id, f"Found synthetic per-row state_id: {state_id}"
+                assert "_q" not in state_id, f"Found synthetic per-query state_id: {state_id}"
+                assert "_r" not in state_id, f"Found synthetic per-row state_id: {state_id}"
 
     def test_process_batch_cleans_up_shared_client(self) -> None:
         """Batch client is cleaned up after processing all rows (BUG-AZURE-02 fix).
