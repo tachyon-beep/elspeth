@@ -225,12 +225,18 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         except RateLimitError as e:
             raise CapacityError(429, str(e)) from e
         except LLMClientError as e:
+            # Re-raise retryable errors (NetworkError, ServerError) - let pool retry
+            # Return error for non-retryable (ContentPolicyError, ContextLengthError)
+            if e.retryable:
+                raise  # Pool catches LLMClientError and applies AIMD retry
             return TransformResult.error(
                 {
                     "reason": "llm_call_failed",
                     "error": str(e),
+                    "error_type": type(e).__name__,
                     "query": spec.output_prefix,
-                }
+                },
+                retryable=False,
             )
 
         # 6. Parse JSON response (THEIR DATA - wrap)

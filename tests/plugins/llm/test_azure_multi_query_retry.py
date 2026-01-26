@@ -578,3 +578,120 @@ class TestMemoryLeakPrevention:
                 f"Memory leak on failure: {len(transform._llm_clients)} clients still cached. "
                 "Per-query clients should be cleaned up even when queries fail."
             )
+
+
+class TestLLMErrorRetry:
+    """Test that retryable LLM errors are actually retried by the pool."""
+
+    def test_network_error_is_retried(self) -> None:
+        """NetworkError should be retried by the pool (P2 bug fix).
+
+        BEFORE FIX: LLMClientError was caught and converted to TransformResult.error
+        without retryable flag, so pool never retried transient network errors.
+
+        AFTER FIX: Retryable LLMClientErrors (NetworkError, ServerError) are re-raised,
+        allowing the pool to apply AIMD retry logic.
+        """
+        from elspeth.plugins.clients.llm import NetworkError
+
+        call_count = [0]
+
+        def mock_chat_completion(**kwargs: Any) -> Mock:
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                # First 2 attempts fail with transient network error
+                raise NetworkError("Connection timeout")
+            # Third attempt succeeds - return proper OpenAI response structure
+            mock_usage = Mock()
+            mock_usage.prompt_tokens = 10
+            mock_usage.completion_tokens = 5
+
+            mock_message = Mock()
+            mock_message.content = json.dumps({"score": 85, "rationale": "Good"})
+
+            mock_choice = Mock()
+            mock_choice.message = mock_message
+
+            mock_response = Mock()
+            mock_response.choices = [mock_choice]
+            mock_response.model = "gpt-4o"
+            mock_response.usage = mock_usage
+
+            return mock_response
+
+        with patch("openai.AzureOpenAI") as mock_azure_class:
+            mock_client = Mock()
+            mock_client.chat.completions.create.side_effect = mock_chat_completion
+            mock_azure_class.return_value = mock_client
+
+            config = make_config(pool_size=4, max_capacity_retry_seconds=10)
+            transform = AzureMultiQueryLLMTransform(config)
+            transform.on_start(make_plugin_context())
+
+            rows = [
+                {
+                    "cs1_bg": "data",
+                    "cs1_sym": "data",
+                    "cs1_hist": "data",
+                    "cs2_bg": "data",
+                    "cs2_sym": "data",
+                    "cs2_hist": "data",
+                }
+            ]
+
+            ctx = make_plugin_context(state_id="network-error-retry")
+            result = transform.process(rows, ctx)
+
+            assert result.status == "success"
+            assert len(result.rows) == 1
+            assert "_error" not in result.rows[0], "Row should succeed after retry"
+
+            # Verify that all 4 queries were tried, some retried due to network errors
+            # Each query hits the mock, some fail twice before succeeding
+            assert call_count[0] > 4, f"Expected retries to happen, got {call_count[0]} calls"
+
+    def test_content_policy_error_not_retried(self) -> None:
+        """ContentPolicyError should NOT be retried (non-retryable error).
+
+        P2 FIX VERIFICATION: Non-retryable errors should return immediately
+        with TransformResult.error(retryable=False) instead of being retried.
+        """
+        from elspeth.plugins.clients.llm import ContentPolicyError
+
+        call_count = [0]
+
+        def mock_chat_completion(**kwargs: Any) -> Mock:
+            call_count[0] += 1
+            # Always fail with content policy violation
+            raise ContentPolicyError("Content violates safety policy")
+
+        with patch("openai.AzureOpenAI") as mock_azure_class:
+            mock_client = Mock()
+            mock_client.chat.completions.create.side_effect = mock_chat_completion
+            mock_azure_class.return_value = mock_client
+
+            config = make_config(pool_size=4, max_capacity_retry_seconds=10)
+            transform = AzureMultiQueryLLMTransform(config)
+            transform.on_start(make_plugin_context())
+
+            rows = [
+                {
+                    "cs1_bg": "data",
+                    "cs1_sym": "data",
+                    "cs1_hist": "data",
+                    "cs2_bg": "data",
+                    "cs2_sym": "data",
+                    "cs2_hist": "data",
+                }
+            ]
+
+            ctx = make_plugin_context(state_id="content-policy-no-retry")
+            result = transform.process(rows, ctx)
+
+            assert result.status == "success"  # Batch succeeds
+            assert len(result.rows) == 1
+            assert "_error" in result.rows[0], "Row should have error"
+
+            # Verify ContentPolicyError caused immediate failure (no retries)
+            # 4 queries, each called exactly once (no retries)
+            assert call_count[0] == 4, f"Expected 4 calls (no retries), got {call_count[0]}"
