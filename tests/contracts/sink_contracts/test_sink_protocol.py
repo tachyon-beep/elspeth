@@ -310,3 +310,27 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
         second_sink.close()
 
         assert first_hash != second_hash, f"Different data produced same hash - hash not computed from content! hash={first_hash}"
+
+
+# =============================================================================
+# Protocol Attribute Tests (standalone - don't need sink instance)
+# =============================================================================
+
+
+def test_sink_protocol_requires_supports_resume() -> None:
+    """SinkProtocol must declare supports_resume attribute."""
+    from elspeth.plugins.protocols import SinkProtocol
+
+    # Verify protocol has supports_resume in annotations
+    assert "supports_resume" in SinkProtocol.__annotations__, (
+        "SinkProtocol must declare 'supports_resume: bool' attribute for resume capability"
+    )
+
+
+def test_sink_protocol_requires_configure_for_resume() -> None:
+    """SinkProtocol must declare configure_for_resume method."""
+    from elspeth.plugins.protocols import SinkProtocol
+
+    # Verify protocol has configure_for_resume method
+    assert hasattr(SinkProtocol, "configure_for_resume"), "SinkProtocol must declare 'configure_for_resume()' method for resume capability"
+    assert callable(SinkProtocol.configure_for_resume), "SinkProtocol.configure_for_resume must be a callable method"

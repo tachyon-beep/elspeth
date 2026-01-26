@@ -411,6 +411,9 @@ class SinkProtocol(Protocol):
     determinism: Determinism
     plugin_version: str
 
+    # Resume capability (Phase 5 - Checkpoint/Resume)
+    supports_resume: bool  # Can this sink append to existing output on resume?
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...
@@ -466,4 +469,18 @@ class SinkProtocol(Protocol):
 
     def on_complete(self, ctx: "PluginContext") -> None:
         """Called at end of run (before close)."""
+        ...
+
+    def configure_for_resume(self) -> None:
+        """Configure sink for resume mode (append instead of truncate).
+
+        Called by engine when resuming a run. Sinks that support resume
+        (supports_resume=True) MUST implement this to switch to append mode.
+
+        Sinks that don't support resume (supports_resume=False) will never
+        have this called - the CLI will reject resume before execution.
+
+        Raises:
+            NotImplementedError: If sink cannot be resumed despite claiming support.
+        """
         ...
