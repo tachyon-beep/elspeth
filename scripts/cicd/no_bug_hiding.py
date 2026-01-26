@@ -457,9 +457,10 @@ def main() -> int:
         help="Output format (default: text)",
     )
     check_parser.add_argument(
-        "--changed-only",
-        action="store_true",
-        help="Only scan git-changed files (not yet implemented)",
+        "files",
+        nargs="*",
+        type=Path,
+        help="Specific files to check (from pre-commit). If empty, scans --root directory.",
     )
 
     args = parser.parse_args()
@@ -486,8 +487,22 @@ def run_check(args: argparse.Namespace) -> int:
 
     allowlist = load_allowlist(allowlist_path)
 
-    # Scan for findings
-    all_findings = scan_directory(root, args.exclude)
+    # Scan for findings - either specific files or whole directory
+    if args.files:
+        # Pre-commit mode: only scan the provided files that are under root
+        all_findings = []
+        for file_path in args.files:
+            resolved = file_path.resolve()
+            # Only scan files that are under the root directory
+            try:
+                resolved.relative_to(root)
+                all_findings.extend(scan_file(resolved, root))
+            except ValueError:
+                # File is not under root, skip it
+                pass
+    else:
+        # Full directory scan mode
+        all_findings = scan_directory(root, args.exclude)
 
     # Filter out allowlisted findings
     violations: list[Finding] = []
@@ -495,9 +510,15 @@ def run_check(args: argparse.Namespace) -> int:
         if allowlist.match(finding) is None:
             violations.append(finding)
 
-    # Check for stale/expired allowlist entries
-    stale_entries = allowlist.get_stale_entries() if allowlist.fail_on_stale else []
-    expired_entries = allowlist.get_expired_entries() if allowlist.fail_on_expired else []
+    # Check for stale/expired allowlist entries (only in full-scan mode)
+    # In file-specific mode (pre-commit), we only scan a subset of files,
+    # so most allowlist entries won't match - that's expected, not stale.
+    if args.files:
+        stale_entries: list[AllowlistEntry] = []
+        expired_entries: list[AllowlistEntry] = []
+    else:
+        stale_entries = allowlist.get_stale_entries() if allowlist.fail_on_stale else []
+        expired_entries = allowlist.get_expired_entries() if allowlist.fail_on_expired else []
 
     # Report results
     has_errors = bool(violations or stale_entries or expired_entries)
