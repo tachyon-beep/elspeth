@@ -325,6 +325,12 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         ctx: PluginContext,
     ) -> None:
         """Contract: error_input fixture MUST produce an error result."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(error_input, ctx)
         assert result.status == "error", f"error_input MUST produce error, got status={result.status}"
 
@@ -335,6 +341,12 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         ctx: PluginContext,
     ) -> None:
         """Contract: Error results MUST have a reason dict."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(error_input, ctx)
         assert result.status == "error"
         assert result.reason is not None, "Error TransformResult has None reason"
@@ -347,6 +359,12 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         ctx: PluginContext,
     ) -> None:
         """Contract: Error results should NOT have output data."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(error_input, ctx)
         assert result.status == "error"
         assert result.row is None, "Error result should not have row"
@@ -359,6 +377,12 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         ctx: PluginContext,
     ) -> None:
         """Contract: Error results MUST have a retryable flag."""
+        # Skip for transforms using BatchTransformMixin (use accept() instead)
+        from elspeth.plugins.batching.mixin import BatchTransformMixin
+
+        if isinstance(transform, BatchTransformMixin):
+            pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
+
         result = transform.process(error_input, ctx)
         assert result.status == "error"
         assert isinstance(result.retryable, bool)
