@@ -10,7 +10,9 @@ Per Data Manifesto: The audit database is OUR data. Bad data = crash.
 from typing import Any
 
 from elspeth.contracts.audit import (
+    Artifact,
     Batch,
+    BatchMember,
     Call,
     Edge,
     Node,
@@ -469,4 +471,63 @@ class TokenOutcomeRepository:
             expand_group_id=row.expand_group_id,
             error_hash=row.error_hash,
             context_json=row.context_json,
+        )
+
+
+class ArtifactRepository:
+    """Repository for Artifact records.
+
+    Handles sink output artifacts with content hashes.
+    No enum conversion needed - artifact_type is user-defined string.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def load(self, row: Any) -> Artifact:
+        """Load Artifact from database row.
+
+        Args:
+            row: Database row from artifacts table
+
+        Returns:
+            Artifact with all fields mapped
+        """
+        return Artifact(
+            artifact_id=row.artifact_id,
+            run_id=row.run_id,
+            produced_by_state_id=row.produced_by_state_id,
+            sink_node_id=row.sink_node_id,
+            artifact_type=row.artifact_type,
+            path_or_uri=row.path_or_uri,
+            content_hash=row.content_hash,
+            size_bytes=row.size_bytes,
+            created_at=row.created_at,
+            idempotency_key=row.idempotency_key,
+        )
+
+
+class BatchMemberRepository:
+    """Repository for BatchMember records.
+
+    Handles batch membership records for aggregation tracking.
+    No enum conversion needed - all fields are primitives.
+    """
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def load(self, row: Any) -> BatchMember:
+        """Load BatchMember from database row.
+
+        Args:
+            row: Database row from batch_members table
+
+        Returns:
+            BatchMember with all fields mapped
+        """
+        return BatchMember(
+            batch_id=row.batch_id,
+            token_id=row.token_id,
+            ordinal=row.ordinal,
         )
