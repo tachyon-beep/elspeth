@@ -16,11 +16,14 @@ class TestNoOpLimiter:
     """
 
     def test_acquire_does_nothing(self) -> None:
-        """acquire() completes without error."""
+        """acquire() returns None without error."""
         limiter = NoOpLimiter()
-        # Should not raise, should not block
-        limiter.acquire()
-        limiter.acquire(weight=10)
+        # Should not raise, should not block, and should return None
+        result1 = limiter.acquire()
+        result2 = limiter.acquire(weight=10)
+
+        assert result1 is None
+        assert result2 is None
 
     def test_try_acquire_always_succeeds(self) -> None:
         """try_acquire() always returns True."""
@@ -29,11 +32,14 @@ class TestNoOpLimiter:
         assert limiter.try_acquire(weight=100) is True
 
     def test_close_does_nothing(self) -> None:
-        """close() completes without error."""
+        """close() returns None and is idempotent."""
         limiter = NoOpLimiter()
-        limiter.close()
+        result1 = limiter.close()
         # Should be safe to call multiple times
-        limiter.close()
+        result2 = limiter.close()
+
+        assert result1 is None
+        assert result2 is None
 
     def test_context_manager_protocol(self) -> None:
         """NoOpLimiter works as context manager."""
@@ -120,7 +126,11 @@ class TestRateLimitRegistryEnabled:
         registry.close()
 
     def test_uses_service_specific_config(self) -> None:
-        """Registry uses per-service config when available."""
+        """Registry uses per-service config when available.
+
+        Verifies that the service-specific rate limits are actually applied,
+        not just that a limiter is created.
+        """
         settings = RateLimitSettings(
             enabled=True,
             default_requests_per_second=10,
@@ -135,17 +145,26 @@ class TestRateLimitRegistryEnabled:
 
         limiter = registry.get_limiter("openai")
 
-        # The limiter should have been created with service-specific config
-        # We can verify by checking it's a RateLimiter (not NoOp) with the right name
+        # Verify type and name
         assert isinstance(limiter, RateLimiter)
         assert limiter.name == "openai"
+
+        # Verify the service-specific config is actually applied
+        assert limiter._requests_per_second == 5
+        assert limiter._requests_per_minute == 100
+
         registry.close()
 
     def test_uses_default_config_for_unconfigured_service(self) -> None:
-        """Registry uses default config for services not explicitly configured."""
+        """Registry uses default config for services not explicitly configured.
+
+        Verifies that unconfigured services get the default rate limits,
+        not the service-specific limits.
+        """
         settings = RateLimitSettings(
             enabled=True,
             default_requests_per_second=15,
+            default_requests_per_minute=None,  # Explicitly no per-minute limit
             services={
                 "openai": ServiceRateLimit(requests_per_second=5),
             },
@@ -155,8 +174,14 @@ class TestRateLimitRegistryEnabled:
         # This service is not in the services dict
         limiter = registry.get_limiter("unknown_api")
 
+        # Verify type and name
         assert isinstance(limiter, RateLimiter)
         assert limiter.name == "unknown_api"
+
+        # Verify the default config is applied (not openai's config)
+        assert limiter._requests_per_second == 15
+        assert limiter._requests_per_minute is None
+
         registry.close()
 
 

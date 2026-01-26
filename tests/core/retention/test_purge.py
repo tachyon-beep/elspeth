@@ -4,6 +4,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import Connection, Table
 
 
@@ -593,9 +594,66 @@ class TestPurgePayloads:
         assert nonexistent_ref not in result.failed_refs
         assert result.failed_refs == []
 
-    def test_purge_measures_duration(self) -> None:
-        """Purge measures operation duration."""
+    def test_purge_tracks_failed_refs(self) -> None:
+        """Purge tracks refs that exist but fail to delete.
+
+        This tests the failure path where exists() returns True but
+        delete() returns False (e.g., permission error, I/O failure).
+        """
         from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = LandscapeDB.in_memory()
+
+        # Create a mock store that simulates deletion failure for a specific ref
+        class FailingPayloadStore:
+            """Mock that fails to delete specific refs."""
+
+            def __init__(self, fail_refs: set[str]) -> None:
+                self._storage: dict[str, bytes] = {}
+                self._fail_refs = fail_refs
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                if content_hash in self._fail_refs:
+                    # Simulate deletion failure (e.g., I/O error)
+                    return False
+                if content_hash in self._storage:
+                    del self._storage[content_hash]
+                    return True
+                return False
+
+        # Store two payloads, mark one for failure
+        store = FailingPayloadStore(fail_refs=set())
+        success_ref = store.store(b"will succeed")
+        fail_ref = store.store(b"will fail")
+        store._fail_refs.add(fail_ref)
+
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([success_ref, fail_ref])
+
+        # One succeeded, one failed
+        assert result.deleted_count == 1
+        assert result.skipped_count == 0
+        assert result.failed_refs == [fail_ref]
+
+        # Successful one is gone, failed one still exists
+        assert not store.exists(success_ref)
+        assert store.exists(fail_ref)
+
+    def test_purge_measures_duration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Purge measures operation duration using deterministic time."""
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.retention import purge as purge_module
         from elspeth.core.retention.purge import PurgeManager
 
         db = LandscapeDB.in_memory()
@@ -603,10 +661,21 @@ class TestPurgePayloads:
 
         ref = store.store(b"content")
 
+        # Monkeypatch perf_counter to return deterministic values
+        call_count = 0
+
+        def fake_perf_counter() -> float:
+            nonlocal call_count
+            call_count += 1
+            # First call (start): 10.0, Second call (end): 12.5
+            return 10.0 if call_count == 1 else 12.5
+
+        monkeypatch.setattr(purge_module, "perf_counter", fake_perf_counter)
+
         manager = PurgeManager(db, store)
         result = manager.purge_payloads([ref])
 
-        assert result.duration_seconds >= 0
+        assert result.duration_seconds == 2.5
 
     def test_purge_empty_list(self) -> None:
         """Purge with empty list returns empty result."""

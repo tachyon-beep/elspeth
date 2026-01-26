@@ -377,14 +377,17 @@ class TestNoOpLimiter:
     """Tests for NoOpLimiter."""
 
     def test_noop_limiter_acquire(self) -> None:
-        """NoOpLimiter.acquire() always succeeds instantly."""
+        """NoOpLimiter.acquire() always succeeds instantly and returns None."""
         from elspeth.core.rate_limit import NoOpLimiter
 
         limiter = NoOpLimiter()
 
-        # Should not block or raise
-        limiter.acquire()
-        limiter.acquire(weight=100)
+        # Should not block or raise, and should return None
+        result1 = limiter.acquire()
+        result2 = limiter.acquire(weight=100)
+
+        assert result1 is None
+        assert result2 is None
 
     def test_noop_limiter_try_acquire(self) -> None:
         """NoOpLimiter.try_acquire() always returns True."""
@@ -404,11 +407,18 @@ class TestNoOpLimiter:
             assert limiter.try_acquire() is True
 
     def test_noop_limiter_close(self) -> None:
-        """NoOpLimiter.close() does nothing but doesn't raise."""
+        """NoOpLimiter.close() returns None and is idempotent."""
         from elspeth.core.rate_limit import NoOpLimiter
 
         limiter = NoOpLimiter()
-        limiter.close()  # Should not raise
+
+        # Should return None and not raise
+        result1 = limiter.close()
+        assert result1 is None
+
+        # Should be idempotent (calling twice doesn't raise)
+        result2 = limiter.close()
+        assert result2 is None
 
 
 class TestExcepthookSuppression:

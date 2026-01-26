@@ -189,13 +189,34 @@ class TestSanitizedWebhookUrl:
         assert result.fingerprint is not None
 
     def test_basic_auth_username_and_password_both_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Both username and password are included in fingerprint."""
+        """Both username and password are included in fingerprint.
+
+        Verifies that:
+        1. Fingerprints are present (not None)
+        2. Both credentials contribute to the fingerprint
+        3. The fingerprint matches the expected HMAC
+        """
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
         url_userpass = "https://user:pass@api.example.com/webhook"
         url_user_only = "https://user@api.example.com/webhook"
 
         result_userpass = SanitizedWebhookUrl.from_raw_url(url_userpass)
         result_user_only = SanitizedWebhookUrl.from_raw_url(url_user_only)
+
+        # Both must have fingerprints (not None)
+        assert result_userpass.fingerprint is not None
+        assert result_user_only.fingerprint is not None
+
+        # Verify exact fingerprints match expected HMAC of sorted credentials
+        # For user:pass -> sorted(["user", "pass"]) = ["pass", "user"] -> "pass|user"
+        expected_userpass = secret_fingerprint("pass|user")
+        assert result_userpass.fingerprint == expected_userpass
+
+        # For user only -> "user"
+        expected_user_only = secret_fingerprint("user")
+        assert result_user_only.fingerprint == expected_user_only
 
         # Different fingerprints because one has password, one doesn't
         assert result_userpass.fingerprint != result_user_only.fingerprint

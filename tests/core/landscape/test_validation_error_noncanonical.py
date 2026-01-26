@@ -67,6 +67,53 @@ class TestValidationErrorNonCanonical:
         assert token.node_id == "source_node"
         assert token.destination == "discard"
 
+    def test_primitive_int_audit_record_verified(self, recorder: LandscapeRecorder) -> None:
+        """P1: Verify persisted audit record fields for primitive int.
+
+        Tests must verify all audit trail fields, not just error_id.
+        """
+        import json
+
+        from elspeth.core.canonical import stable_hash
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_node",
+            landscape=recorder,
+        )
+
+        row_value = 42
+        error_msg = "Expected dict, got int"
+
+        token = ctx.record_validation_error(
+            row=row_value,
+            error=error_msg,
+            schema_mode="dynamic",
+            destination="discard",
+        )
+
+        # Query the persisted validation error record
+        records = recorder.get_validation_errors_for_run("test-run")
+        assert len(records) == 1
+        record = records[0]
+
+        # Verify all persisted fields
+        assert record.error_id == token.error_id
+        assert record.run_id == "test-run"
+        assert record.node_id == "source_node"
+        assert record.error == error_msg
+        assert record.schema_mode == "dynamic"
+        assert record.destination == "discard"
+
+        # Verify row_hash matches stable_hash of the primitive
+        expected_hash = stable_hash(row_value)
+        assert record.row_hash == expected_hash, f"row_hash mismatch: expected {expected_hash}, got {record.row_hash}"
+
+        # Verify row_data_json is canonical JSON
+        row_data = json.loads(record.row_data_json)
+        assert row_data == row_value
+
     def test_record_primitive_string(self, recorder: LandscapeRecorder) -> None:
         """Primitive string should be quarantined without crash."""
         ctx = PluginContext(
@@ -121,6 +168,51 @@ class TestValidationErrorNonCanonical:
 
         assert token.error_id is not None
         assert token.node_id == "source_node"
+
+    def test_nan_audit_record_uses_repr_fallback(self, recorder: LandscapeRecorder) -> None:
+        """P1: Verify NaN uses repr_hash and NonCanonicalMetadata.
+
+        Non-finite floats cannot be canonicalized, so:
+        - row_hash should use repr_hash (hash of repr string)
+        - row_data_json should contain NonCanonicalMetadata structure
+        """
+        import json
+
+        from elspeth.core.canonical import repr_hash
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            node_id="source_node",
+            landscape=recorder,
+        )
+
+        row_value = {"value": float("nan")}
+        error_msg = "Row contains NaN"
+
+        ctx.record_validation_error(
+            row=row_value,
+            error=error_msg,
+            schema_mode="dynamic",
+            destination="discard",
+        )
+
+        # Query the persisted validation error record
+        records = recorder.get_validation_errors_for_run("test-run")
+        assert len(records) == 1
+        record = records[0]
+
+        # Verify row_hash uses repr_hash (not stable_hash which would crash)
+        expected_hash = repr_hash(row_value)
+        assert record.row_hash == expected_hash, f"row_hash mismatch for NaN: expected repr_hash {expected_hash}, got {record.row_hash}"
+
+        # Verify row_data_json contains NonCanonicalMetadata structure
+        row_data = json.loads(record.row_data_json)
+        assert "__repr__" in row_data, "NaN should use repr fallback metadata"
+        assert "__type__" in row_data
+        assert "__canonical_error__" in row_data
+        assert row_data["__type__"] == "dict"
+        assert "nan" in row_data["__repr__"].lower()
 
     def test_record_infinity_value(self, recorder: LandscapeRecorder) -> None:
         """Row with Infinity should be quarantined without crash."""

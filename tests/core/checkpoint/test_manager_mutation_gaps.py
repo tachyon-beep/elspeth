@@ -270,3 +270,117 @@ class TestGetLatestCheckpointOrdering:
 
         assert latest is not None
         assert latest.sequence_number == 30, f"Expected sequence 30 (highest), got {latest.sequence_number}"
+
+    def test_get_latest_filters_by_run_id(self, manager: CheckpointManager, mock_graph: "ExecutionGraph") -> None:
+        """get_latest_checkpoint must filter by run_id, not return from other runs.
+
+        A regression that drops the run_id filter would return checkpoints from
+        the wrong run, causing incorrect resume behavior. This test creates
+        checkpoints for two different runs and verifies correct filtering.
+
+        Identified by quality audit as P1 missing edge case.
+        """
+        from elspeth.core.landscape.schema import (
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+
+        db = manager._db
+
+        # Set up run-001 with sequence 10
+        with db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id="run-001",
+                    started_at=datetime.now(UTC),
+                    config_hash="abc",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status="running",
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="node-001",
+                    run_id="run-001",
+                    plugin_name="test",
+                    node_type="transform",
+                    plugin_version="1.0",
+                    determinism="deterministic",
+                    config_hash="xyz",
+                    config_json="{}",
+                    registered_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-001",
+                    run_id="run-001",
+                    source_node_id="node-001",
+                    row_index=0,
+                    source_data_hash="hash1",
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(tokens_table.insert().values(token_id="tok-001", row_id="row-001", created_at=datetime.now(UTC)))
+            conn.commit()
+
+        # Set up run-002 with sequence 99 (higher than run-001)
+        with db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id="run-002",
+                    started_at=datetime.now(UTC),
+                    config_hash="def",
+                    settings_json="{}",
+                    canonical_version="v1",
+                    status="running",
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="node-002",
+                    run_id="run-002",
+                    plugin_name="test",
+                    node_type="transform",
+                    plugin_version="1.0",
+                    determinism="deterministic",
+                    config_hash="xyz",
+                    config_json="{}",
+                    registered_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-002",
+                    run_id="run-002",
+                    source_node_id="node-002",
+                    row_index=0,
+                    source_data_hash="hash2",
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.execute(tokens_table.insert().values(token_id="tok-002", row_id="row-002", created_at=datetime.now(UTC)))
+            conn.commit()
+
+        # Create graph with node-002 for run-002
+        graph_002 = mock_graph.__class__()
+        graph_002.add_node("node-002", node_type="transform", plugin_name="test", config={})
+
+        # Create checkpoints
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 10, mock_graph)
+        manager.create_checkpoint("run-002", "tok-002", "node-002", 99, graph_002)
+
+        # Verify filtering - run-001 should return its checkpoint, not run-002's
+        latest_run1 = manager.get_latest_checkpoint("run-001")
+        assert latest_run1 is not None
+        assert latest_run1.run_id == "run-001", f"Expected run-001, got {latest_run1.run_id}"
+        assert latest_run1.sequence_number == 10
+
+        # Verify run-002 returns its own checkpoint
+        latest_run2 = manager.get_latest_checkpoint("run-002")
+        assert latest_run2 is not None
+        assert latest_run2.run_id == "run-002", f"Expected run-002, got {latest_run2.run_id}"
+        assert latest_run2.sequence_number == 99

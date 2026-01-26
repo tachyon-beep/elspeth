@@ -121,6 +121,90 @@ class TestRecordCall:
         assert calls[0].call_index == 0
         assert calls[1].call_index == 1
 
+    def test_persisted_call_fields_match_expected_values(self, recorder: LandscapeRecorder, state_id: str) -> None:
+        """Verify all persisted call fields match expected values.
+
+        P1 audit trail verification: Tests must not just check non-null,
+        but verify actual values match expected hashes and enums.
+        """
+        from elspeth.core.canonical import stable_hash
+
+        request_data = {"model": "gpt-4", "prompt": "Hello"}
+        response_data = {"completion": "Hi there!"}
+
+        recorder.record_call(
+            state_id=state_id,
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data=request_data,
+            response_data=response_data,
+            latency_ms=150.5,
+        )
+
+        # Retrieve persisted call via get_calls
+        calls = recorder.get_calls(state_id)
+        persisted = calls[0]
+
+        # Verify enums are actual enum types (not strings)
+        assert isinstance(persisted.call_type, CallType), f"call_type should be CallType enum, got {type(persisted.call_type)}"
+        assert isinstance(persisted.status, CallStatus), f"status should be CallStatus enum, got {type(persisted.status)}"
+        assert persisted.call_type == CallType.LLM
+        assert persisted.status == CallStatus.SUCCESS
+
+        # Verify hashes match expected stable_hash values
+        expected_request_hash = stable_hash(request_data)
+        expected_response_hash = stable_hash(response_data)
+        assert persisted.request_hash == expected_request_hash, (
+            f"request_hash mismatch: expected {expected_request_hash}, got {persisted.request_hash}"
+        )
+        assert persisted.response_hash == expected_response_hash, (
+            f"response_hash mismatch: expected {expected_response_hash}, got {persisted.response_hash}"
+        )
+
+        # Verify other fields
+        assert persisted.call_index == 0
+        assert persisted.latency_ms == 150.5
+        assert persisted.error_json is None
+
+    def test_persisted_error_call_fields(self, recorder: LandscapeRecorder, state_id: str) -> None:
+        """Verify error call fields are correctly persisted."""
+        from elspeth.core.canonical import canonical_json, stable_hash
+
+        request_data = {"url": "https://api.example.com"}
+        error_data = {"code": 500, "message": "Internal Server Error"}
+
+        recorder.record_call(
+            state_id=state_id,
+            call_index=0,
+            call_type=CallType.HTTP,
+            status=CallStatus.ERROR,
+            request_data=request_data,
+            error=error_data,
+            latency_ms=50.0,
+        )
+
+        # Retrieve persisted call
+        calls = recorder.get_calls(state_id)
+        persisted = calls[0]
+
+        # Verify enum types and values
+        assert isinstance(persisted.call_type, CallType)
+        assert isinstance(persisted.status, CallStatus)
+        assert persisted.call_type == CallType.HTTP
+        assert persisted.status == CallStatus.ERROR
+
+        # Verify request hash
+        expected_request_hash = stable_hash(request_data)
+        assert persisted.request_hash == expected_request_hash
+
+        # Verify error_json matches canonical serialization
+        expected_error_json = canonical_json(error_data)
+        assert persisted.error_json == expected_error_json
+
+        # Verify no response hash for error calls
+        assert persisted.response_hash is None
+
     def test_call_with_payload_refs(self, recorder: LandscapeRecorder, state_id: str) -> None:
         """Test recording calls with payload store references."""
         call = recorder.record_call(
