@@ -2537,6 +2537,201 @@ class TestRowProcessorCoalesce:
         assert outer_merged_record is not None
         assert outer_merged_record.join_group_id is not None
 
+    def test_late_arrival_coalesce_returns_failed_outcome(self) -> None:
+        """Late arrivals at coalesce points return FAILED outcome from processor.
+
+        This is an INTEGRATION CONTRACT TEST verifying the processor correctly
+        handles CoalesceOutcome.failure_reason field.
+
+        Scenario:
+        - Fork creates 2 children (fast, slow branches)
+        - Coalesce policy is FIRST (merges immediately on first arrival)
+        - Fast branch arrives → triggers merge → returns COALESCED
+        - Slow branch arrives AFTER merge complete → returns FAILED
+
+        Verifies:
+        1. processor.process_row(slow_token) returns RowResult with outcome=FAILED
+        2. RowResult.error field contains structured FailureInfo
+        3. RowResult.final_data is slow token's data (unchanged)
+        4. FAILED outcome recorded in token_outcomes table
+        5. NO COMPLETED outcome recorded for late arrival
+
+        This test prevents regression of the bug where late arrivals fell through
+        to COMPLETED path because processor didn't check failure_reason field.
+        """
+        from elspeth.contracts import TokenInfo
+        from elspeth.core.config import CoalesceSettings
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.engine.tokens import TokenManager
+
+        # Setup: Create recorder and span factory
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        span_factory = SpanFactory()
+
+        # Register nodes (source and coalesce)
+        from elspeth.contracts import NodeType
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Setup: Create processor with coalesce executor
+        token_manager = TokenManager(recorder)
+        coalesce_executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+
+        # Register coalesce with FIRST policy (merges on first arrival)
+        coalesce_settings = CoalesceSettings(
+            name="test_coalesce",
+            branches=["fast", "slow"],
+            policy="first",
+            strategy="overwrite",
+            primary_branch="fast",
+        )
+        coalesce_executor.register_coalesce(coalesce_settings, coalesce_node.node_id)
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            coalesce_executor=coalesce_executor,
+        )
+
+        # Create initial token and fork it
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"text": "test"},
+        )
+
+        # Fork into fast and slow branches
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["fast", "slow"],
+            step_in_pipeline=1,
+        )
+
+        # Simulate processing: create enriched tokens for each branch
+        fast_token = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"text": "test", "fast_result": "done"},
+            branch_name="fast",
+        )
+        slow_token = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"text": "test", "slow_result": "done"},
+            branch_name="slow",
+        )
+
+        # Need to create context for processing
+        from elspeth.plugins.context import PluginContext
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Coalesce triggers when completed_step >= coalesce_at_step
+        # With no transforms, completed_step = 0, so set coalesce_at_step=0
+        # This means coalesce happens immediately (step 0 complete → step 1 is coalesce)
+
+        # Process fast token → triggers merge (FIRST policy)
+        result1, _ = processor._process_single_token(
+            token=fast_token,
+            transforms=[],  # No transforms needed for this test
+            ctx=ctx,
+            start_step=0,
+            coalesce_name="test_coalesce",
+            coalesce_at_step=0,  # Changed from 1 to 0 (coalesce immediately)
+        )
+
+        # Verify fast token merged successfully
+        assert result1 is not None
+        assert result1.outcome == RowOutcome.COALESCED
+
+        # Process slow token (late arrival - merge already happened)
+        result2, _ = processor._process_single_token(
+            token=slow_token,
+            transforms=[],
+            ctx=ctx,
+            start_step=0,
+            coalesce_name="test_coalesce",
+            coalesce_at_step=0,  # Changed from 1 to 0 (same as fast token)
+        )
+
+        # === CRITICAL ASSERTIONS ===
+
+        # 1. Result is not None (token not held)
+        assert result2 is not None, "Late arrival should return result, not be held"
+
+        # 2. Outcome is FAILED, not COMPLETED
+        assert result2.outcome == RowOutcome.FAILED, f"Late arrival should return FAILED, got {result2.outcome}"
+
+        # 3. Token identity preserved
+        assert result2.token.token_id == slow_token.token_id
+        assert result2.token.branch_name == "slow"
+
+        # 4. Row data unchanged (not merged)
+        assert result2.final_data == slow_token.row_data
+        assert result2.final_data["slow_result"] == "done"
+
+        # 5. Structured error details present
+        assert result2.error is not None, "FAILED outcome must include FailureInfo"
+        assert result2.error.exception_type == "CoalesceFailure"
+        assert "late_arrival" in result2.error.message.lower()
+
+        # 6. Verify audit trail: FAILED outcome recorded
+        # Query token_outcomes table to verify FAILED was recorded
+        from sqlalchemy import text
+
+        with db.engine.connect() as conn:
+            outcomes = conn.execute(
+                text("""
+                    SELECT outcome, error_hash
+                    FROM token_outcomes
+                    WHERE run_id = :run_id
+                    AND token_id = :token_id
+                """),
+                {"run_id": run.run_id, "token_id": slow_token.token_id},
+            ).fetchall()
+
+        assert len(outcomes) > 0, "Should have at least one outcome recorded"
+
+        # Find FAILED outcome (note: stored as lowercase in database)
+        failed_outcomes = [o for o in outcomes if o[0].upper() == "FAILED"]  # o[0] is outcome
+        assert len(failed_outcomes) == 1, f"Should have exactly one FAILED outcome. Got outcomes: {[(o[0], o[1]) for o in outcomes]}"
+        assert failed_outcomes[0][1] is not None, "FAILED outcome must have error_hash"  # o[1] is error_hash
+
+        # 7. Verify NO COMPLETED outcome recorded
+        completed_outcomes = [o for o in outcomes if o[0].upper() == "COMPLETED"]
+        assert len(completed_outcomes) == 0, (
+            f"Late arrival should NOT have COMPLETED outcome (bug symptom). Got: {[(o[0], o[1]) for o in outcomes]}"
+        )
+
 
 class TestRowProcessorRetry:
     """Tests for retry integration in RowProcessor."""

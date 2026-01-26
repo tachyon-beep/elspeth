@@ -255,7 +255,6 @@ allow_hits:
   reason: Checkpoint may be None or empty dict - checking for batch_id existence
   safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
   expires: null
-# Azure Batch LLM Transform - External API error handling
 - key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=415
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
@@ -276,7 +275,6 @@ allow_hits:
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-# Azure Batch - Azure API response structure (trust boundary)
 - key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=530
   owner: architecture
   reason: 'Trust boundary: Azure batch.output_file_id only exists on completed batches'
@@ -287,7 +285,6 @@ allow_hits:
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-# Azure Batch - Checkpoint state (may be from old format or corrupted)
 - key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=594
   owner: architecture
   reason: submitted_at may not exist in old checkpoint format
@@ -303,10 +300,10 @@ allow_hits:
   reason: template_errors may not exist in old checkpoint format
   safety: Empty list default means no template errors tracked - graceful degradation
   expires: null
-# Azure Batch - JSONL output parsing (external data from Azure)
 - key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=698
   owner: architecture
-  reason: 'Trust boundary: Azure JSONL result custom_id field validated as external data'
+  reason: 'Trust boundary: Azure JSONL result custom_id field validated as external
+    data'
   safety: None check follows on next line - returns error row if missing
   expires: null
 - key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=740
@@ -452,18 +449,6 @@ allow_hits:
   safety: Graceful default to '<unknown>' - error message still produced with field
     and message
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=873
-  owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
-    to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=874
-  owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
-    to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
-  expires: null
 - key: cli.py:R1:health:line=1522
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external
@@ -495,151 +480,91 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports
     plugins as unhealthy
   expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=362
-  owner: architecture
-  reason: Optional protocol extension - _on_validation_failure only on sources with
-    SourceDataConfig
-  safety: None default means source doesn't support quarantine routing - validation
-    skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=701
-  owner: architecture
-  reason: Optional schema config with explicit default - not all nodes define schemas
-  safety: 'Default value is well-defined: dynamic fields'
-  expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:line=427
+- key: engine/executors.py:R1:GateExecutor:execute_gate:line=428
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=702
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=704
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=716
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=718
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=803
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=805
   owner: architecture
   reason: Checking if batch exists to decide whether to create one
   safety: None means 'create new batch' - explicit conditional logic follows
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=828
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=830
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have config
   safety: None means 'no trigger config' - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=841
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=843
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=852
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=854
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=867
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=869
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=868
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=870
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1084
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1086
   owner: architecture
   reason: 'Idempotent cleanup: batch_id may not exist if already reset'
   safety: None means 'already cleaned up or never existed' - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1099
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1101
   owner: architecture
   reason: 'Intentional Optional API: returns 0 for unknown node_id'
   safety: 0 is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1139
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1141
   owner: architecture
   reason: Optional trigger evaluator lookup for elapsed time - not all aggregations
     have trigger config
   safety: None means 'no trigger config' - elapsed_age_seconds defaults to 0.0
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1153
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1155
   owner: architecture
   reason: 'Intentional Optional API: batch_id lookup for node_id'
   safety: None is safe - means no batch exists yet, recorded as null in checkpoint
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=902
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=904
   owner: architecture
   reason: 'Explicit existence check: raises RuntimeError if batch_id is None'
   safety: Raises immediately with node_id for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=907
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=909
   owner: architecture
   reason: Existence check paired with explicit RuntimeError if empty
   safety: Raises immediately if buffer is empty
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=908
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=910
   owner: architecture
   reason: Token buffer lookup matches row buffer lookup pattern
   safety: Empty list default paired with row buffer check
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1201
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1203
   owner: architecture
   reason: 'Optional field: _version in checkpoint state for migration compatibility'
   safety: None check with explicit fallback to legacy format
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1248
-  owner: architecture
-  reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
-  safety: None default handled by dataclass
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1257
-  owner: architecture
-  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
-  safety: None check with explicit handling
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1263
-  owner: architecture
-  reason: Optional trigger evaluator lookup - node may not have trigger config
-  safety: None check with conditional elapsed time restoration
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1273
-  owner: architecture
-  reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward
-    compat)'
-  safety: Default 0.0 if missing - safe for fresh checkpoints
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1283
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no batch exists for node_id'
-  safety: None return is expected API behavior
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1294
-  owner: architecture
-  reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
-  safety: False return is safe default - no flush needed
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1308
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
-  safety: None return is expected API behavior
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1337
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no state was restored for node_id'
-  safety: None return is expected API behavior
-  expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1531
-  owner: architecture
-  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink
-    write'
-  safety: Logged with error - sink artifact exists but checkpoint failed, resume will
-    replay
   expires: null
 - key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:line=383
   owner: architecture
@@ -647,59 +572,131 @@ allow_hits:
     data, etc.)'
   safety: Logged and row quarantined with full error details
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=228
-  owner: architecture
-  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash
-    would prevent other plugins from cleanup'
-  safety: Errors logged with full details - resource leaks worse than compounding
-    damage, see docstring lines 206-218
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1072
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1074
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have trigger config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=266
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1252
+  owner: architecture
+  reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
+  safety: None default handled by dataclass
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1261
+  owner: architecture
+  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
+  safety: None check with explicit handling
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1267
+  owner: architecture
+  reason: Optional trigger evaluator lookup - node may not have trigger config
+  safety: None check with conditional elapsed time restoration
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1277
+  owner: architecture
+  reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward
+    compat)'
+  safety: Default 0.0 if missing - safe for fresh checkpoints
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1287
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no batch exists for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1298
+  owner: architecture
+  reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
+  safety: False return is safe default - no flush needed
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1312
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1341
+  owner: architecture
+  reason: 'Intentional Optional API: returns None if no state was restored for node_id'
+  safety: None return is expected API behavior
+  expires: null
+- key: engine/executors.py:R4:SinkExecutor:write:line=1535
+  owner: architecture
+  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink
+    write'
+  safety: Logged with error - sink artifact exists but checkpoint failed, resume will
+    replay
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=236
+  owner: architecture
+  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash
+    would prevent other plugins from cleanup'
+  safety: Errors logged with full details - resource leaks worse than compounding
+    damage
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=274
   owner: architecture
   reason: Building lookup for gate names - only gates (not transforms) are in map
   safety: None means not a gate at this sequence - correctly skipped
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=273
+- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=370
+  owner: architecture
+  reason: Optional protocol extension - _on_validation_failure only on sources with
+    SourceDataConfig
+  safety: None default means source doesn't support quarantine routing - validation
+    skipped
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=709
+  owner: architecture
+  reason: Optional schema config with explicit default - not all nodes define schemas
+  safety: 'Default value is well-defined: dynamic fields'
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=881
+  owner: architecture
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
+    to ''forbid'')'
+  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=882
+  owner: architecture
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
+    to ''forbid'')'
+  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=281
+  owner: architecture
+  reason: Building lookup for config gate names - only config gates are in map
+  safety: None means not a config gate - correctly skipped
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=297
   owner: architecture
   reason: Fallback for error message - use node_id if gate name not found
   safety: Error message still produced with node_id as fallback
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1350
-  owner: architecture
-  reason: 'Trust boundary: JSON schema required field is optional'
-  safety: Empty list default is safe
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1391
-  owner: architecture
-  reason: 'Trust boundary: JSON schema type/format fields may be missing'
-  safety: None check with type-specific handling
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1399
-  owner: architecture
-  reason: 'Trust boundary: JSON schema anyOf items may not have type field'
-  safety: None filtered out in set comprehension
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1404
-  owner: architecture
-  reason: 'Trust boundary: JSON schema type field may be missing'
-  safety: Returns Any for unknown types
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=289
-  owner: architecture
-  reason: Fallback for error message - use node_id if gate name not found in lookup
-  safety: Error message still produced with node_id as fallback identifier
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1337
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1348
   owner: architecture
   reason: 'Trust boundary: JSON schema properties field is optional'
   safety: None check with explicit fallback to empty schema
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1414
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1361
+  owner: architecture
+  reason: 'Trust boundary: JSON schema required field is optional'
+  safety: Empty list default is safe
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1402
+  owner: architecture
+  reason: 'Trust boundary: JSON schema type/format fields may be missing'
+  safety: None check with type-specific handling
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1410
+  owner: architecture
+  reason: 'Trust boundary: JSON schema anyOf items may not have type field'
+  safety: None filtered out in set comprehension
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1415
+  owner: architecture
+  reason: 'Trust boundary: JSON schema type field may be missing'
+  safety: Returns Any for unknown types
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1425
   owner: architecture
   reason: 'Trust boundary: JSON schema items field for arrays may be missing'
   safety: Returns list[Any] for untyped arrays

@@ -993,6 +993,42 @@ class RowProcessor:
                         child_items,
                     )
 
+                if coalesce_outcome.failure_reason:  # Truthy check (rejects None and empty string)
+                    # Coalesce failed (late arrival, timeout, etc.)
+                    #
+                    # AUDIT TRAIL DIVISION OF RESPONSIBILITY:
+                    # - CoalesceExecutor already recorded node_state with failure status (lines 173-184)
+                    # - Processor must record terminal token_outcome here
+                    #
+                    # Late arrivals don't go through flush_pending() (which records outcomes for
+                    # timeout failures), so we must record the outcome synchronously here.
+
+                    # Compute error hash for audit trail
+                    error_msg = coalesce_outcome.failure_reason
+                    error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+
+                    # Record terminal token outcome
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=current_token.token_id,
+                        outcome=RowOutcome.FAILED,
+                        error_hash=error_hash,
+                    )
+
+                    # Return FAILED result with structured error details
+                    return (
+                        RowResult(
+                            token=current_token,
+                            final_data=current_token.row_data,
+                            outcome=RowOutcome.FAILED,
+                            error=FailureInfo(
+                                exception_type="CoalesceFailure",
+                                message=error_msg,
+                            ),
+                        ),
+                        child_items,
+                    )
+
         # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
         # Orchestrator knows branch→sink mapping, processor does not.
         return (
