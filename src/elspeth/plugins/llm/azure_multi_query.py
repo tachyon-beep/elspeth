@@ -507,7 +507,12 @@ class AzureMultiQueryLLMTransform(BaseTransform):
 
         # Fast path: No pooled executor, process sequentially
         if self._executor is None:
-            return self._process_batch_sequential(rows, ctx)
+            try:
+                return self._process_batch_sequential(rows, ctx)
+            finally:
+                # Clean up batch client after all rows processed
+                with self._llm_clients_lock:
+                    self._llm_clients.pop(ctx.state_id, None)
 
         # Concurrent row processing using PooledExecutor
         try:

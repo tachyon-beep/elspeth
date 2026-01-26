@@ -617,3 +617,65 @@ class TestBatchProcessing:
             # Verify NO per-row synthetic state_ids in cache
             for client_key in transform._llm_clients:
                 assert "_row" not in client_key, f"Found synthetic per-row client key: {client_key}"
+
+    def test_sequential_mode_cleans_up_batch_client(self) -> None:
+        """Sequential mode (no pool_size) also cleans up batch client after processing.
+
+        P2 BUG: Sequential path returned early, bypassing cleanup finally block.
+        This caused _llm_clients to accumulate one entry per batch/state_id.
+
+        FIX: Wrap sequential call in try/finally with same cleanup as concurrent path.
+        """
+        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+
+        # Create config WITHOUT pool_size - forces sequential mode
+        config = make_config()
+        del config["pool_size"]
+
+        with mock_azure_openai_responses(responses):
+            transform = AzureMultiQueryLLMTransform(config)
+            transform.on_start(make_plugin_context())
+
+            # Verify no executor created (sequential mode)
+            assert transform._executor is None, "Sequential mode should not have executor"
+
+            # Process first batch
+            ctx1 = make_plugin_context(state_id="batch-seq-001")
+            rows1 = [
+                {
+                    "cs1_bg": "r1",
+                    "cs1_sym": "r1",
+                    "cs1_hist": "r1",
+                    "cs2_bg": "r1",
+                    "cs2_sym": "r1",
+                    "cs2_hist": "r1",
+                }
+            ]
+            result1 = transform.process(rows1, ctx1)
+            assert result1.status == "success"
+
+            # CRITICAL: Client should be cleaned up after batch
+            assert len(transform._llm_clients) == 0, (
+                f"P2 BUG: Sequential mode leaked batch client! Expected 0 clients, found {len(transform._llm_clients)}"
+            )
+
+            # Process second batch with different state_id
+            ctx2 = make_plugin_context(state_id="batch-seq-002")
+            rows2 = [
+                {
+                    "cs1_bg": "r2",
+                    "cs1_sym": "r2",
+                    "cs1_hist": "r2",
+                    "cs2_bg": "r2",
+                    "cs2_sym": "r2",
+                    "cs2_hist": "r2",
+                }
+            ]
+            result2 = transform.process(rows2, ctx2)
+            assert result2.status == "success"
+
+            # CRITICAL: Still no clients (second batch also cleaned up)
+            assert len(transform._llm_clients) == 0, (
+                "P2 BUG: Sequential mode accumulated clients across batches! "
+                f"Expected 0 clients, found {len(transform._llm_clients)}: {list(transform._llm_clients.keys())}"
+            )
