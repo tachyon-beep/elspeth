@@ -235,6 +235,21 @@ allow_hits:
   reason: 'Trust boundary: OpenRouter API may return different model than requested'
   safety: Graceful fallback to requested model - audit still captures actual value
   expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=355
+  owner: architecture
+  reason: 'Trust boundary: HTTP response headers may not include content-type'
+  safety: Graceful default to 'unknown' - used for error reporting only
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=385
+  owner: architecture
+  reason: 'Trust boundary: OpenRouter API ''usage'' field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical for processing
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=439
+  owner: architecture
+  reason: 'Trust boundary: OpenRouter API may return different model than requested'
+  safety: Graceful fallback to requested model - audit still captures actual value
+  expires: null
 - key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=284
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
