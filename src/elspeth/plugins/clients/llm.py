@@ -71,6 +71,122 @@ class RateLimitError(LLMClientError):
         super().__init__(message, retryable=True)
 
 
+class NetworkError(LLMClientError):
+    """Network/connection error - retryable.
+
+    Raised for transient network issues like timeouts, connection refused,
+    DNS failures, etc. These errors are typically transient and should be retried.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
+
+
+class ServerError(LLMClientError):
+    """Server error (5xx) - retryable.
+
+    Raised for server-side errors that are typically transient:
+    - 500 Internal Server Error
+    - 502 Bad Gateway
+    - 503 Service Unavailable
+    - 504 Gateway Timeout
+    - 529 Model Overloaded (Azure-specific)
+
+    These errors indicate temporary infrastructure issues that may
+    resolve on retry.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
+
+
+class ContentPolicyError(LLMClientError):
+    """Content policy violation - not retryable.
+
+    Raised when the LLM provider rejects the request due to content
+    policy violations. Retrying with the same prompt will always fail.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+
+class ContextLengthError(LLMClientError):
+    """Context length exceeded - not retryable.
+
+    Raised when the prompt exceeds the model's maximum context length.
+    Retrying with the same prompt will always fail.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+
+def _is_retryable_error(exception: Exception) -> bool:
+    """Determine if an LLM error is retryable.
+
+    Retryable errors (transient):
+    - Rate limits (429)
+    - Server errors (500, 502, 503, 504, 529)
+    - Network/connection errors (timeout, connection refused, etc.)
+
+    Non-retryable errors (permanent):
+    - Client errors (400, 401, 403, 404, 422)
+    - Content policy violations
+    - Context length exceeded
+
+    Returns:
+        True if error is likely transient and should be retried
+    """
+    error_str = str(exception).lower()
+
+    # Rate limits - always retryable
+    if "rate" in error_str or "429" in error_str:
+        return True
+
+    # Server errors (5xx) - usually transient
+    # Include Microsoft Azure-specific codes (529 = model overloaded)
+    server_error_codes = ["500", "502", "503", "504", "529"]
+    if any(code in error_str for code in server_error_codes):
+        return True
+
+    # Network/connection errors - transient
+    network_error_patterns = [
+        "timeout",
+        "timed out",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "network unreachable",
+        "host unreachable",
+        "dns",
+        "getaddrinfo failed",
+    ]
+    if any(pattern in error_str for pattern in network_error_patterns):
+        return True
+
+    # Client errors (4xx except 429) - permanent
+    client_error_codes = ["400", "401", "403", "404", "422"]
+    if any(code in error_str for code in client_error_codes):
+        return False
+
+    # LLM-specific permanent errors
+    permanent_error_patterns = [
+        "content_policy_violation",
+        "content policy",
+        "safety system",
+        "context_length_exceeded",
+        "context length",
+        "maximum context",
+    ]
+    if any(pattern in error_str for pattern in permanent_error_patterns):
+        return False
+
+    # Unknown error - be conservative, do NOT retry
+    # This prevents infinite retries on unexpected errors
+    return False
+
+
 class AuditedLLMClient(AuditedClientBase):
     """LLM client that automatically records all calls to audit trail.
 
@@ -204,7 +320,9 @@ class AuditedLLMClient(AuditedClientBase):
             latency_ms = (time.perf_counter() - start) * 1000
             error_type = type(e).__name__
             error_str = str(e).lower()
-            is_rate_limit = "rate" in error_str or "429" in error_str
+
+            # Classify error for retry decision
+            is_retryable = _is_retryable_error(e)
 
             self._recorder.record_call(
                 state_id=self._state_id,
@@ -215,11 +333,26 @@ class AuditedLLMClient(AuditedClientBase):
                 error={
                     "type": error_type,
                     "message": str(e),
-                    "retryable": is_rate_limit,
+                    "retryable": is_retryable,
                 },
                 latency_ms=latency_ms,
             )
 
-            if is_rate_limit:
+            # Raise specific exception type based on error classification
+            if "rate" in error_str or "429" in error_str:
                 raise RateLimitError(str(e)) from e
-            raise LLMClientError(str(e), retryable=False) from e
+            elif "content_policy" in error_str or "safety system" in error_str:
+                raise ContentPolicyError(str(e)) from e
+            elif "context_length" in error_str or "maximum context" in error_str:
+                raise ContextLengthError(str(e)) from e
+            elif is_retryable:
+                # Server error or network error - determine which
+                server_error_codes = ["500", "502", "503", "504", "529"]
+                if any(code in error_str for code in server_error_codes):
+                    raise ServerError(str(e)) from e
+                else:
+                    # Must be network error (timeout, connection refused, etc.)
+                    raise NetworkError(str(e)) from e
+            else:
+                # Client error or unknown - not retryable
+                raise LLMClientError(str(e), retryable=False) from e

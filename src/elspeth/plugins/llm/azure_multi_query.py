@@ -533,7 +533,9 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         Returns:
             TransformResult with all rows processed
         """
-        assert ctx.state_id is not None
+        if ctx.state_id is None:
+            raise ValueError("state_id is required for batch processing")
+
         output_rows: list[dict[str, Any]] = []
 
         for row in rows:
@@ -568,8 +570,10 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         """
         from elspeth.plugins.pooling.executor import RowContext
 
-        assert self._executor is not None
-        assert ctx.state_id is not None
+        if self._executor is None:
+            raise RuntimeError("executor not initialized - call on_start() first")
+        if ctx.state_id is None:
+            raise ValueError("state_id is required for batch processing")
 
         queries_per_row = len(self._query_specs)
 
