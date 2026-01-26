@@ -462,6 +462,7 @@ class TestSinkProtocol:
             node_id: str | None = None
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
+            supports_resume = False  # Required by SinkProtocol
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.rows: list[dict[str, Any]] = []
@@ -485,6 +486,9 @@ class TestSinkProtocol:
 
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
+
+            def configure_for_resume(self) -> None:
+                raise NotImplementedError("BatchMemorySink does not support resume")
 
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
@@ -515,6 +519,7 @@ class TestSinkProtocol:
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.IO_WRITE
             plugin_version = "1.0.0"
+            supports_resume = False  # Required by SinkProtocol
             rows: ClassVar[list[dict[str, Any]]] = []
 
             def __init__(self, config: dict[str, Any]) -> None:
@@ -540,6 +545,9 @@ class TestSinkProtocol:
 
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
+
+            def configure_for_resume(self) -> None:
+                raise NotImplementedError("MemorySink does not support resume")
 
         sink = MemorySink({})
 
