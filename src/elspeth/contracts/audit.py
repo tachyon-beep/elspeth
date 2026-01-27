@@ -25,6 +25,17 @@ from elspeth.contracts.enums import (
 )
 
 
+def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
+    """Validate that value is an instance of the expected enum type.
+
+    Tier 1 audit data must crash on invalid types - no coercion, no defaults.
+    Per Data Manifesto: If we read garbage from our own database,
+    something catastrophic happened - crash immediately.
+    """
+    if value is not None and not isinstance(value, enum_type):
+        raise TypeError(f"{field_name} must be {enum_type.__name__}, got {type(value).__name__}: {value!r}")
+
+
 @dataclass
 class Run:
     """A single execution of a pipeline.
@@ -45,6 +56,11 @@ class Run:
     exported_at: datetime | None = None
     export_format: str | None = None
     export_sink: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.status, RunStatus, "status")
+        _validate_enum(self.export_status, ExportStatus, "export_status")
 
 
 @dataclass
@@ -69,6 +85,11 @@ class Node:
     schema_mode: str | None = None  # "dynamic", "strict", "free", "parse"
     schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
 
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.node_type, NodeType, "node_type")
+        _validate_enum(self.determinism, Determinism, "determinism")
+
 
 @dataclass
 class Edge:
@@ -84,6 +105,10 @@ class Edge:
     label: str
     default_mode: RoutingMode  # Strict: enum only
     created_at: datetime
+
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.default_mode, RoutingMode, "default_mode")
 
 
 @dataclass

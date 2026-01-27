@@ -341,7 +341,7 @@ class TestBatchesTriggerType:
         """Batch model should have trigger_type field."""
         from dataclasses import fields
 
-        from elspeth.core.landscape.models import Batch
+        from elspeth.contracts import Batch
 
         field_names = [f.name for f in fields(Batch)]
         assert "trigger_type" in field_names
