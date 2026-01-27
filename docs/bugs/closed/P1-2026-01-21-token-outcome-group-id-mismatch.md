@@ -188,3 +188,49 @@ No fixes found in git history since the bug was reported on 2026-01-21:
 2. Update `TokenManager` methods to preserve group IDs from Token objects when creating TokenInfo
 3. Update `RowProcessor` to use the group IDs from TokenInfo instead of generating new ones
 4. Add integration tests that verify `token_outcomes.*_group_id` matches `tokens.*_group_id` for the same token_id
+
+---
+
+## Closure (2026-01-27)
+
+**Status: FIXED**
+
+### Fix History
+
+The original bug (group ID mismatch) was fixed in stages:
+
+1. **TokenInfo contract** - Group ID fields added (commit unknown, prior to verification)
+2. **TokenManager** - Now preserves group IDs from recorder:
+   - `fork_token()`: `fork_group_id=child.fork_group_id`
+   - `coalesce_tokens()`: `join_group_id=merged.join_group_id`
+   - `expand_token()`: `expand_group_id=db_child.expand_group_id`
+3. **RowProcessor** - Now uses canonical group IDs from tokens:
+   - Fork: `outcome.child_tokens[0].fork_group_id`
+   - Expand: `child_tokens[0].expand_group_id`
+4. **CoalesceExecutor** - Uses `merged_token.join_group_id`
+
+### Why Previous Verifications Said "Still Valid"
+
+A **secondary bug** in commit `a4a8eed` masked the fix:
+
+- `TransformProtocol` incorrectly required `routes` and `fork_to` attributes
+- This caused `isinstance(transform, TransformProtocol)` to return `False` for all transforms
+- The expand tests failed with `TypeError: Unknown transform type` instead of testing group IDs
+- Verifiers saw failing tests and concluded the original bug was unfixed
+
+The secondary bug was fixed by removing `routes` and `fork_to` from `TransformProtocol` (they belong only on `GateProtocol`).
+
+### Test Results (Post-Fix)
+
+All 7 group ID consistency tests now pass:
+- `test_fork_children_share_same_fork_group_id_in_tokens_table` ✓
+- `test_fork_parent_outcome_uses_canonical_fork_group_id` ✓
+- `test_coalesce_creates_merged_token_with_join_group_id` ✓
+- `test_coalesce_consumed_tokens_use_canonical_join_group_id` ✓
+- `test_coalesce_merged_token_outcome_uses_canonical_join_group_id` ✓
+- `test_expand_creates_consistent_group_id_across_all_children` ✓
+- `test_expand_parent_outcome_uses_canonical_expand_group_id` ✓
+
+### Lesson Learned
+
+**Defensive programming can hide bugs.** The `isinstance()` check against a malformed protocol silently rejected valid transforms instead of letting the code run and either succeed or fail with a meaningful error.

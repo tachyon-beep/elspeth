@@ -149,8 +149,6 @@ class TransformProtocol(Protocol):
     name: str
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
-    routes: dict[str, str]
-    fork_to: list[str] | None
     node_id: str | None  # Set by orchestrator after registration
 
     # Metadata for Phase 3 audit/reproducibility
@@ -231,6 +229,12 @@ class GateProtocol(Protocol):
             input_schema = InputSchema
             output_schema = OutputSchema
 
+            def __init__(self, config: dict) -> None:
+                # Routes come from GateSettings - required for any gate that routes
+                self.routes = config["routes"]  # Crash if missing - config error
+                self.fork_to = config.get("fork_to")  # None is valid (most gates don't fork)
+                self.node_id = None
+
             def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
                 # Direct field access - schema guarantees field exists
                 if row["suspicious"]:
@@ -245,6 +249,10 @@ class GateProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+
+    # Routing configuration (set from GateSettings during instantiation)
+    routes: dict[str, str]  # Maps route names to destinations
+    fork_to: list[str] | None  # Branch names for fork operations
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism

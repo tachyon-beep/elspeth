@@ -426,16 +426,18 @@ class ExecutionGraph:
             node_type = "gate" if is_gate else "transform"
 
             if is_gate:
+                # Type narrowing: we know it's a GateProtocol from isinstance check
+                gate = cast(GateProtocol, transform)
                 upstream_schema = graph.get_node_info(prev_node_id).config["schema"]
                 if "schema" in node_config and node_config["schema"] != upstream_schema:
                     raise GraphValidationError(
-                        f"Gate '{transform.name}' declares schema config that differs from upstream. "
+                        f"Gate '{gate.name}' declares schema config that differs from upstream. "
                         f"Upstream schema config: {upstream_schema}, gate schema config: {node_config['schema']}"
                     )
                 node_config["schema"] = upstream_schema
-                node_config["routes"] = dict(transform.routes)
-                if transform.fork_to is not None:
-                    node_config["fork_to"] = list(transform.fork_to)
+                node_config["routes"] = dict(gate.routes)
+                if gate.fork_to is not None:
+                    node_config["fork_to"] = list(gate.fork_to)
 
             graph.add_node(
                 tid,
@@ -451,17 +453,19 @@ class ExecutionGraph:
             pipeline_nodes.append(tid)
 
             if is_gate:
+                # Type narrowing: we know it's a GateProtocol from isinstance check
+                gate = cast(GateProtocol, transform)
                 gate_entries.append(
                     _GateEntry(
                         node_id=tid,
-                        name=transform.name,
-                        fork_to=list(transform.fork_to) if transform.fork_to is not None else None,
-                        routes=dict(transform.routes),
+                        name=gate.name,
+                        fork_to=list(gate.fork_to) if gate.fork_to is not None else None,
+                        routes=dict(gate.routes),
                     )
                 )
 
                 # Gate routes to sinks via route labels
-                for route_label, target in transform.routes.items():
+                for route_label, target in gate.routes.items():
                     if target == "continue":
                         graph._route_resolution_map[(tid, route_label)] = "continue"
                     elif target == "fork":

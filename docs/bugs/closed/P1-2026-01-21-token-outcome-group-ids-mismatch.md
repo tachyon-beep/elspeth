@@ -228,7 +228,7 @@ The bug is a **contract propagation gap**:
 
 ### Conclusion
 
-**Bug Status**: STILL VALID as of commit 2c06ad5 (2026-01-24)
+**Bug Status**: ~~STILL VALID as of commit 2c06ad5 (2026-01-24)~~ **FIXED as of 2026-01-27**
 
 **Priority Justification**: P1 maintained
 - Breaks audit trail consistency (core ELSPETH principle)
@@ -236,4 +236,41 @@ The bug is a **contract propagation gap**:
 - No data loss, but requires schema/code fix before RC2
 - Has workaround via token_parents table
 
-**Recommendation**: Fix before RC2 release to prevent schema migration burden
+**Recommendation**: ~~Fix before RC2 release to prevent schema migration burden~~ Fixed.
+
+---
+
+## Closure (2026-01-27)
+
+**Status: FIXED**
+
+### Summary
+
+The original bug was already fixed in the codebase, but a **secondary bug** was masking it:
+
+1. **Original Bug (Group ID Mismatch)**: FIXED
+   - `TokenInfo` now has group ID fields
+   - `TokenManager` preserves group IDs from recorder
+   - `RowProcessor` uses canonical group IDs from tokens
+
+2. **Secondary Bug (TransformProtocol)**: FIXED 2026-01-27
+   - Commit `a4a8eed` incorrectly added `routes`/`fork_to` to `TransformProtocol`
+   - This broke `isinstance(transform, TransformProtocol)` for all transforms
+   - Expand tests failed with `TypeError` instead of testing group IDs
+   - Fix: Removed erroneous fields from `TransformProtocol`
+
+### All Tests Pass
+
+```
+tests/engine/test_group_id_consistency.py::TestForkGroupIDConsistency::test_fork_children_share_same_fork_group_id_in_tokens_table PASSED
+tests/engine/test_group_id_consistency.py::TestForkGroupIDConsistency::test_fork_parent_outcome_uses_canonical_fork_group_id PASSED
+tests/engine/test_group_id_consistency.py::TestJoinGroupIDConsistency::test_coalesce_creates_merged_token_with_join_group_id PASSED
+tests/engine/test_group_id_consistency.py::TestJoinGroupIDConsistency::test_coalesce_consumed_tokens_use_canonical_join_group_id PASSED
+tests/engine/test_group_id_consistency.py::TestJoinGroupIDConsistency::test_coalesce_merged_token_outcome_uses_canonical_join_group_id PASSED
+tests/engine/test_group_id_consistency.py::TestExpandGroupIDConsistency::test_expand_creates_consistent_group_id_across_all_children PASSED
+tests/engine/test_group_id_consistency.py::TestExpandGroupIDConsistency::test_expand_parent_outcome_uses_canonical_expand_group_id PASSED
+```
+
+### Lesson Learned
+
+Defensive `isinstance()` checks against malformed protocols hide bugs rather than catching them. The failing protocol check made it appear the original bug still existed when it was actually fixed.

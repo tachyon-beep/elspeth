@@ -152,19 +152,13 @@ class BaseGate(ABC):
         """Initialize with configuration.
 
         Args:
-            config: Plugin configuration
+            config: Plugin configuration (validated by GateSettings schema)
         """
         self.config = config
-        self.routes = {}
-        self.fork_to = None
-        if "routes" in config:
-            self.routes = dict(config["routes"])
-        if "fork_to" in config:
-            fork_to = config["fork_to"]
-            if fork_to is None:
-                self.fork_to = None
-            else:
-                self.fork_to = list(fork_to)
+        # GateSettings schema validates routes (required) and fork_to (optional)
+        # Trust the schema - no defensive checks needed here
+        self.routes = config["routes"]
+        self.fork_to = config.get("fork_to")
 
     @abstractmethod
     def evaluate(
