@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import asc, delete, desc, select
 
 from elspeth.contracts import Checkpoint
-from elspeth.core.canonical import compute_upstream_topology_hash, stable_hash
+from elspeth.core.canonical import compute_full_topology_hash, stable_hash
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
@@ -83,7 +83,10 @@ class CheckpointManager:
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation
-            upstream_topology_hash = compute_upstream_topology_hash(graph, node_id)
+            # BUG-COMPAT-01 fix: Use FULL topology hash instead of upstream-only hash.
+            # This ensures changes to ANY branch (including sibling sink branches)
+            # are detected during resume validation, enforcing "one run = one config".
+            upstream_topology_hash = compute_full_topology_hash(graph)
             node_info = graph.get_node_info(node_id)
             checkpoint_node_config_hash = stable_hash(node_info.config)
 
