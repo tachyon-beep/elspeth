@@ -1012,14 +1012,9 @@ class Orchestrator:
                             if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                                 sink_name = result.token.branch_name
 
-                            # Record COMPLETED outcome with sink_name (AUD-001 fix)
-                            # MUST be here (not processor) because only orchestrator knows branch→sink mapping
-                            recorder.record_token_outcome(
-                                run_id=run_id,
-                                token_id=result.token.token_id,
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=sink_name,
-                            )
+                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                            # sink durability is achieved. Do NOT record here - that would violate
+                            # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
                             pending_tokens[sink_name].append(result.token)
                         elif result.outcome == RowOutcome.ROUTED:
@@ -1041,15 +1036,9 @@ class Orchestrator:
                         elif result.outcome == RowOutcome.COALESCED:
                             # Merged token from coalesce - route to output sink
                             rows_coalesced += 1
-                            # P1 FIX: Record COMPLETED for merged token reaching sink
-                            # Consumed tokens already have COALESCED recorded by CoalesceExecutor.
-                            # The merged token's lineage is encoded in its join_group_id.
-                            recorder.record_token_outcome(
-                                run_id=run_id,
-                                token_id=result.token.token_id,
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=default_sink_name,
-                            )
+                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                            # sink durability is achieved. Consumed tokens have COALESCED recorded
+                            # by CoalesceExecutor. The merged token's lineage is in join_group_id.
                             pending_tokens[default_sink_name].append(result.token)
                         elif result.outcome == RowOutcome.EXPANDED:
                             # Deaggregation parent token - children counted separately
@@ -1072,14 +1061,8 @@ class Orchestrator:
                             for outcome in timed_out:
                                 if outcome.merged_token is not None:
                                     rows_coalesced += 1
-                                    # P1 FIX: Record COMPLETED for timeout-triggered merged token
-                                    # (Same pattern as flush_pending and normal COALESCED result)
-                                    recorder.record_token_outcome(
-                                        run_id=run_id,
-                                        token_id=outcome.merged_token.token_id,
-                                        outcome=RowOutcome.COMPLETED,
-                                        sink_name=default_sink_name,
-                                    )
+                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                    # AFTER sink durability is achieved.
                                     pending_tokens[default_sink_name].append(outcome.merged_token)
                                 elif outcome.failure_reason:
                                     rows_coalesce_failed += 1
@@ -1136,13 +1119,8 @@ class Orchestrator:
                         if outcome.merged_token is not None:
                             # Successful merge - route to output sink
                             rows_coalesced += 1
-                            # P1 FIX: Record COMPLETED for merged token reaching sink
-                            recorder.record_token_outcome(
-                                run_id=run_id,
-                                token_id=outcome.merged_token.token_id,
-                                outcome=RowOutcome.COMPLETED,
-                                sink_name=default_sink_name,
-                            )
+                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                            # AFTER sink durability is achieved.
                             pending_tokens[default_sink_name].append(outcome.merged_token)
                         elif outcome.failure_reason:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
@@ -1177,6 +1155,7 @@ class Orchestrator:
                             tokens=tokens,
                             ctx=ctx,
                             step_in_pipeline=step,
+                            sink_name=sink_name,
                             on_token_written=checkpoint_after_sink(sink_node_id),
                         )
 
@@ -1845,14 +1824,9 @@ class Orchestrator:
                         if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                             sink_name = result.token.branch_name
 
-                        # Record COMPLETED outcome with sink_name (AUD-001 fix)
-                        # Same pattern as main execution path
-                        recorder.record_token_outcome(
-                            run_id=run_id,
-                            token_id=result.token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                            sink_name=sink_name,
-                        )
+                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                        # sink durability is achieved. Do NOT record here - that would violate
+                        # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
                         pending_tokens[sink_name].append(result.token)
                     elif result.outcome == RowOutcome.ROUTED:
@@ -1869,13 +1843,8 @@ class Orchestrator:
                         pass
                     elif result.outcome == RowOutcome.COALESCED:
                         rows_coalesced += 1
-                        # P1 FIX: Record COMPLETED for merged token reaching sink
-                        recorder.record_token_outcome(
-                            run_id=run_id,
-                            token_id=result.token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                            sink_name=default_sink_name,
-                        )
+                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                        # sink durability is achieved.
                         pending_tokens[default_sink_name].append(result.token)
                     elif result.outcome == RowOutcome.EXPANDED:
                         rows_expanded += 1
@@ -1896,14 +1865,8 @@ class Orchestrator:
                         for outcome in timed_out:
                             if outcome.merged_token is not None:
                                 rows_coalesced += 1
-                                # P1 FIX: Record COMPLETED for timeout-triggered merged token
-                                # (Same pattern as flush_pending and normal COALESCED result)
-                                recorder.record_token_outcome(
-                                    run_id=run_id,
-                                    token_id=outcome.merged_token.token_id,
-                                    outcome=RowOutcome.COMPLETED,
-                                    sink_name=default_sink_name,
-                                )
+                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                # AFTER sink durability is achieved.
                                 pending_tokens[default_sink_name].append(outcome.merged_token)
                             elif outcome.failure_reason:
                                 rows_coalesce_failed += 1
@@ -1933,13 +1896,8 @@ class Orchestrator:
                 for outcome in pending_outcomes:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
-                        # P1 FIX: Record COMPLETED for merged token reaching sink
-                        recorder.record_token_outcome(
-                            run_id=run_id,
-                            token_id=outcome.merged_token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                            sink_name=default_sink_name,
-                        )
+                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                        # AFTER sink durability is achieved.
                         pending_tokens[default_sink_name].append(outcome.merged_token)
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
@@ -1957,6 +1915,7 @@ class Orchestrator:
                         tokens=tokens,
                         ctx=ctx,
                         step_in_pipeline=step,
+                        sink_name=sink_name,
                     )
 
         finally:
