@@ -1178,6 +1178,38 @@ def _expand_template_files(
     return result
 
 
+def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False) -> Any:
+    """Lowercase dictionary keys for Pydantic schema matching, preserving user data.
+
+    Dynaconf returns keys in UPPERCASE when they come from environment variables,
+    but Pydantic expects lowercase field names. However, user data inside 'options'
+    dicts must be preserved exactly as written - these can contain case-sensitive
+    keys like output_mapping: {"Score": "score"} where "Score" must match the
+    LLM's JSON response field name.
+
+    Args:
+        obj: Any value - dicts are processed recursively, lists have their
+             elements processed, other types pass through unchanged.
+        _preserve_nested: Internal flag - when True, stop lowercasing keys
+             (we're inside an 'options' dict).
+
+    Returns:
+        The input with schema-level dict keys lowercased, but user data preserved.
+    """
+    if isinstance(obj, dict):
+        result = {}
+        for k, v in obj.items():
+            # Lowercase the key unless we're inside an options dict
+            new_key = k if _preserve_nested else k.lower()
+            # Once we enter 'options', preserve all nested keys
+            child_preserve = _preserve_nested or (new_key == "options")
+            result[new_key] = _lowercase_schema_keys(v, _preserve_nested=child_preserve)
+        return result
+    if isinstance(obj, list):
+        return [_lowercase_schema_keys(item, _preserve_nested=_preserve_nested) for item in obj]
+    return obj
+
+
 def load_settings(config_path: Path) -> ElspethSettings:
     """Load settings from YAML file with environment variable overrides.
 
@@ -1216,7 +1248,9 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     # Also filter out internal Dynaconf settings
     internal_keys = {"LOAD_DOTENV", "ENVIRONMENTS", "SETTINGS_FILES"}
-    raw_config = {k.lower(): v for k, v in dynaconf_settings.as_dict().items() if k not in internal_keys}
+    raw_dict = dynaconf_settings.as_dict()
+    filtered = {k: v for k, v in raw_dict.items() if k not in internal_keys}
+    raw_config = _lowercase_schema_keys(filtered)
 
     # Expand ${VAR} and ${VAR:-default} patterns in config values
     raw_config = _expand_env_vars(raw_config)
