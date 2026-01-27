@@ -72,8 +72,9 @@ class TestResumeSchemaRequired:
     def simple_graph(self) -> ExecutionGraph:
         """Create a simple source -> sink graph."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="source_without_schema")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="source_without_schema", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue")
         return graph
 

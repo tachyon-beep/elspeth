@@ -13,6 +13,7 @@ import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, SourceRow
+from elspeth.core.landscape import LandscapeDB
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -25,22 +26,30 @@ if TYPE_CHECKING:
     pass
 
 
+@pytest.fixture(scope="module")
+def routing_db() -> LandscapeDB:
+    """Module-scoped in-memory database for routing tests.
+
+    Tests must use unique run_ids to avoid conflicts.
+    """
+    return LandscapeDB.in_memory()
+
+
 class TestOrchestratorInvalidRouting:
     """Test that invalid routing fails explicitly instead of silently."""
 
-    def test_gate_routing_to_unknown_sink_raises_error(self) -> None:
+    def test_gate_routing_to_unknown_sink_raises_error(
+        self, routing_db: LandscapeDB
+    ) -> None:
         """Gate routing to non-existent sink must fail loudly, not silently."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class RowSchema(PluginSchema):
             value: int
@@ -101,7 +110,7 @@ class TestOrchestratorInvalidRouting:
             gates=[misrouting_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
 
         # This MUST fail loudly - silent counting was the bug
         # Config-driven gates are validated at pipeline init via RouteValidationError,
@@ -113,7 +122,9 @@ class TestOrchestratorInvalidRouting:
 class TestOrchestratorOutputSinkRouting:
     """Verify completed rows go to the configured output_sink, not hardcoded 'default'."""
 
-    def test_completed_rows_go_to_output_sink(self, plugin_manager) -> None:
+    def test_completed_rows_go_to_output_sink(
+        self, plugin_manager: Any, routing_db: LandscapeDB
+    ) -> None:
         """Rows that complete the pipeline go to the output_sink from config."""
         from unittest.mock import MagicMock
 
@@ -123,11 +134,8 @@ class TestOrchestratorOutputSinkRouting:
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         # Config with default_sink="results" (NOT "default")
         settings = ElspethSettings(
@@ -160,6 +168,7 @@ class TestOrchestratorOutputSinkRouting:
         # Mock source that yields one row
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -191,7 +200,7 @@ class TestOrchestratorOutputSinkRouting:
             },
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
         result = orchestrator.run(pipeline_config, graph=graph)
 
         # Row should go to "results" sink, not "default"
@@ -204,20 +213,18 @@ class TestOrchestratorOutputSinkRouting:
 class TestOrchestratorGateRouting:
     """Test that gate routing works with route labels."""
 
-    def test_gate_routes_to_named_sink(self) -> None:
+    def test_gate_routes_to_named_sink(self, routing_db: LandscapeDB) -> None:
         """Gate can route rows to a named sink using route labels."""
         from unittest.mock import MagicMock
 
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         # Mock source
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -254,7 +261,7 @@ class TestOrchestratorGateRouting:
             gates=[routing_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
         result = orchestrator.run(pipeline_config, graph=build_test_graph(pipeline_config))
 
         # Row should be routed, not completed
@@ -272,15 +279,12 @@ class TestRouteValidation:
     are discovered after processing some rows.
     """
 
-    def test_valid_routes_pass_validation(self) -> None:
+    def test_valid_routes_pass_validation(self, routing_db: LandscapeDB) -> None:
         """Valid route configurations should pass validation without error."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class RowSchema(PluginSchema):
             value: int
@@ -342,7 +346,7 @@ class TestRouteValidation:
             gates=[routing_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
         # Should not raise - routes are valid
         result = orchestrator.run(config, graph=build_test_graph(config))
 
@@ -350,19 +354,18 @@ class TestRouteValidation:
         assert len(default_sink.results) == 1  # value=10 continues
         assert len(quarantine_sink.results) == 1  # value=100 routed
 
-    def test_invalid_route_destination_fails_at_init(self) -> None:
+    def test_invalid_route_destination_fails_at_init(
+        self, routing_db: LandscapeDB
+    ) -> None:
         """Route to non-existent sink should fail before processing any rows."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class RowSchema(PluginSchema):
             value: int
@@ -423,7 +426,7 @@ class TestRouteValidation:
             gates=[safety_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
 
         # Should fail at initialization with clear error message
         with pytest.raises(RouteValidationError) as exc_info:
@@ -439,19 +442,16 @@ class TestRouteValidation:
         assert not source.load_called, "Source should not be loaded on validation failure"
         assert len(default_sink.results) == 0, "No rows should be written on failure"
 
-    def test_error_message_includes_route_label(self) -> None:
+    def test_error_message_includes_route_label(self, routing_db: LandscapeDB) -> None:
         """Error message should include the route label for debugging."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class RowSchema(PluginSchema):
             value: int
@@ -509,7 +509,7 @@ class TestRouteValidation:
             gates=[threshold_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
 
         with pytest.raises(RouteValidationError) as exc_info:
             orchestrator.run(config, graph=build_test_graph(config))
@@ -523,15 +523,14 @@ class TestRouteValidation:
         # Should include gate name
         assert "threshold_gate" in error_msg
 
-    def test_continue_routes_are_not_validated_as_sinks(self) -> None:
+    def test_continue_routes_are_not_validated_as_sinks(
+        self, routing_db: LandscapeDB
+    ) -> None:
         """Routes that resolve to 'continue' should not be validated as sinks."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class RowSchema(PluginSchema):
             value: int
@@ -592,7 +591,7 @@ class TestRouteValidation:
             gates=[filter_gate],
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(routing_db)
         # Should not raise - "continue" is a valid routing target
         result = orchestrator.run(config, graph=build_test_graph(config))
 

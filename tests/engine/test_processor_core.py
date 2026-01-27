@@ -67,7 +67,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -79,7 +79,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -161,7 +161,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -269,7 +269,7 @@ class TestRowProcessor:
             # No _on_error configured - errors are bugs
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -332,7 +332,7 @@ class TestRowProcessor:
             _on_error = "discard"  # Intentionally discard errors
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -414,7 +414,7 @@ class TestRowProcessor:
             _on_error = "error_sink"  # Route errors to named sink
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -547,7 +547,7 @@ class TestRowProcessorTokenIdentity:
             output_schema = _TestSchema
 
             def __init__(self, name: str, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.name = name  # type: ignore[misc]
                 self.node_id = node_id
 

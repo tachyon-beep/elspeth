@@ -10,8 +10,7 @@ Test plugins inherit from base classes (BaseTransform) because the processor
 uses isinstance() for type-safe plugin detection.
 """
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import RoutingMode
 from elspeth.contracts.types import GateName, NodeID
@@ -23,11 +22,16 @@ from elspeth.plugins.results import (
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
+if TYPE_CHECKING:
+    from elspeth.core.landscape import LandscapeDB
+
 
 class TestRowProcessorWorkQueue:
     """Work queue tests for fork child execution."""
 
-    def test_work_queue_iteration_guard_prevents_infinite_loop(self, monkeypatch: Any) -> None:
+    def test_work_queue_iteration_guard_prevents_infinite_loop(
+        self, monkeypatch: Any, landscape_db: "LandscapeDB"
+    ) -> None:
         """Work queue should fail if iterations exceed limit.
 
         This test verifies that the iteration guard protects against bugs that
@@ -37,12 +41,11 @@ class TestRowProcessorWorkQueue:
 
         import elspeth.engine.processor as proc_module
         from elspeth.contracts import TokenInfo
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor, _WorkItem
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source_node = recorder.register_node(
@@ -95,15 +98,16 @@ class TestRowProcessorWorkQueue:
         finally:
             proc_module.MAX_WORK_QUEUE_ITERATIONS = original_max
 
-    def test_fork_children_are_executed_through_work_queue(self) -> None:
+    def test_fork_children_are_executed_through_work_queue(
+        self, landscape_db: "LandscapeDB"
+    ) -> None:
         """Fork child tokens should be processed, not orphaned."""
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register nodes (transform before gate since config gates run after transforms)
@@ -155,7 +159,7 @@ class TestRowProcessorWorkQueue:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -421,19 +425,20 @@ class TestRowProcessorRetry:
 
         assert exc_info.value.retryable is False
 
-    def test_max_retries_exceeded_returns_failed_outcome(self) -> None:
+    def test_max_retries_exceeded_returns_failed_outcome(
+        self, landscape_db: "LandscapeDB"
+    ) -> None:
         """When all retries exhausted, process_row returns FAILED outcome."""
 
         from elspeth.contracts import RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.retry import RetryConfig, RetryManager
         from elspeth.engine.spans import SpanFactory
 
         # Set up real Landscape
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(
@@ -461,7 +466,7 @@ class TestRowProcessorRetry:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -501,15 +506,15 @@ class TestRowProcessorRetry:
 class TestRowProcessorRecovery:
     """Tests for RowProcessor recovery support."""
 
-    def test_processor_accepts_restored_aggregation_state(self, tmp_path: Path) -> None:
+    def test_processor_accepts_restored_aggregation_state(
+        self, landscape_db: "LandscapeDB"
+    ) -> None:
         """RowProcessor passes restored state to AggregationExecutor."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         restored_state = {
@@ -543,7 +548,9 @@ class TestNoRetryAuditCompleteness:
     These tests verify the audit trail remains complete even without retry.
     """
 
-    def test_no_retry_retryable_exception_records_transform_error(self) -> None:
+    def test_no_retry_retryable_exception_records_transform_error(
+        self, landscape_db: "LandscapeDB"
+    ) -> None:
         """Retryable exceptions in no-retry mode must record transform_error.
 
         P2 review comment: In the no-retry path, retryable exceptions are converted
@@ -555,15 +562,14 @@ class TestNoRetryAuditCompleteness:
         Expected: transform_errors table should have an entry for the error.
         """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.schema import transform_errors_table
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.clients.llm import LLMClientError
 
         # Set up real Landscape
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(
@@ -591,7 +597,7 @@ class TestNoRetryAuditCompleteness:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
                 # Explicitly set _on_error (normally done by config mixins)
                 self._on_error = "error_sink"
@@ -624,7 +630,7 @@ class TestNoRetryAuditCompleteness:
         assert result.outcome == RowOutcome.ROUTED
 
         # CRITICAL: transform_errors must have an entry for explain() to work
-        with db.engine.connect() as conn:
+        with landscape_db.engine.connect() as conn:
             errors = conn.execute(transform_errors_table.select().where(transform_errors_table.c.run_id == run.run_id)).fetchall()
 
         assert len(errors) >= 1, (
@@ -639,7 +645,9 @@ class TestNoRetryAuditCompleteness:
             f"transform_error should mention rate limit, got: {error.error_details_json}"
         )
 
-    def test_no_retry_with_on_error_none_raises_instead_of_invalid_routed(self) -> None:
+    def test_no_retry_with_on_error_none_raises_instead_of_invalid_routed(
+        self, landscape_db: "LandscapeDB"
+    ) -> None:
         """When on_error is None and retryable exception occurs, should fail properly.
 
         P2 review comment: In the no-retry-manager path, retryable exceptions are
@@ -656,13 +664,12 @@ class TestNoRetryAuditCompleteness:
         import pytest
 
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
         # Set up real Landscape
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(
@@ -691,7 +698,7 @@ class TestNoRetryAuditCompleteness:
 
             def __init__(self, node_id: str) -> None:
                 # NO on_error configured - this is the default
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:

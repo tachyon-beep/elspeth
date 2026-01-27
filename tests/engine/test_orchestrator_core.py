@@ -72,7 +72,7 @@ class TestOrchestrator:
             output_schema = OutputSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -233,7 +233,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1})
@@ -244,7 +244,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2})
@@ -388,7 +388,7 @@ class TestOrchestratorEmptyPipeline:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -481,6 +481,7 @@ class TestOrchestratorAcceptsGraph:
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         mock_source.node_id = None  # Explicit initialization - orchestrator should set this
+        mock_source._on_validation_failure = "discard"  # Required by SourceProtocol
         schema_mock = MagicMock()
 
         schema_mock.model_json_schema.return_value = {"type": "object"}
@@ -531,8 +532,9 @@ class TestOrchestratorAcceptsGraph:
 
         # Build a simple graph
         graph = ExecutionGraph()
-        graph.add_node("source_1", node_type="source", plugin_name="csv")
-        graph.add_node("sink_1", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source_1", node_type="source", plugin_name="csv", config=schema_config)
+        graph.add_node("sink_1", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("source_1", "sink_1", label="continue", mode=RoutingMode.MOVE)
 
         orchestrator = Orchestrator(db)

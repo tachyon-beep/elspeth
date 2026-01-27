@@ -313,7 +313,8 @@ class TestAuditTrailErrorPath:
 
         with patch("openai.AzureOpenAI") as mock_azure_class:
             mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = Exception("API rate limit exceeded")
+            # Non-retryable error to exercise error-path handling
+            mock_client.chat.completions.create.side_effect = Exception("content policy violation")
             mock_azure_class.return_value = mock_client
 
             transform = AzureLLMTransform(

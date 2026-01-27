@@ -272,6 +272,7 @@ class TestOrchestratorProgress:
         # Mock source that yields 150 rows
         mock_source = MagicMock()
         mock_source.name = "test_source"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()

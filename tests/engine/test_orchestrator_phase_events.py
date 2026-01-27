@@ -35,14 +35,12 @@ if TYPE_CHECKING:
 class TestPhaseErrorEmission:
     """Test that PhaseError events are emitted correctly."""
 
-    def test_process_failure_emits_single_phase_error(self) -> None:
+    def test_process_failure_emits_single_phase_error(self, landscape_db: LandscapeDB) -> None:
         """PROCESS phase failure should emit exactly ONE PhaseError(PROCESS).
 
         Also verifies audit trail records run as FAILED with error_json.
         """
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class ValueSchema(PluginSchema):
             value: int
@@ -71,7 +69,7 @@ class TestPhaseErrorEmission:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
@@ -123,7 +121,7 @@ class TestPhaseErrorEmission:
 
         event_bus.subscribe(PhaseError, capture_phase_error)
 
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(landscape_db, event_bus=event_bus)
 
         # Run should fail
         with pytest.raises(RuntimeError, match="Transform exploded"):
@@ -135,21 +133,19 @@ class TestPhaseErrorEmission:
         assert "Transform exploded" in str(phase_errors[0].error)
 
         # P1 Fix: Verify audit trail records failure
-        recorder = LandscapeRecorder(db)
-        # Get runs from database (should have exactly one, the failed run)
+        # With module-scoped db, check most recent run (newest first)
+        recorder = LandscapeRecorder(landscape_db)
         runs = recorder.list_runs()
-        assert len(runs) == 1, f"Expected 1 run, got {len(runs)}"
-        run = runs[0]
+        assert len(runs) >= 1, "Expected at least 1 run in Landscape"
+        run = runs[0]  # Most recent run (list_runs returns newest first)
         assert run.status == RunStatus.FAILED, f"Run status should be FAILED, got {run.status}"
 
-    def test_source_failure_emits_source_phase_error(self) -> None:
+    def test_source_failure_emits_source_phase_error(self, landscape_db: LandscapeDB) -> None:
         """SOURCE phase failure should emit PhaseError(SOURCE), not PROCESS.
 
         Also verifies audit trail records run as FAILED.
         """
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class ExplodingSource(_TestSourceBase):
             name = "exploding_source"
@@ -213,7 +209,7 @@ class TestPhaseErrorEmission:
 
         event_bus.subscribe(PhaseError, capture_phase_error)
 
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(landscape_db, event_bus=event_bus)
 
         # Run should fail
         with pytest.raises(RuntimeError, match="Source load failed"):
@@ -225,9 +221,9 @@ class TestPhaseErrorEmission:
         assert "Source load failed" in str(phase_errors[0].error)
 
         # P1 Fix: Verify audit trail records failure
-        recorder = LandscapeRecorder(db)
-        # Get runs from database (should have exactly one, the failed run)
+        # With module-scoped db, check most recent run (newest first)
+        recorder = LandscapeRecorder(landscape_db)
         runs = recorder.list_runs()
-        assert len(runs) == 1, f"Expected 1 run, got {len(runs)}"
-        run = runs[0]
+        assert len(runs) >= 1, "Expected at least 1 run in Landscape"
+        run = runs[0]  # Most recent run (list_runs returns newest first)
         assert run.status == RunStatus.FAILED, f"Run status should be FAILED, got {run.status}"

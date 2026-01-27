@@ -67,7 +67,7 @@ class TestOrchestratorAuditTrail:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -708,7 +708,7 @@ class TestOrchestratorConfigRecording:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -890,7 +890,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -927,9 +927,10 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="versioned_source")
-        graph.add_node("transform", node_type="transform", plugin_name="versioned_transform")
-        graph.add_node("sink", node_type="sink", plugin_name="versioned_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="versioned_source", config=schema_config)
+        graph.add_node("transform", node_type="transform", plugin_name="versioned_transform", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="versioned_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -1005,7 +1006,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL  # Explicit nondeterministic
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1042,9 +1043,10 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test_source")
-        graph.add_node("transform", node_type="transform", plugin_name="nondeterministic_transform")
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test_source", config=schema_config)
+        graph.add_node("transform", node_type="transform", plugin_name="nondeterministic_transform", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="test_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}

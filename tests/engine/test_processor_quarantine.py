@@ -68,7 +68,7 @@ class TestQuarantineIntegration:
             _on_error = "discard"  # Intentionally quarantine errors
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -165,7 +165,7 @@ class TestQuarantineIntegration:
             _on_error = "discard"  # Quarantine invalid rows
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:

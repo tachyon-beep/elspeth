@@ -2,6 +2,10 @@
 """Tests for Landscape database connection management."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape.database import LandscapeDB
 
 
 class TestDatabaseConnection:
@@ -71,13 +75,10 @@ class TestPhase3ADBMethods:
         inspector = inspect(db.engine)
         assert "runs" in inspector.get_table_names()
 
-    def test_connection_context_manager(self) -> None:
+    def test_connection_context_manager(self, landscape_db: "LandscapeDB") -> None:
         from sqlalchemy import text
 
-        from elspeth.core.landscape.database import LandscapeDB
-
-        db = LandscapeDB.in_memory()
-        with db.connection() as conn:
+        with landscape_db.connection() as conn:
             result = conn.execute(text("SELECT 1"))
             assert result.scalar() == 1
 

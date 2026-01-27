@@ -43,9 +43,10 @@ class TestAggregationRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("sum_aggregator", node_type="aggregation", plugin_name="test")
-        graph.add_node("count_aggregator", node_type="aggregation", plugin_name="count_agg")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
+        graph.add_node("sum_aggregator", node_type="aggregation", plugin_name="test", config=schema_config)
+        graph.add_node("count_aggregator", node_type="aggregation", plugin_name="count_agg", config=schema_config)
         return graph
 
     def test_full_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:

@@ -6,7 +6,7 @@ Extracted from test_orchestrator.py to support split test modules.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import GateName, NodeID, RoutingMode, SinkName
 from elspeth.plugins.base import BaseGate
@@ -14,6 +14,10 @@ from elspeth.plugins.base import BaseGate
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
     from elspeth.engine.orchestrator import PipelineConfig
+
+
+def _dynamic_schema_config() -> dict[str, Any]:
+    return {"schema": {"fields": "dynamic"}}
 
 
 def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -30,7 +34,12 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type="source",
+        plugin_name=config.source.name,
+        config=_dynamic_schema_config(),
+    )
 
     # Add transforms and populate transform_id_map
     transform_ids: dict[int, str] = {}
@@ -43,6 +52,7 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
             node_id,
             node_type="gate" if is_gate else "transform",
             plugin_name=t.name,
+            config=_dynamic_schema_config(),
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -52,7 +62,12 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type="sink",
+            plugin_name=sink.name,
+            config=_dynamic_schema_config(),
+        )
 
     # Populate route resolution map: (gate_id, label) -> sink_name
     route_resolution_map: dict[tuple[str, str], str] = {}
@@ -82,7 +97,10 @@ def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
             gate_id,
             node_type="gate",
             plugin_name=f"config_gate:{gate_config.name}",
-            config=gate_node_config,
+            config={
+                **_dynamic_schema_config(),
+                **gate_node_config,
+            },
         )
 
         # Edge from previous node
@@ -145,7 +163,12 @@ def build_fork_test_graph(
     graph = ExecutionGraph()
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type="source",
+        plugin_name=config.source.name,
+        config=_dynamic_schema_config(),
+    )
 
     # Add transforms
     transform_ids: dict[int, str] = {}
@@ -158,6 +181,7 @@ def build_fork_test_graph(
             node_id,
             node_type="gate" if is_gate else "transform",
             plugin_name=t.name,
+            config=_dynamic_schema_config(),
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -167,7 +191,12 @@ def build_fork_test_graph(
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type="sink",
+            plugin_name=sink.name,
+            config=_dynamic_schema_config(),
+        )
 
     # Add edge from last transform to default sink
     if "default" in sink_ids:

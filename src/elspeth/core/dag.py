@@ -424,10 +424,12 @@ class ExecutionGraph:
         # Build aggregations - dual schemas
         aggregation_ids: dict[AggregationName, NodeID] = {}
         for agg_name, (transform, agg_config) in aggregations.items():
+            transform_config = transform.config  # type: ignore[attr-defined]
             agg_node_config = {
                 "trigger": agg_config.trigger.model_dump(),
                 "output_mode": agg_config.output_mode,
                 "options": dict(agg_config.options),
+                "schema": transform_config["schema"],
             }
             aid = node_id("aggregation", agg_name, agg_node_config)
             aggregation_ids[AggregationName(agg_name)] = aid
@@ -454,6 +456,7 @@ class ExecutionGraph:
             gate_node_config = {
                 "condition": gate_config.condition,
                 "routes": dict(gate_config.routes),
+                "schema": graph.get_node_info(prev_node_id).config["schema"],
             }
             if gate_config.fork_to:
                 gate_node_config["fork_to"] = list(gate_config.fork_to)
@@ -492,8 +495,8 @@ class ExecutionGraph:
 
         # ===== COALESCE IMPLEMENTATION (BUILD NODES AND MAPPINGS FIRST) =====
         # Build coalesce nodes BEFORE connecting gates (needed for branch routing)
+        coalesce_ids: dict[CoalesceName, NodeID] = {}
         if coalesce_settings:
-            coalesce_ids: dict[CoalesceName, NodeID] = {}
             branch_to_coalesce: dict[BranchName, CoalesceName] = {}
 
             for coalesce_config in coalesce_settings:
@@ -618,6 +621,30 @@ class ExecutionGraph:
             for coalesce_id in coalesce_ids.values():
                 if SinkName(default_sink) in sink_ids:
                     graph.add_edge(coalesce_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
+
+        # ===== POPULATE COALESCE SCHEMA CONFIG =====
+        # Coalesce nodes are structural pass-throughs; record the upstream schema
+        # so audit logs reflect the actual data contract at the merge point.
+        for coalesce_id in coalesce_ids.values():
+            incoming_edges = list(graph._graph.in_edges(coalesce_id))
+            if not incoming_edges:
+                raise GraphValidationError(
+                    f"Coalesce node '{coalesce_id}' has no incoming branches; "
+                    "cannot determine schema for audit."
+                )
+
+            first_from_node = incoming_edges[0][0]
+            first_schema = graph.get_node_info(first_from_node).config["schema"]
+
+            for from_node, _to_node in incoming_edges[1:]:
+                other_schema = graph.get_node_info(from_node).config["schema"]
+                if other_schema != first_schema:
+                    raise GraphValidationError(
+                        f"Coalesce node '{coalesce_id}' receives mismatched schema configs from branches. "
+                        "Schemas must be identical at merge points."
+                    )
+
+            graph.get_node_info(coalesce_id).config["schema"] = first_schema
 
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()

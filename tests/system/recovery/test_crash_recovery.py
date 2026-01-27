@@ -53,7 +53,7 @@ class _FailOnceTransform(BaseTransform):
     _fail_row_ids: ClassVar[set[str]] = set()
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__({"schema": {"fields": "dynamic"}})
 
     @classmethod
     def configure(cls, fail_row_ids: set[str]) -> None:
@@ -83,14 +83,15 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple linear graph for testing."""
     graph = ExecutionGraph()
 
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    schema_config = {"schema": {"fields": "dynamic"}}
+    graph.add_node("source", node_type="source", plugin_name=config.source.name, config=schema_config)
 
     transform_ids: dict[int, NodeID] = {}
     prev = "source"
     for i, t in enumerate(config.transforms):
         node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
-        graph.add_node(node_id, node_type="transform", plugin_name=t.name)
+        graph.add_node(node_id, node_type="transform", plugin_name=t.name, config=schema_config)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
@@ -98,7 +99,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = NodeID(f"sink_{sink_name}")
         sink_ids[SinkName(sink_name)] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
 
     if SinkName("default") in sink_ids:
         graph.add_edge(prev, sink_ids[SinkName("default")], label="continue", mode=RoutingMode.MOVE)
@@ -177,7 +178,7 @@ class TestResumeIdempotence:
             determinism = Determinism.DETERMINISTIC
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success({**row, "value": row["value"] * 2})
@@ -326,9 +327,10 @@ class TestResumeIdempotence:
 
         # Build graph for checkpoint
         graph_b = ExecutionGraph()
-        graph_b.add_node("source", node_type="source", plugin_name="list_source", config={})
-        graph_b.add_node("transform_0", node_type="transform", plugin_name="doubler", config={})
-        graph_b.add_node("sink_default", node_type="sink", plugin_name="collect_sink", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph_b.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
+        graph_b.add_node("transform_0", node_type="transform", plugin_name="doubler", config=schema_config)
+        graph_b.add_node("sink_default", node_type="sink", plugin_name="collect_sink", config=schema_config)
         graph_b.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph_b.add_edge("transform_0", "sink_default", label="continue", mode=RoutingMode.MOVE)
         graph_b._sink_id_map = {SinkName("default"): NodeID("sink_default")}
@@ -442,7 +444,7 @@ class TestRetryBehavior:
             _on_error = "discard"  # Route errors to discard (required for error results)
 
             def __init__(self, fail_ids: set[str]) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self._fail_ids = fail_ids
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
@@ -558,8 +560,9 @@ class TestCheckpointRecovery:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for checkpoint recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("transform", node_type="transform", plugin_name="test")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
+        graph.add_node("transform", node_type="transform", plugin_name="test", config=schema_config)
         return graph
 
     def test_checkpoint_preserves_partial_progress(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -842,8 +845,9 @@ class TestAggregationRecovery:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("aggregator", node_type="aggregation", plugin_name="sum_agg")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
+        graph.add_node("aggregator", node_type="aggregation", plugin_name="sum_agg", config=schema_config)
         return graph
 
     def test_aggregation_state_recovers(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:

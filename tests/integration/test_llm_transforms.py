@@ -279,18 +279,16 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process({"text": "test"}, ctx)
+        from elspeth.plugins.clients.llm import RateLimitError
 
-        # Transform should return retryable error
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "rate_limited"
-        assert result.retryable is True
+        with pytest.raises(RateLimitError):
+            transform.process({"text": "test"}, ctx)
 
         # Audit trail should record as error
         calls = recorder.get_calls(state_id)
         assert len(calls) == 1
         assert calls[0].status == CallStatus.ERROR
+        assert "rate" in calls[0].error_json.lower()
 
     def test_system_prompt_included_when_configured(self, recorder: LandscapeRecorder, setup_state: tuple[str, str, str, str, str]) -> None:
         """Verify system prompt is included in API call."""

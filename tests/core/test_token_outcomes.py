@@ -3,6 +3,30 @@
 
 import pytest
 
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+
+
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Create a module-scoped in-memory landscape database.
+
+    Module scope avoids repeated schema creation (15+ tables, indexes)
+    which takes ~5-10ms per instantiation.
+
+    Tests should use unique run_ids to isolate their data.
+    """
+    return LandscapeDB.in_memory()
+
+
+@pytest.fixture
+def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
+    """Create a LandscapeRecorder with the shared test database.
+
+    Function-scoped because the recorder is a lightweight wrapper.
+    Uses the module-scoped landscape_db for actual storage.
+    """
+    return LandscapeRecorder(landscape_db)
+
 
 class TestTokenOutcomeDataclass:
     """Test TokenOutcome dataclass structure."""
@@ -196,21 +220,6 @@ class TestRecordTokenOutcome:
     """Test record_token_outcome() method."""
 
     @pytest.fixture
-    def db(self):
-        """Create in-memory database with schema."""
-        from elspeth.core.landscape import LandscapeDB
-
-        db = LandscapeDB.in_memory()
-        return db
-
-    @pytest.fixture
-    def recorder(self, db):
-        """Create recorder with test database."""
-        from elspeth.core.landscape import LandscapeRecorder
-
-        return LandscapeRecorder(db)
-
-    @pytest.fixture
     def run_with_token(self, recorder):
         """Create a run with a token for testing."""
         from elspeth.contracts import Determinism, NodeType
@@ -325,18 +334,6 @@ class TestGetTokenOutcome:
     """Test get_token_outcome() method."""
 
     @pytest.fixture
-    def db(self):
-        from elspeth.core.landscape import LandscapeDB
-
-        return LandscapeDB.in_memory()
-
-    @pytest.fixture
-    def recorder(self, db):
-        from elspeth.core.landscape import LandscapeRecorder
-
-        return LandscapeRecorder(db)
-
-    @pytest.fixture
     def run_with_outcome(self, recorder):
         """Create run, token, and outcome for testing."""
         from elspeth.contracts import Determinism, NodeType, RowOutcome
@@ -355,7 +352,9 @@ class TestGetTokenOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        outcome_id = recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
+        outcome_id = recorder.record_token_outcome(
+            run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out"
+        )
         return run, token, outcome_id
 
     def test_get_token_outcome_returns_dataclass(self, recorder, run_with_outcome) -> None:
@@ -368,14 +367,16 @@ class TestGetTokenOutcome:
         assert result.token_id == token.token_id
         assert result.outcome.value == "completed"
 
-    def test_get_token_outcome_returns_terminal_over_buffered(self, recorder, run_with_outcome) -> None:
+    def test_get_token_outcome_returns_terminal_over_buffered(
+        self, recorder, run_with_outcome
+    ) -> None:
         """Should return terminal outcome, not BUFFERED."""
         _run, token, _ = run_with_outcome
         # The fixture already recorded COMPLETED (terminal)
         result = recorder.get_token_outcome(token.token_id)
         assert result.is_terminal is True
 
-    def test_get_nonexistent_returns_none(self, recorder, db) -> None:
+    def test_get_nonexistent_returns_none(self, recorder) -> None:
         result = recorder.get_token_outcome("nonexistent_token")
         assert result is None
 
@@ -383,14 +384,10 @@ class TestGetTokenOutcome:
 class TestExplainIncludesOutcome:
     """Test that explain() returns recorded outcomes."""
 
-    def test_explain_returns_outcome(self) -> None:
+    def test_explain_returns_outcome(self, recorder) -> None:
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -405,7 +402,9 @@ class TestExplainIncludesOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
+        recorder.record_token_outcome(
+            run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out"
+        )
 
         result = explain(recorder, run.run_id, token_id=token.token_id)
 
@@ -413,14 +412,10 @@ class TestExplainIncludesOutcome:
         assert result.outcome is not None
         assert result.outcome.outcome == RowOutcome.COMPLETED
 
-    def test_explain_returns_none_outcome_when_not_recorded(self) -> None:
+    def test_explain_returns_none_outcome_when_not_recorded(self, recorder) -> None:
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(

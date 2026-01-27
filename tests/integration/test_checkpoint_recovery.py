@@ -47,7 +47,7 @@ class TestCheckpointRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for checkpoint/recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test")
+        graph.add_node("node-001", node_type="transform", plugin_name="test", config={"schema": {"fields": "dynamic"}})
         return graph
 
     def test_full_checkpoint_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -226,7 +226,7 @@ class TestCheckpointRecoveryIntegration:
 
         # Add node to graph if it doesn't exist
         if not graph.has_node(node_id):
-            graph.add_node(node_id, node_type="transform", plugin_name="test")
+            graph.add_node(node_id, node_type="transform", plugin_name="test", config={"schema": {"fields": "dynamic"}})
 
         with db.engine.connect() as conn:
             # Create run (failed status)
@@ -316,9 +316,10 @@ class TestCheckpointRecoveryIntegration:
 
         # Create graph for this test with the actual nodes used
         test_graph = ExecutionGraph()
-        test_graph.add_node("src", node_type="source", plugin_name="null")
-        test_graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        test_graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        test_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        test_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        test_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
 
         # 1. Set up failed run with 5 rows, checkpoint at row 2
         run_id = "integration-resume-test"
@@ -477,9 +478,10 @@ class TestCheckpointRecoveryIntegration:
 
         # Build graph using add_node() API
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null", config={})
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -543,8 +545,8 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create initial graph with two nodes
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test", config={"version": 1})
-        graph.add_node("transform_a", node_type="transform", plugin_name="test", config={"version": 1})
+        graph.add_node("source", node_type="source", plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}})
+        graph.add_node("transform_a", node_type="transform", plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}})
 
         # Create run
         run = recorder.begin_run(config={}, canonical_version="test-v1")
@@ -599,7 +601,7 @@ class TestCheckpointTopologyHashAtomicity:
         )
 
         # Now modify the graph (simulating what could happen in a race condition)
-        graph.add_node("transform_b", node_type="transform", plugin_name="new_plugin", config={"version": 2})
+        graph.add_node("transform_b", node_type="transform", plugin_name="new_plugin", config={"version": 2, "schema": {"fields": "dynamic"}})
 
         # Compute hash with modified graph
         modified_hash = compute_upstream_topology_hash(graph, "transform_a")
@@ -671,7 +673,7 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create graph with one node
         graph = ExecutionGraph()
-        graph.add_node("existing_node", node_type="transform", plugin_name="test")
+        graph.add_node("existing_node", node_type="transform", plugin_name="test", config={"schema": {"fields": "dynamic"}})
 
         # Create minimal run
         run = recorder.begin_run(config={}, canonical_version="test-v1")

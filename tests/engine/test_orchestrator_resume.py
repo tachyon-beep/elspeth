@@ -207,9 +207,10 @@ class TestOrchestratorResumeRowProcessing:
 
         # Build graph matching the nodes created above
         graph = ExecutionGraph()
-        graph.add_node("source-node", node_type="source", plugin_name="null", config={})
-        graph.add_node("transform-node", node_type="transform", plugin_name="passthrough", config={})
-        graph.add_node("sink-node", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source-node", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("transform-node", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink-node", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
 

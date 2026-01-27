@@ -78,7 +78,7 @@ class TestOrchestratorForkExecution:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -185,6 +185,7 @@ class TestCoalesceWiring:
         # Mock source/sink to avoid file access
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([])
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -267,6 +268,7 @@ class TestCoalesceWiring:
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([MagicMock(is_quarantined=False, row={"value": 1})])
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -425,6 +427,7 @@ class TestCoalesceWiring:
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -527,6 +530,7 @@ class TestCoalesceWiring:
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -659,6 +663,7 @@ class TestCoalesceWiring:
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -778,6 +783,7 @@ class TestCoalesceWiring:
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.load.return_value = iter([])
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()

@@ -72,7 +72,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 attempt_count["count"] += 1
@@ -185,7 +185,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise ConnectionError("Persistent failure")

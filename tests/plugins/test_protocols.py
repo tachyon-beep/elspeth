@@ -32,6 +32,7 @@ class TestSourceProtocol:
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
+            _on_validation_failure = "discard"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -98,6 +99,7 @@ class TestSourceProtocol:
             node_id: str | None = None
             determinism = Determinism.IO_READ
             plugin_version = "1.0.0"
+            _on_validation_failure = "discard"
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config

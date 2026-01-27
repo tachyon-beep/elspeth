@@ -22,6 +22,7 @@ from sqlalchemy import text
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
+from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 
@@ -252,8 +253,11 @@ def verify_fork_audit_trail(
                 SELECT tp.token_id, tp.parent_token_id, t.fork_group_id, t.branch_name
                 FROM token_parents tp
                 JOIN tokens t ON tp.token_id = t.token_id
-                WHERE t.fork_group_id IS NOT NULL
+                JOIN rows r ON t.row_id = r.row_id
+                WHERE r.run_id = :run_id
+                AND t.fork_group_id IS NOT NULL
             """),
+            {"run_id": run_id},
         ).fetchall()
 
         # Should have (parent_rows * children_per_parent) relationships
@@ -275,8 +279,15 @@ def _build_test_graph_with_config_gates(
 
     graph = ExecutionGraph()
 
+    schema_config = {"schema": {"fields": "dynamic"}}
+
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type="source",
+        plugin_name=config.source.name,
+        config=schema_config,
+    )
 
     # Add transforms
     transform_ids: dict[int, str] = {}
@@ -288,6 +299,7 @@ def _build_test_graph_with_config_gates(
             node_id,
             node_type="transform",
             plugin_name=t.name,
+            config=schema_config,
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -297,7 +309,12 @@ def _build_test_graph_with_config_gates(
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type="sink",
+            plugin_name=sink.name,
+            config=schema_config,
+        )
 
     # Add config gates
     config_gate_ids: dict[str, str] = {}
@@ -311,6 +328,7 @@ def _build_test_graph_with_config_gates(
             node_type="gate",
             plugin_name=f"config_gate:{gate_config.name}",
             config={
+                "schema": schema_config["schema"],
                 "condition": gate_config.condition,
                 "routes": dict(gate_config.routes),
             },
@@ -350,15 +368,14 @@ def _build_test_graph_with_config_gates(
 class TestCompositeConditions:
     """WP-09 Verification: Composite conditions work correctly."""
 
-    def test_composite_and_condition(self) -> None:
+    def test_composite_and_condition(self, landscape_db: LandscapeDB) -> None:
         """Verify: row['a'] > 0 and row['b'] == 'x' works correctly.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Test data covering all combinations
         source = ListSource(
@@ -407,15 +424,14 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"routed": 4},  # All rows routed to named sinks
         )
 
-    def test_composite_or_condition(self) -> None:
+    def test_composite_or_condition(self, landscape_db: LandscapeDB) -> None:
         """Verify: row['status'] == 'active' or row['priority'] > 5 works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource(
             [
@@ -459,15 +475,14 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"completed": 2, "routed": 1},
         )
 
-    def test_membership_condition(self) -> None:
+    def test_membership_condition(self, landscape_db: LandscapeDB) -> None:
         """Verify: row['status'] in ['active', 'pending'] works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource(
             [
@@ -514,15 +529,14 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"completed": 2, "routed": 2},
         )
 
-    def test_optional_field_with_get(self) -> None:
+    def test_optional_field_with_get(self, landscape_db: LandscapeDB) -> None:
         """Verify: row.get('optional') is not None works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource(
             [
@@ -637,7 +651,7 @@ class TestRouteLabelResolution:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review_queue"
 
-    def test_ternary_expression_returns_string_routes(self, plugin_manager) -> None:
+    def test_ternary_expression_returns_string_routes(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Verify ternary expressions can return different route labels.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -651,10 +665,9 @@ class TestRouteLabelResolution:
             GateSettings as GateSettingsConfig,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Build settings with ternary condition that returns category directly
         settings = ElspethSettings(
@@ -834,7 +847,7 @@ class TestForkCreatesChildTokens:
         assert node_info.config["fork_to"] == ["analysis_a", "analysis_b"]
         assert node_info.config["routes"]["true"] == "fork"
 
-    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager) -> None:
+    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Fork children with branch_name route to matching sinks.
 
         This is the core fork use case:
@@ -853,10 +866,9 @@ class TestForkCreatesChildTokens:
             GateSettings as GateSettingsConfig,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource([{"value": 42}])
         path_a_sink = CollectSink()
@@ -921,7 +933,7 @@ class TestForkCreatesChildTokens:
             expected_gate_name="forking_gate",
         )
 
-    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager) -> None:
+    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Multiple source rows fork correctly with proper counting.
 
         When processing multiple source rows through a fork gate:
@@ -939,10 +951,9 @@ class TestForkCreatesChildTokens:
             GateSettings as GateSettingsConfig,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Three source rows - all will fork
         source = ListSource([{"value": 10}, {"value": 20}, {"value": 30}])
@@ -1140,17 +1151,16 @@ class TestSecurityRejectionAtConfigTime:
 class TestEndToEndPipeline:
     """Full pipeline integration tests with gates."""
 
-    def test_source_transform_gate_sink_pipeline(self) -> None:
+    def test_source_transform_gate_sink_pipeline(self, landscape_db: LandscapeDB) -> None:
         """End-to-end: Source -> Transform -> Config Gate -> Sink.
 
         P1 Fix: Added audit trail verification for the complete pipeline.
         """
         from elspeth.contracts import TransformResult
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.base import BaseTransform
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         class NormalizeTransform(BaseTransform):
             """Transform that normalizes score to 0-1 range."""
@@ -1193,16 +1203,21 @@ class TestEndToEndPipeline:
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="list_source")
-        graph.add_node("transform_0", node_type="transform", plugin_name="normalize")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
+        graph.add_node("transform_0", node_type="transform", plugin_name="normalize", config=schema_config)
         graph.add_node(
             "config_gate_confidence_gate",
             node_type="gate",
             plugin_name="config_gate:confidence_gate",
-            config={"condition": gate.condition, "routes": dict(gate.routes)},
+            config={
+                "schema": schema_config["schema"],
+                "condition": gate.condition,
+                "routes": dict(gate.routes),
+            },
         )
-        graph.add_node("sink_default", node_type="sink", plugin_name="collect")
-        graph.add_node("sink_low_conf", node_type="sink", plugin_name="collect")
+        graph.add_node("sink_default", node_type="sink", plugin_name="collect", config=schema_config)
+        graph.add_node("sink_low_conf", node_type="sink", plugin_name="collect", config=schema_config)
 
         graph.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge(
@@ -1252,15 +1267,14 @@ class TestEndToEndPipeline:
             expected_terminal_outcomes={"completed": 2, "routed": 1},
         )
 
-    def test_audit_trail_records_gate_evaluation(self) -> None:
+    def test_audit_trail_records_gate_evaluation(self, landscape_db: LandscapeDB) -> None:
         """Verify audit trail records gate condition and result.
 
         P1 Fix: Added comprehensive audit trail verification.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource([{"value": 42}])
         sink = CollectSink()
@@ -1305,7 +1319,7 @@ class TestEndToEndPipeline:
             expected_terminal_outcomes={"completed": 1},
         )
 
-    def test_gate_audit_trail_includes_evaluation_metadata(self) -> None:
+    def test_gate_audit_trail_includes_evaluation_metadata(self, landscape_db: LandscapeDB) -> None:
         """WP-14b: Verify gate audit trail includes condition, result, and route.
 
         ELSPETH is built for high-stakes accountability. Every gate decision
@@ -1319,10 +1333,9 @@ class TestEndToEndPipeline:
 
         P2 Fix: Strengthened assertions to verify correct sink is targeted.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Two rows: one high priority (routes to "urgent"), one low (continues to default)
         source = ListSource([{"priority": 10}, {"priority": 2}], schema=_PrioritySchema)

@@ -88,8 +88,9 @@ class TestSinkDurability:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         return graph
 
     @pytest.fixture

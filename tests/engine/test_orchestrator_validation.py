@@ -26,6 +26,7 @@ from tests.conftest import (
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
+    from elspeth.core.landscape import LandscapeDB
     from elspeth.engine.orchestrator import PipelineConfig
 
 
@@ -40,9 +41,15 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     from elspeth.plugins.base import BaseGate
 
     graph = ExecutionGraph()
+    schema_config = {"schema": {"fields": "dynamic"}}
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type="source",
+        plugin_name=config.source.name,
+        config=schema_config,
+    )
 
     # Add transforms and populate transform_id_map
     transform_ids: dict[int, str] = {}
@@ -55,6 +62,7 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
             node_id,
             node_type="gate" if is_gate else "transform",
             plugin_name=t.name,
+            config=schema_config,
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -64,7 +72,12 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type="sink",
+            plugin_name=sink.name,
+            config=schema_config,
+        )
 
     # Populate route resolution map
     route_resolution_map: dict[tuple[str, str], str] = {}
@@ -99,17 +112,14 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
 class TestTransformErrorSinkValidation:
     """Tests for transform on_error sink validation at startup."""
 
-    def test_invalid_on_error_sink_fails_at_startup(self) -> None:
+    def test_invalid_on_error_sink_fails_at_startup(self, landscape_db: LandscapeDB) -> None:
         """Transform with on_error pointing to non-existent sink fails before processing."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -138,7 +148,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "nonexistent_error_sink"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -172,7 +182,7 @@ class TestTransformErrorSinkValidation:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):
@@ -181,17 +191,14 @@ class TestTransformErrorSinkValidation:
         # Verify source.load was NOT called (validation happens before processing)
         assert not source.load_called
 
-    def test_error_message_includes_transform_name_and_sinks(self) -> None:
+    def test_error_message_includes_transform_name_and_sinks(self, landscape_db: LandscapeDB) -> None:
         """Error message includes transform name and available sinks."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -216,7 +223,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "phantom_sink"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -253,7 +260,7 @@ class TestTransformErrorSinkValidation:
             },  # Two sinks available
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         with pytest.raises(RouteValidationError) as exc_info:
             orchestrator.run(config, graph=_build_test_graph(config))
@@ -267,13 +274,10 @@ class TestTransformErrorSinkValidation:
         assert "default" in error_msg
         assert "error_archive" in error_msg
 
-    def test_on_error_discard_passes_validation(self) -> None:
+    def test_on_error_discard_passes_validation(self, landscape_db: LandscapeDB) -> None:
         """on_error: 'discard' passes validation (special value, not a sink)."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -298,7 +302,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "discard"  # Special value - should pass validation
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -332,19 +336,16 @@ class TestTransformErrorSinkValidation:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "discard" is valid
         result = orchestrator.run(config, graph=_build_test_graph(config))
         assert result.status == "completed"
 
-    def test_on_error_none_passes_validation(self) -> None:
+    def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB) -> None:
         """on_error: null (not set) passes validation."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -369,7 +370,7 @@ class TestTransformErrorSinkValidation:
             # _on_error is None by default from BaseTransform
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -403,19 +404,16 @@ class TestTransformErrorSinkValidation:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - None is valid (no error routing configured)
         result = orchestrator.run(config, graph=_build_test_graph(config))
         assert result.status == "completed"
 
-    def test_valid_on_error_sink_passes_validation(self) -> None:
+    def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB) -> None:
         """Valid on_error sink name passes validation."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -440,7 +438,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "error_sink"  # This sink exists in config
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -478,23 +476,20 @@ class TestTransformErrorSinkValidation:
             },
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "error_sink" exists
         result = orchestrator.run(config, graph=_build_test_graph(config))
         assert result.status == "completed"
 
-    def test_validation_occurs_before_row_processing(self) -> None:
+    def test_validation_occurs_before_row_processing(self, landscape_db: LandscapeDB) -> None:
         """Error occurs BEFORE any rows are processed (source.load should not be called)."""
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
             RouteValidationError,
         )
-
-        db = LandscapeDB.in_memory()
 
         class InputSchema(PluginSchema):
             value: int
@@ -528,7 +523,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "invalid_sink_name"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 call_tracking["transform_process_called"] = True
@@ -566,7 +561,7 @@ class TestTransformErrorSinkValidation:
             sinks={"default": as_sink(sink)},
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):

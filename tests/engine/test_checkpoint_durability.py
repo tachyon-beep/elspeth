@@ -49,8 +49,15 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     """
     graph = ExecutionGraph()
 
+    schema_config = {"schema": {"fields": "dynamic"}}
+
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type="source",
+        plugin_name=config.source.name,
+        config=schema_config,
+    )
 
     # Add transforms
     transform_ids: dict[int, str] = {}
@@ -62,6 +69,7 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
             node_id,
             node_type="transform",
             plugin_name=t.name,
+            config=schema_config,
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -71,7 +79,12 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type="sink",
+            plugin_name=sink.name,
+            config=schema_config,
+        )
 
     # Edge from last transform to default sink
     output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
@@ -178,7 +191,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -325,7 +338,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -425,9 +438,10 @@ class TestCheckpointDurability:
 
         # Build graph for checkpoint topology validation
         test_graph = ExecutionGraph()
-        test_graph.add_node("source", node_type="source", plugin_name="list_source", config={})
-        test_graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config={})
-        test_graph.add_node("sink_default", node_type="sink", plugin_name="tracking_sink", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        test_graph.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
+        test_graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config=schema_config)
+        test_graph.add_node("sink_default", node_type="sink", plugin_name="tracking_sink", config=schema_config)
         test_graph.add_edge("source", "transform_0", label="continue")
         test_graph.add_edge("transform_0", "sink_default", label="continue")
 
@@ -605,7 +619,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -677,7 +691,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2})
@@ -813,7 +827,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -914,7 +928,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1009,7 +1023,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1089,7 +1103,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)

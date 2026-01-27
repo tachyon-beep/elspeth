@@ -50,7 +50,10 @@ class NullSource(BaseSource):
         Args:
             config: Configuration dict (ignored - NullSource needs no config).
         """
-        super().__init__(config)
+        config_copy = dict(config)
+        if "schema" not in config_copy:
+            config_copy["schema"] = {"fields": "dynamic"}
+        super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
 

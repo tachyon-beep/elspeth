@@ -36,8 +36,9 @@ class TestResumeCheckpointCleanup:
     def simple_graph(self) -> ExecutionGraph:
         """Create a simple source -> sink graph."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test_source")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type="source", plugin_name="test_source", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue")
         return graph
 

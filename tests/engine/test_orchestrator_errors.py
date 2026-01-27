@@ -64,7 +64,7 @@ class TestOrchestratorErrorHandling:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
@@ -268,7 +268,7 @@ class TestOrchestratorQuarantineMetrics:
             _on_error = "discard"  # Intentionally discard errors
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 if row.get("quality") == "bad":

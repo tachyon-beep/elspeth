@@ -48,6 +48,12 @@ from tests.conftest import (
 )
 
 
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Module-scoped in-memory database for coalesce integration tests."""
+    return LandscapeDB.in_memory()
+
+
 class ListSource(_TestSourceBase):
     """Reusable test source that yields rows from a list."""
 
@@ -113,6 +119,7 @@ def _build_fork_coalesce_graph(
         settings: Full settings with gates and coalesce config
     """
     graph = ExecutionGraph()
+    schema_config = {"schema": {"fields": "dynamic"}}
 
     # Add source
     source_id = "source_test"
@@ -120,6 +127,7 @@ def _build_fork_coalesce_graph(
         source_id,
         node_type="source",
         plugin_name=config.source.name,
+        config=schema_config,
     )
 
     # Add transforms
@@ -132,6 +140,7 @@ def _build_fork_coalesce_graph(
             node_id,
             node_type="transform",
             plugin_name=t.name,
+            config=schema_config,
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -141,7 +150,7 @@ def _build_fork_coalesce_graph(
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
 
     # Add config gates (from settings.gates)
     config_gate_ids: dict[str, str] = {}
@@ -162,7 +171,10 @@ def _build_fork_coalesce_graph(
             gate_id,
             node_type="gate",
             plugin_name=f"config_gate:{gate_config.name}",
-            config=gate_node_config,
+            config={
+                "schema": schema_config["schema"],
+                **gate_node_config,
+            },
         )
 
         # Edge from previous node
@@ -192,6 +204,7 @@ def _build_fork_coalesce_graph(
             "timeout_seconds": coalesce_config.timeout_seconds,
             "quorum_count": coalesce_config.quorum_count,
             "select_branch": coalesce_config.select_branch,
+            "schema": schema_config["schema"],
         }
 
         graph.add_node(
@@ -260,13 +273,9 @@ def _build_fork_coalesce_graph(
 class TestForkCoalescePipeline:
     """Test complete fork -> process -> coalesce -> sink flow."""
 
-    @pytest.fixture
-    def db(self) -> LandscapeDB:
-        return LandscapeDB.in_memory()
-
     def test_fork_coalesce_pipeline_produces_merged_output(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Complete fork/join pipeline should produce merged output."""
         settings = ElspethSettings(
@@ -311,7 +320,7 @@ class TestForkCoalescePipeline:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Should have processed rows
@@ -329,7 +338,7 @@ class TestForkCoalescePipeline:
 
     def test_partial_branch_coverage_non_coalesced_branches_reach_sink(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Branches not in coalesce should still reach output sink."""
         settings = ElspethSettings(
@@ -372,7 +381,7 @@ class TestForkCoalescePipeline:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Should have:
@@ -391,7 +400,7 @@ class TestForkCoalescePipeline:
 
     def test_fork_coalesce_with_transform(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Fork/coalesce with a transform before the fork gate."""
         from elspeth.plugins.results import TransformResult
@@ -407,7 +416,7 @@ class TestForkCoalescePipeline:
             output_schema = EnrichedSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -460,7 +469,7 @@ class TestForkCoalescePipeline:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Verify processing worked
@@ -477,7 +486,7 @@ class TestForkCoalescePipeline:
 
     def test_multiple_source_rows_fork_coalesce(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Multiple source rows each fork and coalesce independently."""
         settings = ElspethSettings(
@@ -523,7 +532,7 @@ class TestForkCoalescePipeline:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Each source row forks and coalesces
@@ -542,13 +551,9 @@ class TestForkCoalescePipeline:
 class TestCoalesceAuditTrail:
     """Test that coalesce operations are properly recorded in audit trail."""
 
-    @pytest.fixture
-    def db(self) -> LandscapeDB:
-        return LandscapeDB.in_memory()
-
     def test_coalesce_records_node_states(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Coalesce should record node states for consumed tokens."""
         settings = ElspethSettings(
@@ -593,7 +598,7 @@ class TestCoalesceAuditTrail:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Verify run completed
@@ -607,22 +612,34 @@ class TestCoalesceAuditTrail:
             artifacts_table,
             node_states_table,
             nodes_table,
+            rows_table,
             token_outcomes_table,
             tokens_table,
         )
 
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
+        run_id = result.run_id  # Filter by this run's ID
 
-        with db.connection() as conn:
-            # Find coalesce node
-            nodes_result = conn.execute(nodes_table.select().where(nodes_table.c.node_type == "coalesce")).fetchall()
+        with landscape_db.connection() as conn:
+            # Find coalesce node for this run
+            nodes_result = conn.execute(
+                nodes_table.select().where(
+                    (nodes_table.c.node_type == "coalesce") &
+                    (nodes_table.c.run_id == run_id)
+                )
+            ).fetchall()
 
             assert len(nodes_result) == 1
             coalesce_node = nodes_result[0]
             assert "merge_results" in coalesce_node.plugin_name
 
-            # Find node states for coalesce
-            states_result = conn.execute(node_states_table.select().where(node_states_table.c.node_id == coalesce_node.node_id)).fetchall()
+            # Find node states for coalesce (filter by run_id)
+            states_result = conn.execute(
+                node_states_table.select().where(
+                    (node_states_table.c.node_id == coalesce_node.node_id) &
+                    (node_states_table.c.run_id == run_id)
+                )
+            ).fetchall()
 
             # Should have 2 node states (one for each consumed token from path_a and path_b)
             assert len(states_result) == 2
@@ -644,20 +661,35 @@ class TestCoalesceAuditTrail:
                 assert outcome.join_group_id is not None, "COALESCED outcome must have join_group_id pointing to merged token"
 
             # P1: Verify the parent token had FORKED outcome
-            # Find gate node (where fork happened)
-            gate_nodes = conn.execute(nodes_table.select().where(nodes_table.c.node_type == "gate")).fetchall()
+            # Find gate node for this run
+            gate_nodes = conn.execute(
+                nodes_table.select().where(
+                    (nodes_table.c.node_type == "gate") &
+                    (nodes_table.c.run_id == run_id)
+                )
+            ).fetchall()
             assert len(gate_nodes) == 1, "Should have exactly one gate node"
 
-            # Get all tokens to find parent/fork relationships
-            all_tokens = conn.execute(tokens_table.select()).fetchall()
+            # Get all tokens for this run (join through rows table since tokens doesn't have run_id)
+            from sqlalchemy import select
+            all_tokens = conn.execute(
+                select(tokens_table).select_from(
+                    tokens_table.join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
+                ).where(rows_table.c.run_id == run_id)
+            ).fetchall()
 
             # Find tokens with fork_group_id (these are fork children)
             fork_children = [t for t in all_tokens if t.fork_group_id is not None]
             assert len(fork_children) >= 2, "Should have at least 2 fork child tokens"
 
-            # Find the parent token by looking for outcome=FORKED
-            # Note: fork_group_id on children is a grouping ID, NOT the parent token_id
-            forked_outcomes = conn.execute(token_outcomes_table.select().where(token_outcomes_table.c.outcome == "forked")).fetchall()
+            # Find the parent token by looking for outcome=FORKED in this run's tokens
+            run_token_ids = [t.token_id for t in all_tokens]
+            forked_outcomes = conn.execute(
+                token_outcomes_table.select().where(
+                    (token_outcomes_table.c.outcome == "forked") &
+                    (token_outcomes_table.c.token_id.in_(run_token_ids))
+                )
+            ).fetchall()
             assert len(forked_outcomes) >= 1, "Should have at least 1 FORKED outcome"
 
             parent_outcome_row = forked_outcomes[0]
@@ -688,8 +720,10 @@ class TestCoalesceAuditTrail:
             parent_ids = {p.parent_token_id for p in parents}
             assert parent_ids == set(consumed_token_ids), "Merged token parents should match consumed tokens"
 
-            # P1: Verify artifacts have content_hash, artifact_type, sink_node_id
-            artifacts = conn.execute(artifacts_table.select()).fetchall()
+            # P1: Verify artifacts have content_hash, artifact_type, sink_node_id (for this run)
+            artifacts = conn.execute(
+                artifacts_table.select().where(artifacts_table.c.run_id == run_id)
+            ).fetchall()
             assert len(artifacts) >= 1, "Should have at least 1 artifact from sink"
             for artifact in artifacts:
                 assert artifact.content_hash is not None, "Artifact must have content_hash"
@@ -704,19 +738,15 @@ class TestCoalesceTimeoutIntegration:
     so timeouts don't fire until end-of-source via flush_pending().
     """
 
-    @pytest.fixture
-    def db(self) -> LandscapeDB:
-        return LandscapeDB.in_memory()
-
     def test_best_effort_timeout_merges_during_processing(
         self,
-        db: LandscapeDB,
+        landscape_db: LandscapeDB,
     ) -> None:
         """Best-effort coalesce should merge on timeout, not wait for end-of-source.
 
         This test proves BUG P1-2026-01-22-coalesce-timeouts-never-fired:
-        - Row 1 forks to both path_a and path_b → both arrive, merge immediately
-        - Row 2 only goes to path_a (path_b fails transform) → need to wait for timeout
+        - Row 1 forks to both path_a and path_b -> both arrive, merge immediately
+        - Row 2 only goes to path_a (path_b fails transform) -> need to wait for timeout
         - Row 3 emitted 0.2s later, gives time for row 2 timeout to fire
         - Expect: Row 2 should merge via timeout DURING processing of row 3
         - Actual (bug): Row 2 only merges at end-of-source via flush_pending()
@@ -768,7 +798,7 @@ class TestCoalesceTimeoutIntegration:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 # Fail for row id=2 - this creates the timeout scenario
@@ -874,7 +904,7 @@ class TestCoalesceTimeoutIntegration:
 
         graph = _build_fork_coalesce_graph(config, settings)
 
-        orchestrator = Orchestrator(db=db)
+        orchestrator = Orchestrator(db=landscape_db)
         start_time = time.monotonic()
         result = orchestrator.run(config, graph=graph, settings=settings)
         end_time = time.monotonic()

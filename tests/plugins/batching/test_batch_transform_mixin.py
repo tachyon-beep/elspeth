@@ -38,7 +38,7 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
     name = "simple_batch_transform"
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__({"schema": {"fields": "dynamic"}})
         self._batch_initialized = False
 
     def connect_output(self, output: CollectorOutputPort, max_pending: int = 10) -> None:
@@ -302,7 +302,7 @@ class BlockingBatchTransform(BaseTransform, BatchTransformMixin):
     name = "blocking_batch_transform"
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__({"schema": {"fields": "dynamic"}})
         self._batch_initialized = False
         self._block_event = threading.Event()
         self._processing_started = threading.Event()

@@ -83,9 +83,10 @@ class TestResumeComprehensive:
 
         now = datetime.now(UTC)
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -242,9 +243,10 @@ class TestResumeComprehensive:
 
         # Build graph manually
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -345,9 +347,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -418,9 +421,10 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -533,9 +537,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -605,9 +610,10 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -720,9 +726,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -788,9 +795,10 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -903,9 +911,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -971,9 +980,10 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -1086,9 +1096,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}
@@ -1152,9 +1163,10 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null")
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -1254,9 +1266,10 @@ class TestResumeComprehensive:
         )
 
         resume_graph = ExecutionGraph()
-        resume_graph.add_node("src", node_type="source", plugin_name="null", config={})
-        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        resume_graph.add_node("src", node_type="source", plugin_name="null", config=schema_config)
+        resume_graph.add_node("xform", node_type="transform", plugin_name="passthrough", config=schema_config)
+        resume_graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}

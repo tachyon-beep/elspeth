@@ -11,12 +11,11 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 class TestLandscapeRecorderBatches:
     """Batch management for aggregation."""
 
-    def test_create_batch(self) -> None:
+    def test_create_batch(self, landscape_db: "LandscapeDB") -> None:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         agg_node = recorder.register_node(
@@ -37,12 +36,11 @@ class TestLandscapeRecorderBatches:
         assert batch.status == "draft"
         assert batch.attempt == 0
 
-    def test_add_batch_member(self) -> None:
+    def test_add_batch_member(self, landscape_db: "LandscapeDB") -> None:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         agg_node = recorder.register_node(
@@ -81,12 +79,11 @@ class TestLandscapeRecorderBatches:
         assert len(members) == 1
         assert members[0].token_id == token.token_id
 
-    def test_complete_batch(self) -> None:
+    def test_complete_batch(self, landscape_db: "LandscapeDB") -> None:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         agg_node = recorder.register_node(
@@ -113,13 +110,12 @@ class TestLandscapeRecorderBatches:
         assert completed.trigger_reason == "count=10"
         assert completed.completed_at is not None
 
-    def test_batch_lifecycle(self) -> None:
+    def test_batch_lifecycle(self, landscape_db: "LandscapeDB") -> None:
         """Test full batch lifecycle: draft -> executing -> completed."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         agg_node = recorder.register_node(
@@ -174,13 +170,12 @@ class TestLandscapeRecorderBatches:
         assert completed.trigger_reason == "count=3"
         assert completed.completed_at is not None
 
-    def test_get_batches_by_status(self) -> None:
+    def test_get_batches_by_status(self, landscape_db: "LandscapeDB") -> None:
         """For crash recovery - find incomplete batches."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg = recorder.register_node(
             run_id=run.run_id,
@@ -210,14 +205,13 @@ class TestLandscapeRecorderBatches:
 class TestBatchRecoveryQueries:
     """Tests for batch recovery query methods."""
 
-    def test_get_incomplete_batches_returns_draft_and_executing(self) -> None:
+    def test_get_incomplete_batches_returns_draft_and_executing(self, landscape_db: "LandscapeDB") -> None:
         """get_incomplete_batches() finds batches needing recovery."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         # Register a node so batches can reference it
@@ -259,14 +253,13 @@ class TestBatchRecoveryQueries:
         assert executing_batch.batch_id in batch_ids
         assert completed_batch.batch_id not in batch_ids
 
-    def test_get_incomplete_batches_includes_failed_for_retry(self) -> None:
+    def test_get_incomplete_batches_includes_failed_for_retry(self, landscape_db: "LandscapeDB") -> None:
         """Failed batches are returned for potential retry."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -292,14 +285,13 @@ class TestBatchRecoveryQueries:
         batch_ids = {b.batch_id for b in incomplete}
         assert failed_batch.batch_id in batch_ids
 
-    def test_get_incomplete_batches_ordered_by_created_at(self) -> None:
+    def test_get_incomplete_batches_ordered_by_created_at(self, landscape_db: "LandscapeDB") -> None:
         """Batches returned in creation order for deterministic recovery."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -328,15 +320,14 @@ class TestBatchRecoveryQueries:
 class TestBatchRetry:
     """Tests for batch retry functionality."""
 
-    def test_retry_batch_increments_attempt_and_resets_status(self) -> None:
+    def test_retry_batch_increments_attempt_and_resets_status(self, landscape_db: "LandscapeDB") -> None:
         """retry_batch() creates new attempt with draft status."""
 
         from elspeth.contracts import BatchStatus, Determinism, NodeType
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -367,14 +358,13 @@ class TestBatchRetry:
         assert retried.status == BatchStatus.DRAFT
         assert retried.aggregation_node_id == original.aggregation_node_id
 
-    def test_retry_batch_preserves_members(self) -> None:
+    def test_retry_batch_preserves_members(self, landscape_db: "LandscapeDB") -> None:
         """retry_batch() copies batch members to new batch."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -427,7 +417,7 @@ class TestBatchRetry:
         assert members[0].token_id == token1.token_id
         assert members[1].token_id == token2.token_id
 
-    def test_retry_batch_raises_for_non_failed_batch(self) -> None:
+    def test_retry_batch_raises_for_non_failed_batch(self, landscape_db: "LandscapeDB") -> None:
         """Can only retry failed batches."""
         import pytest
 
@@ -435,8 +425,7 @@ class TestBatchRetry:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -459,15 +448,14 @@ class TestBatchRetry:
         with pytest.raises(ValueError, match="Can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
-    def test_retry_batch_raises_for_nonexistent_batch(self) -> None:
+    def test_retry_batch_raises_for_nonexistent_batch(self, landscape_db: "LandscapeDB") -> None:
         """Raises for nonexistent batch ID."""
         import pytest
 
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         with pytest.raises(ValueError, match="Batch not found"):
             recorder.retry_batch("nonexistent-batch-id")

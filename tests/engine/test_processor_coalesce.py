@@ -11,9 +11,13 @@ because the processor uses isinstance() for type-safe plugin detection.
 Gates are config-driven using GateSettings.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape import LandscapeDB
+
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -26,16 +30,15 @@ from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 class TestRowProcessorCoalesce:
     """Test RowProcessor integration with CoalesceExecutor."""
 
-    def test_processor_accepts_coalesce_executor(self) -> None:
+    def test_processor_accepts_coalesce_executor(self, landscape_db: "LandscapeDB") -> None:
         """RowProcessor should accept coalesce_executor parameter."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -65,7 +68,7 @@ class TestRowProcessorCoalesce:
         )
         assert processor._coalesce_executor is coalesce_executor
 
-    def test_fork_then_coalesce_require_all(self) -> None:
+    def test_fork_then_coalesce_require_all(self, landscape_db: "LandscapeDB") -> None:
         """Fork children should coalesce when all branches arrive.
 
         Pipeline: source -> enrich_a -> enrich_b -> fork_gate -> coalesce -> completed
@@ -79,14 +82,13 @@ class TestRowProcessorCoalesce:
         """
         from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.config import CoalesceSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -170,7 +172,7 @@ class TestRowProcessorCoalesce:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -182,7 +184,7 @@ class TestRowProcessorCoalesce:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -247,7 +249,7 @@ class TestRowProcessorCoalesce:
         assert merged_data["sentiment"] == "positive"
         assert merged_data["entities"] == ["ACME"]
 
-    def test_coalesced_token_audit_trail_complete(self) -> None:
+    def test_coalesced_token_audit_trail_complete(self, landscape_db: "LandscapeDB") -> None:
         """Coalesced tokens should have complete audit trail for explain().
 
         After enrich -> fork -> coalesce, querying explain() on the merged
@@ -263,14 +265,13 @@ class TestRowProcessorCoalesce:
         """
         from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.config import CoalesceSettings, GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -354,7 +355,7 @@ class TestRowProcessorCoalesce:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -366,7 +367,7 @@ class TestRowProcessorCoalesce:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -476,7 +477,7 @@ class TestRowProcessorCoalesce:
         # Follow the chain: merged_token -> children -> forked parent -> source row
         assert merged_token.row_id == row.row_id, "Merged token traces back to source row"
 
-    def test_coalesce_best_effort_with_quarantined_child(self) -> None:
+    def test_coalesce_best_effort_with_quarantined_child(self, landscape_db: "LandscapeDB") -> None:
         """best_effort policy should merge available children even if one quarantines.
 
         Scenario:
@@ -493,13 +494,12 @@ class TestRowProcessorCoalesce:
 
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.core.config import CoalesceSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -606,7 +606,7 @@ class TestRowProcessorCoalesce:
         }
         assert "summary" not in outcome.coalesce_metadata["branches_arrived"]
 
-    def test_coalesce_quorum_merges_at_threshold(self) -> None:
+    def test_coalesce_quorum_merges_at_threshold(self, landscape_db: "LandscapeDB") -> None:
         """Quorum policy should merge when quorum_count branches arrive.
 
         Setup: Fork to 3 paths (fast, medium, slow), quorum=2
@@ -621,13 +621,12 @@ class TestRowProcessorCoalesce:
         """
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.core.config import CoalesceSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -756,7 +755,7 @@ class TestRowProcessorCoalesce:
         assert len(outcome3.consumed_tokens) == 1
         assert outcome3.consumed_tokens[0].token_id == slow_token.token_id
 
-    def test_nested_fork_coalesce(self) -> None:
+    def test_nested_fork_coalesce(self, landscape_db: "LandscapeDB") -> None:
         """Test fork within fork, with coalesce at each level.
 
         DAG structure:
@@ -777,13 +776,12 @@ class TestRowProcessorCoalesce:
         """
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.core.config import CoalesceSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         token_manager = TokenManager(recorder)
 
@@ -1044,7 +1042,7 @@ class TestRowProcessorCoalesce:
         assert outer_merged_record is not None
         assert outer_merged_record.join_group_id is not None
 
-    def test_late_arrival_coalesce_returns_failed_outcome(self) -> None:
+    def test_late_arrival_coalesce_returns_failed_outcome(self, landscape_db: "LandscapeDB") -> None:
         """Late arrivals at coalesce points return FAILED outcome from processor.
 
         This is an INTEGRATION CONTRACT TEST verifying the processor correctly
@@ -1068,15 +1066,14 @@ class TestRowProcessorCoalesce:
         """
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import CoalesceSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
 
         # Setup: Create recorder and span factory
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         span_factory = SpanFactory()
 
@@ -1217,7 +1214,7 @@ class TestRowProcessorCoalesce:
         # Query token_outcomes table to verify FAILED was recorded
         from sqlalchemy import text
 
-        with db.engine.connect() as conn:
+        with landscape_db.engine.connect() as conn:
             outcomes = conn.execute(
                 text("""
                     SELECT outcome, error_hash
@@ -1245,14 +1242,13 @@ class TestRowProcessorCoalesce:
 class TestCoalesceLinkage:
     """Test fork -> coalesce linkage."""
 
-    def test_processor_accepts_coalesce_mapping_params(self) -> None:
+    def test_processor_accepts_coalesce_mapping_params(self, landscape_db: "LandscapeDB") -> None:
         """RowProcessor should accept branch_to_coalesce and coalesce_step_map."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(

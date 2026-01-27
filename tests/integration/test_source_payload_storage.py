@@ -28,14 +28,15 @@ def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     from elspeth.core.dag import ExecutionGraph
 
     graph = ExecutionGraph()
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    schema_config = {"schema": {"fields": "dynamic"}}
+    graph.add_node("source", node_type="source", plugin_name=config.source.name, config=schema_config)
 
     # Build sink nodes and ID mapping
     sink_ids: dict[SinkName, NodeID] = {}
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[SinkName(sink_name)] = NodeID(node_id)
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
         graph.add_edge("source", node_id, label="continue", mode=RoutingMode.MOVE)
 
     # Set the internal mappings that orchestrator expects

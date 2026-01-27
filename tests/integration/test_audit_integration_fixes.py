@@ -61,8 +61,9 @@ class TestIntegrationAuditFixes:
         - Task 3: RoutingMode enum alignment
         """
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="csv")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
         graph.add_edge("src", "sink", label="continue", mode=RoutingMode.MOVE)
 
         edges = graph.get_edges()
@@ -139,10 +140,11 @@ class TestIntegrationAuditFixes:
         Verifies Task 3: RoutingMode enum alignment.
         """
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="filter")
-        graph.add_node("sink1", node_type="sink", plugin_name="csv")
-        graph.add_node("sink2", node_type="sink", plugin_name="json")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type="source", plugin_name="csv", config=schema_config)
+        graph.add_node("gate", node_type="gate", plugin_name="filter", config=schema_config)
+        graph.add_node("sink1", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("sink2", node_type="sink", plugin_name="json", config=schema_config)
 
         # Add edges with different routing modes
         graph.add_edge("src", "gate", label="continue", mode=RoutingMode.MOVE)
