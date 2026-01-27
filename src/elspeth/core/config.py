@@ -1198,7 +1198,7 @@ def load_settings(config_path: Path) -> ElspethSettings:
         ValidationError: If configuration fails Pydantic validation
         FileNotFoundError: If config file doesn't exist
     """
-    from dynaconf import Dynaconf
+    from dynaconf import Dynaconf  # type: ignore[attr-defined]
 
     # Explicit check for file existence (Dynaconf silently accepts missing files)
     if not config_path.exists():
