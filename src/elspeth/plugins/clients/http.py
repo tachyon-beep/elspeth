@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import time
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
@@ -26,7 +27,7 @@ class AuditedHTTPClient(AuditedClientBase):
     Wraps httpx to ensure every HTTP call is recorded to the Landscape
     audit trail. Supports:
     - Automatic request/response recording
-    - Auth header filtering (not recorded for security)
+    - Auth header fingerprinting (HMAC fingerprint stored, not raw secrets)
     - Latency measurement
     - Error recording
 
@@ -65,30 +66,82 @@ class AuditedHTTPClient(AuditedClientBase):
         self._base_url = base_url
         self._default_headers = headers or {}
 
-    # Headers that may contain secrets - excluded from audit trail
+    # Headers that may contain secrets - fingerprinted in audit trail
     _SENSITIVE_REQUEST_HEADERS = frozenset({"authorization", "x-api-key", "api-key", "x-auth-token", "proxy-authorization"})
     _SENSITIVE_RESPONSE_HEADERS = frozenset({"set-cookie", "www-authenticate", "proxy-authenticate", "x-auth-token"})
 
-    def _filter_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
-        """Filter out sensitive request headers from audit recording.
+    def _is_sensitive_header(self, header_name: str) -> bool:
+        """Check if a header name indicates sensitive content.
 
-        Auth headers are not recorded to avoid storing secrets.
+        Args:
+            header_name: Header name to check
+
+        Returns:
+            True if header likely contains secrets
+        """
+        lower_name = header_name.lower()
+        return (
+            lower_name in self._SENSITIVE_REQUEST_HEADERS
+            or "auth" in lower_name
+            or "key" in lower_name
+            or "secret" in lower_name
+            or "token" in lower_name
+        )
+
+    def _filter_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        """Fingerprint sensitive request headers for audit recording.
+
+        Sensitive headers (auth, api keys, tokens) are replaced with HMAC
+        fingerprints so that:
+        1. Raw secrets are NEVER stored in the audit trail
+        2. Different credentials produce different fingerprints
+        3. Replay/verify can distinguish requests by credential identity
+
+        In dev mode (ELSPETH_ALLOW_RAW_SECRETS=true), sensitive headers are
+        removed entirely (no fingerprint key required).
 
         Args:
             headers: Full headers dict
 
         Returns:
-            Headers dict with sensitive headers removed
+            Headers dict with sensitive values fingerprinted (or removed in dev mode)
         """
-        return {
-            k: v
-            for k, v in headers.items()
-            if k.lower() not in self._SENSITIVE_REQUEST_HEADERS
-            and "auth" not in k.lower()
-            and "key" not in k.lower()
-            and "secret" not in k.lower()
-            and "token" not in k.lower()
-        }
+        from elspeth.core.security import get_fingerprint_key, secret_fingerprint
+
+        # Check if fingerprint key is available
+        allow_raw = os.environ.get("ELSPETH_ALLOW_RAW_SECRETS", "").lower() == "true"
+
+        try:
+            get_fingerprint_key()
+            have_key = True
+        except ValueError:
+            have_key = False
+
+        result: dict[str, str] = {}
+
+        for k, v in headers.items():
+            if self._is_sensitive_header(k):
+                if have_key:
+                    # Fingerprint the sensitive value
+                    fp = secret_fingerprint(v)
+                    result[k] = f"<fingerprint:{fp}>"
+                elif not allow_raw:
+                    # No key and not dev mode - this shouldn't happen in production
+                    # Remove header to avoid leaking secrets (fail-safe)
+                    logger.warning(
+                        "Sensitive header '%s' dropped: no fingerprint key available. "
+                        "Set ELSPETH_FINGERPRINT_KEY or ELSPETH_ALLOW_RAW_SECRETS=true",
+                        k,
+                    )
+                    # Don't include this header
+                else:
+                    # Dev mode: remove header (don't store secrets, don't require key)
+                    pass
+            else:
+                # Non-sensitive header: include as-is
+                result[k] = v
+
+        return result
 
     def _filter_response_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """Filter out sensitive response headers from audit recording.

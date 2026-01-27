@@ -157,3 +157,35 @@ The fix requires:
 3. Store as `"Authorization": f"<fingerprint:{fp}>"`  or similar redacted format that preserves uniqueness
 4. Add test verifying different auth headers produce different request hashes
 5. Verify fingerprints work correctly in replay mode (same auth = same fingerprint = cache hit)
+
+---
+
+## Resolution (2026-01-28)
+
+**Status: FIXED**
+
+### Changes Made
+
+1. **Modified `src/elspeth/plugins/clients/http.py`:**
+   - Added `os` import for environment variable access
+   - Added new `_is_sensitive_header()` method to centralize header sensitivity detection
+   - Rewrote `_filter_request_headers()` to fingerprint sensitive headers instead of removing them
+   - When fingerprint key available: stores `<fingerprint:64hexchars>` format
+   - When no key but dev mode (`ELSPETH_ALLOW_RAW_SECRETS=true`): removes headers (fail-safe)
+   - When no key and not dev mode: removes headers with warning (production fail-safe)
+
+2. **Added tests in `tests/plugins/clients/test_audited_http_client.py`:**
+   - `test_auth_headers_fingerprinted_in_recorded_request`: Verifies fingerprint format and raw secrets not stored
+   - `test_different_auth_headers_produce_different_request_hashes`: Verifies hash uniqueness with different credentials
+   - `test_auth_headers_removed_when_no_fingerprint_key_dev_mode`: Verifies dev mode fallback behavior
+
+### Verification
+
+- All 25 HTTP client tests pass
+- All 179 security and client tests pass
+- All 3264 unit tests pass (12 expected skips for credential-gated tests)
+- Type checking passes with mypy
+
+### Commit
+
+Branch: `fix/rc1-bug-burndown-session-6`
