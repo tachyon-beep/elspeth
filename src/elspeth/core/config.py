@@ -484,6 +484,26 @@ class LandscapeSettings(BaseModel):
         description="Post-run audit export configuration",
     )
 
+    @field_validator("url")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format at config time.
+
+        Catches malformed URLs early (fail-fast) rather than at first DB access.
+        Uses SQLAlchemy's own URL parser for accurate validation.
+        """
+        from sqlalchemy.engine.url import make_url
+        from sqlalchemy.exc import ArgumentError
+
+        try:
+            parsed = make_url(v)
+            # Verify we got a valid driver/scheme
+            if not parsed.drivername:
+                raise ValueError("Database URL missing driver (e.g., 'sqlite', 'postgresql')")
+        except ArgumentError as e:
+            raise ValueError(f"Invalid database URL format: {e}") from e
+        return v
+
 
 class ConcurrencySettings(BaseModel):
     """Parallel processing configuration per architecture."""

@@ -342,6 +342,58 @@ class TestLandscapeSettings:
         with pytest.raises(ValidationError):
             LandscapeSettings(backend="mysql")
 
+    def test_landscape_settings_url_validation_valid_sqlite(self) -> None:
+        """Valid SQLite URLs are accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Memory database
+        ls = LandscapeSettings(url="sqlite:///:memory:")
+        assert ls.url == "sqlite:///:memory:"
+
+        # File-based with relative path
+        ls = LandscapeSettings(url="sqlite:///./data/audit.db")
+        assert ls.url == "sqlite:///./data/audit.db"
+
+        # File-based with absolute path
+        ls = LandscapeSettings(url="sqlite:////var/lib/elspeth/audit.db")
+        assert ls.url == "sqlite:////var/lib/elspeth/audit.db"
+
+    def test_landscape_settings_url_validation_valid_postgresql(self) -> None:
+        """Valid PostgreSQL URLs are accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Full DSN with credentials
+        pg_url = "postgresql://user:pass@localhost:5432/elspeth_audit"
+        ls = LandscapeSettings(backend="postgresql", url=pg_url)
+        assert ls.url == pg_url
+
+        # With SSL mode parameter
+        pg_url_ssl = "postgresql://user:pass@db.example.com/audit?sslmode=require"
+        ls = LandscapeSettings(backend="postgresql", url=pg_url_ssl)
+        assert ls.url == pg_url_ssl
+
+    def test_landscape_settings_url_validation_rejects_invalid(self) -> None:
+        """Invalid database URLs are rejected at config time."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Not a valid URL format at all
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="not-a-valid-url")
+        assert "Invalid database URL format" in str(exc_info.value)
+
+        # Missing scheme/driver
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="://localhost/db")
+        assert "Invalid database URL format" in str(exc_info.value)
+
+    def test_landscape_settings_url_validation_rejects_empty(self) -> None:
+        """Empty URL is rejected."""
+        from elspeth.core.config import LandscapeSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="")
+        assert "Invalid database URL format" in str(exc_info.value) or "missing driver" in str(exc_info.value).lower()
+
 
 class TestConcurrencySettings:
     """ConcurrencySettings matches architecture specification."""
