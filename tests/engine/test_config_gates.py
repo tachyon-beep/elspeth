@@ -7,12 +7,12 @@ They are processed AFTER plugin transforms but BEFORE sinks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import GateName, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, PluginSchema, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -22,11 +22,7 @@ from tests.conftest import (
     as_sink,
     as_source,
 )
-
-if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
-    from elspeth.engine.orchestrator import PipelineConfig
-
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 # =============================================================================
 # Module-Scoped Database Fixture
@@ -201,96 +197,6 @@ def verify_audit_trail(
         assert len(artifacts) > 0 or sum(expected_terminal_outcomes.values()) == 0, "Should have artifacts for sink writes"
 
 
-def _build_test_graph_with_config_gates(
-    config: PipelineConfig,
-) -> ExecutionGraph:
-    """Build a test graph including config gates.
-
-    Creates a linear graph matching the PipelineConfig structure:
-    source -> transforms... -> config_gates... -> sinks
-    """
-    from elspeth.core.dag import ExecutionGraph
-
-    graph = ExecutionGraph()
-
-    schema_config = {"schema": {"fields": "dynamic"}}
-
-    # Add source
-    graph.add_node(
-        "source",
-        node_type=NodeType.SOURCE,
-        plugin_name=config.source.name,
-        config=schema_config,
-    )
-
-    # Add transforms
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        graph.add_node(
-            node_id,
-            node_type=NodeType.TRANSFORM,
-            plugin_name=t.name,
-            config=schema_config,
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks first (needed for config gate edges)
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(
-            node_id,
-            node_type=NodeType.SINK,
-            plugin_name=sink.name,
-            config=schema_config,
-        )
-
-    # Add config gates
-    config_gate_ids: dict[str, str] = {}
-    route_resolution_map: dict[tuple[str, str], str] = {}
-
-    for gate_config in config.gates:
-        node_id = f"config_gate_{gate_config.name}"
-        config_gate_ids[gate_config.name] = node_id
-        graph.add_node(
-            node_id,
-            node_type=NodeType.GATE,
-            plugin_name=f"config_gate:{gate_config.name}",
-            config={
-                "schema": schema_config["schema"],
-                "condition": gate_config.condition,
-                "routes": dict(gate_config.routes),
-            },
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-
-        # Add route edges and resolution map
-        for route_label, target in gate_config.routes.items():
-            route_resolution_map[(node_id, route_label)] = target
-            if target not in ("continue", "fork") and target in sink_ids:
-                graph.add_edge(node_id, sink_ids[target], label=route_label, mode=RoutingMode.MOVE)
-
-        prev = node_id
-
-    # Edge to output sink
-    output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
-    graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal maps with proper types
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-    graph._default_sink = output_sink
-
-    return graph
-
-
 class TestConfigGateIntegration:
     """Integration tests for config-driven gates."""
 
@@ -321,7 +227,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 2
@@ -369,7 +275,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -646,7 +552,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape for registered nodes
         with db.engine.connect() as conn:
@@ -875,7 +781,7 @@ class TestMultipleConfigGates:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         # Row passes gate1, routes to mid via gate2

@@ -129,7 +129,7 @@ class TestOrchestratorRetry:
             sinks={"default": as_sink(sink)},
         )
 
-        # Use build_test_graph to create graph matching PipelineConfig
+        # Use production graph path for test reliability
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
@@ -237,7 +237,7 @@ class TestOrchestratorRetry:
             sinks={"default": as_sink(sink)},
         )
 
-        # Use build_test_graph to create graph matching PipelineConfig
+        # Use production graph path for test reliability
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
