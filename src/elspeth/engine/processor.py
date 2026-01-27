@@ -439,13 +439,40 @@ class RowProcessor:
         """
         if self._retry_manager is None:
             # No retry configured - single attempt
-            return self._transform_executor.execute_transform(
-                transform=transform,
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=step,
-                attempt=0,
-            )
+            # Must still catch retryable exceptions and convert to error results
+            # to keep failures row-scoped (don't abort entire run)
+            try:
+                return self._transform_executor.execute_transform(
+                    transform=transform,
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=step,
+                    attempt=0,
+                )
+            except LLMClientError as e:
+                if e.retryable:
+                    # Retryable error but no retry manager configured - convert to error result
+                    # This keeps the failure row-scoped instead of aborting the run
+                    return (
+                        TransformResult.error(
+                            {"reason": "llm_retryable_error_no_retry", "error": str(e)},
+                            retryable=True,  # Mark as retryable for audit trail
+                        ),
+                        token,
+                        transform._on_error,
+                    )
+                # Non-retryable errors re-raise (already handled by transform)
+                raise
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # Other retryable errors - convert to error result
+                return (
+                    TransformResult.error(
+                        {"reason": "transient_error_no_retry", "error": str(e)},
+                        retryable=True,
+                    ),
+                    token,
+                    transform._on_error,
+                )
 
         # Track attempt number for audit
         attempt_tracker = {"current": 0}

@@ -302,10 +302,12 @@ class TestRowProcessorRetry:
         assert result.status == "success"
 
     def test_no_retry_when_retry_manager_is_none(self) -> None:
-        """Without retry_manager, exceptions propagate immediately."""
-        from unittest.mock import Mock
+        """Without retry_manager, retryable exceptions become error results (not propagated).
 
-        import pytest
+        This keeps failures row-scoped instead of aborting the entire run.
+        The error result can still be routed to an error sink via on_error config.
+        """
+        from unittest.mock import Mock
 
         from elspeth.engine.processor import RowProcessor
 
@@ -318,18 +320,106 @@ class TestRowProcessorRetry:
         )
 
         processor._transform_executor = Mock()
-        processor._transform_executor.execute_transform.side_effect = ConnectionError("fail")
+        processor._transform_executor.execute_transform.side_effect = ConnectionError("network fail")
 
         transform = Mock()
         transform.node_id = "t1"
+        transform._on_error = "error_sink"  # Configure error routing
         token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
         ctx = Mock(run_id="test-run")
 
-        with pytest.raises(ConnectionError):
-            processor._execute_transform_with_retry(transform, token, ctx, step=0)
+        # Should NOT raise - converts to error result to keep failure row-scoped
+        result, _, error_sink = processor._execute_transform_with_retry(transform, token, ctx, step=0)
 
         # Should only be called once (no retry)
         assert processor._transform_executor.execute_transform.call_count == 1
+
+        # Error result returned instead of exception propagated
+        assert result.status == "error"
+        assert result.retryable is True
+        assert "network fail" in result.reason["error"]
+        assert result.reason["reason"] == "transient_error_no_retry"
+
+        # Error sink from transform config is returned for routing
+        assert error_sink == "error_sink"
+
+    def test_llm_retryable_error_without_retry_manager_becomes_error_result(self) -> None:
+        """Retryable LLMClientError becomes error result when retry_manager is None.
+
+        This addresses P2 review comment: LLM transforms re-raise retryable errors
+        expecting RetryManager to catch them. When retry_manager is None, the
+        processor must catch these and convert to error results to avoid aborting
+        the entire run.
+        """
+        from unittest.mock import Mock
+
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        processor = RowProcessor(
+            recorder=Mock(),
+            span_factory=Mock(),
+            run_id="test-run",
+            source_node_id=NodeID("source"),
+            retry_manager=None,  # No retry configured
+        )
+
+        processor._transform_executor = Mock()
+        # Simulate retryable LLM error (rate limit, network, server error)
+        llm_error = LLMClientError("Rate limit exceeded", retryable=True)
+        processor._transform_executor.execute_transform.side_effect = llm_error
+
+        transform = Mock()
+        transform.node_id = "llm_transform"
+        transform._on_error = "quarantine"
+        token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
+        ctx = Mock(run_id="test-run")
+
+        # Should NOT raise - converts to error result
+        result, _, error_sink = processor._execute_transform_with_retry(transform, token, ctx, step=0)
+
+        # Single attempt (no retry)
+        assert processor._transform_executor.execute_transform.call_count == 1
+
+        # Error result with LLM-specific reason
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason["reason"] == "llm_retryable_error_no_retry"
+        assert "Rate limit exceeded" in result.reason["error"]
+        assert error_sink == "quarantine"
+
+    def test_llm_non_retryable_error_propagates(self) -> None:
+        """Non-retryable LLMClientError propagates (already handled by transform)."""
+        from unittest.mock import Mock
+
+        import pytest
+
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        processor = RowProcessor(
+            recorder=Mock(),
+            span_factory=Mock(),
+            run_id="test-run",
+            source_node_id=NodeID("source"),
+            retry_manager=None,
+        )
+
+        processor._transform_executor = Mock()
+        # Non-retryable error (content policy, context length exceeded)
+        llm_error = LLMClientError("Content policy violation", retryable=False)
+        processor._transform_executor.execute_transform.side_effect = llm_error
+
+        transform = Mock()
+        transform.node_id = "llm_transform"
+        token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
+        ctx = Mock(run_id="test-run")
+
+        # Non-retryable errors should propagate (transform should have handled them)
+        with pytest.raises(LLMClientError) as exc_info:
+            processor._execute_transform_with_retry(transform, token, ctx, step=0)
+
+        assert exc_info.value.retryable is False
 
     def test_max_retries_exceeded_returns_failed_outcome(self) -> None:
         """When all retries exhausted, process_row returns FAILED outcome."""
