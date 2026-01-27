@@ -2819,3 +2819,101 @@ transforms:
         assert plugin_opts["template_source"] == "prompts/test.j2"
         assert plugin_opts["lookup"] == {"greetings": ["Hello"]}
         assert plugin_opts["lookup_source"] == "prompts/lookups.yaml"
+
+
+class TestEnvVarExpansion:
+    """Tests for ${VAR} and ${VAR:-default} environment variable expansion."""
+
+    def test_expand_env_var_with_value_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded when set."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("TEST_API_KEY", "secret-key-123")
+
+        config = {"api_key": "${TEST_API_KEY}"}
+        result = _expand_env_vars(config)
+
+        assert result["api_key"] == "secret-key-123"
+
+    def test_expand_env_var_with_default_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default value is used when env var is not set."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("UNSET_VAR", raising=False)
+
+        config = {"endpoint": "${UNSET_VAR:-https://default.example.com}"}
+        result = _expand_env_vars(config)
+
+        assert result["endpoint"] == "https://default.example.com"
+
+    def test_expand_env_var_prefers_env_over_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variable value takes precedence over default."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("MY_ENDPOINT", "https://actual.example.com")
+
+        config = {"endpoint": "${MY_ENDPOINT:-https://default.example.com}"}
+        result = _expand_env_vars(config)
+
+        assert result["endpoint"] == "https://actual.example.com"
+
+    def test_expand_env_var_required_raises_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing required env var (no default) raises clear error."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("REQUIRED_API_KEY", raising=False)
+
+        config = {"api_key": "${REQUIRED_API_KEY}"}
+
+        with pytest.raises(ValueError) as exc_info:
+            _expand_env_vars(config)
+
+        error_msg = str(exc_info.value)
+        assert "REQUIRED_API_KEY" in error_msg
+        assert "not set" in error_msg
+        assert ":-default" in error_msg  # Suggests the fix
+
+    def test_expand_env_var_in_nested_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded in nested structures."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("NESTED_VALUE", "expanded")
+
+        config = {"outer": {"inner": {"value": "${NESTED_VALUE}"}}}
+        result = _expand_env_vars(config)
+
+        assert result["outer"]["inner"]["value"] == "expanded"
+
+    def test_expand_env_var_in_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded in lists."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("LIST_ITEM", "item-value")
+
+        config = {"items": ["static", "${LIST_ITEM}", "another"]}
+        result = _expand_env_vars(config)
+
+        assert result["items"] == ["static", "item-value", "another"]
+
+    def test_expand_multiple_env_vars_in_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Multiple env vars in a single string are all expanded."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("PROTO", "https")
+        monkeypatch.setenv("HOST", "api.example.com")
+
+        config = {"url": "${PROTO}://${HOST}/v1"}
+        result = _expand_env_vars(config)
+
+        assert result["url"] == "https://api.example.com/v1"
+
+    def test_expand_empty_default_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty string default is valid (${VAR:-} pattern)."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("OPTIONAL_PREFIX", raising=False)
+
+        config = {"prefix": "${OPTIONAL_PREFIX:-}"}
+        result = _expand_env_vars(config)
+
+        assert result["prefix"] == ""

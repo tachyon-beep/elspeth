@@ -148,7 +148,7 @@ allow_hits:
   reason: 'Trust boundary: environment variables are external input that may not exist'
   safety: Explicit None check follows; falls back to default or keeps original for later error
   expires: null
-- key: core/config.py:R1:_fingerprint_config_for_audit:line=1049
+- key: core/config.py:R1:_fingerprint_config_for_audit:line=1052
   owner: architecture
   reason: 'Optional env var: ELSPETH_ALLOW_RAW_SECRETS is not required in production'
   safety: Missing env var = empty string = False = production mode (fail-closed)

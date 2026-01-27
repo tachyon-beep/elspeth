@@ -789,8 +789,11 @@ def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:
                 return env_value
             if default is not None:
                 return default
-            # No env var and no default - keep original (will likely cause error)
-            return match.group(0)
+            # No env var and no default - fail fast with clear error
+            raise ValueError(
+                f"Required environment variable '{var_name}' is not set. "
+                f"Either set the variable or use ${{{{var_name}}:-default}} syntax for optional values."
+            )
 
         return _ENV_VAR_PATTERN.sub(replacer, value)
 
