@@ -112,7 +112,7 @@ def main(
         "--no-dotenv",
         help="Skip loading .env file.",
     ),
-    env_file: Path | None = typer.Option(  # noqa: B008
+    env_file: Path | None = typer.Option(
         None,
         "--env-file",
         help="Path to .env file (skips automatic search).",
