@@ -3,7 +3,39 @@
 **Severity:** P2 (Design Flaw - Correctness/Auditability Impact)
 **Component:** Engine (Processor, DAG)
 **Discovered:** 2026-01-27
-**Status:** Open
+**Status:** RESOLVED (2026-01-28)
+
+---
+
+## Resolution Summary
+
+**Implemented Option A: Processor now matches graph topology.**
+
+Fork children now skip directly to their coalesce step, bypassing all intermediate
+transforms and gates. Merged tokens can continue to downstream nodes if the coalesce
+is not at the end of the pipeline.
+
+### Key Changes
+
+1. **`src/elspeth/core/dag.py`**
+   - Added `_coalesce_gate_index` instance variable to `ExecutionGraph`
+   - Added `get_coalesce_gate_index()` getter method
+
+2. **`src/elspeth/engine/orchestrator.py`**
+   - Added `_compute_coalesce_step_map()` helper method
+   - Formula: `coalesce_step = num_transforms + num_gates + coalesce_index`
+   - This places coalesce steps AFTER all transforms/gates, avoiding step index collisions
+
+3. **`src/elspeth/engine/processor.py`**
+   - Updated plugin gate fork path (~line 905): children get `start_step=coalesce_step`
+   - Updated config gate fork path (~line 1139): children get `start_step=coalesce_step`
+
+### Test Coverage
+
+- `test_multiple_gates_fork_coalesce_step_index`: Verifies no step index collision
+- `test_fork_coalesce_merged_token_has_terminal_outcome`: Verifies audit completeness
+- `test_fork_coalesce_all_tokens_have_correct_outcomes`: Verifies token outcomes
+- Full test suite: 3887 passed, 33 skipped
 
 ---
 

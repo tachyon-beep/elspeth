@@ -3,11 +3,15 @@
 These tests verify the complete flow:
 source -> fork gate -> parallel paths -> coalesce -> sink
 
-Unlike the unit tests in test_coalesce_executor.py, these tests use:
+These tests use:
 - Real source/sink plugins (inline test fixtures)
 - Real Orchestrator
-- Real ExecutionGraph.from_plugin_instances()
+- Real ExecutionGraph.from_plugin_instances() via build_production_graph()
 - Real LandscapeDB (in-memory)
+
+IMPORTANT: All tests use build_production_graph() to ensure they exercise
+the same code paths as production. Manual graph construction is prohibited
+per CLAUDE.md Test Path Integrity requirements.
 """
 
 from __future__ import annotations
@@ -18,15 +22,9 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import (
-    BranchName,
-    CoalesceName,
-    GateName,
-    NodeID,
     NodeStateStatus,
     NodeType,
-    RoutingMode,
     RunStatus,
-    SinkName,
     SourceRow,
 )
 from elspeth.core.config import (
@@ -36,7 +34,6 @@ from elspeth.core.config import (
     SinkSettings,
     SourceSettings,
 )
-from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -49,6 +46,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +62,7 @@ class ListSource(_TestSourceBase):
     output_schema = _TestSchema
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()  # Initialize config with schema
         self._data = data
 
     def on_start(self, ctx: Any) -> None:
@@ -87,7 +86,8 @@ class CollectSink(_TestSinkBase):
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
-        self.config: dict[str, Any] = {}
+        # IMPORTANT: Must include schema for production graph builder
+        self.config: dict[str, Any] = {"schema": {"fields": "dynamic"}}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -106,186 +106,6 @@ class CollectSink(_TestSinkBase):
 
     def close(self) -> None:
         pass
-
-
-def _build_fork_coalesce_graph(
-    config: PipelineConfig,
-    settings: ElspethSettings,
-) -> ExecutionGraph:
-    """Build a test graph that supports fork and coalesce operations.
-
-    This manually builds the graph because ExecutionGraph.from_plugin_instances() requires
-    plugins to be registered, which we can't do with inline test fixtures.
-
-    Args:
-        config: Pipeline configuration with plugins
-        settings: Full settings with gates and coalesce config
-    """
-    graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
-
-    # Add source
-    source_id = "source_test"
-    graph.add_node(
-        source_id,
-        node_type=NodeType.SOURCE,
-        plugin_name=config.source.name,
-        config=schema_config,
-    )
-
-    # Add transforms
-    transform_ids: dict[int, str] = {}
-    prev = source_id
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        graph.add_node(
-            node_id,
-            node_type=NodeType.TRANSFORM,
-            plugin_name=t.name,
-            config=schema_config,
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
-
-    # Add config gates (from settings.gates)
-    config_gate_ids: dict[str, str] = {}
-    route_resolution_map: dict[tuple[str, str], str] = {}
-
-    for gate_config in settings.gates:
-        gate_id = f"config_gate_{gate_config.name}"
-        config_gate_ids[gate_config.name] = gate_id
-
-        gate_node_config = {
-            "condition": gate_config.condition,
-            "routes": dict(gate_config.routes),
-        }
-        if gate_config.fork_to:
-            gate_node_config["fork_to"] = list(gate_config.fork_to)
-
-        graph.add_node(
-            gate_id,
-            node_type=NodeType.GATE,
-            plugin_name=f"config_gate:{gate_config.name}",
-            config={
-                "schema": schema_config["schema"],
-                **gate_node_config,
-            },
-        )
-
-        # Edge from previous node
-        graph.add_edge(prev, gate_id, label="continue", mode=RoutingMode.MOVE)
-
-        # Config gate routes
-        for route_label, target in gate_config.routes.items():
-            route_resolution_map[(gate_id, route_label)] = target
-
-        prev = gate_id
-
-    # Build coalesce nodes
-    coalesce_ids: dict[str, str] = {}
-    branch_to_coalesce: dict[str, str] = {}
-
-    for coalesce_config in settings.coalesce:
-        cid = f"coalesce_{coalesce_config.name}"
-        coalesce_ids[coalesce_config.name] = cid
-
-        for branch in coalesce_config.branches:
-            branch_to_coalesce[branch] = coalesce_config.name
-
-        coalesce_node_config = {
-            "branches": list(coalesce_config.branches),
-            "policy": coalesce_config.policy,
-            "merge": coalesce_config.merge,
-            "timeout_seconds": coalesce_config.timeout_seconds,
-            "quorum_count": coalesce_config.quorum_count,
-            "select_branch": coalesce_config.select_branch,
-            "schema": schema_config["schema"],
-        }
-
-        graph.add_node(
-            cid,
-            node_type=NodeType.COALESCE,
-            plugin_name=f"coalesce:{coalesce_config.name}",
-            config=coalesce_node_config,
-        )
-
-    # Create edges from fork gates to coalesce nodes (for branches in coalesce)
-    output_sink_id = sink_ids[settings.default_sink]
-
-    for gate_config in settings.gates:
-        if gate_config.fork_to:
-            gate_id = config_gate_ids[gate_config.name]
-            for branch in gate_config.fork_to:
-                if branch in branch_to_coalesce:
-                    coalesce_name = branch_to_coalesce[branch]
-                    coalesce_id = coalesce_ids[coalesce_name]
-                    graph.add_edge(
-                        gate_id,
-                        coalesce_id,
-                        label=branch,
-                        mode=RoutingMode.COPY,
-                    )
-                else:
-                    # Branch not in any coalesce - route to output sink
-                    graph.add_edge(
-                        gate_id,
-                        output_sink_id,
-                        label=branch,
-                        mode=RoutingMode.COPY,
-                    )
-
-    # Create edges from coalesce nodes to output sink
-    for _coalesce_name, cid in coalesce_ids.items():
-        graph.add_edge(
-            cid,
-            output_sink_id,
-            label="continue",
-            mode=RoutingMode.MOVE,
-        )
-
-    # Edge from last node to output sink (for non-fork paths)
-    # Only add if no fork gates (fork gates handle their own routing)
-    if not settings.gates or not any(g.fork_to for g in settings.gates):
-        graph.add_edge(prev, output_sink_id, label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal ID maps with proper types
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
-    graph._coalesce_id_map = {CoalesceName(k): NodeID(v) for k, v in coalesce_ids.items()}
-    graph._branch_to_coalesce = {BranchName(k): CoalesceName(v) for k, v in branch_to_coalesce.items()}
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-    graph._default_sink = settings.default_sink
-
-    # Compute coalesce_gate_index (mirrors production logic in dag.py)
-    # This maps coalesce name -> pipeline index of the gate that produces its branches
-    # Build pipeline_nodes list (transforms + gates in order)
-    pipeline_nodes = list(transform_ids.values()) + [config_gate_ids[g.name] for g in settings.gates]
-    pipeline_index = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
-
-    coalesce_gate_index: dict[CoalesceName, int] = {}
-    for gate_config in settings.gates:
-        if gate_config.fork_to:
-            gate_id = config_gate_ids[gate_config.name]
-            gate_idx = pipeline_index[gate_id]
-            for branch in gate_config.fork_to:
-                if branch in branch_to_coalesce:
-                    coalesce_name = CoalesceName(branch_to_coalesce[branch])
-                    # Use highest gate index if multiple gates produce branches for same coalesce
-                    if coalesce_name not in coalesce_gate_index or gate_idx > coalesce_gate_index[coalesce_name]:
-                        coalesce_gate_index[coalesce_name] = gate_idx
-
-    graph._coalesce_gate_index = coalesce_gate_index
-
-    return graph
 
 
 # =============================================================================
@@ -341,7 +161,7 @@ class TestForkCoalescePipeline:
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -363,13 +183,25 @@ class TestForkCoalescePipeline:
         self,
         landscape_db: LandscapeDB,
     ) -> None:
-        """Branches not in coalesce should still reach output sink."""
+        """Branches not in coalesce can route to explicit sinks.
+
+        Production graph builder requires explicit destinations for all fork branches.
+        Branches either go to coalesce OR to a sink whose name matches the branch name.
+        This test verifies both paths work together.
+        """
+        # Create separate sinks - one for coalesced output, one for orphan branch
+        output_sink = CollectSink()
+        path_c_sink = CollectSink()
+
         settings = ElspethSettings(
             source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
-            sinks={"output": SinkSettings(plugin="collect_sink", options={})},
+            sinks={
+                "output": SinkSettings(plugin="collect_sink", options={}),
+                "path_c": SinkSettings(plugin="collect_sink", options={}),  # Matches branch name
+            },
             default_sink="output",
             gates=[
                 GateSettings(
@@ -382,27 +214,27 @@ class TestForkCoalescePipeline:
             coalesce=[
                 CoalesceSettings(
                     name="merge_ab",
-                    branches=["path_a", "path_b"],  # Only 2 coalesce
+                    branches=["path_a", "path_b"],  # 2 go to coalesce
                     policy="require_all",
                     merge="union",
                 ),
             ],
+            # path_c goes to sink named "path_c" (explicit destination)
         )
 
         source = ListSource([{"id": 1}])
-        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
             transforms=[],
-            sinks={"output": as_sink(sink)},
+            sinks={"output": as_sink(output_sink), "path_c": as_sink(path_c_sink)},
             gates=settings.gates,
             coalesce_settings=settings.coalesce,
             aggregation_settings={},
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -411,15 +243,14 @@ class TestForkCoalescePipeline:
         # - 1 row processed (1 source row)
         # - 1 forked (parent row was forked)
         # - 1 merged token from path_a + path_b coalesce
-        # - 1 direct token from path_c (not in coalesce)
         assert result.rows_processed == 1
         assert result.rows_forked == 1
         assert result.rows_coalesced == 1
 
-        # Sink should have 2 rows:
-        # - 1 merged token from path_a + path_b
-        # - 1 direct token from path_c
-        assert len(sink.rows) == 2
+        # output_sink: 1 merged token from path_a + path_b
+        assert len(output_sink.rows) == 1
+        # path_c_sink: 1 direct token from path_c
+        assert len(path_c_sink.rows) == 1
 
     def test_fork_coalesce_with_transform(
         self,
@@ -490,7 +321,7 @@ class TestForkCoalescePipeline:
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -553,7 +384,7 @@ class TestForkCoalescePipeline:
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -619,7 +450,7 @@ class TestCoalesceAuditTrail:
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -916,7 +747,7 @@ class TestCoalesceTimeoutIntegration:
             config={},
         )
 
-        graph = _build_fork_coalesce_graph(config, settings)
+        graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
         start_time = time.monotonic()

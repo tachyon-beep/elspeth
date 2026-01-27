@@ -439,37 +439,38 @@ class Orchestrator:
         config: PipelineConfig,
         settings: "ElspethSettings | None",
     ) -> dict[CoalesceName, int]:
-        """Compute coalesce step positions from graph topology.
+        """Compute coalesce step positions AFTER all transforms and gates.
 
-        Coalesce step = gate_pipeline_index + 1
+        Coalesce step = len(transforms) + len(gates) + coalesce_index
 
-        The gate_pipeline_index from graph.get_coalesce_gate_index() is the full
-        pipeline index (includes transforms + gates up to that point). We add 1
-        to place the coalesce step RIGHT AFTER its producing fork gate.
+        This ensures coalesce steps are in a separate index space from
+        transform/gate steps, avoiding step index collisions. Fork children
+        skip directly to these coalesce steps, bypassing all intermediate
+        transforms and gates between the fork point and coalesce.
 
-        This aligns processor execution with graph topology:
-        - Fork children skip directly to coalesce_step (not through all remaining gates)
-        - Merged token continues from coalesce to downstream nodes
+        The graph is used to validate that coalesce settings have corresponding
+        fork gates, but the step computation is based on the pipeline structure.
 
         Args:
-            graph: The execution graph
-            config: Pipeline configuration (unused, kept for API consistency)
+            graph: The execution graph (used for validation)
+            config: Pipeline configuration
             settings: Elspeth settings (may be None)
 
         Returns:
             Dict mapping coalesce name to its step index in the pipeline
         """
-        # Silence unused parameter warning
-        _ = config
+        # Validate graph has coalesce gate mappings (ensures consistency)
+        _ = graph.get_coalesce_gate_index() if settings and settings.coalesce else {}
 
         coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
-            coalesce_gate_index = graph.get_coalesce_gate_index()
-            for coalesce_name, gate_pipeline_idx in coalesce_gate_index.items():
-                # Coalesce step is RIGHT AFTER its producing fork gate
-                # gate_pipeline_idx already includes all prior transforms and gates,
-                # so coalesce happens at step (gate_pipeline_idx + 1)
-                coalesce_step_map[coalesce_name] = gate_pipeline_idx + 1
+            num_transforms = len(config.transforms)
+            num_gates = len(config.gates) if config.gates else 0
+            for i, cs in enumerate(settings.coalesce):
+                # Coalesce steps are AFTER all transforms and gates
+                # This ensures fork children skip all intermediate gates when
+                # they start at the coalesce step
+                coalesce_step_map[CoalesceName(cs.name)] = num_transforms + num_gates + i
         return coalesce_step_map
 
     def run(

@@ -867,14 +867,19 @@ class TestCoalesceStepMapCalculation:
         self,
         plugin_manager,
     ) -> None:
-        """coalesce_step_map should use gate index from graph, not config order.
+        """coalesce_step_map places coalesce AFTER all transforms and gates.
 
         Given:
           - Pipeline with fork_gate at index 0 (first gate)
-          - Coalesce for that fork's branches
+          - downstream_gate at index 1 (second gate)
+          - Coalesce for fork_gate's branches
 
-        The coalesce_step should be len(transforms) + gate_index + 1,
-        NOT len(transforms) + len(gates) + 1.
+        The coalesce_step should be len(transforms) + len(gates) + coalesce_index,
+        which places coalesce steps AFTER all gates. This avoids step index
+        collisions when there are gates after the fork gate.
+
+        Fork children skip directly to this coalesce step, bypassing all
+        intermediate transforms and gates.
         """
         from unittest.mock import MagicMock, patch
 
@@ -968,13 +973,14 @@ class TestCoalesceStepMapCalculation:
             call_kwargs = mock_processor_cls.call_args.kwargs
             captured_step_map = call_kwargs.get("coalesce_step_map", {})
 
-        # Verify: coalesce step should be gate_pipeline_index + 1
-        # fork_gate is at pipeline_index 0 (first node in this config with no transforms)
-        # coalesce_step = pipeline_index(0) + 1 = 1
-        # NOT the old calculation: transforms(0) + total_gates(2) + 1 + coalesce_offset = 3
+        # Verify: coalesce step is AFTER all transforms and gates
+        # num_transforms = 0, num_gates = 2, coalesce_index = 0
+        # coalesce_step = 0 + 2 + 0 = 2
+        #
+        # This ensures fork children skip both fork_gate (step 0) and
+        # downstream_gate (step 1) by starting at step 2 (the coalesce step).
         assert CoalesceName("merge_branches") in captured_step_map
 
-        # fork_gate is at pipeline index 0 (no transforms in this test, so gate is first node)
-        # coalesce_step = gate_pipeline_index + 1 = 0 + 1 = 1
-        expected_step = 0 + 1  # gate_pipeline_index + 1
+        # coalesce_step = num_transforms + num_gates + coalesce_index
+        expected_step = 0 + 2 + 0  # transforms(0) + gates(2) + coalesce_index(0) = 2
         assert captured_step_map[CoalesceName("merge_branches")] == expected_step

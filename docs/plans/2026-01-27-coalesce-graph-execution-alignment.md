@@ -1,5 +1,8 @@
 # Coalesce Graph-Execution Alignment Implementation Plan
 
+> **STATUS: ✅ COMPLETED (2026-01-28)**
+> All tasks implemented and verified. Full test suite passes (3887 tests).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Align processor execution with graph topology so fork children skip directly to coalesce and merged tokens continue to downstream nodes.
@@ -11,6 +14,16 @@
 **Bug Reference:** `docs/bugs/BUG-COALESCE-GRAPH-EXECUTION-MISMATCH.md`
 
 **Deadline:** First live run next week - this fix must be complete and tested before then.
+
+## Completion Notes (2026-01-28)
+
+**Formula correction:** During implementation, the plan's formula `coalesce_step = gate_pipeline_idx + 1` was found to cause step index collisions when multiple gates follow the fork gate. The correct formula is:
+
+```python
+coalesce_step = num_transforms + num_gates + coalesce_index
+```
+
+This places coalesce steps AFTER all transforms and gates, ensuring fork children skip all intermediate processing when jumping to coalesce.
 
 ---
 
