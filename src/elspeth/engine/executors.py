@@ -23,7 +23,13 @@ from elspeth.contracts import (
     RoutingSpec,
     TokenInfo,
 )
-from elspeth.contracts.enums import BatchStatus, RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.enums import (
+    BatchStatus,
+    NodeStateStatus,
+    RoutingKind,
+    RoutingMode,
+    TriggerType,
+)
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -278,7 +284,7 @@ class TransformExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -336,7 +342,7 @@ class TransformExecutor:
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
             )
@@ -353,7 +359,7 @@ class TransformExecutor:
             # This is a LEGITIMATE processing failure, not a bug
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=result.reason,
             )
@@ -499,7 +505,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -575,7 +581,7 @@ class GateExecutor:
         # Terminal state is DERIVED from routing_events, not stored here
         self._recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=result.row,
             duration_ms=duration_ms,
         )
@@ -659,7 +665,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -683,7 +689,7 @@ class GateExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=error,
             )
@@ -719,7 +725,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -770,7 +776,7 @@ class GateExecutor:
         # Terminal state is DERIVED from routing_events, not stored here
         self._recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=token.row_data,
             duration_ms=duration_ms,
         )
@@ -1073,7 +1079,7 @@ class AggregationExecutor:
                 # but the result isn't available yet. This prevents orphaned OPEN states.
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="pending",
+                    status=NodeStateStatus.PENDING,
                     duration_ms=duration_ms,
                 )
 
@@ -1098,7 +1104,7 @@ class AggregationExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -1136,7 +1142,7 @@ class AggregationExecutor:
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
             )
@@ -1156,7 +1162,7 @@ class AggregationExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=error_info,
             )
@@ -1594,7 +1600,7 @@ class SinkExecutor:
                 for _, state in states:
                     self._recorder.complete_node_state(
                         state_id=state.state_id,
-                        status="failed",
+                        status=NodeStateStatus.FAILED,
                         duration_ms=duration_ms,
                         error=error,
                     )
@@ -1604,7 +1610,7 @@ class SinkExecutor:
         # If this fails, we want to crash - can't checkpoint non-durable data
         sink.flush()
 
-        # Complete all token states - status="completed" means they reached terminal
+        # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
         for token, state in states:
             sink_output = {
@@ -1614,7 +1620,7 @@ class SinkExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=sink_output,
                 duration_ms=duration_ms,
             )
