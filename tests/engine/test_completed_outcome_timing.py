@@ -29,8 +29,8 @@ from elspeth.contracts import (
     NodeStateStatus,
     NodeType,
     PluginSchema,
-    RowOutcome,
     RoutingMode,
+    RowOutcome,
     SinkName,
     SourceRow,
 )
@@ -193,16 +193,13 @@ class TestCompletedOutcomeTimingContract:
         with db.engine.connect() as conn:
             # Query token_outcomes for COMPLETED outcomes
             completed_outcomes = conn.execute(
-                select(token_outcomes_table).where(
-                    token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value
-                )
+                select(token_outcomes_table).where(token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value)
             ).fetchall()
 
             # Query node_states at sink to verify no successful sink processing
             completed_sink_states = conn.execute(
                 select(node_states_table).where(
-                    (node_states_table.c.node_id == "sink_default")
-                    & (node_states_table.c.status == NodeStateStatus.COMPLETED.value)
+                    (node_states_table.c.node_id == "sink_default") & (node_states_table.c.status == NodeStateStatus.COMPLETED.value)
                 )
             ).fetchall()
 
@@ -280,16 +277,13 @@ class TestCompletedOutcomeTimingContract:
         # Verify Invariant 3: For every COMPLETED outcome, a sink node_state must exist
         with db.engine.connect() as conn:
             completed_outcomes = conn.execute(
-                select(token_outcomes_table).where(
-                    token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value
-                )
+                select(token_outcomes_table).where(token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value)
             ).fetchall()
 
             # Get all completed sink node_states
             completed_sink_states = conn.execute(
                 select(node_states_table).where(
-                    (node_states_table.c.node_id == "sink_default")
-                    & (node_states_table.c.status == NodeStateStatus.COMPLETED.value)
+                    (node_states_table.c.node_id == "sink_default") & (node_states_table.c.status == NodeStateStatus.COMPLETED.value)
                 )
             ).fetchall()
 
@@ -369,9 +363,7 @@ class TestCompletedOutcomeTimingContract:
         # Simulate what an auditor would see
         with db.engine.connect() as conn:
             completed_outcomes = conn.execute(
-                select(token_outcomes_table).where(
-                    token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value
-                )
+                select(token_outcomes_table).where(token_outcomes_table.c.outcome == RowOutcome.COMPLETED.value)
             ).fetchall()
             completed_count = len(completed_outcomes)
 

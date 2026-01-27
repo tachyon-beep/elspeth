@@ -158,11 +158,6 @@ allow_hits:
   reason: 'Optional env var: ELSPETH_ALLOW_RAW_SECRETS is not required in production'
   safety: Missing env var = empty string = False = production mode (fail-closed)
   expires: null
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=93
-  owner: architecture
-  reason: 'Trust boundary: ELSPETH_ALLOW_RAW_SECRETS is optional env var (not required in production)'
-  safety: Missing env var = empty string = False = production mode (fail-closed), consistent with config.py:992
-  expires: null
 - key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:line=45
   owner: architecture
   reason: 'Trust boundary: LLM API usage dict may not include all token counts'
@@ -385,21 +380,6 @@ allow_hits:
     plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=274
-  owner: architecture
-  reason: Building lookup for gate names - only gates (not transforms) are in map
-  safety: None means not a gate at this sequence - correctly skipped
-  expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=370
-  owner: architecture
-  reason: Optional protocol extension - _on_validation_failure only on sources with SourceDataConfig
-  safety: None default means source doesn't support quarantine routing - validation skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=709
-  owner: architecture
-  reason: Optional schema config with explicit default - not all nodes define schemas
-  safety: 'Default value is well-defined: dynamic fields'
-  expires: null
 - key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1036
   owner: architecture
   reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
@@ -409,46 +389,6 @@ allow_hits:
   owner: architecture
   reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=281
-  owner: architecture
-  reason: Building lookup for config gate names - only config gates are in map
-  safety: None means not a config gate - correctly skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=297
-  owner: architecture
-  reason: Fallback for error message - use node_id if gate name not found
-  safety: Error message still produced with node_id as fallback
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1366
-  owner: architecture
-  reason: 'Trust boundary: JSON schema properties field is optional'
-  safety: None check with explicit fallback to empty schema
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1379
-  owner: architecture
-  reason: 'Trust boundary: JSON schema required field is optional'
-  safety: Empty list default is safe
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1420
-  owner: architecture
-  reason: 'Trust boundary: JSON schema type/format fields may be missing'
-  safety: None check with type-specific handling
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1428
-  owner: architecture
-  reason: 'Trust boundary: JSON schema anyOf items may not have type field'
-  safety: None filtered out in set comprehension
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1433
-  owner: architecture
-  reason: 'Trust boundary: JSON schema type field may be missing'
-  safety: Returns Any for unknown types
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1443
-  owner: architecture
-  reason: 'Trust boundary: JSON schema items field for arrays may be missing'
-  safety: Returns list[Any] for untyped arrays
   expires: null
 - key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=154
   owner: architecture
@@ -619,11 +559,6 @@ allow_hits:
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to requested model - audit still captures actual value
-  expires: null
-- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_node_state:line=266
-  owner: architecture
-  reason: 'Trust boundary: loading node state that may fail for incomplete audit trails'
-  safety: Errors logged with exc_info; returns None to detail panel
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1189
   owner: architecture
