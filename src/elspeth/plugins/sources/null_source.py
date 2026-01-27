@@ -41,14 +41,21 @@ class NullSource(BaseSource):
     plugin_version = "1.0.0"
     determinism = Determinism.DETERMINISTIC
     output_schema: type[PluginSchema] = NullSourceSchema
+    # NullSource yields no rows, so it never quarantines - but set to satisfy protocol
+    _on_validation_failure: str = "discard"
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize NullSource.
 
         Args:
-            config: Configuration dict (ignored - NullSource needs no config).
+            config: Configuration dict. NullSource requires no specific config,
+                but BaseSource expects schema config. If not provided, defaults
+                to dynamic schema since NullSource never validates rows anyway.
         """
-        super().__init__(config)
+        config_copy = dict(config)
+        if "schema" not in config_copy:
+            config_copy["schema"] = {"fields": "dynamic"}
+        super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
 

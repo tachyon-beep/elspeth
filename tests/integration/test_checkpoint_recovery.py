@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -47,7 +48,7 @@ class TestCheckpointRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for checkpoint/recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test")
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
         return graph
 
     def test_full_checkpoint_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -226,7 +227,7 @@ class TestCheckpointRecoveryIntegration:
 
         # Add node to graph if it doesn't exist
         if not graph.has_node(node_id):
-            graph.add_node(node_id, node_type="transform", plugin_name="test")
+            graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
 
         with db.engine.connect() as conn:
             # Create run (failed status)
@@ -237,7 +238,7 @@ class TestCheckpointRecoveryIntegration:
                     config_hash="test",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
 
@@ -247,9 +248,9 @@ class TestCheckpointRecoveryIntegration:
                     node_id=f"node-{run_suffix}",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -294,7 +295,6 @@ class TestCheckpointRecoveryIntegration:
         """Complete cycle: run -> crash simulation -> resume -> all rows processed."""
         import json
 
-        from elspeth.contracts import RunStatus
         from elspeth.core.landscape.schema import (
             edges_table,
             nodes_table,
@@ -316,9 +316,10 @@ class TestCheckpointRecoveryIntegration:
 
         # Create graph for this test with the actual nodes used
         test_graph = ExecutionGraph()
-        test_graph.add_node("src", node_type="source", plugin_name="null")
-        test_graph.add_node("xform", node_type="transform", plugin_name="passthrough")
-        test_graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        test_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        test_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        test_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
 
         # 1. Set up failed run with 5 rows, checkpoint at row 2
         run_id = "integration-resume-test"
@@ -337,7 +338,7 @@ class TestCheckpointRecoveryIntegration:
                     config_hash="x",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
                 )
             )
@@ -348,9 +349,9 @@ class TestCheckpointRecoveryIntegration:
                     node_id="src",
                     run_id=run_id,
                     plugin_name="null",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -361,9 +362,9 @@ class TestCheckpointRecoveryIntegration:
                     node_id="xform",
                     run_id=run_id,
                     plugin_name="passthrough",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -374,9 +375,9 @@ class TestCheckpointRecoveryIntegration:
                     node_id="sink",
                     run_id=run_id,
                     plugin_name="csv",
-                    node_type="sink",
+                    node_type=NodeType.SINK,
                     plugin_version="1.0.0",
-                    determinism="io_write",
+                    determinism=Determinism.IO_WRITE,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -391,7 +392,7 @@ class TestCheckpointRecoveryIntegration:
                     from_node_id="src",
                     to_node_id="xform",
                     label="continue",
-                    default_mode="move",
+                    default_mode=RoutingMode.MOVE,
                     created_at=now,
                 )
             )
@@ -402,7 +403,7 @@ class TestCheckpointRecoveryIntegration:
                     from_node_id="xform",
                     to_node_id="sink",
                     label="continue",
-                    default_mode="move",
+                    default_mode=RoutingMode.MOVE,
                     created_at=now,
                 )
             )
@@ -477,9 +478,10 @@ class TestCheckpointRecoveryIntegration:
 
         # Build graph using add_node() API
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="null", config={})
-        graph.add_node("xform", node_type="transform", plugin_name="passthrough", config={})
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("src", "xform", label="continue")
         graph.add_edge("xform", "sink", label="continue")
 
@@ -532,9 +534,8 @@ class TestCheckpointTopologyHashAtomicity:
         the transaction ensures hash consistency even if graph is modified
         after checkpoint creation.
         """
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.canonical import compute_upstream_topology_hash
+        from elspeth.core.canonical import compute_full_topology_hash
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         checkpoint_mgr = test_env["checkpoint_manager"]
@@ -543,8 +544,10 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create initial graph with two nodes
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test", config={"version": 1})
-        graph.add_node("transform_a", node_type="transform", plugin_name="test", config={"version": 1})
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}})
+        graph.add_node(
+            "transform_a", node_type=NodeType.TRANSFORM, plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}}
+        )
 
         # Create run
         run = recorder.begin_run(config={}, canonical_version="test-v1")
@@ -582,7 +585,9 @@ class TestCheckpointTopologyHashAtomicity:
         token = recorder.create_token(row_id=row.row_id)
 
         # Compute expected hash for current graph state
-        expected_hash = compute_upstream_topology_hash(graph, "transform_a")
+        # BUG-COMPAT-01: CheckpointManager now uses full topology hash (not upstream-only)
+        # to ensure changes to ANY branch invalidate checkpoints
+        expected_hash = compute_full_topology_hash(graph)
 
         # Create checkpoint with current graph state
         checkpoint = checkpoint_mgr.create_checkpoint(
@@ -599,10 +604,12 @@ class TestCheckpointTopologyHashAtomicity:
         )
 
         # Now modify the graph (simulating what could happen in a race condition)
-        graph.add_node("transform_b", node_type="transform", plugin_name="new_plugin", config={"version": 2})
+        graph.add_node(
+            "transform_b", node_type=NodeType.TRANSFORM, plugin_name="new_plugin", config={"version": 2, "schema": {"fields": "dynamic"}}
+        )
 
         # Compute hash with modified graph
-        modified_hash = compute_upstream_topology_hash(graph, "transform_a")
+        modified_hash = compute_full_topology_hash(graph)
 
         # Verify stored hash still matches ORIGINAL graph, not modified graph
         # (This proves hash was captured atomically at checkpoint creation time)
@@ -616,7 +623,6 @@ class TestCheckpointTopologyHashAtomicity:
 
     def test_checkpoint_validates_graph_parameter(self, test_env: dict[str, Any]) -> None:
         """Verify create_checkpoint() rejects None graph (Bug #9 early fix)."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -661,7 +667,6 @@ class TestCheckpointTopologyHashAtomicity:
 
     def test_checkpoint_validates_node_exists_in_graph(self, test_env: dict[str, Any]) -> None:
         """Verify create_checkpoint() rejects node_id not in graph (Bug #9 early fix)."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -671,7 +676,7 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create graph with one node
         graph = ExecutionGraph()
-        graph.add_node("existing_node", node_type="transform", plugin_name="test")
+        graph.add_node("existing_node", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
 
         # Create minimal run
         run = recorder.begin_run(config={}, canonical_version="test-v1")

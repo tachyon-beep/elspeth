@@ -6,11 +6,12 @@ Tokens are correlated by row_id (same source row that was forked).
 
 import hashlib
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import TokenInfo
-from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.spans import SpanFactory
@@ -29,6 +30,7 @@ class CoalesceOutcome:
         consumed_tokens: Tokens that were merged (marked COALESCED)
         coalesce_metadata: Audit metadata about the merge (branches, policy, etc.)
         failure_reason: Reason for failure if merge failed (timeout, missing branches)
+        coalesce_name: Name of the coalesce point that produced this outcome
     """
 
     held: bool
@@ -36,6 +38,7 @@ class CoalesceOutcome:
     consumed_tokens: list[TokenInfo] = field(default_factory=list)
     coalesce_metadata: dict[str, Any] | None = None
     failure_reason: str | None = None
+    coalesce_name: str | None = None
 
 
 @dataclass
@@ -99,7 +102,12 @@ class CoalesceExecutor:
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
         # Used to detect late arrivals after merge and reject them gracefully
-        self._completed_keys: set[tuple[str, str]] = set()
+        # Uses OrderedDict as bounded FIFO set to prevent unbounded memory growth
+        # (values are None, we only care about key presence and insertion order)
+        self._completed_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
+        # Maximum completed keys to retain (prevents OOM in long-running pipelines)
+        # Late arrivals after eviction create new pending entries (timeout/flush correctly)
+        self._max_completed_keys: int = 10000
 
     def register_coalesce(
         self,
@@ -124,6 +132,22 @@ class CoalesceExecutor:
             List of registered coalesce names
         """
         return list(self._settings.keys())
+
+    def _mark_completed(self, key: tuple[str, str]) -> None:
+        """Mark a coalesce key as completed with bounded memory.
+
+        Uses FIFO eviction to prevent unbounded memory growth in long-running
+        pipelines. When max capacity is exceeded, oldest entries are removed.
+        Late arrivals after eviction will create new pending entries which
+        timeout or flush correctly - acceptable trade-off vs OOM.
+
+        Args:
+            key: (coalesce_name, row_id) tuple to mark as completed
+        """
+        self._completed_keys[key] = None
+        # Evict oldest entries if over capacity
+        while len(self._completed_keys) > self._max_completed_keys:
+            self._completed_keys.popitem(last=False)
 
     def accept(
         self,
@@ -179,7 +203,7 @@ class CoalesceExecutor:
             )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 error={"failure_reason": "late_arrival_after_merge"},
                 duration_ms=0,
             )
@@ -193,6 +217,7 @@ class CoalesceExecutor:
                     "policy": settings.policy,
                     "reason": "Siblings already merged/failed, this token arrived too late",
                 },
+                coalesce_name=coalesce_name,
             )
 
         if key not in self._pending:
@@ -228,10 +253,11 @@ class CoalesceExecutor:
                 pending=pending,
                 step_in_pipeline=step_in_pipeline,
                 key=key,
+                coalesce_name=coalesce_name,
             )
 
         # Hold token - audit trail already recorded above
-        return CoalesceOutcome(held=True)
+        return CoalesceOutcome(held=True, coalesce_name=coalesce_name)
 
     def _should_merge(
         self,
@@ -263,6 +289,7 @@ class CoalesceExecutor:
         pending: _PendingCoalesce,
         step_in_pipeline: int,
         key: tuple[str, str],
+        coalesce_name: str,
     ) -> CoalesceOutcome:
         """Execute the merge and create merged token."""
         now = time.monotonic()
@@ -289,7 +316,7 @@ class CoalesceExecutor:
             # Complete it now that merge is happening
             self._recorder.complete_node_state(
                 state_id=state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data={"merged_into": merged_token.token_id},
                 duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
             )
@@ -301,6 +328,13 @@ class CoalesceExecutor:
                 outcome=RowOutcome.COALESCED,
                 join_group_id=merged_token.join_group_id,
             )
+
+        # NOTE: The merged token does NOT get COALESCED recorded here.
+        # - Consumed tokens: COALESCED (terminal) - they've been absorbed into the merge
+        # - Merged token: Will get COMPLETED when it reaches a sink, or COALESCED if
+        #   consumed by an outer coalesce (nested coalesce scenario)
+        # Recording COALESCED for merged token here would break nested coalesces where
+        # the inner merge result becomes a consumed token in the outer merge.
 
         # Build audit metadata
         coalesce_metadata = {
@@ -320,13 +354,14 @@ class CoalesceExecutor:
 
         # Clean up pending state and mark as completed
         del self._pending[key]
-        self._completed_keys.add(key)  # Track completion to reject late arrivals
+        self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
 
         return CoalesceOutcome(
             held=False,
             merged_token=merged_token,
             consumed_tokens=consumed_tokens,
             coalesce_metadata=coalesce_metadata,
+            coalesce_name=coalesce_name,
         )
 
     def _merge_data(
@@ -406,6 +441,7 @@ class CoalesceExecutor:
                     pending=pending,
                     step_in_pipeline=step_in_pipeline,
                     key=key,
+                    coalesce_name=coalesce_name,
                 )
                 results.append(outcome)
 
@@ -419,6 +455,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
 
@@ -426,7 +463,7 @@ class CoalesceExecutor:
 
     def flush_pending(
         self,
-        step_in_pipeline: int,
+        step_map: dict[str, int],
     ) -> list[CoalesceOutcome]:
         """Flush all pending coalesces (called at end-of-source or shutdown).
 
@@ -436,7 +473,7 @@ class CoalesceExecutor:
         For first policy: should never have pending (merges immediately).
 
         Args:
-            step_in_pipeline: Current position in DAG
+            step_map: Map of coalesce_name -> step_in_pipeline for audit trail
 
         Returns:
             List of CoalesceOutcomes for all pending coalesces
@@ -449,6 +486,7 @@ class CoalesceExecutor:
             settings = self._settings[coalesce_name]
             node_id = self._node_ids[coalesce_name]
             pending = self._pending[key]
+            step_in_pipeline = step_map[coalesce_name]
 
             if settings.policy == "best_effort":
                 # Always merge whatever arrived
@@ -459,6 +497,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
 
@@ -471,6 +510,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
                 else:
@@ -494,7 +534,7 @@ class CoalesceExecutor:
                         # Complete it now with failure status
                         self._recorder.complete_node_state(
                             state_id=state_id,
-                            status="failed",
+                            status=NodeStateStatus.FAILED,
                             error={"failure_reason": "quorum_not_met"},
                             duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                         )
@@ -508,7 +548,7 @@ class CoalesceExecutor:
                         )
 
                     del self._pending[key]
-                    self._completed_keys.add(key)  # Track completion to reject late arrivals
+                    self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                     results.append(
                         CoalesceOutcome(
                             held=False,
@@ -519,6 +559,7 @@ class CoalesceExecutor:
                                 "quorum_required": settings.quorum_count,
                                 "branches_arrived": list(pending.arrived.keys()),
                             },
+                            coalesce_name=coalesce_name,
                         )
                     )
 
@@ -543,7 +584,7 @@ class CoalesceExecutor:
                     # Complete it now with failure status
                     self._recorder.complete_node_state(
                         state_id=state_id,
-                        status="failed",
+                        status=NodeStateStatus.FAILED,
                         error={"failure_reason": "incomplete_branches"},
                         duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                     )
@@ -557,7 +598,7 @@ class CoalesceExecutor:
                     )
 
                 del self._pending[key]
-                self._completed_keys.add(key)  # Track completion to reject late arrivals
+                self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                 results.append(
                     CoalesceOutcome(
                         held=False,
@@ -568,6 +609,7 @@ class CoalesceExecutor:
                             "expected_branches": settings.branches,
                             "branches_arrived": list(pending.arrived.keys()),
                         },
+                        coalesce_name=coalesce_name,
                     )
                 )
 

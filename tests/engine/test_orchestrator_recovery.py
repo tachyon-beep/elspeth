@@ -56,8 +56,9 @@ class TestOrchestratorResume:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="null")
-        graph.add_node("agg_node", node_type="aggregation", plugin_name="test_agg")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=schema_config)
         return graph
 
     @pytest.fixture
@@ -132,8 +133,8 @@ class TestOrchestratorResume:
         )
 
         # Simulate crash mid-flush
-        recorder.update_batch_status(batch.batch_id, "executing")
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         return {
             "run_id": run.run_id,

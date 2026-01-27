@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
+from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
+from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
@@ -68,16 +70,30 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-def _load_dotenv() -> bool:
+def _load_dotenv(env_file: Path | None = None) -> bool:
     """Load environment variables from .env file.
 
-    Searches for .env in current directory and parent directories.
-    Does not override existing environment variables.
+    Args:
+        env_file: Explicit path to .env file. If None, searches for .env
+                 in current directory and parent directories.
 
     Returns:
         True if .env was found and loaded, False otherwise.
+
+    Raises:
+        typer.Exit: If explicit env_file path doesn't exist.
     """
     from dotenv import load_dotenv
+
+    if env_file is not None:
+        if not env_file.exists():
+            typer.secho(
+                f"Error: .env file not found: {env_file}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
+        return load_dotenv(env_file, override=False)
 
     # load_dotenv searches current dir and parents by default
     return load_dotenv(override=False)  # Don't override existing env vars
@@ -97,6 +113,12 @@ def main(
         False,
         "--no-dotenv",
         help="Skip loading .env file.",
+    ),
+    env_file: Path | None = typer.Option(
+        None,
+        "--env-file",
+        help="Path to .env file (skips automatic search).",
+        exists=False,  # We handle existence check ourselves for better error message
     ),
     verbose: bool = typer.Option(
         False,
@@ -119,7 +141,13 @@ def main(
     configure_logging(json_output=json_logs, level=log_level)
 
     if not no_dotenv:
-        _load_dotenv()
+        _load_dotenv(env_file=env_file)
+    elif env_file is not None:
+        typer.secho(
+            "Warning: --env-file ignored because --no-dotenv is set.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 # === Subcommand stubs (to be implemented in later tasks) ===
@@ -170,6 +198,11 @@ def run(
     # Load and validate config via Pydantic
     try:
         config = load_settings(settings_path)
+    except (YamlParserError, YamlScannerError) as e:
+        # YAML syntax errors (malformed YAML) - show helpful message
+        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
+        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        raise typer.Exit(1) from None
     except FileNotFoundError:
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
@@ -577,7 +610,7 @@ def _execute_pipeline(
 
         return {
             "run_id": result.run_id,
-            "status": result.status.value,  # Convert enum to string for TypedDict
+            "status": result.status,  # RunStatus enum (str subclass)
             "rows_processed": result.rows_processed,
         }
     finally:
@@ -789,7 +822,7 @@ def _execute_pipeline_with_instances(
 
         return {
             "run_id": result.run_id,
-            "status": result.status.value,  # Convert enum to string for TypedDict
+            "status": result.status,  # RunStatus enum (str subclass)
             "rows_processed": result.rows_processed,
         }
     finally:
@@ -813,6 +846,11 @@ def validate(
     # Load and validate config via Pydantic
     try:
         config = load_settings(settings_path)
+    except (YamlParserError, YamlScannerError) as e:
+        # YAML syntax errors (malformed YAML) - show helpful message
+        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
+        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        raise typer.Exit(1) from None
     except FileNotFoundError:
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
@@ -1459,6 +1497,28 @@ def resume(
             except NotImplementedError as e:
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1) from None
+
+            # Validate output target schema compatibility
+            validation = sink.validate_output_target()
+            if not validation.valid:
+                typer.echo(
+                    f"\nError: Cannot resume with sink '{sink_name}'.\nOutput target schema mismatch: {validation.error_message}",
+                    err=True,
+                )
+                if validation.missing_fields:
+                    typer.echo(f"  Missing fields: {list(validation.missing_fields)}", err=True)
+                if validation.extra_fields:
+                    typer.echo(f"  Extra fields: {list(validation.extra_fields)}", err=True)
+                if validation.order_mismatch:
+                    typer.echo(
+                        "  Note: Fields present but in wrong order (strict mode)",
+                        err=True,
+                    )
+                typer.echo(
+                    "\nHint: Either fix the output file to match schema, or start a new run.",
+                    err=True,
+                )
+                raise typer.Exit(1)
 
             resume_sinks[sink_name] = sink
 

@@ -11,9 +11,12 @@ Phase 3 Integration:
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+
+if TYPE_CHECKING:
+    from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
     GateResult,
@@ -140,6 +143,8 @@ class BaseGate(ABC):
     name: str
     input_schema: type[PluginSchema]
     output_schema: type[PluginSchema]
+    routes: dict[str, str]
+    fork_to: list[str] | None
     node_id: str | None = None  # Set by orchestrator after registration
 
     # Metadata for Phase 3 audit/reproducibility
@@ -150,9 +155,13 @@ class BaseGate(ABC):
         """Initialize with configuration.
 
         Args:
-            config: Plugin configuration
+            config: Plugin configuration (validated by GateSettings schema)
         """
         self.config = config
+        # GateSettings schema validates routes (required) and fork_to (optional)
+        # Trust the schema - no defensive checks needed here
+        self.routes = config["routes"]
+        self.fork_to = config.get("fork_to")
 
     @abstractmethod
     def evaluate(
@@ -256,6 +265,22 @@ class BaseSink(ABC):
             f"implement configure_for_resume()."
         )
 
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing output target matches configured schema.
+
+        Called by engine/CLI before write operations in append/resume mode.
+        Default returns valid=True (dynamic schema or no existing target).
+
+        Sinks that set supports_resume=True SHOULD override this to validate
+        that the existing output target (file/table) matches the schema.
+
+        Returns:
+            OutputValidationResult indicating compatibility.
+        """
+        from elspeth.contracts.sink import OutputValidationResult
+
+        return OutputValidationResult.success()
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -329,6 +354,10 @@ class BaseSource(ABC):
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism = Determinism.IO_READ
     plugin_version: str = "0.0.0"
+
+    # Sink name for quarantined rows, or "discard" to drop invalid rows
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.

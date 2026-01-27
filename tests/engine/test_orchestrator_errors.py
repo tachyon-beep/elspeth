@@ -20,7 +20,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -64,7 +64,7 @@ class TestOrchestratorErrorHandling:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Transform exploded!")
@@ -101,7 +101,7 @@ class TestOrchestratorErrorHandling:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError, match="Transform exploded!"):
-            orchestrator.run(config, graph=build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify run was marked as failed in Landscape audit trail
         # Query for all runs and find the one that was created
@@ -206,7 +206,7 @@ class TestOrchestratorSourceQuarantineValidation:
 
         # Should fail at initialization with clear error message
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify error message contains helpful information
         error_msg = str(exc_info.value)
@@ -268,7 +268,7 @@ class TestOrchestratorQuarantineMetrics:
             _on_error = "discard"  # Intentionally discard errors
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 if row.get("quality") == "bad":
@@ -312,7 +312,7 @@ class TestOrchestratorQuarantineMetrics:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify counts
         assert run_result.status == "completed"
@@ -324,3 +324,125 @@ class TestOrchestratorQuarantineMetrics:
         # Only good rows written to sink
         assert len(sink.results) == 2
         assert all(r["quality"] == "good" for r in sink.results)
+
+
+class TestSourceQuarantineTokenOutcome:
+    """Test that source-level quarantine records QUARANTINED token_outcome.
+
+    BUG: Quarantined source rows lack QUARANTINED token_outcome
+    - Source yields SourceRow.quarantined() for invalid rows
+    - Orchestrator creates token and routes to quarantine sink
+    - BUT: orchestrator never calls recorder.record_token_outcome(QUARANTINED)
+    - Result: token_outcomes table has no terminal state for quarantined rows
+
+    This violates the audit trail completeness requirement (CLAUDE.md: every row
+    reaches exactly one terminal state).
+    """
+
+    def test_source_quarantine_records_quarantined_token_outcome(self) -> None:
+        """Source-quarantined rows MUST have QUARANTINED outcome in token_outcomes.
+
+        When a source yields SourceRow.quarantined(), the orchestrator should:
+        1. Create a token for the quarantined row
+        2. Record QUARANTINED token_outcome with error_hash
+        3. Route the row to the quarantine sink
+
+        The audit trail must be complete - explain/lineage queries should find
+        the terminal state for quarantined rows.
+        """
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class QuarantiningSource(_TestSourceBase):
+            """Source that yields one valid row and one quarantined row."""
+
+            name = "quarantining_source"
+            output_schema = RowSchema
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Valid row
+                yield SourceRow.valid({"id": 1, "name": "alice"})
+                # Quarantined row - simulates validation failure
+                yield SourceRow.quarantined(
+                    row={"id": 2, "name": "bob", "invalid_field": "bad_data"},
+                    error="Schema validation failed: unexpected field 'invalid_field'",
+                    destination="quarantine",
+                )
+                # Another valid row
+                yield SourceRow.valid({"id": 3, "name": "charlie"})
+
+        class CollectSink(_TestSinkBase):
+            name = "collect_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = QuarantiningSource()
+        default_sink = CollectSink()
+        quarantine_sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
+
+        # Verify run completed successfully
+        assert run_result.status == "completed"
+        assert run_result.rows_processed == 3
+        assert run_result.rows_succeeded == 2  # alice and charlie
+        assert run_result.rows_quarantined == 1  # bob
+
+        # Verify sinks received correct rows
+        assert len(default_sink.results) == 2
+        assert len(quarantine_sink.results) == 1
+        assert quarantine_sink.results[0]["id"] == 2  # bob went to quarantine
+
+        # === THE CRITICAL ASSERTION ===
+        # Query token_outcomes table to verify QUARANTINED outcome was recorded
+        run_id = run_result.run_id
+
+        # Get all token outcomes for this run
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import token_outcomes_table
+
+        with db.engine.connect() as conn:
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id)).fetchall()
+
+        # Should have 3 terminal outcomes: 2 COMPLETED + 1 QUARANTINED
+        assert len(outcomes) == 3, f"Expected 3 token outcomes, got {len(outcomes)}"
+
+        # Find the QUARANTINED outcome specifically
+        quarantined_outcomes = [o for o in outcomes if o.outcome == RowOutcome.QUARANTINED.value]
+        assert len(quarantined_outcomes) == 1, (
+            f"Expected exactly 1 QUARANTINED outcome, got {len(quarantined_outcomes)}. "
+            f"All outcomes: {[(o.outcome, o.error_hash) for o in outcomes]}"
+        )
+
+        # Verify error_hash was recorded (for audit trail completeness)
+        quarantined = quarantined_outcomes[0]
+        assert quarantined.error_hash is not None, (
+            "QUARANTINED outcome must have error_hash for audit trail. "
+            "The error hash allows correlating with the original validation error."
+        )

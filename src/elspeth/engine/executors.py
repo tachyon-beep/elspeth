@@ -21,9 +21,16 @@ from elspeth.contracts import (
     NodeStateOpen,
     RoutingAction,
     RoutingSpec,
+    RowOutcome,
     TokenInfo,
 )
-from elspeth.contracts.enums import RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.enums import (
+    BatchStatus,
+    NodeStateStatus,
+    RoutingKind,
+    RoutingMode,
+    TriggerType,
+)
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -278,7 +285,7 @@ class TransformExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -336,7 +343,7 @@ class TransformExecutor:
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
             )
@@ -353,7 +360,7 @@ class TransformExecutor:
             # This is a LEGITIMATE processing failure, not a bug
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=result.reason,
             )
@@ -499,7 +506,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -575,7 +582,7 @@ class GateExecutor:
         # Terminal state is DERIVED from routing_events, not stored here
         self._recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=result.row,
             duration_ms=duration_ms,
         )
@@ -659,7 +666,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -683,7 +690,7 @@ class GateExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=error,
             )
@@ -719,7 +726,7 @@ class GateExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -770,7 +777,7 @@ class GateExecutor:
         # Terminal state is DERIVED from routing_events, not stored here
         self._recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=token.row_data,
             duration_ms=duration_ms,
         )
@@ -980,7 +987,7 @@ class AggregationExecutor:
         ctx: PluginContext,
         step_in_pipeline: int,
         trigger_type: TriggerType,
-    ) -> tuple[TransformResult, list[TokenInfo]]:
+    ) -> tuple[TransformResult, list[TokenInfo], str]:
         """Execute a batch flush with full audit recording.
 
         This method:
@@ -998,7 +1005,7 @@ class AggregationExecutor:
             trigger_type: What triggered the flush (COUNT, TIMEOUT, END_OF_SOURCE, etc.)
 
         Returns:
-            Tuple of (TransformResult with audit fields, list of consumed tokens)
+            Tuple of (TransformResult with audit fields, list of consumed tokens, batch_id)
 
         Raises:
             Exception: Re-raised from transform.process() after recording failure
@@ -1035,8 +1042,8 @@ class AggregationExecutor:
         # Step 1: Transition batch to "executing"
         self._recorder.update_batch_status(
             batch_id=batch_id,
-            status="executing",
-            trigger_type=trigger_type.value,
+            status=BatchStatus.EXECUTING,
+            trigger_type=trigger_type,
         )
 
         # Step 2: Begin node state for flush operation
@@ -1073,7 +1080,7 @@ class AggregationExecutor:
                 # but the result isn't available yet. This prevents orphaned OPEN states.
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="pending",
+                    status=NodeStateStatus.PENDING,
                     duration_ms=duration_ms,
                 )
 
@@ -1081,7 +1088,7 @@ class AggregationExecutor:
                 # Keep status as "executing" but set aggregation_state_id.
                 self._recorder.update_batch_status(
                     batch_id=batch_id,
-                    status="executing",
+                    status=BatchStatus.EXECUTING,
                     state_id=state.state_id,
                 )
 
@@ -1098,7 +1105,7 @@ class AggregationExecutor:
                 }
                 self._recorder.complete_node_state(
                     state_id=state.state_id,
-                    status="failed",
+                    status=NodeStateStatus.FAILED,
                     duration_ms=duration_ms,
                     error=error,
                 )
@@ -1106,8 +1113,8 @@ class AggregationExecutor:
                 # Transition batch to failed
                 self._recorder.complete_batch(
                     batch_id=batch_id,
-                    status="failed",
-                    trigger_type=trigger_type.value,
+                    status=BatchStatus.FAILED,
+                    trigger_type=trigger_type,
                     state_id=state.state_id,
                 )
 
@@ -1136,7 +1143,7 @@ class AggregationExecutor:
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
             )
@@ -1144,8 +1151,8 @@ class AggregationExecutor:
             # Transition batch to completed
             self._recorder.complete_batch(
                 batch_id=batch_id,
-                status="completed",
-                trigger_type=trigger_type.value,
+                status=BatchStatus.COMPLETED,
+                trigger_type=trigger_type,
                 state_id=state.state_id,
             )
         else:
@@ -1156,7 +1163,7 @@ class AggregationExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=error_info,
             )
@@ -1164,12 +1171,16 @@ class AggregationExecutor:
             # Transition batch to failed
             self._recorder.complete_batch(
                 batch_id=batch_id,
-                status="failed",
-                trigger_type=trigger_type.value,
+                status=BatchStatus.FAILED,
+                trigger_type=trigger_type,
                 state_id=state.state_id,
             )
 
-        # Step 6: Reset for next batch and clear buffers
+        # Step 6: Save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
+        # Note: batch_id was validated at the start of this method
+        flushed_batch_id = batch_id
+
+        # Reset for next batch and clear buffers
         self._reset_batch_state(node_id)
         self._buffers[node_id] = []
         self._buffer_tokens[node_id] = []
@@ -1179,7 +1190,7 @@ class AggregationExecutor:
         if evaluator is not None:
             evaluator.reset()
 
-        return result, buffered_tokens
+        return result, buffered_tokens, flushed_batch_id
 
     def _reset_batch_state(self, node_id: NodeID) -> None:
         """Reset batch tracking state for next batch.
@@ -1524,19 +1535,31 @@ class SinkExecutor:
         ctx: PluginContext,
         step_in_pipeline: int,
         *,
+        sink_name: str,
+        outcome: RowOutcome | None = RowOutcome.COMPLETED,
         on_token_written: Callable[[TokenInfo], None] | None = None,
     ) -> Artifact | None:
         """Write tokens to sink with artifact recording.
 
-        CRITICAL: Creates a node_state for EACH token written. This is how
-        we derive the COMPLETED terminal state - every token that reaches
-        a sink gets a completed node_state at the sink node.
+        CRITICAL: Creates a node_state for EACH token written AND records
+        token outcomes. Both records are created AFTER sink.flush()
+        to ensure they only exist when data is durably written.
+
+        This is the ONLY place terminal outcomes should be recorded for sink-bound
+        tokens. Recording here (not in the orchestrator processing loop) ensures the
+        token outcome contract is honored:
+        - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
+        - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
         Args:
             sink: Sink plugin to write to
             tokens: Tokens to write (may be empty)
             ctx: Plugin context
             step_in_pipeline: Current position in DAG (Orchestrator is authority)
+            sink_name: Name of the sink (for token_outcome recording)
+            outcome: RowOutcome to record (COMPLETED for default sink, ROUTED for gate-routed).
+                    Pass None to skip outcome recording (used when outcome was already recorded,
+                    e.g., QUARANTINED tokens).
             on_token_written: Optional callback called for each token after successful write.
                              Used for post-sink checkpointing.
 
@@ -1590,7 +1613,7 @@ class SinkExecutor:
                 for _, state in states:
                     self._recorder.complete_node_state(
                         state_id=state.state_id,
-                        status="failed",
+                        status=NodeStateStatus.FAILED,
                         duration_ms=duration_ms,
                         error=error,
                     )
@@ -1600,7 +1623,7 @@ class SinkExecutor:
         # If this fails, we want to crash - can't checkpoint non-durable data
         sink.flush()
 
-        # Complete all token states - status="completed" means they reached terminal
+        # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
         for token, state in states:
             sink_output = {
@@ -1610,7 +1633,7 @@ class SinkExecutor:
             }
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data=sink_output,
                 duration_ms=duration_ms,
             )
@@ -1627,6 +1650,24 @@ class SinkExecutor:
             content_hash=artifact_info.content_hash,
             size_bytes=artifact_info.size_bytes,
         )
+
+        # Record token outcomes AFTER sink durability is achieved
+        # This is the ONLY correct place to record outcomes for sink-bound tokens - after:
+        # 1. sink.write() succeeded
+        # 2. sink.flush() succeeded (data is durable)
+        # 3. node_states are marked COMPLETED
+        # 4. artifact is registered
+        # Recording here ensures Invariant 3: "COMPLETED/ROUTED implies completed sink node_state"
+        #
+        # outcome=None means outcome was already recorded (e.g., QUARANTINED tokens)
+        if outcome is not None:
+            for token, _ in states:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=outcome,  # Use provided outcome (COMPLETED or ROUTED)
+                    sink_name=sink_name,
+                )
 
         # Call checkpoint callback for each token after successful write + flush
         # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.

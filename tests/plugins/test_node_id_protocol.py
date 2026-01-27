@@ -108,7 +108,7 @@ class TestNodeIdProtocol:
             def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
                 return GateResult(row=row, action=RoutingAction.continue_())
 
-        gate = TestGate({})
+        gate = TestGate({"routes": {"default": "continue"}})
         assert gate.node_id is None
 
         gate.node_id = "gate-789"

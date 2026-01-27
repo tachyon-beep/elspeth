@@ -342,6 +342,58 @@ class TestLandscapeSettings:
         with pytest.raises(ValidationError):
             LandscapeSettings(backend="mysql")
 
+    def test_landscape_settings_url_validation_valid_sqlite(self) -> None:
+        """Valid SQLite URLs are accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Memory database
+        ls = LandscapeSettings(url="sqlite:///:memory:")
+        assert ls.url == "sqlite:///:memory:"
+
+        # File-based with relative path
+        ls = LandscapeSettings(url="sqlite:///./data/audit.db")
+        assert ls.url == "sqlite:///./data/audit.db"
+
+        # File-based with absolute path
+        ls = LandscapeSettings(url="sqlite:////var/lib/elspeth/audit.db")
+        assert ls.url == "sqlite:////var/lib/elspeth/audit.db"
+
+    def test_landscape_settings_url_validation_valid_postgresql(self) -> None:
+        """Valid PostgreSQL URLs are accepted."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Full DSN with credentials
+        pg_url = "postgresql://user:pass@localhost:5432/elspeth_audit"
+        ls = LandscapeSettings(backend="postgresql", url=pg_url)
+        assert ls.url == pg_url
+
+        # With SSL mode parameter
+        pg_url_ssl = "postgresql://user:pass@db.example.com/audit?sslmode=require"
+        ls = LandscapeSettings(backend="postgresql", url=pg_url_ssl)
+        assert ls.url == pg_url_ssl
+
+    def test_landscape_settings_url_validation_rejects_invalid(self) -> None:
+        """Invalid database URLs are rejected at config time."""
+        from elspeth.core.config import LandscapeSettings
+
+        # Not a valid URL format at all
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="not-a-valid-url")
+        assert "Invalid database URL format" in str(exc_info.value)
+
+        # Missing scheme/driver
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="://localhost/db")
+        assert "Invalid database URL format" in str(exc_info.value)
+
+    def test_landscape_settings_url_validation_rejects_empty(self) -> None:
+        """Empty URL is rejected."""
+        from elspeth.core.config import LandscapeSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            LandscapeSettings(url="")
+        assert "Invalid database URL format" in str(exc_info.value) or "missing driver" in str(exc_info.value).lower()
+
 
 class TestConcurrencySettings:
     """ConcurrencySettings matches architecture specification."""
@@ -2280,7 +2332,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
         )
         assert settings_live.run_mode == RunMode.LIVE
 
@@ -2289,7 +2341,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="replay",
+            run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
         assert settings_replay.run_mode == RunMode.REPLAY
@@ -2299,13 +2351,14 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="verify",
+            run_mode=RunMode.VERIFY,
             replay_from="run-abc123",
         )
         assert settings_verify.run_mode == RunMode.VERIFY
 
     def test_replay_mode_requires_source_run_id(self) -> None:
         """Replay mode requires replay_from."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -2313,7 +2366,7 @@ class TestRunModeSettings:
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
                 default_sink="output",
-                run_mode="replay",
+                run_mode=RunMode.REPLAY,
                 # Missing replay_from
             )
 
@@ -2322,6 +2375,7 @@ class TestRunModeSettings:
 
     def test_verify_mode_requires_source_run_id(self) -> None:
         """Verify mode requires replay_from."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -2329,7 +2383,7 @@ class TestRunModeSettings:
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
                 default_sink="output",
-                run_mode="verify",
+                run_mode=RunMode.VERIFY,
                 # Missing replay_from
             )
 
@@ -2346,7 +2400,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
             # No replay_from
         )
 
@@ -2363,7 +2417,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
             replay_from="run-abc123",  # Provided but not required
         )
 
@@ -2397,13 +2451,14 @@ class TestRunModeSettings:
 
     def test_resolve_config_includes_run_mode(self) -> None:
         """resolve_config includes run_mode settings."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="replay",
+            run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
 
@@ -2767,3 +2822,101 @@ transforms:
         assert plugin_opts["template_source"] == "prompts/test.j2"
         assert plugin_opts["lookup"] == {"greetings": ["Hello"]}
         assert plugin_opts["lookup_source"] == "prompts/lookups.yaml"
+
+
+class TestEnvVarExpansion:
+    """Tests for ${VAR} and ${VAR:-default} environment variable expansion."""
+
+    def test_expand_env_var_with_value_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded when set."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("TEST_API_KEY", "secret-key-123")
+
+        config = {"api_key": "${TEST_API_KEY}"}
+        result = _expand_env_vars(config)
+
+        assert result["api_key"] == "secret-key-123"
+
+    def test_expand_env_var_with_default_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Default value is used when env var is not set."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("UNSET_VAR", raising=False)
+
+        config = {"endpoint": "${UNSET_VAR:-https://default.example.com}"}
+        result = _expand_env_vars(config)
+
+        assert result["endpoint"] == "https://default.example.com"
+
+    def test_expand_env_var_prefers_env_over_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variable value takes precedence over default."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("MY_ENDPOINT", "https://actual.example.com")
+
+        config = {"endpoint": "${MY_ENDPOINT:-https://default.example.com}"}
+        result = _expand_env_vars(config)
+
+        assert result["endpoint"] == "https://actual.example.com"
+
+    def test_expand_env_var_required_raises_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Missing required env var (no default) raises clear error."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("REQUIRED_API_KEY", raising=False)
+
+        config = {"api_key": "${REQUIRED_API_KEY}"}
+
+        with pytest.raises(ValueError) as exc_info:
+            _expand_env_vars(config)
+
+        error_msg = str(exc_info.value)
+        assert "REQUIRED_API_KEY" in error_msg
+        assert "not set" in error_msg
+        assert ":-default" in error_msg  # Suggests the fix
+
+    def test_expand_env_var_in_nested_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded in nested structures."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("NESTED_VALUE", "expanded")
+
+        config = {"outer": {"inner": {"value": "${NESTED_VALUE}"}}}
+        result = _expand_env_vars(config)
+
+        assert result["outer"]["inner"]["value"] == "expanded"
+
+    def test_expand_env_var_in_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variables are expanded in lists."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("LIST_ITEM", "item-value")
+
+        config = {"items": ["static", "${LIST_ITEM}", "another"]}
+        result = _expand_env_vars(config)
+
+        assert result["items"] == ["static", "item-value", "another"]
+
+    def test_expand_multiple_env_vars_in_string(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Multiple env vars in a single string are all expanded."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.setenv("PROTO", "https")
+        monkeypatch.setenv("HOST", "api.example.com")
+
+        config = {"url": "${PROTO}://${HOST}/v1"}
+        result = _expand_env_vars(config)
+
+        assert result["url"] == "https://api.example.com/v1"
+
+    def test_expand_empty_default_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty string default is valid (${VAR:-} pattern)."""
+        from elspeth.core.config import _expand_env_vars
+
+        monkeypatch.delenv("OPTIONAL_PREFIX", raising=False)
+
+        config = {"prefix": "${OPTIONAL_PREFIX:-}"}
+        result = _expand_env_vars(config)
+
+        assert result["prefix"] == ""

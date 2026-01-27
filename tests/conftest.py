@@ -71,7 +71,7 @@ support the direct instantiation pattern by providing Protocol-compliant default
 
 import os
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 from hypothesis import Phase, Verbosity, settings
@@ -215,13 +215,16 @@ class _TestSourceBase:
     output_schema: type[PluginSchema]
 
     # Protocol-required attributes with defaults
+    # ClassVar for class-level default; __init__ creates instance attribute that shadows it
+    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
+    _on_validation_failure: str = "discard"  # Default: drop invalid rows in tests
 
     def __init__(self) -> None:
         """Initialize test source with empty config."""
-        self.config: dict[str, Any] = {}
+        self.config = {"schema": {"fields": "dynamic"}}
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
@@ -279,6 +282,8 @@ class _TestSinkBase:
     name: str
 
     # Protocol-required attributes with defaults
+    # ClassVar for class-level default; __init__ creates instance attribute that shadows it
+    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
     input_schema: type[PluginSchema] = _TestSchema
     idempotent: bool = True
     node_id: str | None = None
@@ -287,7 +292,7 @@ class _TestSinkBase:
 
     def __init__(self) -> None:
         """Initialize test sink with empty config."""
-        self.config: dict[str, Any] = {}
+        self.config = {"schema": {"fields": "dynamic"}}
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -338,6 +343,8 @@ class _TestTransformBase:
     name: str
 
     # Protocol-required attributes with defaults
+    # ClassVar for class-level default; __init__ creates instance attribute that shadows it
+    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
     node_id: str | None = None
@@ -349,7 +356,7 @@ class _TestTransformBase:
 
     def __init__(self) -> None:
         """Initialize test transform with empty config."""
-        self.config: dict[str, Any] = {}
+        self.config = {"schema": {"fields": "dynamic"}}
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -428,9 +435,9 @@ def as_transform_result(result: Any) -> "TransformResult":
 # Use these for integration tests that validate audit trail integrity.
 
 
-@pytest.fixture
-def real_landscape_db(tmp_path):
-    """Real LandscapeDB with FK constraints enabled.
+@pytest.fixture(scope="module")
+def real_landscape_db(tmp_path_factory):
+    """Real LandscapeDB with FK constraints enabled (module-scoped).
 
     Use this for integration tests that validate:
     - FK constraints are satisfied
@@ -439,6 +446,11 @@ def real_landscape_db(tmp_path):
 
     Returns an in-memory SQLite database with all tables created
     and FK constraints ENABLED (enforced).
+
+    Module scope avoids repeated schema creation (15+ tables, indexes)
+    which takes ~5-10ms per instantiation.
+
+    Tests should use unique run_ids to isolate their data.
 
     Example:
         def test_batch_fk_constraints(real_landscape_db):

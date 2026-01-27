@@ -127,8 +127,16 @@ class TestAuditedHTTPClient:
         assert call_kwargs["error"]["type"] == "ConnectError"
         assert "Connection refused" in call_kwargs["error"]["message"]
 
-    def test_auth_headers_filtered_from_recorded_request(self) -> None:
-        """Auth-related headers are not recorded for security."""
+    def test_auth_headers_fingerprinted_in_recorded_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Auth headers are fingerprinted (not removed) so different credentials produce different hashes.
+
+        This is critical for audit integrity: requests with different credentials must
+        have different request_hash values to distinguish them in replay/verify mode.
+        The raw secret values must NOT appear in the audit trail.
+        """
+        # Set fingerprint key for deterministic testing
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+
         recorder = self._create_mock_recorder()
 
         client = AuditedHTTPClient(
@@ -156,17 +164,129 @@ class TestAuditedHTTPClient:
 
             client.post("https://api.example.com/v1/process")
 
-        # Verify auth headers were filtered
         call_kwargs = recorder.record_call.call_args[1]
         recorded_headers = call_kwargs["request_data"]["headers"]
 
-        # Auth headers should NOT be recorded
-        assert "Authorization" not in recorded_headers
-        assert "X-API-Key" not in recorded_headers
+        # Auth headers should be FINGERPRINTED, not removed
+        # The fingerprint format is "<fingerprint:64hexchars>"
+        assert "Authorization" in recorded_headers
+        assert "X-API-Key" in recorded_headers
 
-        # Non-auth headers SHOULD be recorded
-        assert "Content-Type" in recorded_headers
-        assert "X-Request-Id" in recorded_headers
+        # Raw secrets must NOT appear
+        assert "Bearer secret-token" not in recorded_headers["Authorization"]
+        assert "api-key-12345" not in recorded_headers["X-API-Key"]
+
+        # Fingerprints should be in the expected format
+        assert recorded_headers["Authorization"].startswith("<fingerprint:")
+        assert recorded_headers["X-API-Key"].startswith("<fingerprint:")
+        # Fingerprints are 64 hex chars
+        assert len(recorded_headers["Authorization"]) == len("<fingerprint:") + 64 + len(">")
+
+        # Non-auth headers SHOULD be recorded unchanged
+        assert recorded_headers["Content-Type"] == "application/json"
+        assert recorded_headers["X-Request-Id"] == "req-123"
+
+    def test_different_auth_headers_produce_different_request_hashes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Requests with different auth credentials must produce different request_hash values.
+
+        This is the core bug fix: previously, auth headers were removed entirely,
+        causing identical hashes for requests that differed only by credentials.
+        With fingerprinting, each unique credential produces a unique fingerprint,
+        which produces a unique request_hash.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key-for-http-client")
+
+        from elspeth.core.canonical import stable_hash
+
+        recorder1 = self._create_mock_recorder()
+        recorder2 = self._create_mock_recorder()
+
+        # Client 1 with credential A
+        client1 = AuditedHTTPClient(
+            recorder=recorder1,
+            state_id="state_1",
+            headers={"Authorization": "Bearer credential-A"},
+        )
+
+        # Client 2 with credential B (different)
+        client2 = AuditedHTTPClient(
+            recorder=recorder2,
+            state_id="state_2",
+            headers={"Authorization": "Bearer credential-B"},
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            # Same URL and body, different credentials
+            client1.post("https://api.example.com/v1/process", json={"data": "test"})
+            client2.post("https://api.example.com/v1/process", json={"data": "test"})
+
+        # Get the recorded request_data for each call
+        request_data_1 = recorder1.record_call.call_args[1]["request_data"]
+        request_data_2 = recorder2.record_call.call_args[1]["request_data"]
+
+        # The request_hash values MUST be different
+        hash1 = stable_hash(request_data_1)
+        hash2 = stable_hash(request_data_2)
+
+        assert hash1 != hash2, (
+            "CRITICAL: Requests with different credentials produced identical hashes! This breaks replay/verify mode and audit integrity."
+        )
+
+    def test_auth_headers_removed_when_no_fingerprint_key_dev_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In dev mode (ELSPETH_ALLOW_RAW_SECRETS=true), auth headers are removed without fingerprinting.
+
+        This allows development without setting up fingerprint keys while still
+        not leaking secrets into the audit trail.
+        """
+        # No fingerprint key, but dev mode enabled
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
+
+        recorder = self._create_mock_recorder()
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            headers={
+                "Authorization": "Bearer secret-token",
+                "Content-Type": "application/json",
+            },
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("https://api.example.com/v1/process")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_headers = call_kwargs["request_data"]["headers"]
+
+        # In dev mode, auth headers are removed (no fingerprint available)
+        assert "Authorization" not in recorded_headers
+
+        # Non-auth headers still recorded
+        assert recorded_headers["Content-Type"] == "application/json"
 
     def test_base_url_prepended(self) -> None:
         """Base URL is prepended to request path."""

@@ -21,6 +21,7 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.sink import OutputValidationResult
     from elspeth.plugins.context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
 
@@ -69,6 +70,10 @@ class SourceProtocol(Protocol):
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
     plugin_version: str
+
+    # Sink name for quarantined rows, or "discard" to drop invalid rows
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
@@ -225,6 +230,12 @@ class GateProtocol(Protocol):
             input_schema = InputSchema
             output_schema = OutputSchema
 
+            def __init__(self, config: dict) -> None:
+                # Routes come from GateSettings - required for any gate that routes
+                self.routes = config["routes"]  # Crash if missing - config error
+                self.fork_to = config.get("fork_to")  # None is valid (most gates don't fork)
+                self.node_id = None
+
             def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
                 # Direct field access - schema guarantees field exists
                 if row["suspicious"]:
@@ -239,6 +250,10 @@ class GateProtocol(Protocol):
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
     node_id: str | None  # Set by orchestrator after registration
+
+    # Routing configuration (set from GateSettings during instantiation)
+    routes: dict[str, str]  # Maps route names to destinations
+    fork_to: list[str] | None  # Branch names for fork operations
 
     # Metadata for Phase 3 audit/reproducibility
     determinism: Determinism
@@ -482,5 +497,19 @@ class SinkProtocol(Protocol):
 
         Raises:
             NotImplementedError: If sink cannot be resumed despite claiming support.
+        """
+        ...
+
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing output target matches configured schema.
+
+        Called by engine/CLI before write operations in append/resume mode.
+        Returns valid=True by default (dynamic schema or no validation needed).
+
+        Sinks that support resume SHOULD override to validate that existing
+        output target (file/table) schema matches configured schema.
+
+        Returns:
+            OutputValidationResult indicating compatibility.
         """
         ...

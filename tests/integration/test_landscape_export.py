@@ -14,7 +14,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeType, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -240,7 +240,7 @@ class TestSignedExportDeterminism:
                 run_id=run.run_id,
                 node_id=f"node_{i}",
                 plugin_name="test",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
                 config={"index": i},
                 schema_config=DYNAMIC_SCHEMA,
@@ -274,12 +274,12 @@ class TestSignedExportDeterminism:
             )
             recorder.complete_node_state(
                 state.state_id,
-                status="completed",
+                status=RunStatus.COMPLETED,
                 output_data={"result": i * 20},
                 duration_ms=5.0,
             )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Export the SAME run twice with signing
         signing_key = b"test-determinism-key-12345"

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.canonical import canonical_json
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.landscape.database import LandscapeDB
@@ -73,7 +74,7 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
                 config_hash="test",
                 settings_json="{}",
                 canonical_version="v1",
-                status="failed",
+                status=RunStatus.FAILED,
             )
         )
 
@@ -83,9 +84,9 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
                 node_id="source",
                 run_id=run_id,
                 plugin_name="test_source",
-                node_type="source",
+                node_type=NodeType.SOURCE,
                 plugin_version="1.0",
-                determinism="deterministic",
+                determinism=Determinism.DETERMINISTIC,
                 config_hash="test",
                 config_json="{}",
                 registered_at=now,

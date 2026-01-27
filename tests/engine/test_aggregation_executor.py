@@ -1,15 +1,22 @@
 """Tests for aggregation executor."""
 
+import uuid
 from typing import Any
 
 import pytest
 
+from elspeth.contracts.enums import Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+
+
+def unique_id(prefix: str = "") -> str:
+    """Generate unique ID for test data to avoid collisions when sharing database."""
+    return f"{prefix}{uuid.uuid4().hex[:8]}"
 
 
 class TestAggregationExecutorOldInterfaceDeleted:
@@ -22,14 +29,13 @@ class TestAggregationExecutorOldInterfaceDeleted:
          See TestAggregationExecutorBuffering for new tests.
     """
 
-    def test_old_accept_method_deleted(self) -> None:
+    def test_old_accept_method_deleted(self, real_landscape_db) -> None:
         """Old accept() method should be deleted from AggregationExecutor."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -41,14 +47,13 @@ class TestAggregationExecutorOldInterfaceDeleted:
         # Old accept() method should be deleted
         assert not hasattr(executor, "accept"), "accept() method should be deleted - use buffer_row() instead"
 
-    def test_old_flush_method_deleted(self) -> None:
+    def test_old_flush_method_deleted(self, real_landscape_db) -> None:
         """Old flush() method should be deleted from AggregationExecutor."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -84,14 +89,13 @@ class TestAggregationExecutorTriggersDeleted:
 class TestAggregationExecutorRestore:
     """Tests for aggregation state restoration."""
 
-    def test_restore_state_sets_internal_state(self) -> None:
+    def test_restore_state_sets_internal_state(self, real_landscape_db) -> None:
         """restore_state() stores state for plugin access."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -106,14 +110,13 @@ class TestAggregationExecutorRestore:
 
         assert executor.get_restored_state(NodeID("agg_node")) == state
 
-    def test_restore_state_returns_none_for_unknown_node(self) -> None:
+    def test_restore_state_returns_none_for_unknown_node(self, real_landscape_db) -> None:
         """get_restored_state() returns None for nodes without restored state."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -124,15 +127,13 @@ class TestAggregationExecutorRestore:
 
         assert executor.get_restored_state(NodeID("unknown_node")) is None
 
-    def test_restore_batch_sets_current_batch(self) -> None:
+    def test_restore_batch_sets_current_batch(self, real_landscape_db) -> None:
         """restore_batch() makes batch the current batch for its node."""
-        from elspeth.contracts.enums import Determinism, NodeType
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register aggregation node
@@ -166,14 +167,13 @@ class TestAggregationExecutorRestore:
         # Assert
         assert executor.get_batch_id(NodeID("agg_node")) == batch.batch_id
 
-    def test_restore_batch_not_found_raises_error(self) -> None:
+    def test_restore_batch_not_found_raises_error(self, real_landscape_db) -> None:
         """restore_batch() raises ValueError for unknown batch_id."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -185,19 +185,18 @@ class TestAggregationExecutorRestore:
         with pytest.raises(ValueError, match="Batch not found"):
             executor.restore_batch("nonexistent-batch-id")
 
-    def test_restore_batch_restores_member_count_deleted(self) -> None:
+    def test_restore_batch_restores_member_count_deleted(self, real_landscape_db) -> None:
         """Test deleted - used old accept() interface.
 
         OLD: Tested that restoring a batch lets you call accept() with correct ordinals.
         NEW: Restore functionality now uses buffer_row() interface instead.
              See TestAggregationExecutorCheckpoint for new restore tests.
         """
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         executor = AggregationExecutor(
@@ -213,21 +212,20 @@ class TestAggregationExecutorRestore:
 class TestAggregationExecutorBuffering:
     """Tests for engine-level row buffering in AggregationExecutor."""
 
-    def test_executor_buffers_rows_internally(self) -> None:
+    def test_executor_buffers_rows_internally(self, real_landscape_db) -> None:
         """Executor buffers rows without calling plugin.accept()."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="buffer_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -269,21 +267,20 @@ class TestAggregationExecutorBuffering:
         assert len(buffered) == 3
         assert [r["value"] for r in buffered] == [0, 1, 2]
 
-    def test_get_buffered_data_does_not_clear_buffer(self) -> None:
+    def test_get_buffered_data_does_not_clear_buffer(self, real_landscape_db) -> None:
         """_get_buffered_data() returns data without clearing (internal method)."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="buffer_flush_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -303,11 +300,12 @@ class TestAggregationExecutorBuffering:
             aggregation_settings={node_id: settings},
         )
 
-        # Buffer rows
+        # Buffer rows - use unique IDs to avoid collisions
+        test_prefix = unique_id("buf_no_clear_")
         for i in range(2):
             token = TokenInfo(
-                row_id=f"row-{i}",
-                token_id=f"token-{i}",
+                row_id=f"{test_prefix}row-{i}",
+                token_id=f"{test_prefix}token-{i}",
                 row_data={"value": i},
             )
             row = recorder.create_row(
@@ -329,21 +327,20 @@ class TestAggregationExecutorBuffering:
         assert executor.get_buffered_rows(node_id) == buffered_rows
         assert executor.get_buffered_tokens(node_id) == buffered_tokens
 
-    def test_buffered_tokens_are_tracked(self) -> None:
+    def test_buffered_tokens_are_tracked(self, real_landscape_db) -> None:
         """Executor tracks TokenInfo objects alongside buffered rows."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="token_track_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -363,11 +360,12 @@ class TestAggregationExecutorBuffering:
             aggregation_settings={node_id: settings},
         )
 
-        # Buffer 2 rows
+        # Buffer 2 rows - use unique IDs to avoid collisions
+        test_prefix = unique_id("tok_track_")
         for i in range(2):
             token = TokenInfo(
-                row_id=f"row-{i}",
-                token_id=f"token-{i}",
+                row_id=f"{test_prefix}row-{i}",
+                token_id=f"{test_prefix}token-{i}",
                 row_data={"value": i * 10},
             )
             row = recorder.create_row(
@@ -383,24 +381,23 @@ class TestAggregationExecutorBuffering:
         # Check buffered tokens
         tokens = executor.get_buffered_tokens(node_id)
         assert len(tokens) == 2
-        assert tokens[0].token_id == "token-0"
-        assert tokens[1].token_id == "token-1"
+        assert tokens[0].token_id == f"{test_prefix}token-0"
+        assert tokens[1].token_id == f"{test_prefix}token-1"
 
-    def test_buffer_creates_batch_on_first_row(self) -> None:
+    def test_buffer_creates_batch_on_first_row(self, real_landscape_db) -> None:
         """buffer_row() creates a batch on first row just like accept()."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_create_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -423,10 +420,11 @@ class TestAggregationExecutorBuffering:
         # No batch yet
         assert executor.get_batch_id(node_id) is None
 
-        # Buffer first row
+        # Buffer first row - use unique IDs to avoid collisions
+        test_prefix = unique_id("batch_create_")
         token = TokenInfo(
-            row_id="row-0",
-            token_id="token-0",
+            row_id=f"{test_prefix}row-0",
+            token_id=f"{test_prefix}token-0",
             row_data={"value": 42},
         )
         row = recorder.create_row(
@@ -448,21 +446,20 @@ class TestAggregationExecutorBuffering:
         assert batch is not None
         assert batch.aggregation_node_id == agg_node.node_id
 
-    def test_buffer_updates_trigger_evaluator(self) -> None:
+    def test_buffer_updates_trigger_evaluator(self, real_landscape_db) -> None:
         """buffer_row() updates trigger evaluator count."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="trigger_update_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -482,11 +479,12 @@ class TestAggregationExecutorBuffering:
             aggregation_settings={node_id: settings},
         )
 
-        # Buffer 2 rows - should not trigger
+        # Buffer 2 rows - should not trigger - use unique IDs to avoid collisions
+        test_prefix = unique_id("trig_upd_")
         for i in range(2):
             token = TokenInfo(
-                row_id=f"row-{i}",
-                token_id=f"token-{i}",
+                row_id=f"{test_prefix}row-{i}",
+                token_id=f"{test_prefix}token-{i}",
                 row_data={"value": i},
             )
             row = recorder.create_row(
@@ -503,8 +501,8 @@ class TestAggregationExecutorBuffering:
 
         # Buffer 3rd row - should trigger
         token = TokenInfo(
-            row_id="row-2",
-            token_id="token-2",
+            row_id=f"{test_prefix}row-2",
+            token_id=f"{test_prefix}token-2",
             row_data={"value": 2},
         )
         row = recorder.create_row(
@@ -519,21 +517,20 @@ class TestAggregationExecutorBuffering:
 
         assert executor.should_flush(node_id) is True
 
-    def test_get_buffered_data_returns_both_rows_and_tokens(self) -> None:
+    def test_get_buffered_data_returns_both_rows_and_tokens(self, real_landscape_db) -> None:
         """_get_buffered_data() returns tuple of (rows, tokens) for passthrough mode."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="flush_returns_tokens_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -553,15 +550,16 @@ class TestAggregationExecutorBuffering:
             aggregation_settings={node_id: settings},
         )
 
-        # Buffer 2 rows with distinct tokens
+        # Buffer 2 rows with distinct tokens - use unique IDs to avoid collisions
+        test_prefix = unique_id("buf_data_")
         token1 = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
+            row_id=f"{test_prefix}row-1",
+            token_id=f"{test_prefix}token-1",
             row_data={"x": 1},
         )
         token2 = TokenInfo(
-            row_id="row-2",
-            token_id="token-2",
+            row_id=f"{test_prefix}row-2",
+            token_id=f"{test_prefix}token-2",
             row_data={"x": 2},
         )
 
@@ -586,8 +584,8 @@ class TestAggregationExecutorBuffering:
 
         # Verify tokens
         assert len(tokens) == 2
-        assert tokens[0].token_id == "token-1"
-        assert tokens[1].token_id == "token-2"
+        assert tokens[0].token_id == f"{test_prefix}token-1"
+        assert tokens[1].token_id == f"{test_prefix}token-2"
 
         # Buffer should NOT be cleared (_get_buffered_data is internal, doesn't clear)
         assert executor.get_buffered_rows(node_id) == rows
@@ -597,21 +595,20 @@ class TestAggregationExecutorBuffering:
 class TestAggregationExecutorCheckpoint:
     """Tests for buffer serialization/deserialization for crash recovery."""
 
-    def test_get_checkpoint_state_stores_full_token_info(self) -> None:
+    def test_get_checkpoint_state_stores_full_token_info(self, real_landscape_db) -> None:
         """Checkpoint stores complete TokenInfo (not just token_ids) for restoration."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="checkpoint_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -631,16 +628,17 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={node_id: settings},
         )
 
-        # Add tokens with all metadata
+        # Add tokens with all metadata - use unique IDs to avoid collisions
+        test_prefix = unique_id("ckpt_store_")
         token1 = TokenInfo(
-            row_id="row-1",
-            token_id="token-101",
+            row_id=f"{test_prefix}row-1",
+            token_id=f"{test_prefix}token-101",
             row_data={"name": "Alice", "score": 95},
             branch_name="high_score",
         )
         token2 = TokenInfo(
-            row_id="row-2",
-            token_id="token-102",
+            row_id=f"{test_prefix}row-2",
+            token_id=f"{test_prefix}token-102",
             row_data={"name": "Bob", "score": 42},
             branch_name=None,  # Optional field
         )
@@ -668,14 +666,14 @@ class TestAggregationExecutorCheckpoint:
         assert len(tokens_data) == 2
 
         # Verify first token has ALL fields
-        assert tokens_data[0]["token_id"] == "token-101"
-        assert tokens_data[0]["row_id"] == "row-1"
+        assert tokens_data[0]["token_id"] == f"{test_prefix}token-101"
+        assert tokens_data[0]["row_id"] == f"{test_prefix}row-1"
         assert tokens_data[0]["row_data"] == {"name": "Alice", "score": 95}
         assert tokens_data[0]["branch_name"] == "high_score"
 
         # Verify second token (with None branch_name)
-        assert tokens_data[1]["token_id"] == "token-102"
-        assert tokens_data[1]["row_id"] == "row-2"
+        assert tokens_data[1]["token_id"] == f"{test_prefix}token-102"
+        assert tokens_data[1]["row_id"] == f"{test_prefix}row-2"
         assert tokens_data[1]["row_data"] == {"name": "Bob", "score": 42}
         assert tokens_data[1]["branch_name"] is None
 
@@ -689,20 +687,19 @@ class TestAggregationExecutorCheckpoint:
         deserialized = json.loads(serialized)
         assert deserialized == checkpoint, "Checkpoint must round-trip through JSON"
 
-    def test_get_checkpoint_state_excludes_empty_buffers(self) -> None:
+    def test_get_checkpoint_state_excludes_empty_buffers(self, real_landscape_db) -> None:
         """get_checkpoint_state() only includes non-empty buffers."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="empty_buffer_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -726,21 +723,20 @@ class TestAggregationExecutorCheckpoint:
         state = executor.get_checkpoint_state()
         assert state == {"_version": "1.0"}  # Only version field when no buffers
 
-    def test_restore_from_checkpoint_reconstructs_full_token_info(self) -> None:
+    def test_restore_from_checkpoint_reconstructs_full_token_info(self, real_landscape_db) -> None:
         """Restore reconstructs complete TokenInfo objects from checkpoint data."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="restore_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -810,20 +806,19 @@ class TestAggregationExecutorCheckpoint:
         # VERIFY: batch_id restored
         assert executor.get_batch_id(node_id) == "batch-123"
 
-    def test_restore_from_checkpoint_restores_trigger_count(self) -> None:
+    def test_restore_from_checkpoint_restores_trigger_count(self, real_landscape_db) -> None:
         """restore_from_checkpoint() restores trigger evaluator count."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="trigger_restore_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -870,23 +865,22 @@ class TestAggregationExecutorCheckpoint:
         evaluator = executor._trigger_evaluators[node_id]
         assert evaluator.batch_count == 4
 
-    def test_checkpoint_roundtrip(self) -> None:
+    def test_checkpoint_roundtrip(self, real_landscape_db) -> None:
         """Buffer state survives checkpoint/restore cycle."""
         import json
 
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="roundtrip_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -907,10 +901,12 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={node_id: settings},
         )
 
+        # Use unique IDs to avoid collisions
+        test_prefix = unique_id("ckpt_rt_")
         for i in range(3):
             token = TokenInfo(
-                row_id=f"row-{i}",
-                token_id=f"token-{i}",
+                row_id=f"{test_prefix}row-{i}",
+                token_id=f"{test_prefix}token-{i}",
                 row_data={"value": i * 10},
             )
             row = recorder.create_row(
@@ -946,7 +942,7 @@ class TestAggregationExecutorCheckpoint:
         evaluator = executor2._trigger_evaluators[node_id]
         assert evaluator.batch_count == 3
 
-    def test_checkpoint_restore_then_flush_succeeds(self) -> None:
+    def test_checkpoint_restore_then_flush_succeeds(self, real_landscape_db) -> None:
         """After restoring from checkpoint, aggregation can flush successfully.
 
         This is the critical test for P1-2026-01-21: the original bug was that
@@ -955,20 +951,19 @@ class TestAggregationExecutorCheckpoint:
         """
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
         from elspeth.plugins.results import TransformResult
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="flush_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -991,20 +986,23 @@ class TestAggregationExecutorCheckpoint:
         # Create batch in landscape (must exist before flush)
         batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=agg_node.node_id)
 
+        # Use unique IDs to avoid collisions
+        test_prefix = unique_id("ckpt_flush_")
+
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
         checkpoint_state: dict[str, Any] = {
             "_version": "1.0",
             node_id: {
                 "tokens": [
                     {
-                        "token_id": "token-101",
-                        "row_id": "row-1",
+                        "token_id": f"{test_prefix}token-101",
+                        "row_id": f"{test_prefix}row-1",
                         "row_data": {"value": 10},
                         "branch_name": None,
                     },
                     {
-                        "token_id": "token-102",
-                        "row_id": "row-2",
+                        "token_id": f"{test_prefix}token-102",
+                        "row_id": f"{test_prefix}row-2",
                         "row_data": {"value": 20},
                         "branch_name": None,
                     },
@@ -1044,7 +1042,7 @@ class TestAggregationExecutorCheckpoint:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Execute flush - should NOT crash with IndexError
-        result, consumed_tokens = executor.execute_flush(
+        result, consumed_tokens, _batch_id = executor.execute_flush(
             node_id=node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -1059,26 +1057,25 @@ class TestAggregationExecutorCheckpoint:
 
         # VERIFY: Consumed tokens match the buffered tokens
         assert len(consumed_tokens) == 2
-        assert consumed_tokens[0].token_id == "token-101"
-        assert consumed_tokens[1].token_id == "token-102"
+        assert consumed_tokens[0].token_id == f"{test_prefix}token-101"
+        assert consumed_tokens[1].token_id == f"{test_prefix}token-102"
 
-    def test_execute_flush_detects_incomplete_restoration(self) -> None:
+    def test_execute_flush_detects_incomplete_restoration(self, real_landscape_db) -> None:
         """Defensive guard catches buffer/token length mismatch with clear error."""
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TriggerType
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mismatch_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1124,23 +1121,22 @@ class TestAggregationExecutorCheckpoint:
                 trigger_type=TriggerType.COUNT,
             )
 
-    def test_checkpoint_size_warning_at_1mb_threshold(self) -> None:
+    def test_checkpoint_size_warning_at_1mb_threshold(self, real_landscape_db) -> None:
         """Checkpoint size validation logs warning when exceeding 1MB."""
         from unittest.mock import patch
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="size_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1200,21 +1196,20 @@ class TestAggregationExecutorCheckpoint:
             assert "MB" in warning_call
             assert "buffered rows" in warning_call
 
-    def test_checkpoint_size_error_at_10mb_limit(self) -> None:
+    def test_checkpoint_size_error_at_10mb_limit(self, real_landscape_db) -> None:
         """Checkpoint size validation raises RuntimeError when exceeding 10MB."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TokenInfo
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="limit_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1258,21 +1253,20 @@ class TestAggregationExecutorCheckpoint:
         with pytest.raises(RuntimeError, match=r"Checkpoint size.*exceeds 10MB limit"):
             executor.get_checkpoint_state()
 
-    def test_checkpoint_size_error_message_includes_solutions(self) -> None:
+    def test_checkpoint_size_error_message_includes_solutions(self, real_landscape_db) -> None:
         """Checkpoint size error message includes actionable solutions."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TokenInfo
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="solution_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1316,23 +1310,22 @@ class TestAggregationExecutorCheckpoint:
         assert "rows" in error_message  # Mentions row count
         assert "nodes" in error_message  # Mentions node count
 
-    def test_checkpoint_size_no_warning_under_1mb(self) -> None:
+    def test_checkpoint_size_no_warning_under_1mb(self, real_landscape_db) -> None:
         """Checkpoint size validation is silent when under 1MB threshold."""
         from unittest.mock import patch
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TokenInfo
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="under_1mb_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1388,23 +1381,22 @@ class TestAggregationExecutorCheckpoint:
             assert checkpoint is not None
             assert node_id in checkpoint
 
-    def test_checkpoint_size_warning_but_no_error_between_thresholds(self) -> None:
+    def test_checkpoint_size_warning_but_no_error_between_thresholds(self, real_landscape_db) -> None:
         """Checkpoint between 1MB and 10MB logs warning but does not raise error."""
         from unittest.mock import patch
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor, TokenInfo
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="between_thresholds_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1459,21 +1451,20 @@ class TestAggregationExecutorCheckpoint:
             assert checkpoint is not None
             assert node_id in checkpoint
 
-    def test_restore_from_checkpoint_handles_empty_state(self) -> None:
+    def test_restore_from_checkpoint_handles_empty_state(self, real_landscape_db) -> None:
         """Restore from checkpoint handles empty state gracefully."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="empty_state_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1502,23 +1493,20 @@ class TestAggregationExecutorCheckpoint:
         assert node_id in executor._buffer_tokens
         assert len(executor._buffer_tokens[node_id]) == 0
 
-    def test_restore_from_checkpoint_crashes_on_missing_tokens_key(self) -> None:
+    def test_restore_from_checkpoint_crashes_on_missing_tokens_key(self, real_landscape_db) -> None:
         """Restore crashes with clear error when checkpoint missing 'tokens' key."""
-        import pytest
-
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="missing_tokens_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1552,23 +1540,20 @@ class TestAggregationExecutorCheckpoint:
         with pytest.raises(ValueError, match="missing 'tokens' key"):
             executor.restore_from_checkpoint(invalid_checkpoint)
 
-    def test_restore_from_checkpoint_crashes_on_invalid_tokens_type(self) -> None:
+    def test_restore_from_checkpoint_crashes_on_invalid_tokens_type(self, real_landscape_db) -> None:
         """Restore crashes when 'tokens' is not a list."""
-        import pytest
-
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="invalid_tokens_type_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1601,23 +1586,20 @@ class TestAggregationExecutorCheckpoint:
         with pytest.raises(ValueError, match="'tokens' must be a list"):
             executor.restore_from_checkpoint(invalid_checkpoint)
 
-    def test_restore_from_checkpoint_crashes_on_missing_token_fields(self) -> None:
+    def test_restore_from_checkpoint_crashes_on_missing_token_fields(self, real_landscape_db) -> None:
         """Restore crashes when token missing required fields."""
-        import pytest
-
         from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
 
         # Setup
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(real_landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="missing_token_fields_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

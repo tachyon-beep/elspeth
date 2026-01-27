@@ -484,6 +484,26 @@ class LandscapeSettings(BaseModel):
         description="Post-run audit export configuration",
     )
 
+    @field_validator("url")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        """Validate database URL format at config time.
+
+        Catches malformed URLs early (fail-fast) rather than at first DB access.
+        Uses SQLAlchemy's own URL parser for accurate validation.
+        """
+        from sqlalchemy.engine.url import make_url
+        from sqlalchemy.exc import ArgumentError
+
+        try:
+            parsed = make_url(v)
+            # Verify we got a valid driver/scheme
+            if not parsed.drivername:
+                raise ValueError("Database URL missing driver (e.g., 'sqlite', 'postgresql')")
+        except ArgumentError as e:
+            raise ValueError(f"Invalid database URL format: {e}") from e
+        return v
+
 
 class ConcurrencySettings(BaseModel):
     """Parallel processing configuration per architecture."""
@@ -769,8 +789,11 @@ def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:
                 return env_value
             if default is not None:
                 return default
-            # No env var and no default - keep original (will likely cause error)
-            return match.group(0)
+            # No env var and no default - fail fast with clear error
+            raise ValueError(
+                f"Required environment variable '{var_name}' is not set. "
+                f"Either set the variable or use ${{{{var_name}}:-default}} syntax for optional values."
+            )
 
         return _ENV_VAR_PATTERN.sub(replacer, value)
 
@@ -1175,7 +1198,7 @@ def load_settings(config_path: Path) -> ElspethSettings:
         ValidationError: If configuration fails Pydantic validation
         FileNotFoundError: If config file doesn't exist
     """
-    from dynaconf import Dynaconf
+    from dynaconf import Dynaconf  # type: ignore[attr-defined]
 
     # Explicit check for file existence (Dynaconf silently accepts missing files)
     if not config_path.exists():

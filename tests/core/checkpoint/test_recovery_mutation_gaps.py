@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint.recovery import RecoveryManager, ResumeCheck, ResumePoint
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.schema import (
@@ -37,7 +37,7 @@ def _create_run_with_checkpoint_prerequisites(
     token_id: str = "test-token",
     row_id: str = "test-row",
     node_id: str = "test-node",
-    status: str = "failed",
+    status: RunStatus = RunStatus.FAILED,
 ) -> None:
     """Helper to create run, node, row, and token needed for checkpoint FK constraints.
 
@@ -64,9 +64,9 @@ def _create_run_with_checkpoint_prerequisites(
                 node_id=node_id,
                 run_id=run_id,
                 plugin_name="test",
-                node_type="source",
+                node_type=NodeType.SOURCE,
                 plugin_version="1.0",
-                determinism="deterministic",
+                determinism=Determinism.DETERMINISTIC,
                 config_hash="x",
                 config_json="{}",
                 registered_at=now,
@@ -180,7 +180,7 @@ class TestCanResumeBranches:
     def mock_graph(self) -> ExecutionGraph:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        graph.add_node("test-node", node_type=NodeType.TRANSFORM, plugin_name="test")
         return graph
 
     def test_nonexistent_run_returns_cannot_resume(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
@@ -252,7 +252,7 @@ class TestCanResumeBranches:
             in_memory_db,
             run_id=run_id,
             token_id=token_id,
-            status="failed",
+            status=RunStatus.FAILED,
         )
 
         # Create a checkpoint for it
@@ -308,8 +308,8 @@ class TestGetResumePoint:
     def mock_graph(self) -> ExecutionGraph:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("test-node", node_type="transform", plugin_name="test")
-        graph.add_node("test-node-456", node_type="transform", plugin_name="test")
+        graph.add_node("test-node", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("test-node-456", node_type=NodeType.TRANSFORM, plugin_name="test")
         return graph
 
     def test_get_resume_point_returns_none_for_nonresumable(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
@@ -335,7 +335,7 @@ class TestGetResumePoint:
             run_id=run_id,
             token_id=token_id,
             node_id="test-node-456",
-            status="failed",
+            status=RunStatus.FAILED,
         )
 
         # Create a checkpoint with aggregation state
@@ -374,7 +374,7 @@ class TestGetResumePoint:
             in_memory_db,
             run_id=run_id,
             token_id=token_id,
-            status="failed",
+            status=RunStatus.FAILED,
         )
 
         # Checkpoint without aggregation_state_json
@@ -424,7 +424,7 @@ class TestGetUnprocessedRowDataErrors:
     def mock_graph(self) -> ExecutionGraph:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        graph.add_node("test-node", node_type=NodeType.TRANSFORM, plugin_name="test")
         return graph
 
     def test_empty_unprocessed_rows_returns_empty_list(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
@@ -479,7 +479,7 @@ class TestGetUnprocessedRowDataErrors:
                     config_hash="test-hash",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -487,9 +487,9 @@ class TestGetUnprocessedRowDataErrors:
                     node_id="source-node",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -542,7 +542,7 @@ class TestGetUnprocessedRowDataErrors:
                     config_hash="test-hash",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -550,9 +550,9 @@ class TestGetUnprocessedRowDataErrors:
                     node_id="source-node",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -629,7 +629,7 @@ class TestGetUnprocessedRowsErrors:
     def mock_graph(self) -> ExecutionGraph:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        graph.add_node("test-node", node_type=NodeType.TRANSFORM, plugin_name="test")
         return graph
 
     def test_no_checkpoint_returns_empty_list(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
@@ -666,7 +666,7 @@ class TestGetUnprocessedRowsErrors:
             in_memory_db,
             run_id=run_id,
             token_id=token_id,
-            status="failed",
+            status=RunStatus.FAILED,
         )
 
         # Create a checkpoint pointing to the token

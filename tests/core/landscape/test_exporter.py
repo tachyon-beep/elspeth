@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import BatchStatus, NodeStateStatus, NodeType, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -24,7 +24,7 @@ def populated_db() -> tuple[LandscapeDB, str]:
         run_id=run.run_id,
         node_id="source_1",
         plugin_name="csv",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_version="1.0.0",
         config={"path": "input.csv"},
         schema_config=DYNAMIC_SCHEMA,
@@ -37,7 +37,7 @@ def populated_db() -> tuple[LandscapeDB, str]:
         data={"name": "Alice", "value": 100},
     )
 
-    recorder.complete_run(run.run_id, status="completed")
+    recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
     return db, run.run_id
 
@@ -154,7 +154,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -163,7 +163,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -175,7 +175,7 @@ class TestLandscapeExporterComplexRun:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -197,7 +197,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -209,7 +209,7 @@ class TestLandscapeExporterComplexRun:
             data={"x": 1},
         )
         token = recorder.create_token(row_id=row.row_id)
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -229,7 +229,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="transform",
             plugin_name="passthrough",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -250,11 +250,11 @@ class TestLandscapeExporterComplexRun:
         )
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"x": 1},
             duration_ms=10.0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -275,7 +275,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -303,7 +303,7 @@ class TestLandscapeExporterComplexRun:
             content_hash="abc123",
             size_bytes=1024,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -324,7 +324,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="aggregator",
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -335,10 +335,10 @@ class TestLandscapeExporterComplexRun:
         )
         recorder.complete_batch(
             batch_id=batch.batch_id,
-            status="completed",
+            status=BatchStatus.COMPLETED,
             trigger_reason="count=10",
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -359,7 +359,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="aggregator",
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -380,7 +380,7 @@ class TestLandscapeExporterComplexRun:
             token_id=token.token_id,
             ordinal=0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -400,7 +400,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="gate",
             plugin_name="threshold",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -409,7 +409,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -441,7 +441,7 @@ class TestLandscapeExporterComplexRun:
             mode=RoutingMode.MOVE,
             reason={"rule": "value > 1000"},
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -461,7 +461,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -478,7 +478,7 @@ class TestLandscapeExporterComplexRun:
             row_id=row.row_id,
             branches=["a", "b"],
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -612,7 +612,7 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 node_id=f"node_{i}",
                 plugin_name="test",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
                 config={"index": i},
                 schema_config=DYNAMIC_SCHEMA,
@@ -654,7 +654,7 @@ class TestLandscapeExporterSigning:
                     )
                     recorder.complete_node_state(
                         state.state_id,
-                        status="completed",
+                        status=NodeStateStatus.COMPLETED,
                         output_data={"result": i * j + k},  # Required for COMPLETED states
                         duration_ms=5.0,
                     )
@@ -673,9 +673,9 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 aggregation_node_id="node_1",
             )
-            recorder.complete_batch(batch.batch_id, status="completed")
+            recorder.complete_batch(batch.batch_id, status=BatchStatus.COMPLETED)
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Export multiple times and verify final_hash is identical
         exporter = LandscapeExporter(db, signing_key=b"determinism-test-key")
@@ -706,12 +706,12 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 node_id=f"node_{i}",
                 plugin_name="test",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
 
@@ -746,7 +746,7 @@ class TestLandscapeExporterCallRecords:
             run_id=run.run_id,
             node_id="llm_transform",
             plugin_name="llm_classifier",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -779,11 +779,11 @@ class TestLandscapeExporterCallRecords:
 
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"category": "positive"},
             duration_ms=300.0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -822,7 +822,7 @@ class TestLandscapeExporterManifestIntegrity:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -833,7 +833,7 @@ class TestLandscapeExporterManifestIntegrity:
             row_index=0,
             data={"value": 42},
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db, signing_key=b"hash-chain-test-key")
         records = list(exporter.export_run(run.run_id, sign=True))
@@ -873,12 +873,12 @@ class TestLandscapeExporterTier1Corruption:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Corrupt the run status directly in the database
         with db.connection() as conn:

@@ -376,8 +376,13 @@ class TestBaseLLMTransformProcess:
         assert "API Error" in result.reason["error"]
         assert result.retryable is False
 
-    def test_rate_limit_error_is_retryable(self, ctx: PluginContext, mock_client: Mock) -> None:
-        """Rate limit errors marked retryable=True."""
+    def test_rate_limit_error_propagates_for_engine_retry(self, ctx: PluginContext, mock_client: Mock) -> None:
+        """Rate limit errors propagate as exceptions for engine retry.
+
+        Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
+        rather than converted to TransformResult.error(). This allows the engine's
+        RetryManager to handle retries with proper backoff.
+        """
         mock_client.chat_completion.side_effect = RateLimitError("Rate limit exceeded")
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
 
@@ -389,12 +394,11 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        result = transform.process({"text": "hello"}, ctx)
+        # Exception propagates for engine retry (not converted to TransformResult)
+        with pytest.raises(RateLimitError) as exc_info:
+            transform.process({"text": "hello"}, ctx)
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "rate_limited"
-        assert result.retryable is True
+        assert "Rate limit exceeded" in str(exc_info.value)
 
     def test_successful_transform_returns_enriched_row(self, ctx: PluginContext, mock_client: Mock) -> None:
         """Successful transform returns row with LLM response."""
@@ -534,8 +538,13 @@ class TestBaseLLMTransformProcess:
         assert call_args.kwargs["temperature"] == 0.7
         assert call_args.kwargs["max_tokens"] == 500
 
-    def test_retryable_llm_error_propagates_flag(self, ctx: PluginContext, mock_client: Mock) -> None:
-        """LLMClientError retryable flag is propagated."""
+    def test_retryable_llm_error_propagates_as_exception(self, ctx: PluginContext, mock_client: Mock) -> None:
+        """Retryable LLMClientError propagates as exception for engine retry.
+
+        Retryable errors (those with retryable=True) are re-raised rather than
+        converted to TransformResult.error(). This allows the engine's
+        RetryManager to handle retries with proper backoff.
+        """
         # Non-rate-limit but retryable error
         mock_client.chat_completion.side_effect = LLMClientError("Server overloaded", retryable=True)
         TestLLMTransform = create_test_transform_class(mock_client=mock_client)
@@ -548,10 +557,12 @@ class TestBaseLLMTransformProcess:
             }
         )
 
-        result = transform.process({"text": "hello"}, ctx)
+        # Exception propagates for engine retry
+        with pytest.raises(LLMClientError) as exc_info:
+            transform.process({"text": "hello"}, ctx)
 
-        assert result.status == "error"
-        assert result.retryable is True
+        assert exc_info.value.retryable is True
+        assert "Server overloaded" in str(exc_info.value)
 
     def test_close_is_noop(self) -> None:
         """close() does nothing but doesn't raise."""

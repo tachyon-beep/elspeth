@@ -2,14 +2,16 @@
 
 from datetime import UTC, datetime
 
-from elspeth.contracts.enums import (
+from elspeth.contracts import (
     Determinism,
+    Edge,
     ExportStatus,
+    Node,
     NodeType,
     RoutingMode,
+    Run,
     RunStatus,
 )
-from elspeth.core.landscape.models import Edge, Node, Run
 
 
 class TestModelEnumTypes:
@@ -103,7 +105,7 @@ class TestModelEnumTier1Rejection:
         """Node.node_type must reject string 'transform' (wants NodeType.TRANSFORM)."""
         import pytest
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError, match=r"node_type must be NodeType, got str: 'transform'"):
             Node(
                 node_id="node-1",
                 run_id="run-1",
@@ -120,7 +122,7 @@ class TestModelEnumTier1Rejection:
         """Node.node_type must reject integer values."""
         import pytest
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError, match=r"node_type must be NodeType, got int: 1"):
             Node(
                 node_id="node-1",
                 run_id="run-1",
@@ -137,7 +139,7 @@ class TestModelEnumTier1Rejection:
         """Node.determinism must reject string 'deterministic'."""
         import pytest
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError, match=r"determinism must be Determinism, got str: 'deterministic'"):
             Node(
                 node_id="node-1",
                 run_id="run-1",
@@ -154,7 +156,7 @@ class TestModelEnumTier1Rejection:
         """Run.status must reject string 'completed'."""
         import pytest
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError, match=r"status must be RunStatus, got str: 'completed'"):
             Run(
                 run_id="run-1",
                 started_at=datetime.now(UTC),
@@ -168,7 +170,7 @@ class TestModelEnumTier1Rejection:
         """Edge.default_mode must reject string 'move'."""
         import pytest
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError, match=r"default_mode must be RoutingMode, got str: 'move'"):
             Edge(
                 edge_id="edge-1",
                 run_id="run-1",

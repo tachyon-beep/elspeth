@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint.manager import CheckpointManager
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ class TestCheckpointIdFormat:
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={})
         return graph
 
     @pytest.fixture
@@ -60,7 +61,7 @@ class TestCheckpointIdFormat:
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.execute(
@@ -68,9 +69,9 @@ class TestCheckpointIdFormat:
                     node_id="node-001",
                     run_id="run-001",
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=datetime.now(UTC),
@@ -159,7 +160,7 @@ class TestGetLatestCheckpointOrdering:
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={})
         return graph
 
     @pytest.fixture
@@ -181,7 +182,7 @@ class TestGetLatestCheckpointOrdering:
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.execute(
@@ -189,9 +190,9 @@ class TestGetLatestCheckpointOrdering:
                     node_id="node-001",
                     run_id="run-001",
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=datetime.now(UTC),
@@ -298,7 +299,7 @@ class TestGetLatestCheckpointOrdering:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.execute(
@@ -306,9 +307,9 @@ class TestGetLatestCheckpointOrdering:
                     node_id="node-001",
                     run_id="run-001",
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=datetime.now(UTC),
@@ -336,7 +337,7 @@ class TestGetLatestCheckpointOrdering:
                     config_hash="def",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.execute(
@@ -344,9 +345,9 @@ class TestGetLatestCheckpointOrdering:
                     node_id="node-002",
                     run_id="run-002",
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=datetime.now(UTC),
@@ -367,7 +368,7 @@ class TestGetLatestCheckpointOrdering:
 
         # Create graph with node-002 for run-002
         graph_002 = mock_graph.__class__()
-        graph_002.add_node("node-002", node_type="transform", plugin_name="test", config={})
+        graph_002.add_node("node-002", node_type=NodeType.TRANSFORM, plugin_name="test", config={})
 
         # Create checkpoints
         manager.create_checkpoint("run-001", "tok-001", "node-001", 10, mock_graph)

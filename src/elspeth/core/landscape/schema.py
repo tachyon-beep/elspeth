@@ -385,6 +385,10 @@ checkpoints_table = Table(
     # Topology validation (topological checkpoint compatibility)
     Column("upstream_topology_hash", String(64), nullable=False),  # Hash of nodes + edges upstream of checkpoint
     Column("checkpoint_node_config_hash", String(64), nullable=False),  # Hash of checkpoint node config only
+    # Format version for compatibility checking (replaces hardcoded date check)
+    # Version 1: Pre-deterministic node IDs (legacy, rejected)
+    # Version 2: Deterministic node IDs (2026-01-24+)
+    Column("format_version", Integer, nullable=True),  # Nullable for backwards compat with existing checkpoints
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(
         ["node_id", "run_id"],

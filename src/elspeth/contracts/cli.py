@@ -4,6 +4,8 @@
 from dataclasses import dataclass
 from typing import NotRequired, TypedDict
 
+from elspeth.contracts.enums import RunStatus
+
 
 @dataclass(frozen=True)
 class ProgressEvent:
@@ -44,7 +46,7 @@ class ExecutionResult(TypedDict):
     """
 
     run_id: str
-    status: str
+    status: RunStatus  # Strict: enum (str subclass) instead of naked string
     rows_processed: int
     rows_succeeded: NotRequired[int]
     rows_failed: NotRequired[int]

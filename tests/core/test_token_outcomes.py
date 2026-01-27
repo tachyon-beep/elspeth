@@ -3,6 +3,30 @@
 
 import pytest
 
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+
+
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Create a module-scoped in-memory landscape database.
+
+    Module scope avoids repeated schema creation (15+ tables, indexes)
+    which takes ~5-10ms per instantiation.
+
+    Tests should use unique run_ids to isolate their data.
+    """
+    return LandscapeDB.in_memory()
+
+
+@pytest.fixture
+def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
+    """Create a LandscapeRecorder with the shared test database.
+
+    Function-scoped because the recorder is a lightweight wrapper.
+    Uses the module-scoped landscape_db for actual storage.
+    """
+    return LandscapeRecorder(landscape_db)
+
 
 class TestTokenOutcomeDataclass:
     """Test TokenOutcome dataclass structure."""
@@ -196,21 +220,6 @@ class TestRecordTokenOutcome:
     """Test record_token_outcome() method."""
 
     @pytest.fixture
-    def db(self):
-        """Create in-memory database with schema."""
-        from elspeth.core.landscape import LandscapeDB
-
-        db = LandscapeDB.in_memory()
-        return db
-
-    @pytest.fixture
-    def recorder(self, db):
-        """Create recorder with test database."""
-        from elspeth.core.landscape import LandscapeRecorder
-
-        return LandscapeRecorder(db)
-
-    @pytest.fixture
     def run_with_token(self, recorder):
         """Create a run with a token for testing."""
         from elspeth.contracts import Determinism, NodeType
@@ -275,22 +284,43 @@ class TestRecordTokenOutcome:
 
     def test_record_buffered_then_terminal(self, recorder, run_with_token) -> None:
         """BUFFERED followed by terminal should succeed."""
-        from elspeth.contracts import RowOutcome
+        from elspeth.contracts import Determinism, NodeType, RowOutcome
+        from elspeth.contracts.schema import SchemaConfig
 
         run, token = run_with_token
 
-        # First record BUFFERED (non-terminal) - no batch_id needed
+        # Create an aggregation node (required for batches)
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="agg_node_1",
+            plugin_name="test_aggregation",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        # Create a batch (required for batch_id FK)
+        batch = recorder.create_batch(
+            run_id=run.run_id,
+            aggregation_node_id="agg_node_1",
+        )
+
+        # First record BUFFERED (non-terminal) with required batch_id
         recorder.record_token_outcome(
             run_id=run.run_id,
             token_id=token.token_id,
             outcome=RowOutcome.BUFFERED,
+            batch_id=batch.batch_id,
         )
 
-        # Then record terminal outcome - should succeed
+        # Then record terminal outcome with same batch_id
         outcome_id = recorder.record_token_outcome(
             run_id=run.run_id,
             token_id=token.token_id,
             outcome=RowOutcome.CONSUMED_IN_BATCH,
+            batch_id=batch.batch_id,
         )
 
         assert outcome_id is not None
@@ -321,20 +351,153 @@ class TestRecordTokenOutcome:
             )
 
 
+class TestOutcomeContractValidation:
+    """Test that record_token_outcome enforces required fields per outcome type.
+
+    See docs/audit/tokens/00-token-outcome-contract.md for the contract.
+    """
+
+    @pytest.fixture
+    def run_with_token(self, recorder):
+        """Create a run with a token for testing validation."""
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="src",
+            plugin_name="test",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
+        token = recorder.create_token(row.row_id)
+        return run, token
+
+    def test_completed_requires_sink_name(self, recorder, run_with_token) -> None:
+        """COMPLETED outcome must have sink_name."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="COMPLETED outcome requires sink_name"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+            )
+
+    def test_routed_requires_sink_name(self, recorder, run_with_token) -> None:
+        """ROUTED outcome must have sink_name."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="ROUTED outcome requires sink_name"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.ROUTED,
+            )
+
+    def test_forked_requires_fork_group_id(self, recorder, run_with_token) -> None:
+        """FORKED outcome must have fork_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="FORKED outcome requires fork_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FORKED,
+            )
+
+    def test_failed_requires_error_hash(self, recorder, run_with_token) -> None:
+        """FAILED outcome must have error_hash."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="FAILED outcome requires error_hash"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+            )
+
+    def test_quarantined_requires_error_hash(self, recorder, run_with_token) -> None:
+        """QUARANTINED outcome must have error_hash."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="QUARANTINED outcome requires error_hash"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.QUARANTINED,
+            )
+
+    def test_coalesced_requires_join_group_id(self, recorder, run_with_token) -> None:
+        """COALESCED outcome must have join_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="COALESCED outcome requires join_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COALESCED,
+            )
+
+    def test_expanded_requires_expand_group_id(self, recorder, run_with_token) -> None:
+        """EXPANDED outcome must have expand_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="EXPANDED outcome requires expand_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.EXPANDED,
+            )
+
+    def test_buffered_requires_batch_id(self, recorder, run_with_token) -> None:
+        """BUFFERED outcome must have batch_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="BUFFERED outcome requires batch_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.BUFFERED,
+            )
+
+    def test_consumed_in_batch_requires_batch_id(self, recorder, run_with_token) -> None:
+        """CONSUMED_IN_BATCH outcome must have batch_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="CONSUMED_IN_BATCH outcome requires batch_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.CONSUMED_IN_BATCH,
+            )
+
+
 class TestGetTokenOutcome:
     """Test get_token_outcome() method."""
-
-    @pytest.fixture
-    def db(self):
-        from elspeth.core.landscape import LandscapeDB
-
-        return LandscapeDB.in_memory()
-
-    @pytest.fixture
-    def recorder(self, db):
-        from elspeth.core.landscape import LandscapeRecorder
-
-        return LandscapeRecorder(db)
 
     @pytest.fixture
     def run_with_outcome(self, recorder):
@@ -375,7 +538,7 @@ class TestGetTokenOutcome:
         result = recorder.get_token_outcome(token.token_id)
         assert result.is_terminal is True
 
-    def test_get_nonexistent_returns_none(self, recorder, db) -> None:
+    def test_get_nonexistent_returns_none(self, recorder) -> None:
         result = recorder.get_token_outcome("nonexistent_token")
         assert result is None
 
@@ -383,14 +546,10 @@ class TestGetTokenOutcome:
 class TestExplainIncludesOutcome:
     """Test that explain() returns recorded outcomes."""
 
-    def test_explain_returns_outcome(self) -> None:
+    def test_explain_returns_outcome(self, recorder) -> None:
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -413,14 +572,10 @@ class TestExplainIncludesOutcome:
         assert result.outcome is not None
         assert result.outcome.outcome == RowOutcome.COMPLETED
 
-    def test_explain_returns_none_outcome_when_not_recorded(self) -> None:
+    def test_explain_returns_none_outcome_when_not_recorded(self, recorder) -> None:
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(

@@ -13,6 +13,7 @@ uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -39,7 +40,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -47,7 +48,7 @@ class TestRowProcessor:
         transform1 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="double",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -55,7 +56,7 @@ class TestRowProcessor:
         transform2 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="add_one",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -67,7 +68,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -79,7 +80,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -141,7 +142,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -149,7 +150,7 @@ class TestRowProcessor:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -161,7 +162,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -205,7 +206,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -248,7 +249,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -256,7 +257,7 @@ class TestRowProcessor:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -269,7 +270,7 @@ class TestRowProcessor:
             # No _on_error configured - errors are bugs
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -309,7 +310,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -317,7 +318,7 @@ class TestRowProcessor:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -332,7 +333,7 @@ class TestRowProcessor:
             _on_error = "discard"  # Intentionally discard errors
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -391,7 +392,7 @@ class TestRowProcessor:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -399,7 +400,7 @@ class TestRowProcessor:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -414,7 +415,7 @@ class TestRowProcessor:
             _on_error = "error_sink"  # Route errors to named sink
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -447,13 +448,13 @@ class TestRowProcessor:
         # Original data preserved
         assert result.final_data == {"value": -5}
 
-        # === P1: Audit trail verification for ROUTED ===
-        # Verify token outcome was recorded with sink_name
+        # === Audit trail semantics ===
+        # Token outcome recording is DEFERRED to sink_executor.write() to ensure
+        # outcome is only recorded AFTER sink durability is achieved.
+        # At this point (after process_row), the outcome is NOT yet recorded.
+        # See: Token Outcome Assurance (TOA) - outcomes recorded after sink.flush()
         outcome = recorder.get_token_outcome(result.token_id)
-        assert outcome is not None, "Token outcome should be recorded"
-        assert outcome.outcome == RowOutcome.ROUTED, "Outcome should be ROUTED"
-        assert outcome.sink_name == "error_sink", "Sink name should be recorded"
-        assert outcome.is_terminal is True, "ROUTED is terminal"
+        assert outcome is None, "Outcome should NOT be recorded yet - deferred to sink write"
 
 
 class TestRowProcessorTokenIdentity:
@@ -472,7 +473,7 @@ class TestRowProcessorTokenIdentity:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -520,7 +521,7 @@ class TestRowProcessorTokenIdentity:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -528,7 +529,7 @@ class TestRowProcessorTokenIdentity:
         transform1 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="t1",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -536,7 +537,7 @@ class TestRowProcessorTokenIdentity:
         transform2 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="t2",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -547,7 +548,7 @@ class TestRowProcessorTokenIdentity:
             output_schema = _TestSchema
 
             def __init__(self, name: str, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.name = name  # type: ignore[misc]
                 self.node_id = node_id
 
@@ -604,7 +605,7 @@ class TestRowProcessorUnknownType:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

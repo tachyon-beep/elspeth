@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.context import PluginContext, TransformErrorToken
 from elspeth.plugins.results import TransformResult
@@ -58,7 +59,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -112,7 +113,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -176,7 +177,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -235,7 +236,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -287,7 +288,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -373,7 +374,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -449,7 +450,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="buggy",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -507,7 +508,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -568,7 +569,7 @@ class TestTransformErrorRouting:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

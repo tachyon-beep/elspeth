@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.enums import BatchStatus
+from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
@@ -43,9 +43,10 @@ class TestAggregationRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test")
-        graph.add_node("sum_aggregator", node_type="aggregation", plugin_name="test")
-        graph.add_node("count_aggregator", node_type="aggregation", plugin_name="count_agg")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
+        graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=schema_config)
+        graph.add_node("count_aggregator", node_type=NodeType.AGGREGATION, plugin_name="count_agg", config=schema_config)
         return graph
 
     def test_full_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -98,8 +99,8 @@ class TestAggregationRecoveryIntegration:
         )
 
         # Simulate crash during flush
-        recorder.update_batch_status(batch.batch_id, "executing")
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # === PHASE 2: Verify recovery is possible ===
 
@@ -119,7 +120,7 @@ class TestAggregationRecoveryIntegration:
         assert incomplete[0].status == BatchStatus.EXECUTING
 
         # Mark executing as failed (crash interrupted)
-        recorder.update_batch_status(batch.batch_id, "failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
 
         # Retry the batch
         retry_batch = recorder.retry_batch(batch.batch_id)
@@ -162,7 +163,7 @@ class TestAggregationRecoveryIntegration:
             db,
             run.run_id,
             extra_nodes=[
-                ("count_aggregator", "count_agg", "aggregation"),
+                ("count_aggregator", "count_agg", NodeType.AGGREGATION),
             ],
         )
 
@@ -185,7 +186,7 @@ class TestAggregationRecoveryIntegration:
         )
         for i, token in enumerate(tokens[:2]):
             recorder.add_batch_member(sum_batch.batch_id, token.token_id, ordinal=i)
-        recorder.update_batch_status(sum_batch.batch_id, "completed")
+        recorder.update_batch_status(sum_batch.batch_id, BatchStatus.COMPLETED)
 
         # Create batch for count_aggregator (crashed during execution)
         count_batch = recorder.create_batch(
@@ -194,7 +195,7 @@ class TestAggregationRecoveryIntegration:
         )
         for i, token in enumerate(tokens[2:]):
             recorder.add_batch_member(count_batch.batch_id, token.token_id, ordinal=i)
-        recorder.update_batch_status(count_batch.batch_id, "executing")
+        recorder.update_batch_status(count_batch.batch_id, BatchStatus.EXECUTING)
 
         # Checkpoint at last processed token
         checkpoint_mgr.create_checkpoint(
@@ -206,7 +207,7 @@ class TestAggregationRecoveryIntegration:
             graph=mock_graph,
         )
 
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # Verify recovery
         check = recovery_mgr.can_resume(run.run_id, mock_graph)
@@ -253,7 +254,7 @@ class TestAggregationRecoveryIntegration:
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
 
         # Mark as failed for retry
-        recorder.update_batch_status(batch.batch_id, "failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
 
         # Checkpoint
         checkpoint_mgr.create_checkpoint(
@@ -307,12 +308,12 @@ class TestAggregationRecoveryIntegration:
             recorder.retry_batch(batch.batch_id)
 
         # Test with executing status
-        recorder.update_batch_status(batch.batch_id, "executing")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
         with pytest.raises(ValueError, match="Can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
         # Test with completed status
-        recorder.update_batch_status(batch.batch_id, "completed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.COMPLETED)
         with pytest.raises(ValueError, match="Can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
@@ -321,7 +322,7 @@ class TestAggregationRecoveryIntegration:
         db: LandscapeDB,
         run_id: str,
         *,
-        extra_nodes: list[tuple[str, str, str]] | None = None,
+        extra_nodes: list[tuple[str, str, NodeType]] | None = None,
     ) -> None:
         """Register nodes using raw SQL to avoid schema_config requirement.
 
@@ -341,9 +342,9 @@ class TestAggregationRecoveryIntegration:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -356,9 +357,9 @@ class TestAggregationRecoveryIntegration:
                     node_id="sum_aggregator",
                     run_id=run_id,
                     plugin_name="sum_agg",
-                    node_type="aggregation",
+                    node_type=NodeType.AGGREGATION,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -375,7 +376,7 @@ class TestAggregationRecoveryIntegration:
                             plugin_name=plugin_name,
                             node_type=node_type,
                             plugin_version="1.0",
-                            determinism="deterministic",
+                            determinism=Determinism.DETERMINISTIC,
                             config_hash="test",
                             config_json="{}",
                             registered_at=now,
@@ -481,7 +482,7 @@ class TestAggregationRecoveryIntegration:
         )
 
         # Simulate crash
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # === PHASE 2: Resume and verify timeout preservation ===
 

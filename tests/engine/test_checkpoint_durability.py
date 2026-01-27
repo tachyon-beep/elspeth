@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PluginSchema, RoutingMode, RunStatus, SinkName, SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -42,15 +42,22 @@ from tests.conftest import (
 )
 
 
-def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple linear graph for testing.
 
     Creates: source -> transforms... -> sinks
     """
     graph = ExecutionGraph()
 
+    schema_config = {"schema": {"fields": "dynamic"}}
+
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node(
+        "source",
+        node_type=NodeType.SOURCE,
+        plugin_name=config.source.name,
+        config=schema_config,
+    )
 
     # Add transforms
     transform_ids: dict[int, str] = {}
@@ -60,8 +67,9 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
         transform_ids[i] = node_id
         graph.add_node(
             node_id,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name=t.name,
+            config=schema_config,
         )
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
@@ -71,7 +79,12 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(
+            node_id,
+            node_type=NodeType.SINK,
+            plugin_name=sink.name,
+            config=schema_config,
+        )
 
     # Edge from last transform to default sink
     output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
@@ -178,7 +191,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -199,8 +212,8 @@ class TestCheckpointDurability:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
-        assert result.status == "completed"
+        result = orchestrator.run(config, graph=_build_production_graph(config))
+        assert result.status == RunStatus.COMPLETED
         assert result.rows_processed == 5
 
         # Verify: 5 rows written
@@ -226,14 +239,14 @@ class TestCheckpointDurability:
         )
 
         # Get sink node_id from graph
-        test_graph = _build_test_graph(config)
+        test_graph = _build_production_graph(config)
         sink_node_id = test_graph.get_sink_id_map()[SinkName("default")]
 
         # Verify node_states exist for all rows at sink
         with db.engine.connect() as conn:
             states = conn.execute(select(node_states_table).where(node_states_table.c.node_id == sink_node_id)).fetchall()
             assert len(states) == 5, f"Expected 5 node_states at sink, got {len(states)}"
-            assert all(s.status == "completed" for s in states), "All sink states should be completed"
+            assert all(s.status == NodeStateStatus.COMPLETED for s in states), "All sink states should be completed"
 
             # Verify token_outcomes exist and are terminal
             outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id)).fetchall()
@@ -261,7 +274,6 @@ class TestCheckpointDurability:
         """
         import json
 
-        from elspeth.contracts import NodeType
         from elspeth.core.checkpoint import RecoveryManager
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -325,7 +337,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -346,7 +358,6 @@ class TestCheckpointDurability:
         run_id = run.run_id
 
         # Register source node
-        from elspeth.contracts import Determinism
         from elspeth.contracts.schema import SchemaConfig
 
         recorder.register_node(
@@ -425,9 +436,10 @@ class TestCheckpointDurability:
 
         # Build graph for checkpoint topology validation
         test_graph = ExecutionGraph()
-        test_graph.add_node("source", node_type="source", plugin_name="list_source", config={})
-        test_graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config={})
-        test_graph.add_node("sink_default", node_type="sink", plugin_name="tracking_sink", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        test_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
+        test_graph.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        test_graph.add_node("sink_default", node_type=NodeType.SINK, plugin_name="tracking_sink", config=schema_config)
         test_graph.add_edge("source", "transform_0", label="continue")
         test_graph.add_edge("transform_0", "sink_default", label="continue")
 
@@ -443,7 +455,7 @@ class TestCheckpointDurability:
             )
 
         # Mark run as failed (simulating crash after 2 rows written)
-        recorder.complete_run(run_id, status="failed")
+        recorder.complete_run(run_id, status=RunStatus.FAILED)
 
         # --- Phase 2: Verify preconditions ---
         # 2 checkpoints exist (for rows 0 and 1)
@@ -467,7 +479,7 @@ class TestCheckpointDurability:
         )
 
         # Build graph for topology validation
-        graph = _build_test_graph(config)
+        graph = _build_production_graph(config)
 
         # Verify can_resume returns True
         resume_check = recovery.can_resume(run_id, graph)
@@ -491,12 +503,12 @@ class TestCheckpointDurability:
         result = orchestrator.resume(
             resume_point,
             config,
-            graph=_build_test_graph(config),
+            graph=_build_production_graph(config),
             payload_store=payload_store,
         )
 
         # --- Phase 4: Verify correct recovery behavior ---
-        assert result.status == "completed", f"Resume failed with status: {result.status}"
+        assert result.status == RunStatus.COMPLETED, f"Resume failed with status: {result.status}"
 
         # CRITICAL: Only 3 rows should have been reprocessed (rows 2, 3, 4)
         assert result.rows_processed == 3, (
@@ -529,13 +541,15 @@ class TestCheckpointDurability:
         )
 
         # Get sink node_id from graph
-        resume_graph = _build_test_graph(config)
+        resume_graph = _build_production_graph(config)
         sink_node_id = resume_graph.get_sink_id_map()[SinkName("default")]
 
         with db.engine.connect() as conn:
             # Verify node_states at sink for resumed rows (3 new rows processed)
             states = conn.execute(
-                select(node_states_table).where((node_states_table.c.node_id == sink_node_id) & (node_states_table.c.status == "completed"))
+                select(node_states_table).where(
+                    (node_states_table.c.node_id == sink_node_id) & (node_states_table.c.status == NodeStateStatus.COMPLETED)
+                )
             ).fetchall()
             # Resume should have written 3 new rows to sink
             assert len(states) >= 3, f"Expected at least 3 completed sink states after resume, got {len(states)}"
@@ -605,7 +619,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -627,7 +641,7 @@ class TestCheckpointDurability:
         )
 
         with pytest.raises(RuntimeError, match="Simulated sink failure"):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config))
 
         # Verify: NO checkpoints created because batch failed
         run_id = _get_latest_run_id(db)
@@ -677,7 +691,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2})
@@ -716,7 +730,7 @@ class TestCheckpointDurability:
             sinks={"default": as_sink(sink)},
         )
 
-        graph = _build_test_graph(config)
+        graph = _build_production_graph(config)
         # P3 Fix: Use public API for accessing graph internals
         sink_node_id = graph.get_sink_id_map()[SinkName("default")]
         transform_node_id = graph.get_transform_id_map()[0]
@@ -728,7 +742,7 @@ class TestCheckpointDurability:
         )
 
         result = orchestrator.run(config, graph=graph)
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
 
         # Verify: checkpoint node_id is the SINK node
         assert len(captured_checkpoints) == 1
@@ -813,7 +827,7 @@ class TestCheckpointDurability:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -834,8 +848,8 @@ class TestCheckpointDurability:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
-        assert result.status == "completed"
+        result = orchestrator.run(config, graph=_build_production_graph(config))
+        assert result.status == RunStatus.COMPLETED
 
         # Verify timing: 0 checkpoints before write, N after
         assert len(checkpoints_before_write) == 1, "Expected one write call"
@@ -914,7 +928,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -936,8 +950,8 @@ class TestCheckpointTimingInvariants:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
-        assert result.status == "completed"
+        result = orchestrator.run(config, graph=_build_production_graph(config))
+        assert result.status == RunStatus.COMPLETED
 
         # With 5 rows and checkpoint_interval=2:
         # Checkpoints at sequence 2 and 4 (sequence 1, 3, 5 are not boundaries)
@@ -1009,7 +1023,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1030,8 +1044,8 @@ class TestCheckpointTimingInvariants:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
-        assert result.status == "completed"
+        result = orchestrator.run(config, graph=_build_production_graph(config))
+        assert result.status == RunStatus.COMPLETED
 
         # No checkpoints when disabled
         run_id = _get_latest_run_id(db)
@@ -1089,7 +1103,7 @@ class TestCheckpointTimingInvariants:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1112,6 +1126,6 @@ class TestCheckpointTimingInvariants:
         )
 
         # Should run successfully without checkpointing
-        result = orchestrator.run(config, graph=_build_test_graph(config))
-        assert result.status == "completed"
+        result = orchestrator.run(config, graph=_build_production_graph(config))
+        assert result.status == RunStatus.COMPLETED
         assert len(sink.results) == 3

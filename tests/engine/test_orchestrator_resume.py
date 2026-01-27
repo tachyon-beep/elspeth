@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeID, RoutingMode, RunStatus, SinkName
+from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, RunStatus, SinkName
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -96,7 +96,7 @@ class TestOrchestratorResumeRowProcessing:
                     config_hash="test",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                     source_schema_json=source_schema_json,
                 )
             )
@@ -107,9 +107,9 @@ class TestOrchestratorResumeRowProcessing:
                     node_id="source-node",
                     run_id=run_id,
                     plugin_name="null",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -122,9 +122,9 @@ class TestOrchestratorResumeRowProcessing:
                     node_id="transform-node",
                     run_id=run_id,
                     plugin_name="passthrough",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -137,9 +137,9 @@ class TestOrchestratorResumeRowProcessing:
                     node_id="sink-node",
                     run_id=run_id,
                     plugin_name="csv",
-                    node_type="sink",
+                    node_type=NodeType.SINK,
                     plugin_version="1.0",
-                    determinism="io_write",
+                    determinism=Determinism.IO_WRITE,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -154,7 +154,7 @@ class TestOrchestratorResumeRowProcessing:
                     from_node_id="source-node",
                     to_node_id="transform-node",
                     label="continue",
-                    default_mode="move",
+                    default_mode=RoutingMode.MOVE,
                     created_at=now,
                 )
             )
@@ -165,7 +165,7 @@ class TestOrchestratorResumeRowProcessing:
                     from_node_id="transform-node",
                     to_node_id="sink-node",
                     label="continue",
-                    default_mode="move",
+                    default_mode=RoutingMode.MOVE,
                     created_at=now,
                 )
             )
@@ -207,9 +207,10 @@ class TestOrchestratorResumeRowProcessing:
 
         # Build graph matching the nodes created above
         graph = ExecutionGraph()
-        graph.add_node("source-node", node_type="source", plugin_name="null", config={})
-        graph.add_node("transform-node", node_type="transform", plugin_name="passthrough", config={})
-        graph.add_node("sink-node", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
+        graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
 

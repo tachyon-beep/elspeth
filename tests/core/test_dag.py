@@ -15,32 +15,35 @@ class TestDAGBuilder:
         assert graph.edge_count == 0
 
     def test_add_node(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
 
         assert graph.node_count == 1
         assert graph.has_node("source")
 
     def test_add_edge(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("transform", node_type="transform", plugin_name="validate")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="validate")
         graph.add_edge("source", "transform", label="continue")
 
         assert graph.edge_count == 1
 
     def test_linear_pipeline(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("t1", node_type="transform", plugin_name="enrich")
-        graph.add_node("t2", node_type="transform", plugin_name="classify")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("t1", node_type=NodeType.TRANSFORM, plugin_name="enrich")
+        graph.add_node("t2", node_type=NodeType.TRANSFORM, plugin_name="classify")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "t1", label="continue")
         graph.add_edge("t1", "t2", label="continue")
@@ -54,34 +57,37 @@ class TestDAGValidation:
     """Validation of execution graphs."""
 
     def test_is_valid_for_acyclic(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("a", node_type="source", plugin_name="csv")
-        graph.add_node("b", node_type="transform", plugin_name="x")
-        graph.add_node("c", node_type="sink", plugin_name="csv")
+        graph.add_node("a", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="x")
+        graph.add_node("c", node_type=NodeType.SINK, plugin_name="csv")
         graph.add_edge("a", "b", label="continue")
         graph.add_edge("b", "c", label="continue")
 
         assert graph.is_acyclic() is True
 
     def test_is_invalid_for_cycle(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("a", node_type="transform", plugin_name="x")
-        graph.add_node("b", node_type="transform", plugin_name="y")
+        graph.add_node("a", node_type=NodeType.TRANSFORM, plugin_name="x")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="y")
         graph.add_edge("a", "b", label="continue")
         graph.add_edge("b", "a", label="continue")  # Creates cycle!
 
         assert graph.is_acyclic() is False
 
     def test_validate_raises_on_cycle(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         graph = ExecutionGraph()
-        graph.add_node("a", node_type="transform", plugin_name="x")
-        graph.add_node("b", node_type="transform", plugin_name="y")
+        graph.add_node("a", node_type=NodeType.TRANSFORM, plugin_name="x")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="y")
         graph.add_edge("a", "b", label="continue")
         graph.add_edge("b", "a", label="continue")
 
@@ -89,13 +95,14 @@ class TestDAGValidation:
             graph.validate()
 
     def test_topological_order(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("t1", node_type="transform", plugin_name="a")
-        graph.add_node("t2", node_type="transform", plugin_name="b")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("t1", node_type=NodeType.TRANSFORM, plugin_name="a")
+        graph.add_node("t2", node_type=NodeType.TRANSFORM, plugin_name="b")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "t1", label="continue")
         graph.add_edge("t1", "t2", label="continue")
@@ -117,13 +124,14 @@ class TestDAGValidation:
         registration - routing events would be recorded against the wrong
         edge, corrupting the audit trail.
         """
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="config_gate")
-        graph.add_node("sink_a", node_type="sink", plugin_name="csv")
-        graph.add_node("sink_b", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate")
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv")
 
         # Gate has one "continue" edge to sink_a
         graph.add_edge("source", "gate", label="continue")
@@ -140,13 +148,14 @@ class TestDAGValidation:
         The uniqueness constraint is per-node, not global. Multiple nodes
         can each have a 'continue' edge because edge_map keys by (from_node, label).
         """
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("t1", node_type="transform", plugin_name="a")
-        graph.add_node("t2", node_type="transform", plugin_name="b")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("t1", node_type=NodeType.TRANSFORM, plugin_name="a")
+        graph.add_node("t2", node_type=NodeType.TRANSFORM, plugin_name="b")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         # Each node has ONE "continue" edge - no collisions
         graph.add_edge("source", "t1", label="continue")
@@ -161,35 +170,38 @@ class TestSourceSinkValidation:
     """Validation of source and sink constraints."""
 
     def test_validate_requires_exactly_one_source(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         graph = ExecutionGraph()
-        graph.add_node("t1", node_type="transform", plugin_name="x")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("t1", node_type=NodeType.TRANSFORM, plugin_name="x")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
         graph.add_edge("t1", "sink", label="continue")
 
         with pytest.raises(GraphValidationError, match="exactly one source"):
             graph.validate()
 
     def test_validate_requires_at_least_one_sink(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("t1", node_type="transform", plugin_name="x")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("t1", node_type=NodeType.TRANSFORM, plugin_name="x")
         graph.add_edge("source", "t1", label="continue")
 
         with pytest.raises(GraphValidationError, match="at least one sink"):
             graph.validate()
 
     def test_validate_multiple_sinks_allowed(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="classifier")
-        graph.add_node("sink1", node_type="sink", plugin_name="csv")
-        graph.add_node("sink2", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="classifier")
+        graph.add_node("sink1", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink2", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "gate", label="continue")
         graph.add_edge("gate", "sink1", label="normal")
@@ -199,22 +211,24 @@ class TestSourceSinkValidation:
         graph.validate()
 
     def test_get_source_node(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("my_source", node_type="source", plugin_name="csv")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("my_source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
         graph.add_edge("my_source", "sink", label="continue")
 
         assert graph.get_source() == "my_source"
 
     def test_get_sink_nodes(self) -> None:
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("sink1", node_type="sink", plugin_name="csv")
-        graph.add_node("sink2", node_type="sink", plugin_name="json")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("sink1", node_type=NodeType.SINK, plugin_name="csv")
+        graph.add_node("sink2", node_type=NodeType.SINK, plugin_name="json")
         graph.add_edge("source", "sink1", label="continue")
         graph.add_edge("source", "sink2", label="continue")
 
@@ -227,12 +241,13 @@ class TestExecutionGraphAccessors:
 
     def test_get_node_info(self) -> None:
         """Get NodeInfo for a node."""
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph, NodeInfo
 
         graph = ExecutionGraph()
         graph.add_node(
             "node_1",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="my_plugin",
             config={"key": "value"},
         )
@@ -241,7 +256,7 @@ class TestExecutionGraphAccessors:
 
         assert isinstance(info, NodeInfo)
         assert info.node_id == "node_1"
-        assert info.node_type == "transform"
+        assert info.node_type == NodeType.TRANSFORM
         assert info.plugin_name == "my_plugin"
         assert info.config == {"key": "value"}
 
@@ -256,13 +271,13 @@ class TestExecutionGraphAccessors:
 
     def test_get_edges(self) -> None:
         """Get all edges with data."""
-        from elspeth.contracts import EdgeInfo, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("a", node_type="source", plugin_name="src")
-        graph.add_node("b", node_type="transform", plugin_name="tf")
-        graph.add_node("c", node_type="sink", plugin_name="sink")
+        graph.add_node("a", node_type=NodeType.SOURCE, plugin_name="src")
+        graph.add_node("b", node_type=NodeType.TRANSFORM, plugin_name="tf")
+        graph.add_node("c", node_type=NodeType.SINK, plugin_name="sink")
         graph.add_edge("a", "b", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("b", "c", label="output", mode=RoutingMode.COPY)
 
@@ -284,13 +299,13 @@ class TestExecutionGraphAccessors:
 
     def test_get_incoming_edges_returns_edges_pointing_to_node(self):
         """get_incoming_edges() returns all edges with to_node matching the given node_id."""
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("A", node_type="source", plugin_name="csv")
-        graph.add_node("B", node_type="transform", plugin_name="mapper")
-        graph.add_node("C", node_type="sink", plugin_name="csv")
+        graph.add_node("A", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("B", node_type=NodeType.TRANSFORM, plugin_name="mapper")
+        graph.add_node("C", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("A", "B", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("B", "C", label="continue", mode=RoutingMode.MOVE)
@@ -305,11 +320,12 @@ class TestExecutionGraphAccessors:
 
     def test_get_incoming_edges_returns_empty_for_source_node(self):
         """get_incoming_edges() returns empty list for nodes with no predecessors."""
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("A", node_type="source", plugin_name="csv")
-        graph.add_node("B", node_type="sink", plugin_name="csv")
+        graph.add_node("A", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("B", node_type=NodeType.SINK, plugin_name="csv")
 
         incoming = graph.get_incoming_edges("A")
 
@@ -317,7 +333,7 @@ class TestExecutionGraphAccessors:
 
     def test_get_effective_producer_schema_walks_through_gates(self) -> None:
         """_get_effective_producer_schema() recursively finds schema through gate chain."""
-        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         class OutputSchema(PluginSchema):
@@ -326,9 +342,9 @@ class TestExecutionGraphAccessors:
         graph = ExecutionGraph()
 
         # Build chain: source -> gate -> sink
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
-        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # No schema
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate:check")  # No schema
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
@@ -340,10 +356,11 @@ class TestExecutionGraphAccessors:
 
     def test_get_effective_producer_schema_crashes_on_gate_without_inputs(self):
         """_get_effective_producer_schema() crashes if gate has no incoming edges."""
+        from elspeth.contracts import NodeType
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("gate", node_type="gate", plugin_name="config_gate:orphan")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate:orphan")
 
         # Gate with no inputs is a bug in our code - should crash
         # ValueError is raised by internal validation during edge compatibility checking
@@ -355,7 +372,7 @@ class TestExecutionGraphAccessors:
 
     def test_get_effective_producer_schema_handles_chained_gates(self) -> None:
         """_get_effective_producer_schema() recursively walks through multiple gates."""
-        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -365,10 +382,10 @@ class TestExecutionGraphAccessors:
         graph = ExecutionGraph()
 
         # Build chain: source -> gate1 -> gate2 -> sink
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
-        graph.add_node("gate1", node_type="gate", plugin_name="config_gate:first")
-        graph.add_node("gate2", node_type="gate", plugin_name="config_gate:second")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate1", node_type=NodeType.GATE, plugin_name="config_gate:first")
+        graph.add_node("gate2", node_type=NodeType.GATE, plugin_name="config_gate:second")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "gate1", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("gate1", "gate2", label="continue", mode=RoutingMode.MOVE)
@@ -381,7 +398,7 @@ class TestExecutionGraphAccessors:
 
     def test_dag_validation_only_checks_structure(self) -> None:
         """DAG validation should only check cycles and connectivity, not schemas."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class OutputSchema(PluginSchema):
@@ -393,8 +410,8 @@ class TestExecutionGraphAccessors:
         graph = ExecutionGraph()
 
         # Add incompatible schemas
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DifferentSchema)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=DifferentSchema)
         graph.add_edge("source", "sink", label="continue")
 
         # OLD behavior: Would raise GraphValidationError for schema mismatch
@@ -403,7 +420,7 @@ class TestExecutionGraphAccessors:
 
     def test_get_effective_producer_schema_returns_direct_schema_for_transform(self) -> None:
         """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class TransformOutput(PluginSchema):
@@ -412,7 +429,7 @@ class TestExecutionGraphAccessors:
         graph = ExecutionGraph()
         graph.add_node(
             "transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="field_mapper",
             output_schema=TransformOutput,
         )
@@ -423,7 +440,7 @@ class TestExecutionGraphAccessors:
 
     def test_validate_edge_schemas_uses_effective_schema_for_gates(self) -> None:
         """validate_edge_compatibility() uses effective producer schema for gate edges."""
-        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -439,9 +456,9 @@ class TestExecutionGraphAccessors:
 
         # Pipeline: source -> gate -> sink
         # Gate has NO schemas (simulates config-driven gate from from_config())
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
-        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # NO SCHEMA
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate:check")  # NO SCHEMA
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
 
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
@@ -459,7 +476,7 @@ class TestExecutionGraphAccessors:
 
     def test_validate_edge_schemas_validates_all_fork_destinations(self) -> None:
         """Fork gates validate all destination edges against effective schema."""
-        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -474,10 +491,10 @@ class TestExecutionGraphAccessors:
             score: float  # Incompatible - requires field not in source
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
-        graph.add_node("gate", node_type="gate", plugin_name="config_gate:fork")  # NO SCHEMA
-        graph.add_node("sink_a", node_type="sink", plugin_name="csv_a", input_schema=SinkA)
-        graph.add_node("sink_b", node_type="sink", plugin_name="csv_b", input_schema=SinkB)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate:fork")  # NO SCHEMA
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv_a", input_schema=SinkA)
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv_b", input_schema=SinkB)
 
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink_a", label="branch_a", mode=RoutingMode.COPY)  # Fork: COPY mode
@@ -1014,12 +1031,12 @@ class TestMultiEdgeSupport:
 
     def test_multiple_edges_same_node_pair(self) -> None:
         """MultiDiGraph allows multiple labeled edges between same nodes."""
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("gate", node_type="gate", plugin_name="fork_gate")
-        graph.add_node("sink", node_type="sink", plugin_name="output")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="output")
 
         # Add two edges with different labels to SAME destination
         graph.add_edge("gate", "sink", label="path_a", mode=RoutingMode.COPY)
@@ -1034,13 +1051,13 @@ class TestMultiEdgeSupport:
 
     def test_multi_edge_graph_is_acyclic(self) -> None:
         """Verify is_acyclic() works correctly with MultiDiGraph parallel edges."""
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="classifier")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="classifier")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         # Multiple parallel edges to same sink - still acyclic
@@ -1059,12 +1076,12 @@ class TestEdgeInfoIntegration:
 
     def test_get_edges_returns_edge_info(self) -> None:
         """get_edges() returns list of EdgeInfo, not tuples."""
-        from elspeth.contracts import EdgeInfo, RoutingMode
+        from elspeth.contracts import EdgeInfo, NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source-1", node_type="source", plugin_name="csv")
-        graph.add_node("sink-1", node_type="sink", plugin_name="csv")
+        graph.add_node("source-1", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("sink-1", node_type=NodeType.SINK, plugin_name="csv")
         graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)
 
         edges = graph.get_edges()
@@ -1078,12 +1095,12 @@ class TestEdgeInfoIntegration:
 
     def test_add_edge_accepts_routing_mode_enum(self) -> None:
         """add_edge() accepts RoutingMode enum, not string."""
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("n1", node_type="transform", plugin_name="test")
-        graph.add_node("n2", node_type="sink", plugin_name="test")
+        graph.add_node("n1", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("n2", node_type=NodeType.SINK, plugin_name="test")
 
         # Should accept enum directly
         graph.add_edge("n1", "n2", label="route", mode=RoutingMode.COPY)
@@ -1162,13 +1179,13 @@ class TestMultiEdgeScenarios:
         This is the core bug scenario: {"high": "alerts", "medium": "alerts", "low": "alerts"}
         With DiGraph, only "low" survives. With MultiDiGraph, all three edges exist.
         """
-        from elspeth.contracts import RoutingMode
+        from elspeth.contracts import NodeType, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="classifier")
-        graph.add_node("alerts", node_type="sink", plugin_name="csv")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="classifier")
+        graph.add_node("alerts", node_type=NodeType.SINK, plugin_name="csv")
 
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         # Multiple severity levels all route to same alerts sink
@@ -1191,7 +1208,7 @@ class TestCoalesceNodes:
     def test_from_config_creates_coalesce_node(self, plugin_manager) -> None:
         """Coalesce config should create a coalesce node in the graph."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
-        from elspeth.contracts import CoalesceName
+        from elspeth.contracts import CoalesceName, NodeType
         from elspeth.core.config import (
             CoalesceSettings,
             ElspethSettings,
@@ -1250,7 +1267,7 @@ class TestCoalesceNodes:
         # Verify node type
         node_id = coalesce_map[CoalesceName("merge_results")]
         node_info = graph.get_node_info(node_id)
-        assert node_info.node_type == "coalesce"
+        assert node_info.node_type == NodeType.COALESCE
         assert node_info.plugin_name == "coalesce:merge_results"
 
     def test_from_config_coalesce_edges_from_fork_branches(self, plugin_manager) -> None:
@@ -1321,6 +1338,146 @@ class TestCoalesceNodes:
         labels = {e.label for e in gate_to_coalesce_edges}
         assert labels == {"path_a", "path_b"}
         assert all(e.mode == RoutingMode.COPY for e in gate_to_coalesce_edges)
+
+    def test_duplicate_fork_branches_rejected_in_config_gate(self, plugin_manager) -> None:
+        """Duplicate branch names in fork_to should be rejected for config gates."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import ElspethSettings, GateSettings, SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_a"],  # Duplicate branch name
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                default_sink=settings.default_sink,
+                coalesce_settings=settings.coalesce,
+            )
+
+    def test_duplicate_fork_branches_rejected_in_plugin_gate(self) -> None:
+        """Duplicate branch names in fork_to should be rejected for plugin gates."""
+        from typing import Any
+
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.plugins.base import BaseGate
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import GateResult, RoutingAction
+
+        class DummySchema(PluginSchema):
+            pass
+
+        class DummySource:
+            name = "dummy_source"
+            output_schema = DummySchema
+            node_id: str | None = None
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0.0"
+            _on_validation_failure = "discard"
+
+            def __init__(self) -> None:
+                self.config = {"schema": {"fields": "dynamic"}}
+
+            def load(self, ctx: PluginContext) -> Any:
+                yield SourceRow.valid({"value": 1})
+
+            def close(self) -> None:
+                pass
+
+            def on_start(self, ctx: PluginContext) -> None:
+                pass
+
+            def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+        class DummySink:
+            input_schema = DummySchema
+            idempotent = True
+            node_id: str | None = None
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0.0"
+
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.config = {"schema": {"fields": "dynamic"}}
+
+            def write(self, rows: Any, ctx: PluginContext) -> ArtifactDescriptor:
+                return ArtifactDescriptor.for_file(path="memory", content_hash="", size_bytes=0)
+
+            def flush(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+            def on_start(self, ctx: PluginContext) -> None:
+                pass
+
+            def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+        class DummyGate(BaseGate):
+            name = "fork_gate"
+            input_schema = DummySchema
+            output_schema = DummySchema
+
+            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                return GateResult(row=row, action=RoutingAction.continue_())
+
+        source = DummySource()
+        sinks = {
+            "output": DummySink("output"),
+            "path_a": DummySink("path_a"),
+        }
+        # Plugin gates must NOT have "fork" as a route target - they use
+        # RoutingAction.fork_to_paths() in evaluate() instead.
+        # Routes here just define non-fork routing options.
+        gate = DummyGate(
+            {
+                "routes": {"default": "continue"},
+                "fork_to": ["path_a", "path_a"],  # Duplicate branch - should be rejected
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
+            ExecutionGraph.from_plugin_instances(
+                source=source,
+                transforms=[gate],
+                sinks=sinks,
+                aggregations={},
+                gates=[],
+                default_sink="output",
+                coalesce_settings=None,
+            )
 
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(
         self,
@@ -1837,9 +1994,17 @@ class TestCoalesceNodes:
 
         # Simulate what orchestrator does (build coalesce_step_map)
         coalesce_step_map: dict[str, int] = {}
-        base_step = len(settings.transforms) + len(settings.gates)
-        for i, cs in enumerate(settings.coalesce):
-            coalesce_step_map[cs.name] = base_step + i
+        branch_steps: dict[str, int] = {}
+        base_step = len(settings.transforms)
+        for gate_idx, gate in enumerate(settings.gates):
+            if gate.fork_to:
+                step = base_step + gate_idx + 1
+                for branch in gate.fork_to:
+                    existing = branch_steps.get(branch)
+                    if existing is None or step > existing:
+                        branch_steps[branch] = step
+        for cs in settings.coalesce:
+            coalesce_step_map[cs.name] = max(branch_steps[branch] for branch in cs.branches)
 
         # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_step_map
         # This is what processor relies on at lines 695-696
@@ -1921,6 +2086,76 @@ class TestCoalesceNodes:
         assert coalesce_to_sink_edges[0].label == "continue"
         assert coalesce_to_sink_edges[0].mode == RoutingMode.MOVE
 
+    def test_coalesce_node_connects_to_next_gate(self, plugin_manager) -> None:
+        """Coalesce node should continue to the next gate when one exists."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName, GateName, RoutingMode
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker1",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+                GateSettings(
+                    name="gate2",
+                    condition="True",
+                    routes={"true": "continue", "false": "continue"},
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
+        gate2_id = graph.get_config_gate_id_map()[GateName("gate2")]
+
+        edges = graph.get_edges()
+        coalesce_to_gate_edges = [e for e in edges if e.from_node == coalesce_id and e.to_node == gate2_id]
+
+        assert len(coalesce_to_gate_edges) == 1
+        assert coalesce_to_gate_edges[0].label == "continue"
+        assert coalesce_to_gate_edges[0].mode == RoutingMode.MOVE
+
     def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
@@ -2000,7 +2235,7 @@ class TestSchemaValidation:
         hasn't been added yet. The old linear validator checked all sinks against
         the "final transform output", missing this incompatibility.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class SourceSchema(PluginSchema):
@@ -2028,33 +2263,33 @@ class TestSchemaValidation:
         # Build pipeline: Source -> Gate -> [routes to raw_sink OR continues to add_score]
         graph.add_node(
             "src",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_name="csv",
             output_schema=SourceSchema,
         )
         graph.add_node(
             "gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name="quality_gate",
             input_schema=SourceSchema,
             output_schema=SourceSchema,  # Gate doesn't modify data
         )
         graph.add_node(
             "add_score",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="add_score_transform",
             input_schema=SourceSchema,
             output_schema=AddScoreSchema,  # Adds 'score' field
         )
         graph.add_node(
             "raw_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_name="csv",
             input_schema=RawSinkSchema,  # Requires 'score' field!
         )
         graph.add_node(
             "processed_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_name="csv",
             input_schema=AddScoreSchema,
         )
@@ -2078,7 +2313,7 @@ class TestSchemaValidation:
         Manual graph construction bypasses config schema limitation that
         doesn't support per-branch transforms.
         """
-        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -2102,13 +2337,13 @@ class TestSchemaValidation:
         graph = ExecutionGraph()
 
         # Build fork/join DAG with INCOMPATIBLE branch schemas
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
-        graph.add_node("fork_gate", node_type="gate", plugin_name="fork_gate")
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
 
         # Branch A: adds score field
         graph.add_node(
             "transform_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="add_score",
             input_schema=SourceOutput,
             output_schema=BranchAOutput,
@@ -2117,7 +2352,7 @@ class TestSchemaValidation:
         # Branch B: adds rank field (incompatible with Branch A)
         graph.add_node(
             "transform_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name="add_rank",
             input_schema=SourceOutput,
             output_schema=BranchBOutput,
@@ -2126,7 +2361,7 @@ class TestSchemaValidation:
         # Coalesce attempts to merge incompatible schemas
         graph.add_node(
             "coalesce",
-            node_type="coalesce",
+            node_type=NodeType.COALESCE,
             plugin_name="coalesce:merge",
             config={
                 "branches": ["branch_a", "branch_b"],
@@ -2135,7 +2370,7 @@ class TestSchemaValidation:
             },
         )
 
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
 
         # Build edges
         graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
@@ -2160,7 +2395,7 @@ class TestSchemaValidation:
         Verifies source→agg validates against input_schema,
         and agg→sink validates against output_schema.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -2172,16 +2407,16 @@ class TestSchemaValidation:
 
         graph = ExecutionGraph()
 
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
         graph.add_node(
             "agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             input_schema=SourceOutput,  # Incoming edge validates against this
             output_schema=AggregationOutput,  # Outgoing edge validates against this
             config={},
         )
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=AggregationOutput)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=AggregationOutput)
 
         graph.add_edge("source", "agg", label="continue")
         graph.add_edge("agg", "sink", label="continue")
@@ -2191,7 +2426,7 @@ class TestSchemaValidation:
 
     def test_aggregation_schema_transition_incompatible_output(self) -> None:
         """Aggregation with incompatible output_schema should fail validation."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -2210,16 +2445,16 @@ class TestSchemaValidation:
 
         graph = ExecutionGraph()
 
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
         graph.add_node(
             "agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             input_schema=SourceOutput,
             output_schema=AggregationOutput,
             config={},
         )
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
 
         graph.add_edge("source", "agg", label="continue")
         graph.add_edge("agg", "sink", label="continue")
@@ -2233,7 +2468,7 @@ class TestSchemaValidation:
 
     def test_schema_validation_error_includes_diagnostic_details(self) -> None:
         """Schema validation errors include field name, producer node, consumer node."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import NodeType, PluginSchema
         from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
@@ -2247,8 +2482,8 @@ class TestSchemaValidation:
 
         graph = ExecutionGraph()
 
-        graph.add_node("my_source", node_type="source", plugin_name="csv_reader", output_schema=SourceOutput)
-        graph.add_node("my_sink", node_type="sink", plugin_name="db_writer", input_schema=SinkInput)
+        graph.add_node("my_source", node_type=NodeType.SOURCE, plugin_name="csv_reader", output_schema=SourceOutput)
+        graph.add_node("my_sink", node_type=NodeType.SINK, plugin_name="db_writer", input_schema=SinkInput)
 
         graph.add_edge("my_source", "my_sink", label="continue")
 
@@ -2275,6 +2510,7 @@ def test_from_plugin_instances_extracts_schemas():
     from pathlib import Path
 
     from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.contracts import NodeType
     from elspeth.core.config import load_settings
     from elspeth.core.dag import ExecutionGraph
 
@@ -2329,7 +2565,7 @@ default_sink: output
         )
 
         # Verify schemas extracted
-        source_nodes = [n for n, d in graph._graph.nodes(data=True) if d["info"].node_type == "source"]
+        source_nodes = [n for n, d in graph._graph.nodes(data=True) if d["info"].node_type == NodeType.SOURCE]
         source_info = graph.get_node_info(source_nodes[0])
         assert source_info.output_schema is not None
 
@@ -2339,6 +2575,7 @@ default_sink: output
 
 def test_validate_aggregation_dual_schema():
     """Verify aggregation edges validate against correct schemas."""
+    from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
@@ -2356,16 +2593,16 @@ def test_validate_aggregation_dual_schema():
     )
 
     graph = ExecutionGraph()
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=InputSchema)
     graph.add_node(
         "agg",
-        node_type="aggregation",
+        node_type=NodeType.AGGREGATION,
         plugin_name="batch_stats",
         input_schema=InputSchema,
         output_schema=OutputSchema,
         config={},
     )
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=OutputSchema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=OutputSchema)
 
     graph.add_edge("source", "agg", label="continue")
     graph.add_edge("agg", "sink", label="continue")
@@ -2376,6 +2613,7 @@ def test_validate_aggregation_dual_schema():
 
 def test_validate_aggregation_detects_incompatibility():
     """Verify validation detects aggregation output mismatch."""
+    from elspeth.contracts import NodeType
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
@@ -2399,16 +2637,16 @@ def test_validate_aggregation_detects_incompatibility():
     )
 
     graph = ExecutionGraph()
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=InputSchema)
     graph.add_node(
         "agg",
-        node_type="aggregation",
+        node_type=NodeType.AGGREGATION,
         plugin_name="batch_stats",
         input_schema=InputSchema,
         output_schema=OutputSchema,
         config={},
     )
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkSchema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkSchema)
 
     graph.add_edge("source", "agg", label="continue")
     graph.add_edge("agg", "sink", label="continue")
@@ -2429,6 +2667,7 @@ class TestDynamicSchemaDetection:
         Manually constructed graph with dynamic output_schema and specific input_schema.
         Validation should be skipped for dynamic schemas.
         """
+        from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
@@ -2448,8 +2687,8 @@ class TestDynamicSchemaDetection:
         )
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=DynamicSchema)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SpecificSchema)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=DynamicSchema)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SpecificSchema)
         graph.add_edge("source", "sink", label="continue")
 
         # Should NOT raise - validation is skipped for dynamic schemas
@@ -2461,6 +2700,7 @@ class TestDynamicSchemaDetection:
         Manually constructed graph with specific output_schema and dynamic input_schema.
         Validation should be skipped for dynamic schemas.
         """
+        from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
@@ -2480,8 +2720,8 @@ class TestDynamicSchemaDetection:
         )
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SpecificSchema)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DynamicSchema)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SpecificSchema)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=DynamicSchema)
         graph.add_edge("source", "sink", label="continue")
 
         # Should NOT raise - validation is skipped for dynamic schemas
@@ -2650,3 +2890,93 @@ class TestDeterministicNodeIDs:
         source_id_2 = next(n for n in graph2._graph.nodes() if n.startswith("source_"))
 
         assert source_id_1 != source_id_2
+
+
+class TestCoalesceGateIndex:
+    """Test coalesce_gate_index exposure from ExecutionGraph."""
+
+    def test_get_coalesce_gate_index_returns_copy(self) -> None:
+        """Getter should return a copy to prevent external mutation."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts.types import CoalesceName
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["branch_a", "branch_b"],
+                ),
+            ],
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_branches",
+                    branches=["branch_a", "branch_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            default_sink="output",
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            coalesce_settings=settings.coalesce,
+            default_sink=settings.default_sink,
+        )
+
+        # Get the index
+        index = graph.get_coalesce_gate_index()
+
+        # Verify it contains expected mapping
+        assert CoalesceName("merge_branches") in index
+        assert isinstance(index[CoalesceName("merge_branches")], int)
+
+        # Verify it's a copy (mutation doesn't affect internal state)
+        original_value = index[CoalesceName("merge_branches")]
+        index[CoalesceName("merge_branches")] = 999
+
+        fresh_index = graph.get_coalesce_gate_index()
+        assert fresh_index[CoalesceName("merge_branches")] == original_value
+
+    def test_get_coalesce_gate_index_empty_when_no_coalesce(self) -> None:
+        """Getter returns empty dict when no coalesce configured."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            default_sink="output",
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            coalesce_settings=settings.coalesce,
+            default_sink=settings.default_sink,
+        )
+
+        index = graph.get_coalesce_gate_index()
+        assert index == {}

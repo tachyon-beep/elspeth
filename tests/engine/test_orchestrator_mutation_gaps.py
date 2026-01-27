@@ -15,8 +15,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import Determinism, RunStatus, SourceRow
-from elspeth.engine.orchestrator import PipelineConfig, RouteValidationError, RunResult
+from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus, SourceRow
+from elspeth.core.landscape import LandscapeDB
+from elspeth.engine.orchestrator import (
+    Orchestrator,
+    PipelineConfig,
+    RouteValidationError,
+    RunResult,
+)
 from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
@@ -28,6 +34,12 @@ from tests.conftest import (
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
     from elspeth.plugins.context import PluginContext
+
+
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Module-scoped database for test performance."""
+    return LandscapeDB.in_memory()
 
 
 # =============================================================================
@@ -206,15 +218,11 @@ class TestRouteValidationEdgeCases:
     """Test route validation handles special cases correctly."""
 
     @pytest.fixture
-    def orchestrator(self) -> Any:
-        """Create orchestrator with in-memory DB."""
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
+    def orchestrator(self, landscape_db: LandscapeDB) -> Orchestrator:
+        """Create orchestrator using module-scoped database."""
+        return Orchestrator(landscape_db)
 
-        db = LandscapeDB.in_memory()
-        return Orchestrator(db)
-
-    def test_continue_destination_is_not_validated_as_sink(self, orchestrator: Any) -> None:
+    def test_continue_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 245: 'continue' destination should skip sink validation."""
         # Route map with 'continue' destination
         route_resolution_map = {
@@ -230,7 +238,7 @@ class TestRouteValidationEdgeCases:
             transforms=[],
         )
 
-    def test_fork_destination_is_not_validated_as_sink(self, orchestrator: Any) -> None:
+    def test_fork_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 249: 'fork' destination should skip sink validation."""
         route_resolution_map = {
             ("gate_1", "split"): "fork",  # Should be skipped
@@ -245,12 +253,23 @@ class TestRouteValidationEdgeCases:
             transforms=[],
         )
 
-    def test_invalid_sink_raises_with_helpful_message(self, orchestrator: Any) -> None:
+    def test_invalid_sink_raises_with_helpful_message(self, orchestrator: Orchestrator) -> None:
         """Lines 255-258: Invalid sink destination raises RouteValidationError."""
+        from elspeth.contracts import GateName, NodeID
+        from elspeth.core.config import GateSettings
+
         route_resolution_map = {
-            ("gate_1", "error_route"): "nonexistent_sink",
+            (NodeID("gate_1"), "error_route"): "nonexistent_sink",
         }
         available_sinks = {"output", "errors"}
+        config_gate_id_map = {GateName("gate_1"): NodeID("gate_1")}
+        config_gates = [
+            GateSettings(
+                name="gate_1",
+                condition="'error_route'",
+                routes={"error_route": "nonexistent_sink"},
+            )
+        ]
 
         with pytest.raises(RouteValidationError) as exc_info:
             orchestrator._validate_route_destinations(
@@ -258,6 +277,8 @@ class TestRouteValidationEdgeCases:
                 available_sinks=available_sinks,
                 transform_id_map={},
                 transforms=[],
+                config_gate_id_map=config_gate_id_map,
+                config_gates=config_gates,
             )
 
         # Verify error message contains helpful information
@@ -282,15 +303,11 @@ class TestTransformErrorSinkValidation:
     """
 
     @pytest.fixture
-    def orchestrator(self) -> Any:
-        """Create orchestrator with in-memory DB."""
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
+    def orchestrator(self, landscape_db: LandscapeDB) -> Orchestrator:
+        """Create orchestrator using module-scoped database."""
+        return Orchestrator(landscape_db)
 
-        db = LandscapeDB.in_memory()
-        return Orchestrator(db)
-
-    def test_transform_with_none_on_error_is_valid(self, orchestrator: Any) -> None:
+    def test_transform_with_none_on_error_is_valid(self, orchestrator: Orchestrator) -> None:
         """Line 290: Transform with on_error=None should pass validation."""
         from elspeth.plugins.base import BaseTransform
 
@@ -315,7 +332,7 @@ class TestTransformErrorSinkValidation:
             _transform_id_map={0: "transform_0"},
         )
 
-    def test_transform_with_discard_on_error_is_valid(self, orchestrator: Any) -> None:
+    def test_transform_with_discard_on_error_is_valid(self, orchestrator: Orchestrator) -> None:
         """Line 294: Transform with on_error='discard' should pass validation."""
         from elspeth.plugins.base import BaseTransform
 
@@ -340,7 +357,7 @@ class TestTransformErrorSinkValidation:
             _transform_id_map={0: "transform_0"},
         )
 
-    def test_transform_with_invalid_on_error_raises(self, orchestrator: Any) -> None:
+    def test_transform_with_invalid_on_error_raises(self, orchestrator: Orchestrator) -> None:
         """Lines 299-302: Invalid on_error sink raises RouteValidationError."""
         from elspeth.plugins.base import BaseTransform
 
@@ -381,15 +398,11 @@ class TestSourceQuarantineValidation:
     """Test source on_validation_failure destination validation."""
 
     @pytest.fixture
-    def orchestrator(self) -> Any:
-        """Create orchestrator with in-memory DB."""
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
+    def orchestrator(self, landscape_db: LandscapeDB) -> Orchestrator:
+        """Create orchestrator using module-scoped database."""
+        return Orchestrator(landscape_db)
 
-        db = LandscapeDB.in_memory()
-        return Orchestrator(db)
-
-    def test_source_with_discard_quarantine_is_valid(self, orchestrator: Any) -> None:
+    def test_source_with_discard_quarantine_is_valid(self, orchestrator: Orchestrator) -> None:
         """Line 337: Source with on_validation_failure='discard' should pass."""
 
         class SourceDiscardInvalid(_TestSourceBase):
@@ -409,7 +422,7 @@ class TestSourceQuarantineValidation:
             available_sinks=available_sinks,
         )
 
-    def test_source_with_invalid_quarantine_raises(self, orchestrator: Any) -> None:
+    def test_source_with_invalid_quarantine_raises(self, orchestrator: Orchestrator) -> None:
         """Lines 344-347: Invalid quarantine sink raises RouteValidationError."""
 
         class SourceBadQuarantine(_TestSourceBase):
@@ -451,7 +464,7 @@ class TestNodeTypeMetadata:
     to verify determinism and plugin_version are recorded correctly.
     """
 
-    def test_config_gate_recorded_as_deterministic(self, plugin_manager) -> None:
+    def test_config_gate_recorded_as_deterministic(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Config gates should be recorded as DETERMINISTIC in audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -461,11 +474,7 @@ class TestNodeTypeMetadata:
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
-        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
 
         # Create settings with a config gate
         settings = ElspethSettings(
@@ -504,12 +513,12 @@ class TestNodeTypeMetadata:
             gates=list(settings.gates),
         )
 
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(landscape_db)
         result = orchestrator.run(config, graph)
         assert result.status == RunStatus.COMPLETED
 
         # P1 Fix: Query audit trail and verify config gate metadata
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         nodes = recorder.get_nodes(result.run_id)
 
         # Find the config gate node
@@ -530,35 +539,32 @@ class TestNodeTypeMetadata:
 class TestCheckpointSequencing:
     """Test checkpoint sequence number is properly incremented."""
 
-    def test_sequence_number_increments_on_checkpoint(self) -> None:
+    def test_sequence_number_increments_on_checkpoint(self, landscape_db: LandscapeDB) -> None:
         """Lines 151-153: sequence_number must increment for each checkpoint.
 
         Uses frequency="aggregation_only" so _maybe_checkpoint increments
         the counter without attempting DB insert (avoids FK constraint on run_id).
         The increment at line 152 happens unconditionally when checkpointing is enabled.
         """
-        from elspeth.contracts import RoutingMode
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
 
-        db = LandscapeDB.in_memory()
-        checkpoint_manager = CheckpointManager(db)
+        checkpoint_manager = CheckpointManager(landscape_db)
         # Use aggregation_only: increments counter but doesn't create checkpoint record
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
 
         orchestrator = Orchestrator(
-            db,
+            landscape_db,
             checkpoint_manager=checkpoint_manager,
             checkpoint_settings=checkpoint_settings,
         )
 
         # Build graph matching the nodes used in _maybe_checkpoint calls
         graph = ExecutionGraph()
-        graph.add_node("source-1", node_type="source", plugin_name="null", config={})
-        graph.add_node("sink-1", node_type="sink", plugin_name="csv", config={})
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source-1", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("sink-1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)
 
         # Set the graph on the orchestrator (normally done in execute())
@@ -570,7 +576,7 @@ class TestCheckpointSequencing:
         # Calling _maybe_checkpoint should increment sequence_number
         # With aggregation_only, it increments but doesn't hit the DB
         orchestrator._maybe_checkpoint(
-            run_id="test-run",
+            run_id="test-run-seq-incr",
             token_id="token-1",
             node_id="sink-1",
         )
@@ -580,31 +586,28 @@ class TestCheckpointSequencing:
 
         # Call again
         orchestrator._maybe_checkpoint(
-            run_id="test-run",
+            run_id="test-run-seq-incr",
             token_id="token-2",
             node_id="sink-1",
         )
 
         assert orchestrator._sequence_number == 2
 
-    def test_sequence_number_not_incremented_when_disabled(self) -> None:
+    def test_sequence_number_not_incremented_when_disabled(self, landscape_db: LandscapeDB) -> None:
         """Lines 147-148: sequence_number should NOT increment when disabled."""
         from elspeth.core.config import CheckpointSettings
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
 
-        db = LandscapeDB.in_memory()
         checkpoint_settings = CheckpointSettings(enabled=False)
 
         orchestrator = Orchestrator(
-            db,
+            landscape_db,
             checkpoint_settings=checkpoint_settings,
         )
 
         assert orchestrator._sequence_number == 0
 
         orchestrator._maybe_checkpoint(
-            run_id="test-run",
+            run_id="test-run-disabled",
             token_id="token-1",
             node_id="sink-1",
         )
@@ -612,18 +615,15 @@ class TestCheckpointSequencing:
         # Should NOT have incremented when checkpointing is disabled
         assert orchestrator._sequence_number == 0
 
-    def test_sequence_number_not_incremented_without_manager(self) -> None:
+    def test_sequence_number_not_incremented_without_manager(self, landscape_db: LandscapeDB) -> None:
         """Lines 149-150: sequence_number should NOT increment without manager."""
         from elspeth.core.config import CheckpointSettings
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.orchestrator import Orchestrator
 
-        db = LandscapeDB.in_memory()
         # No checkpoint_manager provided
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
 
         orchestrator = Orchestrator(
-            db,
+            landscape_db,
             checkpoint_settings=checkpoint_settings,
             # checkpoint_manager deliberately omitted
         )
@@ -631,7 +631,7 @@ class TestCheckpointSequencing:
         assert orchestrator._sequence_number == 0
 
         orchestrator._maybe_checkpoint(
-            run_id="test-run",
+            run_id="test-run-no-manager",
             token_id="token-1",
             node_id="sink-1",
         )

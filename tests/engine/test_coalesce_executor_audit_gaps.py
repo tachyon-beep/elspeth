@@ -254,7 +254,7 @@ class TestCoalesceAuditGap1b:
         executor.accept(token_b, "quorum_merge", step_in_pipeline=2)
 
         # Flush at end-of-source (triggers failure)
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"quorum_merge": 2})
         assert len(flushed) == 1
 
         failure_outcome = flushed[0]
@@ -404,7 +404,7 @@ class TestCoalesceAuditGap2:
         executor.accept(token_c, "merge_all", step_in_pipeline=2)
 
         # End-of-source: flush pending (A will never arrive)
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"merge_all": 2})
         assert len(flushed) == 1
 
         failure_outcome = flushed[0]
@@ -443,3 +443,139 @@ class TestCoalesceAuditGap2:
         assert all(o.outcome == RowOutcome.FAILED for o in child_outcomes), (
             f"All fork children should eventually reach FAILED outcome. Got outcomes: {[o.outcome for o in child_outcomes]}"
         )
+
+
+class TestCoalesceTimeoutAuditGap:
+    """Test that timeout-triggered merges have complete audit trail.
+
+    DESIGN CLARIFICATION: Token outcomes work as follows:
+    - Consumed tokens (branch tokens absorbed by merge): COALESCED (terminal)
+    - Merged token: Gets COMPLETED when reaching sink (not COALESCED)
+
+    The merged token does NOT get COALESCED because:
+    1. Each token can only have ONE terminal outcome (unique constraint)
+    2. In nested coalesces, a merged token becomes a consumed token in outer merge
+    3. Recording COALESCED for merged token would violate unique constraint
+
+    The audit trail is complete because:
+    - Consumed tokens show COALESCED with join_group_id
+    - Merged token will show COMPLETED when it reaches the sink
+    - The link between consumed and merged is through join_group_id
+    """
+
+    def test_timeout_consumed_tokens_have_coalesced_outcome(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Timeout-triggered merges must record COALESCED for consumed tokens.
+
+        This verifies that when a timeout fires and triggers a best_effort merge,
+        all consumed branch tokens (the ones that arrived before timeout) have
+        COALESCED outcomes recorded with proper join_group_id.
+        """
+        import time
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="timeout_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure best_effort coalesce with timeout
+        settings = CoalesceSettings(
+            name="timeout_merge",
+            branches=["path_a", "path_b"],
+            policy="best_effort",  # Merges whatever arrived on timeout
+            merge="union",
+            timeout_seconds=0.01,  # Very short for testing
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create and fork initial token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+        )
+
+        # Only path_a arrives (path_b is "slow")
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+
+        outcome_a = executor.accept(token_a, "timeout_merge", step_in_pipeline=2)
+        assert outcome_a.held is True  # Waiting for path_b
+
+        # Wait for timeout to elapse
+        time.sleep(0.02)
+
+        # Check timeouts - should trigger merge with what arrived
+        timed_out = executor.check_timeouts(
+            coalesce_name="timeout_merge",
+            step_in_pipeline=2,
+        )
+
+        # Verify timeout triggered
+        assert len(timed_out) == 1
+        timeout_outcome = timed_out[0]
+        assert timeout_outcome.merged_token is not None
+        merged_token = timeout_outcome.merged_token
+
+        # Verify consumed tokens in the outcome
+        assert len(timeout_outcome.consumed_tokens) == 1
+        assert timeout_outcome.consumed_tokens[0].token_id == token_a.token_id
+
+        # CRITICAL: The consumed token (path_a) must have COALESCED outcome
+        # This is recorded by _execute_merge() for each consumed token
+        consumed_outcome = recorder.get_token_outcome(token_a.token_id)
+        assert consumed_outcome is not None, (
+            f"Consumed token {token_a.token_id} has NO token_outcome! _execute_merge should record COALESCED for all consumed tokens."
+        )
+        assert consumed_outcome.outcome == RowOutcome.COALESCED, (
+            f"Consumed token should have outcome=COALESCED, got {consumed_outcome.outcome}"
+        )
+        assert consumed_outcome.join_group_id is not None, "Consumed token COALESCED outcome must have join_group_id"
+
+        # Verify join_group_id links consumed to merged
+        assert consumed_outcome.join_group_id == merged_token.join_group_id, (
+            f"Consumed token's join_group_id ({consumed_outcome.join_group_id}) "
+            f"should match merged token's join_group_id ({merged_token.join_group_id})"
+        )
+
+        # Merged token has NO outcome yet - it will get COMPLETED when reaching sink
+        # This is correct behavior: merged token's outcome is recorded by orchestrator
+        # when it reaches the sink, not here in check_timeouts

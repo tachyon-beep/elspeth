@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
@@ -24,7 +24,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -72,7 +72,7 @@ class TestOrchestrator:
             output_schema = OutputSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -112,9 +112,9 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
-        assert run_result.status == "completed"
+        assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 3
         assert len(sink.results) == 3
         assert sink.results[0] == {"value": 1, "doubled": 2}
@@ -186,9 +186,9 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
-        assert run_result.status == "completed"
+        assert run_result.status == RunStatus.COMPLETED
         # value=10 and value=30 go to default, value=100 goes to high
         assert len(default_sink.results) == 2
         assert len(high_sink.results) == 1
@@ -233,7 +233,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1})
@@ -244,7 +244,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2})
@@ -280,9 +280,9 @@ class TestOrchestratorMultipleTransforms:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
-        assert run_result.status == "completed"
+        assert run_result.status == RunStatus.COMPLETED
         assert len(sink.results) == 1
         # (5 + 1) * 2 = 12
         assert sink.results[0]["value"] == 12
@@ -349,9 +349,9 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
-        assert run_result.status == "completed"
+        assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 1
         assert len(sink.results) == 1
         assert sink.results[0] == {"value": 99}
@@ -388,7 +388,7 @@ class TestOrchestratorEmptyPipeline:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -423,9 +423,9 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
-        assert run_result.status == "completed"
+        assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 0
         assert len(sink.results) == 0
 
@@ -481,6 +481,7 @@ class TestOrchestratorAcceptsGraph:
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         mock_source.node_id = None  # Explicit initialization - orchestrator should set this
+        mock_source._on_validation_failure = "discard"  # Required by SourceProtocol
         schema_mock = MagicMock()
 
         schema_mock.model_json_schema.return_value = {"type": "object"}
@@ -531,8 +532,9 @@ class TestOrchestratorAcceptsGraph:
 
         # Build a simple graph
         graph = ExecutionGraph()
-        graph.add_node("source_1", node_type="source", plugin_name="csv")
-        graph.add_node("sink_1", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source_1", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source_1", "sink_1", label="continue", mode=RoutingMode.MOVE)
 
         orchestrator = Orchestrator(db)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -30,8 +31,8 @@ class TestRecoveryProtocol:
     def mock_graph(self) -> ExecutionGraph:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test")
-        graph.add_node("node-agg", node_type="aggregation", plugin_name="test")
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test")
+        graph.add_node("node-agg", node_type=NodeType.AGGREGATION, plugin_name="test")
         return graph
 
     @pytest.fixture
@@ -57,7 +58,7 @@ class TestRecoveryProtocol:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -65,9 +66,9 @@ class TestRecoveryProtocol:
                     node_id="node-001",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=now,
@@ -107,7 +108,7 @@ class TestRecoveryProtocol:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="completed",
+                    status=RunStatus.COMPLETED,
                 )
             )
             conn.commit()
@@ -129,7 +130,7 @@ class TestRecoveryProtocol:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.commit()
@@ -151,7 +152,7 @@ class TestRecoveryProtocol:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.commit()
@@ -246,7 +247,7 @@ class TestRecoveryProtocol:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -254,9 +255,9 @@ class TestRecoveryProtocol:
                     node_id="node-agg",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="aggregation",
+                    node_type=NodeType.AGGREGATION,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=now,
@@ -329,7 +330,7 @@ class TestGetUnprocessedRows:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -337,9 +338,9 @@ class TestGetUnprocessedRows:
                     node_id="node-unproc",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=now,
@@ -517,7 +518,7 @@ class TestGetUnprocessedRowsForkScenarios:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             # Create node
@@ -526,9 +527,9 @@ class TestGetUnprocessedRowsForkScenarios:
                     node_id="gate-fork",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="gate",
+                    node_type=NodeType.GATE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=now,
@@ -622,7 +623,7 @@ class TestGetUnprocessedRowsFailureScenarios:
                     config_hash="abc",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -630,9 +631,9 @@ class TestGetUnprocessedRowsFailureScenarios:
                     node_id="transform-1",
                     run_id=run_id,
                     plugin_name="test",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=now,

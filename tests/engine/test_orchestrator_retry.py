@@ -18,7 +18,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -72,7 +72,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 attempt_count["count"] += 1
@@ -129,8 +129,8 @@ class TestOrchestratorRetry:
             sinks={"default": as_sink(sink)},
         )
 
-        # Use build_test_graph to create graph matching PipelineConfig
-        graph = build_test_graph(config)
+        # Use production graph path for test reliability
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
         result = orchestrator.run(config, graph=graph, settings=settings)
@@ -185,7 +185,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise ConnectionError("Persistent failure")
@@ -237,8 +237,8 @@ class TestOrchestratorRetry:
             sinks={"default": as_sink(sink)},
         )
 
-        # Use build_test_graph to create graph matching PipelineConfig
-        graph = build_test_graph(config)
+        # Use production graph path for test reliability
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
         result = orchestrator.run(config, graph=graph, settings=settings)

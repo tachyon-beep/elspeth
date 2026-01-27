@@ -18,7 +18,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy import select
 
-from elspeth.contracts import PluginSchema, TokenInfo, TransformResult
+from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
@@ -120,7 +120,7 @@ class TestRetryAuditTrail:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name=plugin_name,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,
@@ -184,7 +184,7 @@ class TestRetryAuditTrail:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,
@@ -284,7 +284,7 @@ class TestRetryAuditTrail:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,
@@ -387,7 +387,7 @@ class TestRetryAuditTrail:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,

@@ -165,12 +165,21 @@ def explain(
         calls.extend(state_calls)
 
     # Get parent tokens
+    # TIER 1 TRUST: token_parents is audit data - crash on any anomaly
     parent_tokens: list[Token] = []
     parents = recorder.get_token_parents(token_id)
     for parent in parents:
         parent_token = recorder.get_token(parent.parent_token_id)
-        if parent_token is not None:
-            parent_tokens.append(parent_token)
+        if parent_token is None:
+            # This indicates audit DB corruption - a token_parents record
+            # references a parent that doesn't exist. This should be impossible
+            # with FK constraints enabled, but we crash as defense-in-depth.
+            raise ValueError(
+                f"Audit integrity violation: parent token '{parent.parent_token_id}' "
+                f"not found for token '{token_id}'. The token_parents table references "
+                f"a non-existent parent. This indicates database corruption."
+            )
+        parent_tokens.append(parent_token)
 
     # Get validation errors for this row (by hash)
     validation_errors = recorder.get_validation_errors_for_row(run_id, source_row.source_data_hash)

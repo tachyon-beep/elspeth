@@ -1,7 +1,9 @@
 """Tests for explain command TUI integration."""
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.tui.screens.explain_screen import (
+    InvalidStateTransitionError,
     LoadedState,
     LoadingFailedState,
     UninitializedState,
@@ -64,7 +66,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -72,7 +74,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -105,7 +107,7 @@ class TestExplainScreen:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -150,7 +152,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -158,7 +160,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -307,3 +309,352 @@ class TestExplainScreenStateModel:
         # Should preserve db for retry
         assert screen.state.db is db
         assert screen.state.run_id == "retry-test-run"
+
+
+class TestExplainScreenStateTransitions:
+    """Tests for state transition methods: load(), retry(), clear()."""
+
+    # =========================================================================
+    # load() transitions
+    # =========================================================================
+
+    def test_load_from_uninitialized_succeeds(self) -> None:
+        """load() from UninitializedState → LoadedState on success."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        # Start with uninitialized screen
+        screen = ExplainScreen()
+        assert isinstance(screen.state, UninitializedState)
+
+        # Create test data
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # load() should transition to LoadedState
+        screen.load(db, run.run_id)
+
+        assert isinstance(screen.state, LoadedState)
+        assert screen.state.run_id == run.run_id
+        assert screen.state.db is db
+
+    def test_load_from_uninitialized_fails_gracefully(self) -> None:
+        """load() from UninitializedState → LoadingFailedState on db error."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        screen = ExplainScreen()
+        db = LandscapeDB.in_memory()
+
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Network timeout"),
+        ):
+            screen.load(db, "test-run-id")
+
+        assert isinstance(screen.state, LoadingFailedState)
+        assert screen.state.error is not None
+        assert "Network timeout" in screen.state.error
+
+    def test_load_from_loaded_state_raises(self) -> None:
+        """load() from LoadedState raises InvalidStateTransitionError."""
+        import pytest
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Start in LoadedState
+        screen = ExplainScreen(db=db, run_id=run.run_id)
+        assert isinstance(screen.state, LoadedState)
+
+        # Attempting load() should raise
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
+            screen.load(db, "another-run-id")
+
+        assert exc_info.value.method == "load"
+        assert exc_info.value.current_state == "LoadedState"
+        assert "UninitializedState" in exc_info.value.allowed_states
+
+    def test_load_from_loading_failed_raises(self) -> None:
+        """load() from LoadingFailedState raises InvalidStateTransitionError."""
+        from unittest.mock import patch
+
+        import pytest
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+
+        # Get into LoadingFailedState
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Error"),
+        ):
+            screen = ExplainScreen(db=db, run_id="test-run")
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        # Attempting load() should raise (use retry() instead)
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
+            screen.load(db, "another-run")
+
+        assert exc_info.value.method == "load"
+        assert exc_info.value.current_state == "LoadingFailedState"
+
+    # =========================================================================
+    # retry() transitions
+    # =========================================================================
+
+    def test_retry_from_loading_failed_succeeds(self) -> None:
+        """retry() from LoadingFailedState → LoadedState when error is fixed."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # First attempt fails
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Temporary error"),
+        ):
+            screen = ExplainScreen(db=db, run_id=run.run_id)
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        # retry() should now succeed (patch removed, real get_nodes works)
+        screen.retry()
+
+        assert isinstance(screen.state, LoadedState)
+        assert screen.state.run_id == run.run_id
+
+    def test_retry_from_loading_failed_still_fails(self) -> None:
+        """retry() from LoadingFailedState → LoadingFailedState on persistent error."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+
+        # Get into LoadingFailedState
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("First error"),
+        ):
+            screen = ExplainScreen(db=db, run_id="test-run")
+
+        assert isinstance(screen.state, LoadingFailedState)
+        first_error = screen.state.error
+
+        # retry() with different error
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Second error"),
+        ):
+            screen.retry()
+
+        assert isinstance(screen.state, LoadingFailedState)
+        assert screen.state.error is not None
+        assert "Second error" in screen.state.error
+        assert screen.state.error != first_error
+
+    def test_retry_from_uninitialized_raises(self) -> None:
+        """retry() from UninitializedState raises InvalidStateTransitionError."""
+        import pytest
+
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        screen = ExplainScreen()
+        assert isinstance(screen.state, UninitializedState)
+
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
+            screen.retry()
+
+        assert exc_info.value.method == "retry"
+        assert exc_info.value.current_state == "UninitializedState"
+        assert "LoadingFailedState" in exc_info.value.allowed_states
+
+    def test_retry_from_loaded_raises(self) -> None:
+        """retry() from LoadedState raises InvalidStateTransitionError."""
+        import pytest
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        screen = ExplainScreen(db=db, run_id=run.run_id)
+        assert isinstance(screen.state, LoadedState)
+
+        with pytest.raises(InvalidStateTransitionError) as exc_info:
+            screen.retry()
+
+        assert exc_info.value.method == "retry"
+        assert exc_info.value.current_state == "LoadedState"
+
+    # =========================================================================
+    # clear() transitions
+    # =========================================================================
+
+    def test_clear_from_loaded_state(self) -> None:
+        """clear() from LoadedState → UninitializedState."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        screen = ExplainScreen(db=db, run_id=run.run_id)
+        assert isinstance(screen.state, LoadedState)
+
+        screen.clear()
+
+        assert isinstance(screen.state, UninitializedState)
+
+    def test_clear_from_loading_failed_state(self) -> None:
+        """clear() from LoadingFailedState → UninitializedState."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Error"),
+        ):
+            screen = ExplainScreen(db=db, run_id="test-run")
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        screen.clear()
+
+        assert isinstance(screen.state, UninitializedState)
+
+    def test_clear_from_uninitialized_is_idempotent(self) -> None:
+        """clear() from UninitializedState → UninitializedState (no-op)."""
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        screen = ExplainScreen()
+        assert isinstance(screen.state, UninitializedState)
+
+        screen.clear()
+
+        assert isinstance(screen.state, UninitializedState)
+
+    def test_clear_resets_selection_and_detail_panel(self) -> None:
+        """clear() resets selected node and detail panel state."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_node",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        screen = ExplainScreen(db=db, run_id=run.run_id)
+        screen.on_tree_select(node.node_id)
+
+        # Verify selection exists
+        assert screen.get_detail_panel_state() is not None
+
+        screen.clear()
+
+        # Selection should be cleared
+        assert screen.get_detail_panel_state() is None
+
+    # =========================================================================
+    # Transition sequences
+    # =========================================================================
+
+    def test_clear_then_load_different_data(self) -> None:
+        """clear() → load() allows loading different data."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Create two runs
+        run1 = recorder.begin_run(config={"name": "run1"}, canonical_version="v1")
+        run2 = recorder.begin_run(config={"name": "run2"}, canonical_version="v1")
+
+        # Load first run
+        screen = ExplainScreen(db=db, run_id=run1.run_id)
+        assert isinstance(screen.state, LoadedState)
+        assert screen.state.run_id == run1.run_id
+
+        # Clear and load second run
+        screen.clear()
+        screen.load(db, run2.run_id)
+
+        assert isinstance(screen.state, LoadedState)
+        assert screen.state.run_id == run2.run_id
+
+    def test_retry_then_clear_then_load(self) -> None:
+        """Complex transition: retry (fail) → clear → load (success)."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Start with failure
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Error"),
+        ):
+            screen = ExplainScreen(db=db, run_id=run.run_id)
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        # Retry still fails
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Still broken"),
+        ):
+            screen.retry()
+
+        assert isinstance(screen.state, LoadingFailedState)
+
+        # User gives up and clears
+        screen.clear()
+        assert isinstance(screen.state, UninitializedState)
+
+        # Try loading fresh (now works)
+        screen.load(db, run.run_id)
+        assert isinstance(screen.state, LoadedState)

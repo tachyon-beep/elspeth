@@ -7,7 +7,7 @@ Verifies all integration audit fixes (Tasks 1-7) work together end-to-end.
 
 import pytest
 
-from elspeth.contracts import EdgeInfo, ExecutionError, RoutingMode
+from elspeth.contracts import EdgeInfo, ExecutionError, NodeType, RoutingMode, RunStatus
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -61,8 +61,9 @@ class TestIntegrationAuditFixes:
         - Task 3: RoutingMode enum alignment
         """
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="csv")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("src", "sink", label="continue", mode=RoutingMode.MOVE)
 
         edges = graph.get_edges()
@@ -139,10 +140,11 @@ class TestIntegrationAuditFixes:
         Verifies Task 3: RoutingMode enum alignment.
         """
         graph = ExecutionGraph()
-        graph.add_node("src", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="filter")
-        graph.add_node("sink1", node_type="sink", plugin_name="csv")
-        graph.add_node("sink2", node_type="sink", plugin_name="json")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="filter", config=schema_config)
+        graph.add_node("sink1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_node("sink2", node_type=NodeType.SINK, plugin_name="json", config=schema_config)
 
         # Add edges with different routing modes
         graph.add_edge("src", "gate", label="continue", mode=RoutingMode.MOVE)
@@ -228,7 +230,7 @@ class TestIntegrationAuditFixes:
         assert ctx.run_id == run.run_id
 
         # Complete the run
-        completed = recorder.complete_run(run.run_id, "completed")
+        completed = recorder.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
 
         # Cleanup

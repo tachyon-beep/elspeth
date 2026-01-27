@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from elspeth.contracts import Determinism
+from elspeth.contracts import Determinism, NodeType
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.core.checkpoint import CheckpointManager
@@ -79,10 +79,11 @@ class TestResumeEdgeIDs:
     def gate_graph(self) -> ExecutionGraph:
         """Create a graph with a gate routing to multiple sinks."""
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test_source")
-        graph.add_node("gate", node_type="gate", plugin_name="simple_gate")
-        graph.add_node("sink_a", node_type="sink", plugin_name="csv")
-        graph.add_node("sink_b", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="simple_gate", config=schema_config)
+        graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_node("sink_b", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
 
         # Add edges: source -> gate -> sinks
         graph.add_edge("source", "gate", label="continue")
@@ -106,9 +107,9 @@ class TestResumeEdgeIDs:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -121,9 +122,9 @@ class TestResumeEdgeIDs:
                     node_id="gate",
                     run_id=run_id,
                     plugin_name="simple_gate",
-                    node_type="gate",
+                    node_type=NodeType.GATE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -137,9 +138,9 @@ class TestResumeEdgeIDs:
                         node_id=sink_name,
                         run_id=run_id,
                         plugin_name="csv",
-                        node_type="sink",
+                        node_type=NodeType.SINK,
                         plugin_version="1.0",
-                        determinism="io_write",
+                        determinism=Determinism.IO_WRITE,
                         config_hash="test",
                         config_json="{}",
                         registered_at=now,

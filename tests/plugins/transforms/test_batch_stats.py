@@ -123,8 +123,13 @@ class TestBatchStatsHappyPath:
         assert result.row["mean"] is None
         assert result.row["batch_empty"] is True
 
-    def test_skips_non_numeric_values(self, ctx: PluginContext) -> None:
-        """BatchStats skips non-numeric values gracefully."""
+    def test_non_numeric_values_raise_type_error(self, ctx: PluginContext) -> None:
+        """BatchStats raises TypeError on non-numeric values (no coercion).
+
+        Per CLAUDE.md Tier 2 trust model: transforms receive pipeline data that
+        should already be type-validated. Wrong types indicate upstream bugs
+        and must raise TypeError, not be silently skipped.
+        """
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -136,18 +141,12 @@ class TestBatchStatsHappyPath:
 
         rows: list[dict[str, Any]] = [
             {"id": 1, "amount": 10.0},
-            {"id": 2, "amount": "not_a_number"},  # Skip this
+            {"id": 2, "amount": "not_a_number"},  # This must raise, not skip
             {"id": 3, "amount": 30.0},
         ]
 
-        result = transform.process(rows, ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["count"] == 2  # Only 2 numeric values
-        assert result.row["sum"] == 40.0
-        assert result.row["mean"] == 20.0
-        assert result.row["batch_size"] == 3  # Total rows including non-numeric
+        with pytest.raises(TypeError, match="must be numeric"):
+            transform.process(rows, ctx)
 
 
 class TestBatchStatsOutputSchema:

@@ -20,6 +20,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import NodeStateCompleted, TransformResult
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -117,7 +118,7 @@ def node_id(recorder: LandscapeRecorder, run_id: str) -> str:
     node = recorder.register_node(
         run_id=run_id,
         plugin_name="azure_llm",
-        node_type="transform",
+        node_type=NodeType.TRANSFORM,
         plugin_version="1.0",
         config={},
         schema_config=schema,
@@ -502,7 +503,7 @@ class TestBatchTransformTimeoutEviction:
         node = recorder.register_node(
             run_id=run_id,
             plugin_name="mock_batch_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,

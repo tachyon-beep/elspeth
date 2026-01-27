@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeType, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -22,7 +22,7 @@ class TestLandscapeRecorderQueryMethods:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -60,7 +60,7 @@ class TestLandscapeRecorderQueryMethods:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -98,7 +98,7 @@ class TestLandscapeRecorderQueryMethods:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -140,7 +140,7 @@ class TestLandscapeRecorderQueryMethods:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="gate",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -148,7 +148,7 @@ class TestLandscapeRecorderQueryMethods:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -199,7 +199,7 @@ class TestLandscapeRecorderQueryMethods:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

@@ -10,6 +10,7 @@ from datetime import UTC
 
 from sqlalchemy import select
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.lineage import explain
@@ -40,7 +41,7 @@ class TestValidationErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -90,7 +91,7 @@ class TestValidationErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -139,7 +140,7 @@ class TestTransformErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -172,7 +173,7 @@ class TestTransformErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="price_calculator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -223,7 +224,7 @@ class TestTransformErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -256,7 +257,7 @@ class TestTransformErrorPersistence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -305,7 +306,7 @@ class TestErrorEventExplainQuery:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={"path": "data.csv"},
             sequence=0,
@@ -363,7 +364,7 @@ class TestErrorEventExplainQuery:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             sequence=0,
@@ -373,7 +374,7 @@ class TestErrorEventExplainQuery:
         transform_node = recorder.register_node(
             run_id=run_id,
             plugin_name="divide_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             sequence=1,
@@ -431,7 +432,7 @@ class TestErrorEventExplainQuery:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             sequence=0,
@@ -470,7 +471,7 @@ class TestErrorEventExplainQuery:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             sequence=0,
@@ -480,7 +481,7 @@ class TestErrorEventExplainQuery:
         transform1 = recorder.register_node(
             run_id=run_id,
             plugin_name="transform1",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             sequence=1,
@@ -490,7 +491,7 @@ class TestErrorEventExplainQuery:
         transform2 = recorder.register_node(
             run_id=run_id,
             plugin_name="transform2",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             sequence=2,

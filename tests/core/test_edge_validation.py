@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import PluginSchema
+from elspeth.contracts import NodeType, PluginSchema
 from elspeth.core.dag import ExecutionGraph
 from tests.conftest import as_sink, as_source
 
@@ -33,10 +33,10 @@ def test_edge_validation_detects_missing_fields() -> None:
     graph = ExecutionGraph()
 
     # Add source with ProducerSchema
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
 
     # Add sink requiring ConsumerSchema (has 'email' field)
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
 
     # Wire them together (add_edge does NOT validate)
     graph.add_edge("source", "sink", label="continue")
@@ -55,8 +55,8 @@ def test_edge_validation_allows_dynamic_schemas() -> None:
     dynamic_schema = _create_dynamic_schema("DynamicSchema")
 
     # Dynamic producer → strict consumer: OK
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=dynamic_schema)
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=dynamic_schema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
     graph.add_edge("source", "sink", label="continue")  # Should succeed
 
     # Should not raise
@@ -64,8 +64,8 @@ def test_edge_validation_allows_dynamic_schemas() -> None:
 
     # Strict producer → dynamic consumer: OK
     graph2 = ExecutionGraph()
-    graph2.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
-    graph2.add_node("sink", node_type="sink", plugin_name="csv", input_schema=dynamic_schema)
+    graph2.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
+    graph2.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=dynamic_schema)
     graph2.add_edge("source", "sink", label="continue")  # Should succeed
 
     # Should not raise
@@ -77,10 +77,10 @@ def test_gate_passthrough_validation() -> None:
     graph = ExecutionGraph()
 
     # Source produces ProducerSchema
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
 
     # Gate claims to pass through but has DIFFERENT output schema
-    graph.add_node("gate", node_type="gate", plugin_name="threshold", input_schema=ProducerSchema, output_schema=ConsumerSchema)
+    graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold", input_schema=ProducerSchema, output_schema=ConsumerSchema)
 
     # Wire them (add_edge does NOT validate)
     graph.add_edge("source", "gate", label="continue")
@@ -95,22 +95,26 @@ def test_coalesce_branch_compatibility() -> None:
     graph = ExecutionGraph()
 
     # Source forks to two paths
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
 
     # Path 1: Transform to Schema A
     class SchemaA(PluginSchema):
         value: int
 
-    graph.add_node("transform1", node_type="transform", plugin_name="field_mapper", input_schema=ProducerSchema, output_schema=SchemaA)
+    graph.add_node(
+        "transform1", node_type=NodeType.TRANSFORM, plugin_name="field_mapper", input_schema=ProducerSchema, output_schema=SchemaA
+    )
 
     # Path 2: Transform to Schema B (INCOMPATIBLE!)
     class SchemaB(PluginSchema):
         different: str
 
-    graph.add_node("transform2", node_type="transform", plugin_name="field_mapper", input_schema=ProducerSchema, output_schema=SchemaB)
+    graph.add_node(
+        "transform2", node_type=NodeType.TRANSFORM, plugin_name="field_mapper", input_schema=ProducerSchema, output_schema=SchemaB
+    )
 
     # Coalesce node
-    graph.add_node("coalesce", node_type="coalesce", plugin_name="merge", input_schema=SchemaA)  # Expects SchemaA from both branches
+    graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="merge", input_schema=SchemaA)  # Expects SchemaA from both branches
 
     # Wire up
     graph.add_edge("source", "transform1", label="fork_path_1")
@@ -128,13 +132,15 @@ def test_gate_walk_through_for_effective_schema() -> None:
     graph = ExecutionGraph()
 
     # Source produces ProducerSchema
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
 
     # Gate has NO schema (config-driven gate)
-    graph.add_node("gate", node_type="gate", plugin_name="config_gate", input_schema=None, output_schema=None)  # Inherits from upstream!
+    graph.add_node(
+        "gate", node_type=NodeType.GATE, plugin_name="config_gate", input_schema=None, output_schema=None
+    )  # Inherits from upstream!
 
     # Sink requires ConsumerSchema
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
 
     # Wire: source → gate → sink
     graph.add_edge("source", "gate", label="continue")
@@ -151,10 +157,10 @@ def test_chained_gates() -> None:
     graph = ExecutionGraph()
 
     # Source → Gate1 → Gate2 → Sink
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
-    graph.add_node("gate1", node_type="gate", plugin_name="config_gate", input_schema=None, output_schema=None)
-    graph.add_node("gate2", node_type="gate", plugin_name="config_gate", input_schema=None, output_schema=None)
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("gate1", node_type=NodeType.GATE, plugin_name="config_gate", input_schema=None, output_schema=None)
+    graph.add_node("gate2", node_type=NodeType.GATE, plugin_name="config_gate", input_schema=None, output_schema=None)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
 
     graph.add_edge("source", "gate1", label="continue")
     graph.add_edge("gate1", "gate2", label="continue")
@@ -170,10 +176,10 @@ def test_none_schema_handling() -> None:
     graph = ExecutionGraph()
 
     # Source with None schema (dynamic)
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=None)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=None)
 
     # Sink with strict schema
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
 
     graph.add_edge("source", "sink", label="continue")
 
@@ -231,9 +237,9 @@ def test_aggregation_dual_schema_both_edges_validated() -> None:
         average: float  # Required, not in agg output!
 
     graph = ExecutionGraph()
-    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
-    graph.add_node("agg", node_type="aggregation", plugin_name="stats", input_schema=AggInput, output_schema=AggOutput)
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+    graph.add_node("agg", node_type=NodeType.AGGREGATION, plugin_name="stats", input_schema=AggInput, output_schema=AggOutput)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
 
     graph.add_edge("source", "agg", label="continue")
     graph.add_edge("agg", "sink", label="continue")
@@ -247,8 +253,8 @@ def test_orphaned_config_gate_crashes_with_diagnostic() -> None:
     """Config gate with no incoming edges is a graph construction bug - should crash with clear error."""
 
     graph = ExecutionGraph()
-    graph.add_node("gate", node_type="gate", plugin_name="config_gate", input_schema=None, output_schema=None)  # Config gate
-    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+    graph.add_node("gate", node_type=NodeType.GATE, plugin_name="config_gate", input_schema=None, output_schema=None)  # Config gate
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerSchema)
 
     # Accidentally wired gate→sink without source→gate
     graph.add_edge("gate", "sink", label="continue")
@@ -262,8 +268,8 @@ def test_schema_mismatch_error_includes_field_name_and_nodes() -> None:
     """Error messages must be actionable - include field names and node IDs."""
 
     graph = ExecutionGraph()
-    graph.add_node("csv_reader", node_type="source", plugin_name="csv", output_schema=ProducerSchema)  # Has: id, name
-    graph.add_node("db_writer", node_type="sink", plugin_name="database", input_schema=ConsumerSchema)  # Needs: id, name, email
+    graph.add_node("csv_reader", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerSchema)  # Has: id, name
+    graph.add_node("db_writer", node_type=NodeType.SINK, plugin_name="database", input_schema=ConsumerSchema)  # Needs: id, name, email
 
     graph.add_edge("csv_reader", "db_writer", label="continue")
 

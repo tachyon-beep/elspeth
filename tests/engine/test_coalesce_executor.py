@@ -701,7 +701,7 @@ class TestCoalesceExecutorQuorum:
         assert outcome_b.held is True  # Still waiting (need 3)
 
         # End-of-source: flush pending coalesces
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"quorum_merge": 2})
 
         # Verify failure outcome returned
         assert len(flushed) == 1
@@ -738,7 +738,11 @@ class TestCoalesceExecutorQuorum:
             coalesce_state = coalesce_states[0]
 
             # Verify node state indicates failure
-            assert coalesce_state.status == "failed", f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+            from elspeth.contracts import NodeStateStatus as _NodeStateStatus
+
+            assert coalesce_state.status == _NodeStateStatus.FAILED, (
+                f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+            )
 
             # Verify error_json explains the failure (type narrow to NodeStateFailed)
             from elspeth.contracts import NodeStateFailed
@@ -1335,7 +1339,7 @@ class TestFlushPending:
         assert outcome2.held is True  # Still waiting for path_c
 
         # Call flush_pending at end-of-source
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"best_effort_merge": 2})
 
         # Should have merged whatever arrived
         assert len(flushed) == 1
@@ -1416,7 +1420,7 @@ class TestFlushPending:
         assert outcome.held is True
 
         # Call flush_pending
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"quorum_merge": 2})
 
         # Should return failure outcome (quorum not met)
         assert len(flushed) == 1
@@ -1495,7 +1499,7 @@ class TestFlushPending:
         assert outcome.held is True
 
         # Call flush_pending
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"require_all_merge": 2})
 
         # require_all never does partial merge - returns failure
         assert len(flushed) == 1
@@ -1604,7 +1608,7 @@ class TestFlushPending:
         assert outcome2.merged_token is not None
 
         # Call flush_pending - should return empty (nothing pending)
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"quorum_merge": 2})
         assert len(flushed) == 0
 
     def test_flush_pending_empty_when_no_pending(
@@ -1627,5 +1631,5 @@ class TestFlushPending:
         )
 
         # No coalesces registered, nothing pending
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={})
         assert len(flushed) == 0

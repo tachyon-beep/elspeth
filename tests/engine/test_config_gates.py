@@ -7,13 +7,14 @@ They are processed AFTER plugin transforms but BEFORE sinks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, PluginSchema, SourceRow
 from elspeth.core.config import GateSettings
+from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import (
     _TestSinkBase,
@@ -21,10 +22,17 @@ from tests.conftest import (
     as_sink,
     as_source,
 )
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
-if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
-    from elspeth.engine.orchestrator import PipelineConfig
+# =============================================================================
+# Module-Scoped Database Fixture
+# =============================================================================
+
+
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Module-scoped in-memory LandscapeDB for config gate tests."""
+    return LandscapeDB.in_memory()
 
 
 # =============================================================================
@@ -189,94 +197,17 @@ def verify_audit_trail(
         assert len(artifacts) > 0 or sum(expected_terminal_outcomes.values()) == 0, "Should have artifacts for sink writes"
 
 
-def _build_test_graph_with_config_gates(
-    config: PipelineConfig,
-) -> ExecutionGraph:
-    """Build a test graph including config gates.
-
-    Creates a linear graph matching the PipelineConfig structure:
-    source -> transforms... -> config_gates... -> sinks
-    """
-    from elspeth.core.dag import ExecutionGraph
-
-    graph = ExecutionGraph()
-
-    # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
-
-    # Add transforms
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        graph.add_node(
-            node_id,
-            node_type="transform",
-            plugin_name=t.name,
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks first (needed for config gate edges)
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
-
-    # Add config gates
-    config_gate_ids: dict[str, str] = {}
-    route_resolution_map: dict[tuple[str, str], str] = {}
-
-    for gate_config in config.gates:
-        node_id = f"config_gate_{gate_config.name}"
-        config_gate_ids[gate_config.name] = node_id
-        graph.add_node(
-            node_id,
-            node_type="gate",
-            plugin_name=f"config_gate:{gate_config.name}",
-            config={
-                "condition": gate_config.condition,
-                "routes": dict(gate_config.routes),
-            },
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-
-        # Add route edges and resolution map
-        for route_label, target in gate_config.routes.items():
-            route_resolution_map[(node_id, route_label)] = target
-            if target not in ("continue", "fork") and target in sink_ids:
-                graph.add_edge(node_id, sink_ids[target], label=route_label, mode=RoutingMode.MOVE)
-
-        prev = node_id
-
-    # Edge to output sink
-    output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
-    graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal maps with proper types
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-    graph._default_sink = output_sink
-
-    return graph
-
-
 class TestConfigGateIntegration:
     """Integration tests for config-driven gates."""
 
-    def test_config_gate_continue(self) -> None:
+    def test_config_gate_continue(self, landscape_db: LandscapeDB) -> None:
         """Config gate with 'continue' destination passes rows through.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource([{"value": 10}, {"value": 20}])
         sink = CollectSink()
@@ -296,7 +227,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 2
@@ -312,15 +243,14 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"completed": 2},
         )
 
-    def test_config_gate_routes_to_sink(self) -> None:
+    def test_config_gate_routes_to_sink(self, landscape_db: LandscapeDB) -> None:
         """Config gate routes rows to different sinks based on condition.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Rows: 10 (low), 100 (high), 30 (low)
         source = ListSource([{"value": 10}, {"value": 100}, {"value": 30}])
@@ -345,7 +275,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -394,7 +324,7 @@ class TestConfigGateIntegration:
             true_events = [e for e in routing_events if e[1] == "true"]
             assert len(true_events) == 1, "Should have exactly 1 'true' routing event"
 
-    def test_config_gate_with_string_result(self, plugin_manager) -> None:
+    def test_config_gate_with_string_result(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Config gate condition can return a string route label.
 
         This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
@@ -410,10 +340,9 @@ class TestConfigGateIntegration:
             GateSettings as GateSettingsConfig,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource(
             [{"category": "A"}, {"category": "B"}, {"category": "A"}],
@@ -489,7 +418,7 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"routed": 3},
         )
 
-    def test_config_gate_integer_route_label(self, plugin_manager) -> None:
+    def test_config_gate_integer_route_label(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Config gate condition can return an integer that maps to route labels.
 
         When an expression returns an integer (e.g., row['priority'] returns 1, 2, 3),
@@ -509,10 +438,9 @@ class TestConfigGateIntegration:
             GateSettings as GateSettingsConfig,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # 3 rows with priorities 1, 2, 1 -> expect 2 go to priority_1, 1 goes to priority_2
         source = ListSource(
@@ -598,15 +526,14 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"routed": 3},
         )
 
-    def test_config_gate_node_registered_in_landscape(self) -> None:
+    def test_config_gate_node_registered_in_landscape(self, landscape_db: LandscapeDB) -> None:
         """Config gates are registered as nodes in Landscape.
 
         P1 Fix: Added comprehensive audit trail verification beyond node registration.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = ListSource([{"value": 42}])
         sink = CollectSink()
@@ -625,7 +552,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape for registered nodes
         with db.engine.connect() as conn:
@@ -816,15 +743,14 @@ class TestConfigGateFromSettings:
 class TestMultipleConfigGates:
     """Tests for multiple config gates in sequence."""
 
-    def test_multiple_config_gates_processed_in_order(self) -> None:
+    def test_multiple_config_gates_processed_in_order(self, landscape_db: LandscapeDB) -> None:
         """Multiple config gates are processed in definition order.
 
         P1 Fix: Added audit trail verification for both gates in sequence.
         """
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Row: value=25 should pass gate1 (>10) but fail gate2 (>50)
         source = ListSource([{"value": 25}])
@@ -855,7 +781,7 @@ class TestMultipleConfigGates:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph_with_config_gates(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         # Row passes gate1, routes to mid via gate2

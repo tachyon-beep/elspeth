@@ -7,8 +7,7 @@ pipeline configuration by checking topological compatibility.
 import structlog
 
 from elspeth.contracts import Checkpoint, ResumeCheck
-from elspeth.core.canonical import compute_upstream_topology_hash as compute_hash
-from elspeth.core.canonical import stable_hash
+from elspeth.core.canonical import compute_full_topology_hash, stable_hash
 from elspeth.core.dag import ExecutionGraph
 
 
@@ -21,11 +20,15 @@ class CheckpointCompatibilityValidator:
     A checkpoint is compatible if:
     1. Checkpoint node exists in current graph
     2. Checkpoint node config hasn't changed
-    3. Upstream topology (nodes + edges) is unchanged
+    3. FULL topology (ALL nodes + edges) is unchanged
 
-    Changes DOWNSTREAM of the checkpoint are allowed (e.g., adding transforms
-    after checkpoint, changing sink config) because they don't affect
-    already-processed rows.
+    BUG-COMPAT-01 FIX: Changed from upstream-only to full DAG validation.
+    In multi-sink DAGs, upstream-only validation allowed changes to sibling
+    branches (other sink paths) to go undetected, causing a single run to
+    contain outputs produced under different pipeline configurations.
+
+    Now ANY topology change (including downstream or sibling branches)
+    invalidates the checkpoint, enforcing: one run_id = one configuration.
     """
 
     def __init__(self) -> None:
@@ -73,8 +76,10 @@ class CheckpointCompatibilityValidator:
                 f"Current: {current_config_hash[:8]}...)",
             )
 
-        # Validation 3: Upstream topology (nodes + edges) must be unchanged
-        current_topology_hash = self.compute_upstream_topology_hash(current_graph, checkpoint.node_id)
+        # Validation 3: FULL topology (ALL nodes + edges) must be unchanged
+        # BUG-COMPAT-01 fix: Validate entire DAG, not just upstream of checkpoint.
+        # This catches changes to sibling branches in multi-sink DAGs.
+        current_topology_hash = self.compute_full_topology_hash(current_graph)
 
         if checkpoint.upstream_topology_hash != current_topology_hash:
             # Provide detailed diagnostic
@@ -96,13 +101,15 @@ class CheckpointCompatibilityValidator:
             "Re-run from beginning to create fresh checkpoint.",
         )
 
-    def compute_upstream_topology_hash(
+    def compute_full_topology_hash(
         self,
         graph: ExecutionGraph,
-        node_id: str,
     ) -> str:
-        """Delegate to canonical.compute_upstream_topology_hash()."""
-        return compute_hash(graph, node_id)
+        """Delegate to canonical.compute_full_topology_hash().
+
+        BUG-COMPAT-01: Changed from upstream-only to full DAG hashing.
+        """
+        return compute_full_topology_hash(graph)
 
     def _create_topology_mismatch_error(
         self,
@@ -126,7 +133,8 @@ class CheckpointCompatibilityValidator:
         # For now, provide hash comparison for audit trail
         return ResumeCheck(
             can_resume=False,
-            reason=f"Pipeline structure changed upstream of checkpoint node '{checkpoint.node_id}'. "
-            f"Resuming would skip transforms or produce inconsistent results. "
+            reason=f"Pipeline configuration changed since checkpoint was created. "
+            f"Resuming would produce outputs under a different configuration, "
+            f"violating audit integrity (one run_id must map to one configuration). "
             f"(Expected topology hash: {expected_hash[:8]}..., Actual: {actual_hash[:8]}...)",
         )

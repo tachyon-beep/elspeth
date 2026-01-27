@@ -12,9 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import pytest
-
-from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -56,7 +54,7 @@ class _PassthroughTransform(BaseTransform):
     output_schema = _InputSchema
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
@@ -73,7 +71,7 @@ class _EnrichingTransform(BaseTransform):
     output_schema = _OutputSchema
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
@@ -88,9 +86,10 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     Creates: source -> transforms... -> sinks
     """
     graph = ExecutionGraph()
+    schema_config = {"schema": {"fields": "dynamic"}}
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
 
     # Add transforms
     transform_ids: dict[int, NodeID] = {}
@@ -98,7 +97,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for i, t in enumerate(config.transforms):
         node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
-        graph.add_node(node_id, node_type="transform", plugin_name=t.name)
+        graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name=t.name, config=schema_config)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
@@ -107,7 +106,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = NodeID(f"sink_{sink_name}")
         sink_ids[SinkName(sink_name)] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
+        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
 
     # Connect last transform to default sink
     if SinkName("default") in sink_ids:
@@ -244,14 +243,83 @@ class TestLineageCompleteness:
 class TestLineageAfterRetention:
     """Tests for lineage availability after payload retention."""
 
-    @pytest.mark.skip(reason="Payload retention not yet implemented")
     def test_lineage_available_after_payload_purge(self, tmp_path: Path) -> None:
         """Lineage hashes remain after payload data is purged.
 
         ELSPETH design: Hashes survive payload deletion - integrity is
         always verifiable even after payloads are purged for storage reasons.
         """
-        pass
+        from datetime import UTC, datetime, timedelta
+
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.row_data import RowDataState
+        from elspeth.core.payload_store import FilesystemPayloadStore
+        from elspeth.core.retention.purge import PurgeManager
+        from elspeth.engine.artifacts import ArtifactDescriptor
+
+        db = LandscapeDB(f"sqlite:///{tmp_path}/lineage.db")
+        payload_store = FilesystemPayloadStore(tmp_path / "payloads")
+
+        class TestSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = _InputSchema
+
+            def load(self, ctx: Any) -> Any:
+                yield SourceRow.valid({"id": "row_1", "value": 100})
+
+            def close(self) -> None:
+                pass
+
+        class TestSink(_TestSinkBase):
+            name = "collect_sink"
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        source = TestSource()
+        sink = TestSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[_PassthroughTransform()],  # type: ignore[list-item]
+            sinks={"default": as_sink(sink)},
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=_build_linear_graph(config), payload_store=payload_store)
+
+        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        rows = recorder.get_rows(result.run_id)
+        assert rows, "Expected at least one row recorded"
+        row = rows[0]
+        assert row.source_data_ref is not None
+        assert row.source_data_hash is not None
+
+        # Ensure payload exists before purge
+        assert payload_store.exists(row.source_data_ref)
+        before = recorder.get_row_data(row.row_id)
+        assert before.state == RowDataState.AVAILABLE
+
+        # Purge payloads (treat run as expired)
+        purge_manager = PurgeManager(db, payload_store)
+        as_of = datetime.now(UTC) + timedelta(minutes=1)
+        refs = purge_manager.find_expired_payload_refs(retention_days=0, as_of=as_of)
+        assert row.source_data_ref in refs
+        purge_manager.purge_payloads(refs)
+
+        # Payload should now be purged, but hash remains
+        after = recorder.get_row_data(row.row_id)
+        assert after.state == RowDataState.PURGED
+        lineage = recorder.explain_row(result.run_id, row.row_id)
+        assert lineage is not None
+        assert lineage.source_data_hash == row.source_data_hash
+        assert lineage.payload_available is False
+        assert lineage.source_data is None
+
+        db.close()
 
 
 class TestExplainQueryFunctionality:

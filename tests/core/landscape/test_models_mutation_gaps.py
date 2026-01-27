@@ -20,32 +20,32 @@ from datetime import UTC, datetime
 import pytest
 
 from elspeth.contracts import (
-    BatchStatus,
-    Determinism,
-    ExportStatus,
-    NodeStateStatus,
-    NodeType,
-    RoutingMode,
-    RunStatus,
-)
-from elspeth.core.landscape.models import (
     Artifact,
     Batch,
     BatchMember,
     BatchOutput,
+    BatchStatus,
     Call,
+    CallStatus,
+    CallType,
     Checkpoint,
+    Determinism,
     Edge,
+    ExportStatus,
     Node,
     NodeState,
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
     NodeStatePending,
+    NodeStateStatus,
+    NodeType,
     RoutingEvent,
+    RoutingMode,
     Row,
     RowLineage,
     Run,
+    RunStatus,
     Token,
     TokenParent,
 )
@@ -586,8 +586,8 @@ class TestCallDataclass:
             call_id="call-001",
             state_id="state-001",
             call_index=0,
-            call_type="http",
-            status="success",
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
             request_hash="req123",
             created_at=datetime.now(UTC),
         )
@@ -599,8 +599,8 @@ class TestCallDataclass:
                 call_id="call-001",
                 state_id="state-001",
                 call_index=0,
-                call_type="http",
-                status="success",
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
                 request_hash="req123",
                 # created_at missing
             )
@@ -671,7 +671,7 @@ class TestRoutingEventDataclass:
             edge_id="edge-001",
             routing_group_id="rg-001",
             ordinal=0,
-            mode="move",
+            mode=RoutingMode.MOVE,
             created_at=datetime.now(UTC),
         )
 
@@ -684,7 +684,7 @@ class TestRoutingEventDataclass:
                 edge_id="edge-001",
                 routing_group_id="rg-001",
                 ordinal=0,
-                mode="move",
+                mode=RoutingMode.MOVE,
                 # created_at missing
             )
 
@@ -837,7 +837,10 @@ class TestRowLineageDataclass:
         lineage = RowLineage(
             row_id="row-001",
             run_id="run-001",
-            source_hash="hash123",
+            source_node_id="source-001",
+            row_index=0,
+            source_data_hash="hash123",
+            created_at=datetime.now(UTC),
             source_data={"field": "value"},
             payload_available=True,
         )
@@ -849,7 +852,10 @@ class TestRowLineageDataclass:
         lineage = RowLineage(
             row_id="row-001",
             run_id="run-001",
-            source_hash="hash123",
+            source_node_id="source-001",
+            row_index=0,
+            source_data_hash="hash123",
+            created_at=datetime.now(UTC),
             source_data=None,
             payload_available=False,
         )

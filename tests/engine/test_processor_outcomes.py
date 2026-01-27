@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, RowOutcome
+from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 
@@ -21,13 +21,12 @@ class TestProcessorRecordsOutcomes:
     """Test that processor records outcomes at determination points."""
 
     @pytest.fixture
-    def setup_pipeline(self):
+    def setup_pipeline(self, landscape_db):
         """Set up minimal pipeline for testing outcome recording."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        return db, recorder
+        recorder = LandscapeRecorder(landscape_db)
+        return landscape_db, recorder
 
     def test_outcome_api_works_directly(self, setup_pipeline) -> None:
         """Verify the record_token_outcome API works as expected."""
@@ -90,14 +89,13 @@ class TestAllOutcomeTypesRecorded:
             (RowOutcome.EXPANDED, {"expand_group_id": "expand_123"}),
         ],
     )
-    def test_outcome_type_can_be_recorded(self, outcome: RowOutcome, kwargs: dict[str, Any]) -> None:
+    def test_outcome_type_can_be_recorded(self, landscape_db, outcome: RowOutcome, kwargs: dict[str, Any]) -> None:
         """Each outcome type (non-batch) should be recordable with appropriate context."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -144,14 +142,13 @@ class TestAllOutcomeTypesRecorded:
             RowOutcome.BUFFERED,
         ],
     )
-    def test_batch_outcome_type_can_be_recorded(self, outcome: RowOutcome) -> None:
+    def test_batch_outcome_type_can_be_recorded(self, landscape_db, outcome: RowOutcome) -> None:
         """Batch-related outcomes require a real batch (FK constraint)."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -194,7 +191,7 @@ class TestAllOutcomeTypesRecorded:
 class TestTerminalUniquenessConstraint:
     """Test the partial unique index enforces exactly one terminal outcome per token."""
 
-    def test_only_one_terminal_outcome_per_token(self) -> None:
+    def test_only_one_terminal_outcome_per_token(self, landscape_db) -> None:
         """Partial unique index enforces exactly one terminal outcome.
 
         The token_outcomes table has a partial unique index on token_id
@@ -207,10 +204,9 @@ class TestTerminalUniquenessConstraint:
 
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -233,7 +229,7 @@ class TestTerminalUniquenessConstraint:
         with pytest.raises(IntegrityError):
             recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.ROUTED, sink_name="err")
 
-    def test_multiple_buffered_outcomes_allowed(self) -> None:
+    def test_multiple_buffered_outcomes_allowed(self, landscape_db) -> None:
         """Multiple BUFFERED (non-terminal) outcomes are allowed.
 
         BUFFERED is non-terminal, so the partial unique index doesn't apply.
@@ -241,10 +237,9 @@ class TestTerminalUniquenessConstraint:
         """
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -292,15 +287,14 @@ class TestTerminalUniquenessConstraint:
 class TestExplainShowsRecordedOutcome:
     """Test end-to-end flow: record outcome -> explain() includes it."""
 
-    def test_explain_shows_recorded_outcome(self) -> None:
+    def test_explain_shows_recorded_outcome(self, landscape_db) -> None:
         """Full flow: record outcome -> explain() includes it."""
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -326,15 +320,14 @@ class TestExplainShowsRecordedOutcome:
         assert lineage.outcome.sink_name == "errors"
         assert lineage.outcome.is_terminal is True
 
-    def test_explain_shows_outcome_context_fields(self) -> None:
+    def test_explain_shows_outcome_context_fields(self, landscape_db) -> None:
         """Explain returns all outcome-specific context fields."""
         from elspeth.contracts import Determinism, NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -366,15 +359,14 @@ class TestExplainShowsRecordedOutcome:
         assert lineage.outcome.error_hash == "err_abc123"
         assert lineage.outcome.is_terminal is True
 
-    def test_explain_returns_none_outcome_when_not_recorded(self) -> None:
+    def test_explain_returns_none_outcome_when_not_recorded(self, landscape_db) -> None:
         """Explain returns None for outcome when none recorded."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.lineage import explain
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
@@ -404,7 +396,7 @@ class TestEngineIntegrationOutcomes:
     RowProcessor path to verify outcomes are recorded correctly end-to-end.
     """
 
-    def test_processor_records_completed_outcome_with_context(self) -> None:
+    def test_processor_records_completed_outcome_with_context(self, landscape_db) -> None:
         """RowProcessor should record COMPLETED outcome with correct context."""
         from typing import Any, ClassVar
 
@@ -412,7 +404,7 @@ class TestEngineIntegrationOutcomes:
 
         from elspeth.contracts import PluginSchema, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.base import BaseTransform
@@ -422,14 +414,13 @@ class TestEngineIntegrationOutcomes:
         class _TestSchema(PluginSchema):
             model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -437,7 +428,7 @@ class TestEngineIntegrationOutcomes:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -449,7 +440,7 @@ class TestEngineIntegrationOutcomes:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -481,7 +472,7 @@ class TestEngineIntegrationOutcomes:
         states = recorder.get_node_states_for_token(result.token_id)
         assert len(states) == 1, "Should have node_state for the transform"
         state = states[0]
-        assert state.status.value == "completed", "Transform should complete successfully"
+        assert state.status == RunStatus.COMPLETED, "Transform should complete successfully"
         assert state.input_hash is not None, "Input hash should be recorded"
         assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
@@ -491,7 +482,7 @@ class TestEngineIntegrationOutcomes:
 
         from pydantic import ConfigDict
 
-        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts import NodeType, PluginSchema, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
@@ -510,7 +501,7 @@ class TestEngineIntegrationOutcomes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -518,7 +509,7 @@ class TestEngineIntegrationOutcomes:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -531,7 +522,7 @@ class TestEngineIntegrationOutcomes:
             _on_error = "discard"  # Quarantine on error
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -568,7 +559,7 @@ class TestEngineIntegrationOutcomes:
 
     def test_processor_records_forked_outcome_with_fork_group_id(self) -> None:
         """RowProcessor should record FORKED outcome with fork_group_id and parent lineage."""
-        from elspeth.contracts import RoutingMode, RowOutcome
+        from elspeth.contracts import NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -583,7 +574,7 @@ class TestEngineIntegrationOutcomes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -591,7 +582,7 @@ class TestEngineIntegrationOutcomes:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -599,7 +590,7 @@ class TestEngineIntegrationOutcomes:
         path_a = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -607,7 +598,7 @@ class TestEngineIntegrationOutcomes:
         path_b = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),

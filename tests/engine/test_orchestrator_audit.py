@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeID, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, RoutingMode, RunStatus, SinkName, SourceRow
 from elspeth.contracts.audit import NodeStateCompleted
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -22,7 +22,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -67,7 +67,7 @@ class TestOrchestratorAuditTrail:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -102,10 +102,9 @@ class TestOrchestratorAuditTrail:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify audit trail
-        from elspeth.contracts import RunStatus
         from elspeth.core.canonical import stable_hash
 
         recorder = LandscapeRecorder(db)
@@ -141,7 +140,7 @@ class TestOrchestratorAuditTrail:
             # All node states should have input_hash (proves we captured input)
             assert state.input_hash is not None, f"Node state {state.state_id} missing input_hash"
             # Successful states should have output_hash - narrow the type first
-            if state.status == "completed":
+            if state.status == NodeStateStatus.COMPLETED:
                 assert isinstance(state, NodeStateCompleted)
                 assert state.output_hash is not None, f"Completed node state {state.state_id} missing output_hash"
 
@@ -292,7 +291,7 @@ class TestOrchestratorLandscapeExport:
         result = orchestrator.run(pipeline, graph=graph, settings=settings)
 
         # Run should complete
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
         assert result.rows_processed == 1
 
         # Export sink should have received audit records
@@ -422,7 +421,7 @@ class TestOrchestratorLandscapeExport:
         with patch.dict(os.environ, {"ELSPETH_SIGNING_KEY": "test-signing-key-12345"}):
             result = orchestrator.run(pipeline, graph=graph, settings=settings)
 
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
         assert len(export_sink.captured_rows) > 0
 
         # All records should have signatures when signing enabled
@@ -660,7 +659,7 @@ class TestOrchestratorLandscapeExport:
         orchestrator = Orchestrator(db)
         result = orchestrator.run(pipeline, graph=graph, settings=settings)
 
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
         # Output sink should have the row
         assert len(output_sink.captured_rows) == 1
         # Audit sink should be empty (no export)
@@ -708,7 +707,7 @@ class TestOrchestratorConfigRecording:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -751,7 +750,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify config was recorded
         recorder = LandscapeRecorder(db)
@@ -826,7 +825,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify empty config was recorded
         recorder = LandscapeRecorder(db)
@@ -890,7 +889,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -927,9 +926,10 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="versioned_source")
-        graph.add_node("transform", node_type="transform", plugin_name="versioned_transform")
-        graph.add_node("sink", node_type="sink", plugin_name="versioned_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="versioned_source", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="versioned_transform", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="versioned_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -1005,7 +1005,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL  # Explicit nondeterministic
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -1042,9 +1042,10 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="test_source")
-        graph.add_node("transform", node_type="transform", plugin_name="nondeterministic_transform")
-        graph.add_node("sink", node_type="sink", plugin_name="test_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="nondeterministic_transform", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -1062,6 +1063,6 @@ class TestNodeMetadataFromPlugin:
         transform_node = next(n for n in nodes if n.plugin_name == "nondeterministic_transform")
 
         # Verify determinism is recorded correctly
-        assert transform_node.determinism == "external_call", (
-            f"Transform determinism should be 'nondeterministic', got '{transform_node.determinism}'"
+        assert transform_node.determinism == Determinism.EXTERNAL_CALL, (
+            f"Transform determinism should be 'external_call', got '{transform_node.determinism}'"
         )

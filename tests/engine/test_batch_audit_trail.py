@@ -28,7 +28,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
-from elspeth.contracts.enums import CallStatus, CallType, NodeStateStatus
+from elspeth.contracts.enums import CallStatus, CallType, NodeStateStatus, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -68,7 +68,7 @@ def create_test_environment(
     node = recorder.register_node(
         run_id=run_id,
         plugin_name=plugin_name,
-        node_type="transform",
+        node_type=NodeType.TRANSFORM,
         plugin_version="1.0",
         config={},
         schema_config=schema,
@@ -313,7 +313,8 @@ class TestAuditTrailErrorPath:
 
         with patch("openai.AzureOpenAI") as mock_azure_class:
             mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = Exception("API rate limit exceeded")
+            # Non-retryable error to exercise error-path handling
+            mock_client.chat.completions.create.side_effect = Exception("content policy violation")
             mock_azure_class.return_value = mock_client
 
             transform = AzureLLMTransform(

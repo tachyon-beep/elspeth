@@ -16,7 +16,7 @@ from pydantic import Field, model_validator
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
-from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
+from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -287,6 +287,9 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             llm_client = self._get_llm_client(ctx.state_id)
 
             # 4. Call LLM (EXTERNAL - wrap)
+            # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
+            # to let the engine's RetryManager handle them. Non-retryable errors
+            # (ContentPolicyError, ContextLengthError) return TransformResult.error().
             try:
                 response = llm_client.chat_completion(
                     model=self._model,
@@ -294,15 +297,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                     temperature=self._temperature,
                     max_tokens=self._max_tokens,
                 )
-            except RateLimitError as e:
-                return TransformResult.error(
-                    {"reason": "rate_limited", "error": str(e)},
-                    retryable=True,
-                )
             except LLMClientError as e:
+                if e.retryable:
+                    # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
+                    raise
+                # Non-retryable error - return error result
                 return TransformResult.error(
                     {"reason": "llm_call_failed", "error": str(e)},
-                    retryable=e.retryable,
+                    retryable=False,
                 )
 
             # 5. Build output row (OUR CODE - let exceptions crash)

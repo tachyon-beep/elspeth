@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
@@ -123,7 +124,7 @@ class TestSchemaNotNullConstraints:
                     config_hash="test_hash",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
 
@@ -133,9 +134,9 @@ class TestSchemaNotNullConstraints:
                     node_id="test_node",
                     run_id="test_run",
                     plugin_name="test_plugin",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test_hash",
                     config_json="{}",
                     registered_at=now,

@@ -7,17 +7,19 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
-import hashlib
-import json
 import os
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
+
+if TYPE_CHECKING:
+    from elspeth.contracts.sink import OutputValidationResult
 from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 from elspeth.contracts.url import SanitizedDatabaseUrl
+from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext
@@ -120,6 +122,69 @@ class DatabaseSink(BaseSink):
         self._metadata: MetaData | None = None
         self._table_replaced: bool = False  # Track if we've done the replace for this instance
 
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing database table columns against configured schema.
+
+        Checks that:
+        - Strict mode: Table columns match schema fields exactly (set comparison)
+        - Free mode: All schema fields present as columns (extras allowed)
+        - Dynamic mode: No validation (schema adapts to existing columns)
+
+        Note: Unlike CSV, column order is not validated for databases.
+
+        Returns:
+            OutputValidationResult indicating compatibility.
+        """
+        from sqlalchemy import inspect
+
+        from elspeth.contracts.sink import OutputValidationResult
+
+        # Ensure engine exists for inspection
+        if self._engine is None:
+            self._engine = create_engine(self._url)
+
+        inspector = inspect(self._engine)
+        if not inspector.has_table(self._table_name):
+            return OutputValidationResult.success()  # Will create table
+
+        # Get existing columns
+        columns = inspector.get_columns(self._table_name)
+        existing = [col["name"] for col in columns]
+
+        # Dynamic schema = no validation needed
+        if self._schema_config.is_dynamic:
+            return OutputValidationResult.success(target_fields=existing)
+
+        # Get expected fields from schema (guaranteed non-None when not dynamic)
+        fields = self._schema_config.fields
+        if fields is None:
+            return OutputValidationResult.success(target_fields=existing)
+        expected = [f.name for f in fields]
+        existing_set, expected_set = set(existing), set(expected)
+
+        if self._schema_config.mode == "strict":
+            # Strict: exact column match (set comparison, no order)
+            if existing_set != expected_set:
+                return OutputValidationResult.failure(
+                    message="Table columns do not match schema (strict mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(expected_set - existing_set),
+                    extra_fields=sorted(existing_set - expected_set),
+                )
+        else:  # mode == "free"
+            # Free: schema fields must exist as columns (extras allowed)
+            missing = expected_set - existing_set
+            if missing:
+                return OutputValidationResult.failure(
+                    message="Table missing required schema columns (free mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(missing),
+                )
+
+        return OutputValidationResult.success(target_fields=existing)
+
     def _ensure_table(self, row: dict[str, Any]) -> None:
         """Create table, handling if_exists behavior.
 
@@ -213,10 +278,12 @@ class DatabaseSink(BaseSink):
                 This indicates a bug in an upstream transform.
         """
         # Compute canonical JSON payload BEFORE any database operation
-        payload_json = json.dumps(rows, sort_keys=True, separators=(",", ":"))
-        payload_bytes = payload_json.encode("utf-8")
-        content_hash = hashlib.sha256(payload_bytes).hexdigest()
-        payload_size = len(payload_bytes)
+        # Uses RFC 8785 canonical JSON for deterministic hashing:
+        # - Normalizes pandas/numpy types to JSON primitives
+        # - Rejects NaN/Infinity (invalid JSON per RFC 8785)
+        # - Deterministic unicode escaping
+        content_hash = stable_hash(rows)
+        payload_size = len(canonical_json(rows).encode("utf-8"))
 
         if not rows:
             # Empty batch - return descriptor without DB operations

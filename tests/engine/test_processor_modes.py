@@ -12,6 +12,7 @@ Extracted from test_processor.py to improve test organization.
 
 from typing import Any
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
@@ -42,7 +43,7 @@ class TestProcessorPassthroughMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -61,7 +62,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -69,7 +70,7 @@ class TestProcessorPassthroughMode:
         enricher_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="passthrough_enricher",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -165,7 +166,7 @@ class TestProcessorPassthroughMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -181,7 +182,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -189,7 +190,7 @@ class TestProcessorPassthroughMode:
         bad_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="bad_passthrough",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -248,7 +249,7 @@ class TestProcessorPassthroughMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -267,7 +268,7 @@ class TestProcessorPassthroughMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -280,7 +281,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -288,7 +289,7 @@ class TestProcessorPassthroughMode:
         enricher_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -296,7 +297,7 @@ class TestProcessorPassthroughMode:
         double_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="double",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -379,7 +380,7 @@ class TestProcessorTransformMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -403,7 +404,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -411,7 +412,7 @@ class TestProcessorTransformMode:
         splitter_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -507,7 +508,7 @@ class TestProcessorTransformMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -524,7 +525,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -532,7 +533,7 @@ class TestProcessorTransformMode:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="aggregator",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -609,7 +610,7 @@ class TestProcessorTransformMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -633,7 +634,7 @@ class TestProcessorTransformMode:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -646,7 +647,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -654,7 +655,7 @@ class TestProcessorTransformMode:
         splitter_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -662,7 +663,7 @@ class TestProcessorTransformMode:
         doubler_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="doubler",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

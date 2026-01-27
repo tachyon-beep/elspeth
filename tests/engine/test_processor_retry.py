@@ -10,10 +10,9 @@ Test plugins inherit from base classes (BaseTransform) because the processor
 uses isinstance() for type-safe plugin detection.
 """
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeType, RoutingMode
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -23,11 +22,14 @@ from elspeth.plugins.results import (
 )
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
+if TYPE_CHECKING:
+    from elspeth.core.landscape import LandscapeDB
+
 
 class TestRowProcessorWorkQueue:
     """Work queue tests for fork child execution."""
 
-    def test_work_queue_iteration_guard_prevents_infinite_loop(self, monkeypatch: Any) -> None:
+    def test_work_queue_iteration_guard_prevents_infinite_loop(self, monkeypatch: Any, landscape_db: "LandscapeDB") -> None:
         """Work queue should fail if iterations exceed limit.
 
         This test verifies that the iteration guard protects against bugs that
@@ -37,18 +39,17 @@ class TestRowProcessorWorkQueue:
 
         import elspeth.engine.processor as proc_module
         from elspeth.contracts import TokenInfo
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor, _WorkItem
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -95,22 +96,21 @@ class TestRowProcessorWorkQueue:
         finally:
             proc_module.MAX_WORK_QUEUE_ITERATIONS = original_max
 
-    def test_fork_children_are_executed_through_work_queue(self) -> None:
+    def test_fork_children_are_executed_through_work_queue(self, landscape_db: "LandscapeDB") -> None:
         """Fork child tokens should be processed, not orphaned."""
         from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register nodes (transform before gate since config gates run after transforms)
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -118,7 +118,7 @@ class TestRowProcessorWorkQueue:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -126,7 +126,7 @@ class TestRowProcessorWorkQueue:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -155,7 +155,7 @@ class TestRowProcessorWorkQueue:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -302,10 +302,12 @@ class TestRowProcessorRetry:
         assert result.status == "success"
 
     def test_no_retry_when_retry_manager_is_none(self) -> None:
-        """Without retry_manager, exceptions propagate immediately."""
-        from unittest.mock import Mock
+        """Without retry_manager, retryable exceptions become error results (not propagated).
 
-        import pytest
+        This keeps failures row-scoped instead of aborting the entire run.
+        The error result can still be routed to an error sink via on_error config.
+        """
+        from unittest.mock import Mock
 
         from elspeth.engine.processor import RowProcessor
 
@@ -318,38 +320,125 @@ class TestRowProcessorRetry:
         )
 
         processor._transform_executor = Mock()
-        processor._transform_executor.execute_transform.side_effect = ConnectionError("fail")
+        processor._transform_executor.execute_transform.side_effect = ConnectionError("network fail")
 
         transform = Mock()
         transform.node_id = "t1"
+        transform._on_error = "error_sink"  # Configure error routing
         token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
         ctx = Mock(run_id="test-run")
 
-        with pytest.raises(ConnectionError):
-            processor._execute_transform_with_retry(transform, token, ctx, step=0)
+        # Should NOT raise - converts to error result to keep failure row-scoped
+        result, _, error_sink = processor._execute_transform_with_retry(transform, token, ctx, step=0)
 
         # Should only be called once (no retry)
         assert processor._transform_executor.execute_transform.call_count == 1
 
-    def test_max_retries_exceeded_returns_failed_outcome(self) -> None:
+        # Error result returned instead of exception propagated
+        assert result.status == "error"
+        assert result.retryable is True
+        assert "network fail" in result.reason["error"]
+        assert result.reason["reason"] == "transient_error_no_retry"
+
+        # Error sink from transform config is returned for routing
+        assert error_sink == "error_sink"
+
+    def test_llm_retryable_error_without_retry_manager_becomes_error_result(self) -> None:
+        """Retryable LLMClientError becomes error result when retry_manager is None.
+
+        This addresses P2 review comment: LLM transforms re-raise retryable errors
+        expecting RetryManager to catch them. When retry_manager is None, the
+        processor must catch these and convert to error results to avoid aborting
+        the entire run.
+        """
+        from unittest.mock import Mock
+
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        processor = RowProcessor(
+            recorder=Mock(),
+            span_factory=Mock(),
+            run_id="test-run",
+            source_node_id=NodeID("source"),
+            retry_manager=None,  # No retry configured
+        )
+
+        processor._transform_executor = Mock()
+        # Simulate retryable LLM error (rate limit, network, server error)
+        llm_error = LLMClientError("Rate limit exceeded", retryable=True)
+        processor._transform_executor.execute_transform.side_effect = llm_error
+
+        transform = Mock()
+        transform.node_id = "llm_transform"
+        transform._on_error = "quarantine"
+        token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
+        ctx = Mock(run_id="test-run")
+
+        # Should NOT raise - converts to error result
+        result, _, error_sink = processor._execute_transform_with_retry(transform, token, ctx, step=0)
+
+        # Single attempt (no retry)
+        assert processor._transform_executor.execute_transform.call_count == 1
+
+        # Error result with LLM-specific reason
+        assert result.status == "error"
+        assert result.retryable is True
+        assert result.reason["reason"] == "llm_retryable_error_no_retry"
+        assert "Rate limit exceeded" in result.reason["error"]
+        assert error_sink == "quarantine"
+
+    def test_llm_non_retryable_error_propagates(self) -> None:
+        """Non-retryable LLMClientError propagates (already handled by transform)."""
+        from unittest.mock import Mock
+
+        import pytest
+
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        processor = RowProcessor(
+            recorder=Mock(),
+            span_factory=Mock(),
+            run_id="test-run",
+            source_node_id=NodeID("source"),
+            retry_manager=None,
+        )
+
+        processor._transform_executor = Mock()
+        # Non-retryable error (content policy, context length exceeded)
+        llm_error = LLMClientError("Content policy violation", retryable=False)
+        processor._transform_executor.execute_transform.side_effect = llm_error
+
+        transform = Mock()
+        transform.node_id = "llm_transform"
+        token = Mock(token_id="t1", row_id="r1", row_data={}, branch_name=None)
+        ctx = Mock(run_id="test-run")
+
+        # Non-retryable errors should propagate (transform should have handled them)
+        with pytest.raises(LLMClientError) as exc_info:
+            processor._execute_transform_with_retry(transform, token, ctx, step=0)
+
+        assert exc_info.value.retryable is False
+
+    def test_max_retries_exceeded_returns_failed_outcome(self, landscape_db: "LandscapeDB") -> None:
         """When all retries exhausted, process_row returns FAILED outcome."""
 
         from elspeth.contracts import RowOutcome
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.retry import RetryConfig, RetryManager
         from elspeth.engine.spans import SpanFactory
 
         # Set up real Landscape
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -357,7 +446,7 @@ class TestRowProcessorRetry:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="always_fails",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -371,7 +460,7 @@ class TestRowProcessorRetry:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -411,15 +500,13 @@ class TestRowProcessorRetry:
 class TestRowProcessorRecovery:
     """Tests for RowProcessor recovery support."""
 
-    def test_processor_accepts_restored_aggregation_state(self, tmp_path: Path) -> None:
+    def test_processor_accepts_restored_aggregation_state(self, landscape_db: "LandscapeDB") -> None:
         """RowProcessor passes restored state to AggregationExecutor."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
         from elspeth.engine.spans import SpanFactory
 
-        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
-        recorder = LandscapeRecorder(db)
+        recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         restored_state = {
@@ -441,3 +528,189 @@ class TestRowProcessorRecovery:
             "buffer": [1, 2],
             "count": 2,
         }
+
+
+class TestNoRetryAuditCompleteness:
+    """Tests for audit trail completeness when retry_manager is None.
+
+    BUG: When retry is disabled and retryable exceptions occur:
+    1. No transform_error is recorded (bypasses TransformExecutor error handling)
+    2. If on_error is None, creates invalid ROUTED outcome with sink_name=None
+
+    These tests verify the audit trail remains complete even without retry.
+    """
+
+    def test_no_retry_retryable_exception_records_transform_error(self, landscape_db: "LandscapeDB") -> None:
+        """Retryable exceptions in no-retry mode must record transform_error.
+
+        P2 review comment: In the no-retry path, retryable exceptions are converted
+        into TransformResult.error and returned directly. Because this bypasses
+        TransformExecutor's error-routing logic, no transform_errors entry is
+        recorded, so when retry is disabled and a rate-limit/network error happens,
+        the row is routed but explain() has no transform_error details.
+
+        Expected: transform_errors table should have an entry for the error.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.core.landscape.schema import transform_errors_table
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        # Set up real Landscape
+        recorder = LandscapeRecorder(landscape_db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="llm_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class RateLimitedTransform(BaseTransform):
+            """Transform that raises retryable LLM error."""
+
+            name = "rate_limited"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+                # Explicitly set _on_error (normally done by config mixins)
+                self._on_error = "error_sink"
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                raise LLMClientError("Rate limit exceeded", retryable=True)
+
+        # No retry manager - single attempt
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            retry_manager=None,
+        )
+
+        # Must pass landscape for record_transform_error to work
+        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+
+        # Process should return error result (not raise)
+        results = processor.process_row(
+            row_index=0,
+            row_data={"x": 1},
+            transforms=[RateLimitedTransform(transform_node.node_id)],
+            ctx=ctx,
+        )
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.outcome == RowOutcome.ROUTED
+
+        # CRITICAL: transform_errors must have an entry for explain() to work
+        with landscape_db.engine.connect() as conn:
+            errors = conn.execute(transform_errors_table.select().where(transform_errors_table.c.run_id == run.run_id)).fetchall()
+
+        assert len(errors) >= 1, (
+            "No transform_error recorded when retryable exception occurred in no-retry mode. "
+            "This breaks explain() - the row shows ROUTED but there's no transform_error "
+            "explaining why. The error details are lost."
+        )
+
+        # Verify error has expected content
+        error = errors[0]
+        assert "rate" in error.error_details_json.lower() or "limit" in error.error_details_json.lower(), (
+            f"transform_error should mention rate limit, got: {error.error_details_json}"
+        )
+
+    def test_no_retry_with_on_error_none_raises_instead_of_invalid_routed(self, landscape_db: "LandscapeDB") -> None:
+        """When on_error is None and retryable exception occurs, should fail properly.
+
+        P2 review comment: In the no-retry-manager path, retryable exceptions are
+        converted into TransformResult.error and returned with transform._on_error
+        even if _on_error is None. For pipelines that omit on_error (the default)
+        and hit a retryable ConnectionError/LLMClientError, process_row records a
+        ROUTED outcome with sink_name=None and the orchestrator later asserts on
+        result.sink_name, leaving a bogus terminal outcome in the audit trail
+        before crashing.
+
+        Expected: Should raise RuntimeError (like TransformExecutor does) when
+        on_error is None and an error result is produced.
+        """
+        import pytest
+
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+
+        # Set up real Landscape
+        recorder = LandscapeRecorder(landscape_db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="network_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class NetworkFailTransform(BaseTransform):
+            """Transform that raises retryable network error with no on_error."""
+
+            name = "network_fail"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, node_id: str) -> None:
+                # NO on_error configured - this is the default
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                raise ConnectionError("Network unreachable")
+
+        # No retry manager - single attempt
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            retry_manager=None,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Should raise RuntimeError, not return invalid ROUTED with sink_name=None
+        with pytest.raises(RuntimeError) as exc_info:
+            processor.process_row(
+                row_index=0,
+                row_data={"x": 1},
+                transforms=[NetworkFailTransform(transform_node.node_id)],
+                ctx=ctx,
+            )
+
+        # Error message should explain the problem
+        assert "on_error" in str(exc_info.value).lower(), f"RuntimeError should mention missing on_error config, got: {exc_info.value}"

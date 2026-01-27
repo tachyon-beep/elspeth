@@ -1,11 +1,35 @@
 # tests/core/retention/test_purge.py
 """Tests for PurgeManager - PayloadStore retention management."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import Connection, Table
+
+from elspeth.contracts import (
+    CallStatus,
+    CallType,
+    Determinism,
+    NodeStateStatus,
+    NodeType,
+    RoutingMode,
+    RunStatus,
+)
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape.database import LandscapeDB
+
+
+@pytest.fixture(scope="module")
+def landscape_db() -> LandscapeDB:
+    """Module-scoped database for test performance."""
+    from elspeth.core.landscape.database import LandscapeDB
+
+    return LandscapeDB.in_memory()
 
 
 def _create_state(
@@ -25,7 +49,7 @@ def _create_state(
             run_id=run_id,
             step_index=0,
             attempt=0,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             input_hash="input123",
             output_hash="output123",
             started_at=datetime.now(UTC),
@@ -68,8 +92,8 @@ def _create_call(
             call_id=call_id,
             state_id=state_id,
             call_index=0,
-            call_type="llm",
-            status="completed",
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
             request_hash="req_hash",
             request_ref=request_ref,
             response_hash="resp_hash",
@@ -95,7 +119,7 @@ def _create_edge(
             from_node_id=from_node_id,
             to_node_id=to_node_id,
             label="continue",
-            default_mode="move",
+            default_mode=RoutingMode.MOVE,
             created_at=datetime.now(UTC),
         )
     )
@@ -118,7 +142,7 @@ def _create_routing_event(
             edge_id=edge_id,
             routing_group_id=str(uuid4()),
             ordinal=0,
-            mode="move",
+            mode=RoutingMode.MOVE,
             reason_hash="reason_hash",
             reason_ref=reason_ref,
             created_at=datetime.now(UTC),
@@ -132,7 +156,7 @@ def _create_run(
     run_id: str,
     *,
     completed_at: datetime | None = None,
-    status: str = "completed",
+    status: RunStatus = RunStatus.COMPLETED,
 ) -> None:
     """Helper to create a run record."""
     conn.execute(
@@ -160,9 +184,9 @@ def _create_node(
             node_id=node_id,
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
-            determinism="deterministic",
+            determinism=Determinism.DETERMINISTIC,
             config_hash="config123",
             config_json="{}",
             registered_at=datetime.now(UTC),
@@ -253,13 +277,12 @@ class TestPurgeResult:
 class TestFindExpiredRowPayloads:
     """Tests for find_expired_row_payloads method."""
 
-    def test_find_expired_row_payloads(self) -> None:
+    def test_find_expired_row_payloads(self, landscape_db: LandscapeDB) -> None:
         """Finds row payloads older than retention period."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -267,6 +290,7 @@ class TestFindExpiredRowPayloads:
         run_id = str(uuid4())
         node_id = str(uuid4())
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        test_ref = f"ref_for_old_payload_{uuid4()}"
 
         with db.connection() as conn:
             _create_run(
@@ -274,7 +298,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -284,22 +308,21 @@ class TestFindExpiredRowPayloads:
                 run_id=run_id,
                 node_id=node_id,
                 row_index=0,
-                source_data_ref="ref_for_old_payload",
+                source_data_ref=test_ref,
                 source_data_hash="hash_old",
             )
 
         # Find payloads older than 30 days
         expired = manager.find_expired_row_payloads(retention_days=30)
 
-        assert "ref_for_old_payload" in expired
+        assert test_ref in expired
 
-    def test_find_expired_respects_retention(self) -> None:
+    def test_find_expired_respects_retention(self, landscape_db: LandscapeDB) -> None:
         """Does not flag recent payloads."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -307,6 +330,7 @@ class TestFindExpiredRowPayloads:
         run_id = str(uuid4())
         node_id = str(uuid4())
         recent_completed_at = datetime.now(UTC) - timedelta(days=10)
+        test_ref = f"ref_for_recent_payload_{uuid4()}"
 
         with db.connection() as conn:
             _create_run(
@@ -314,7 +338,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=recent_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -324,28 +348,28 @@ class TestFindExpiredRowPayloads:
                 run_id=run_id,
                 node_id=node_id,
                 row_index=0,
-                source_data_ref="ref_for_recent_payload",
+                source_data_ref=test_ref,
                 source_data_hash="hash_recent",
             )
 
         # Find payloads older than 30 days - should NOT include recent
         expired = manager.find_expired_row_payloads(retention_days=30)
 
-        assert "ref_for_recent_payload" not in expired
+        assert test_ref not in expired
 
-    def test_find_expired_ignores_incomplete_runs(self) -> None:
+    def test_find_expired_ignores_incomplete_runs(self, landscape_db: LandscapeDB) -> None:
         """Does not flag payloads from incomplete runs."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
         # Create a run from 60 days ago that is still running
         run_id = str(uuid4())
         node_id = str(uuid4())
+        test_ref = f"ref_for_running_payload_{uuid4()}"
 
         with db.connection() as conn:
             _create_run(
@@ -353,7 +377,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=None,  # Not completed
-                status="running",
+                status=RunStatus.RUNNING,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -363,22 +387,21 @@ class TestFindExpiredRowPayloads:
                 run_id=run_id,
                 node_id=node_id,
                 row_index=0,
-                source_data_ref="ref_for_running_payload",
+                source_data_ref=test_ref,
                 source_data_hash="hash_running",
             )
 
         # Find payloads older than 30 days - should NOT include running
         expired = manager.find_expired_row_payloads(retention_days=30)
 
-        assert "ref_for_running_payload" not in expired
+        assert test_ref not in expired
 
-    def test_find_expired_excludes_null_refs(self) -> None:
+    def test_find_expired_excludes_null_refs(self, landscape_db: LandscapeDB) -> None:
         """Does not include rows with null source_data_ref."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -392,7 +415,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -408,15 +431,19 @@ class TestFindExpiredRowPayloads:
 
         expired = manager.find_expired_row_payloads(retention_days=30)
 
-        assert len(expired) == 0
+        # Verify no null refs are returned
+        assert None not in expired
+        assert "" not in expired
+        # All returned refs should be non-empty strings
+        for ref in expired:
+            assert ref and isinstance(ref, str)
 
-    def test_find_expired_with_as_of_date(self) -> None:
+    def test_find_expired_with_as_of_date(self, landscape_db: LandscapeDB) -> None:
         """Uses as_of date for cutoff calculation."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -424,9 +451,10 @@ class TestFindExpiredRowPayloads:
         node_id = str(uuid4())
         # Run completed 45 days ago
         completed_at = datetime.now(UTC) - timedelta(days=45)
+        test_ref = f"ref_45_days_old_{uuid4()}"
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
                 conn,
@@ -435,31 +463,30 @@ class TestFindExpiredRowPayloads:
                 run_id=run_id,
                 node_id=node_id,
                 row_index=0,
-                source_data_ref="ref_45_days_old",
+                source_data_ref=test_ref,
                 source_data_hash="hash_45",
             )
 
         # With as_of=now, 30 day retention - 45 days old is expired
         expired_now = manager.find_expired_row_payloads(retention_days=30)
-        assert "ref_45_days_old" in expired_now
+        assert test_ref in expired_now
 
         # With as_of=60 days ago, 30 day retention - 45 days old was not expired yet
         as_of = datetime.now(UTC) - timedelta(days=60)
         expired_past = manager.find_expired_row_payloads(retention_days=30, as_of=as_of)
-        assert "ref_45_days_old" not in expired_past
+        assert test_ref not in expired_past
 
-    def test_find_expired_deduplicates_shared_refs(self) -> None:
+    def test_find_expired_deduplicates_shared_refs(self, landscape_db: LandscapeDB) -> None:
         """Multiple rows referencing the same payload return only one ref.
 
         Content-addressed storage means identical content shares one blob,
         so multiple rows can have the same source_data_ref. The query must
         deduplicate to avoid returning the same ref multiple times.
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -468,7 +495,7 @@ class TestFindExpiredRowPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         # The shared ref that multiple rows point to (content-addressed)
-        shared_ref = "shared_content_hash_abc123"
+        shared_ref = f"shared_content_hash_{uuid4()}"
 
         with db.connection() as conn:
             _create_run(
@@ -476,7 +503,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
 
@@ -497,18 +524,16 @@ class TestFindExpiredRowPayloads:
 
         # Should return exactly one instance of the shared ref, not three
         assert expired.count(shared_ref) == 1
-        assert len(expired) == 1
 
 
 class TestPurgePayloads:
     """Tests for purge_payloads method."""
 
-    def test_purge_payloads_deletes_content(self) -> None:
+    def test_purge_payloads_deletes_content(self, landscape_db: LandscapeDB) -> None:
         """Purge actually deletes from PayloadStore."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
 
         # Store some content
@@ -523,13 +548,12 @@ class TestPurgePayloads:
         assert ref2 not in store._storage
         assert store.delete_calls == [ref1, ref2]
 
-    def test_purge_preserves_landscape_hashes(self) -> None:
+    def test_purge_preserves_landscape_hashes(self, landscape_db: LandscapeDB) -> None:
         """Purge deletes blobs but keeps hashes in Landscape."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
 
         # Create run with row
@@ -547,7 +571,7 @@ class TestPurgePayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -575,12 +599,11 @@ class TestPurgePayloads:
             saved_hash = result.scalar()
             assert saved_hash == "original_hash_kept"
 
-    def test_purge_tracks_skipped_refs(self) -> None:
+    def test_purge_tracks_skipped_refs(self, landscape_db: LandscapeDB) -> None:
         """Purge tracks refs that don't exist as skipped (not failed)."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
 
         # Store one payload, leave another ref nonexistent
@@ -596,16 +619,15 @@ class TestPurgePayloads:
         assert nonexistent_ref not in result.failed_refs
         assert result.failed_refs == []
 
-    def test_purge_tracks_failed_refs(self) -> None:
+    def test_purge_tracks_failed_refs(self, landscape_db: LandscapeDB) -> None:
         """Purge tracks refs that exist but fail to delete.
 
         This tests the failure path where exists() returns True but
         delete() returns False (e.g., permission error, I/O failure).
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         # Create a mock store that simulates deletion failure for a specific ref
         class FailingPayloadStore:
@@ -652,13 +674,12 @@ class TestPurgePayloads:
         assert not store.exists(success_ref)
         assert store.exists(fail_ref)
 
-    def test_purge_measures_duration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_purge_measures_duration(self, landscape_db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
         """Purge measures operation duration using deterministic time."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.retention import purge as purge_module
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
 
         ref = store.store(b"content")
@@ -679,12 +700,11 @@ class TestPurgePayloads:
 
         assert result.duration_seconds == 2.5
 
-    def test_purge_empty_list(self) -> None:
+    def test_purge_empty_list(self, landscape_db: LandscapeDB) -> None:
         """Purge with empty list returns empty result."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
 
         manager = PurgeManager(db, store)
@@ -704,9 +724,8 @@ class TestFindExpiredCallPayloads:
     retention policy as row payloads.
     """
 
-    def test_find_expired_includes_call_request_refs(self) -> None:
+    def test_find_expired_includes_call_request_refs(self, landscape_db: LandscapeDB) -> None:
         """Expired call request payloads should be found for purge."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -717,7 +736,7 @@ class TestFindExpiredCallPayloads:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -731,7 +750,7 @@ class TestFindExpiredCallPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -751,9 +770,8 @@ class TestFindExpiredCallPayloads:
         assert "call_request_payload_ref" in expired, "Call request_ref should be found"
         assert "call_response_payload_ref" in expired, "Call response_ref should be found"
 
-    def test_find_expired_includes_call_response_refs(self) -> None:
+    def test_find_expired_includes_call_response_refs(self, landscape_db: LandscapeDB) -> None:
         """Expired call response payloads should be found for purge."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -764,7 +782,7 @@ class TestFindExpiredCallPayloads:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -778,7 +796,7 @@ class TestFindExpiredCallPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -804,9 +822,8 @@ class TestFindExpiredRoutingPayloads:
     Routing reason payloads should be subject to the same retention policy.
     """
 
-    def test_find_expired_includes_routing_reason_refs(self) -> None:
+    def test_find_expired_includes_routing_reason_refs(self, landscape_db: LandscapeDB) -> None:
         """Expired routing reason payloads should be found for purge."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             edges_table,
             node_states_table,
@@ -818,7 +835,7 @@ class TestFindExpiredRoutingPayloads:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -834,7 +851,7 @@ class TestFindExpiredRoutingPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, source_node_id, run_id)
             _create_node(conn, nodes_table, sink_node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, source_node_id, row_index=0)
@@ -859,9 +876,8 @@ class TestFindExpiredRoutingPayloads:
 class TestFindExpiredAllPayloadRefs:
     """Tests for the unified find_expired_payload_refs method."""
 
-    def test_find_expired_payload_refs_returns_deduplicated_union(self) -> None:
+    def test_find_expired_payload_refs_returns_deduplicated_union(self, landscape_db: LandscapeDB) -> None:
         """All payload types should be returned, deduplicated."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             edges_table,
@@ -874,7 +890,7 @@ class TestFindExpiredAllPayloadRefs:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -889,9 +905,13 @@ class TestFindExpiredAllPayloadRefs:
         edge_id = str(uuid4())
         event_id = str(uuid4())
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        row_ref = f"row_payload_ref_{uuid4()}"
+        call_req_ref = f"call_request_ref_{uuid4()}"
+        call_resp_ref = f"call_response_ref_{uuid4()}"
+        routing_ref = f"routing_reason_ref_{uuid4()}"
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, source_node_id, run_id)
             _create_node(conn, nodes_table, sink_node_id, run_id)
             _create_row(
@@ -901,7 +921,7 @@ class TestFindExpiredAllPayloadRefs:
                 run_id,
                 source_node_id,
                 row_index=0,
-                source_data_ref="row_payload_ref",
+                source_data_ref=row_ref,
             )
             _create_token(conn, tokens_table, token_id, row_id)
             _create_state(conn, node_states_table, state_id, token_id, source_node_id, run_id)
@@ -910,8 +930,8 @@ class TestFindExpiredAllPayloadRefs:
                 calls_table,
                 call_id,
                 state_id,
-                request_ref="call_request_ref",
-                response_ref="call_response_ref",
+                request_ref=call_req_ref,
+                response_ref=call_resp_ref,
             )
             _create_edge(conn, edges_table, edge_id, run_id, source_node_id, sink_node_id)
             _create_routing_event(
@@ -920,24 +940,26 @@ class TestFindExpiredAllPayloadRefs:
                 event_id,
                 state_id,
                 edge_id,
-                reason_ref="routing_reason_ref",
+                reason_ref=routing_ref,
             )
 
         # Find all expired payload refs
         expired = manager.find_expired_payload_refs(retention_days=30)
 
         # Should include all 4 payload refs
-        assert "row_payload_ref" in expired
-        assert "call_request_ref" in expired
-        assert "call_response_ref" in expired
-        assert "routing_reason_ref" in expired
+        assert row_ref in expired
+        assert call_req_ref in expired
+        assert call_resp_ref in expired
+        assert routing_ref in expired
 
-        # Should be exactly 4 (no duplicates)
-        assert len(expired) == 4
+        # Each ref should appear exactly once (deduplicated)
+        assert expired.count(row_ref) == 1
+        assert expired.count(call_req_ref) == 1
+        assert expired.count(call_resp_ref) == 1
+        assert expired.count(routing_ref) == 1
 
-    def test_find_expired_payload_refs_respects_retention(self) -> None:
+    def test_find_expired_payload_refs_respects_retention(self, landscape_db: LandscapeDB) -> None:
         """Recent call/routing payloads should not be found."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -948,7 +970,7 @@ class TestFindExpiredAllPayloadRefs:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -962,7 +984,7 @@ class TestFindExpiredAllPayloadRefs:
         recent_completed_at = datetime.now(UTC) - timedelta(days=10)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=recent_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=recent_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -989,7 +1011,7 @@ class TestContentAddressableSharedRefs:
     multiple runs. Purge must exclude refs still used by non-expired runs.
     """
 
-    def test_shared_row_ref_excluded_when_used_by_recent_run(self) -> None:
+    def test_shared_row_ref_excluded_when_used_by_recent_run(self, landscape_db: LandscapeDB) -> None:
         """Shared row payload ref should NOT be purged if a recent run uses it.
 
         Scenario:
@@ -997,11 +1019,10 @@ class TestContentAddressableSharedRefs:
         - Run B (10 days old, not expired) has row with same source_data_ref=H
         - Purge with 30-day retention should NOT return H (Run B needs it)
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1020,7 +1041,7 @@ class TestContentAddressableSharedRefs:
 
         with db.connection() as conn:
             # Create Run A (expired) with shared ref
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1034,7 +1055,7 @@ class TestContentAddressableSharedRefs:
             )
 
             # Create Run B (NOT expired) with SAME shared ref
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(
                 conn,
@@ -1054,9 +1075,8 @@ class TestContentAddressableSharedRefs:
             f"Shared ref {shared_ref} should NOT be returned for deletion because Run B (10 days old) still needs it"
         )
 
-    def test_shared_call_ref_excluded_when_used_by_recent_run(self) -> None:
+    def test_shared_call_ref_excluded_when_used_by_recent_run(self, landscape_db: LandscapeDB) -> None:
         """Shared call payload ref should NOT be purged if a recent run uses it."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -1067,7 +1087,7 @@ class TestContentAddressableSharedRefs:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1088,7 +1108,7 @@ class TestContentAddressableSharedRefs:
             row_a_id = str(uuid4())
             token_a_id = str(uuid4())
             state_a_id = str(uuid4())
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(conn, rows_table, row_a_id, run_a_id, node_a_id, row_index=0)
             _create_token(conn, tokens_table, token_a_id, row_a_id)
@@ -1100,7 +1120,7 @@ class TestContentAddressableSharedRefs:
             row_b_id = str(uuid4())
             token_b_id = str(uuid4())
             state_b_id = str(uuid4())
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(conn, rows_table, row_b_id, run_b_id, node_b_id, row_index=0)
             _create_token(conn, tokens_table, token_b_id, row_b_id)
@@ -1113,13 +1133,12 @@ class TestContentAddressableSharedRefs:
             f"Shared call ref {shared_ref} should NOT be returned for deletion because Run B (10 days old) still needs it"
         )
 
-    def test_exclusive_expired_ref_is_returned(self) -> None:
+    def test_exclusive_expired_ref_is_returned(self, landscape_db: LandscapeDB) -> None:
         """Ref used ONLY by expired runs should be returned for deletion."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1132,7 +1151,7 @@ class TestContentAddressableSharedRefs:
         old_completed = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1149,13 +1168,12 @@ class TestContentAddressableSharedRefs:
 
         assert exclusive_ref in expired, f"Exclusive ref {exclusive_ref} SHOULD be returned for deletion because no active run needs it"
 
-    def test_shared_ref_excluded_when_used_by_running_run(self) -> None:
+    def test_shared_ref_excluded_when_used_by_running_run(self, landscape_db: LandscapeDB) -> None:
         """Shared ref should NOT be purged if an incomplete (running) run uses it."""
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1171,7 +1189,7 @@ class TestContentAddressableSharedRefs:
         node_b_id = str(uuid4())
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1184,7 +1202,7 @@ class TestContentAddressableSharedRefs:
             )
 
             # Running run (completed_at=None, status=running)
-            _create_run(conn, runs_table, run_b_id, completed_at=None, status="running")
+            _create_run(conn, runs_table, run_b_id, completed_at=None, status=RunStatus.RUNNING)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(
                 conn,
@@ -1215,7 +1233,7 @@ class TestCallJoinRunIsolation:
     nodes table (the run_id is denormalized on node_states for this purpose).
     """
 
-    def test_expired_call_ref_returned_when_same_node_id_exists_in_recent_run(self) -> None:
+    def test_expired_call_ref_returned_when_same_node_id_exists_in_recent_run(self, landscape_db: LandscapeDB) -> None:
         """BUG TEST: Expired run's call ref should be returned even when recent run has same node_id.
 
         Scenario:
@@ -1232,7 +1250,6 @@ class TestCallJoinRunIsolation:
         both expired_refs AND active_refs. Set difference removes it, so ref-A
         is NOT returned - causing DATA LOSS (refs that should be purged aren't).
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -1243,7 +1260,7 @@ class TestCallJoinRunIsolation:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1268,7 +1285,7 @@ class TestCallJoinRunIsolation:
 
         with db.connection() as conn:
             # === Run A (expired) ===
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
             _create_row(conn, rows_table, row_a_id, run_a_id, shared_node_id, row_index=0)
             _create_token(conn, tokens_table, token_a_id, row_a_id)
@@ -1276,7 +1293,7 @@ class TestCallJoinRunIsolation:
             _create_call(conn, calls_table, call_a_id, state_a_id, response_ref="ref-A-should-be-purged")
 
             # === Run B (recent) ===
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
             _create_row(conn, rows_table, row_b_id, run_b_id, shared_node_id, row_index=0)
             _create_token(conn, tokens_table, token_b_id, row_b_id)
@@ -1298,13 +1315,12 @@ class TestCallJoinRunIsolation:
         # ref-B should NOT be returned (Run B is recent)
         assert "ref-B-keep" not in expired, f"ref-B from recent Run B should NOT be returned for purge. Got expired refs: {expired}"
 
-    def test_recent_call_ref_not_returned_when_expired_run_has_same_node_id(self) -> None:
+    def test_recent_call_ref_not_returned_when_expired_run_has_same_node_id(self, landscape_db: LandscapeDB) -> None:
         """Verify recent run's call ref is protected even when expired run has same node_id.
 
         This is the inverse scenario - verifying that we don't accidentally purge
         recent data due to the join ambiguity.
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
@@ -1315,7 +1331,7 @@ class TestCallJoinRunIsolation:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1332,7 +1348,7 @@ class TestCallJoinRunIsolation:
 
         with db.connection() as conn:
             # Run A (expired)
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)
             row_a_id = str(uuid4())
             token_a_id = str(uuid4())
@@ -1343,7 +1359,7 @@ class TestCallJoinRunIsolation:
             _create_call(conn, calls_table, str(uuid4()), state_a_id, response_ref="ref-old")
 
             # Run B (recent)
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)
             row_b_id = str(uuid4())
             token_b_id = str(uuid4())
@@ -1368,13 +1384,12 @@ class TestRoutingJoinRunIsolation:
     The fix: Use node_states.run_id directly instead of joining through nodes.
     """
 
-    def test_expired_routing_ref_returned_when_same_node_id_exists_in_recent_run(self) -> None:
+    def test_expired_routing_ref_returned_when_same_node_id_exists_in_recent_run(self, landscape_db: LandscapeDB) -> None:
         """BUG TEST: Expired run's routing ref should be returned even when recent run has same node_id.
 
         Same pattern as call_join test - the ambiguous join causes routing refs
         from expired runs to incorrectly appear in active_refs, preventing purge.
         """
-        from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.schema import (
             edges_table,
             node_states_table,
@@ -1386,7 +1401,7 @@ class TestRoutingJoinRunIsolation:
         )
         from elspeth.core.retention.purge import PurgeManager
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
         store = MockPayloadStore()
         manager = PurgeManager(db, store)
 
@@ -1405,7 +1420,7 @@ class TestRoutingJoinRunIsolation:
 
         with db.connection() as conn:
             # === Run A (expired) ===
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
             _create_node(conn, nodes_table, sink_node_id_a, run_a_id)
             row_a_id = str(uuid4())
@@ -1422,7 +1437,7 @@ class TestRoutingJoinRunIsolation:
             )
 
             # === Run B (recent) ===
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
             _create_node(conn, nodes_table, sink_node_id_b, run_b_id)
             row_b_id = str(uuid4())

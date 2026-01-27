@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from elspeth.contracts import RoutingMode, RoutingSpec
+from elspeth.contracts import NodeType, RoutingMode, RoutingSpec
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -24,7 +24,7 @@ class TestLandscapeRecorderRouting:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -32,7 +32,7 @@ class TestLandscapeRecorderRouting:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -40,7 +40,7 @@ class TestLandscapeRecorderRouting:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -92,7 +92,7 @@ class TestLandscapeRecorderRouting:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -100,7 +100,7 @@ class TestLandscapeRecorderRouting:
         sink_a = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sink_a",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -108,7 +108,7 @@ class TestLandscapeRecorderRouting:
         sink_b = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sink_b",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

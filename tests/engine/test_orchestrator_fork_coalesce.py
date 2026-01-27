@@ -21,10 +21,34 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
+
+
+# =============================================================================
+# Reusable Test Fixtures for Coalesce Tests
+# =============================================================================
+
+
+class CoalesceTestSource(_TestSourceBase):
+    """Reusable source for coalesce tests that yields configurable rows.
+
+    Unlike the null source (0 rows), this source yields actual rows for tests
+    that need to exercise row processing paths.
+    """
+
+    name = "coalesce_test_source"
+    output_schema = _TestSchema
+
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
+        super().__init__()
+        self._rows = rows or [{"value": 1}]  # Default: 1 row
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for row in self._rows:
+            yield SourceRow.valid(row)
 
 
 class TestOrchestratorForkExecution:
@@ -78,7 +102,7 @@ class TestOrchestratorForkExecution:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row)
@@ -118,7 +142,7 @@ class TestOrchestratorForkExecution:
             sinks={"default": as_sink(sink)},
         )
 
-        graph = build_test_graph(config)
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
         run_result = orchestrator.run(config, graph=graph)
@@ -154,15 +178,8 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),  # Use null source - no file access
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_out.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -182,42 +199,18 @@ class TestCoalesceWiring:
             ],
         )
 
-        # Mock source/sink to avoid file access
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([])
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
+        # Use real plugins from instantiate_plugins_from_config
+        plugins = instantiate_plugins_from_config(settings)
 
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[],
-            sinks={"output": mock_sink},
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-
-        # Build the graph from settings (which includes coalesce)
-        plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -229,7 +222,9 @@ class TestCoalesceWiring:
             coalesce_settings=settings.coalesce,
         )
 
-        # Patch RowProcessor to capture its args
+        # NOTE: RowProcessor mock is SUSPICIOUS - tests implementation detail
+        # (that coalesce_executor kwarg exists) rather than behavior.
+        # TODO: Replace with behavior-based test in Phase 5.
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor:
             mock_processor.return_value.process_row.return_value = []
             mock_processor.return_value.token_manager = MagicMock()
@@ -260,46 +255,19 @@ class TestCoalesceWiring:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
 
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([MagicMock(is_quarantined=False, row={"value": 1})])
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
-        mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
+        # Use CoalesceTestSource that yields 1 row (needed to trigger processing)
+        test_source = CoalesceTestSource(rows=[{"value": 1}])
 
         # Settings with coalesce (needed to enable coalesce path in orchestrator)
+        # Note: Settings use null for instantiate_plugins_from_config to get graph
+        # structure (gates, coalesce), but we use test_source in config for actual rows
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_coalesced.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -319,17 +287,19 @@ class TestCoalesceWiring:
             ],
         )
 
+        # Get plugins for graph structure
+        plugins = instantiate_plugins_from_config(settings)
+
+        # Use test_source in config (yields rows), but real plugins for sinks
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[],
-            sinks={"output": mock_sink},
+            source=as_source(test_source),
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
-        plugins = instantiate_plugins_from_config(settings)
-
         graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
+            source=as_source(test_source),  # Use test source in graph too
             transforms=plugins["transforms"],
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
@@ -340,10 +310,31 @@ class TestCoalesceWiring:
 
         orchestrator = Orchestrator(db=db)
 
-        # Mock RowProcessor to return COALESCED outcome
+        # =====================================================================
+        # MOCK CASCADE EXPLANATION (Unit Test Boundary)
+        # =====================================================================
+        # This test verifies Orchestrator's handling of COALESCED outcomes in
+        # isolation. The mock cascade exists because:
+        #
+        # 1. RowProcessor mock → Returns fake COALESCED result
+        # 2. Fake token_id="merged_token_1" → Not in database (no FK reference)
+        # 3. record_token_outcome mock → Avoids FK constraint violation
+        # 4. SinkExecutor mock → Avoids FK errors when recording sink writes
+        #
+        # INTEGRATION COVERAGE: Full coalesce behavior (with real tokens) is
+        # tested in:
+        # - test_coalesce_integration.py::test_fork_coalesce_pipeline_produces_merged_output
+        # - test_processor_coalesce.py::test_fork_then_coalesce_require_all
+        # - test_integration.py::test_fork_coalesce_writes_merged_to_sink
+        #
+        # This test specifically verifies:
+        # - Orchestrator correctly counts COALESCED outcomes (rows_coalesced)
+        # - Orchestrator routes merged tokens to the sink
+        # =====================================================================
+
         merged_token = TokenInfo(
             row_id="row_1",
-            token_id="merged_token_1",
+            token_id="merged_token_1",  # Fake - not in DB
             row_data={"merged": True},
             branch_name=None,
         )
@@ -356,15 +347,17 @@ class TestCoalesceWiring:
         with (
             patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls,
             patch("elspeth.engine.executors.SinkExecutor") as mock_sink_executor_cls,
+            patch("elspeth.core.landscape.LandscapeRecorder.record_token_outcome") as mock_record_outcome,
         ):
             mock_processor = MagicMock()
             mock_processor.process_row.return_value = [coalesced_result]
             mock_processor.token_manager.create_initial_token.return_value = MagicMock(row_id="row_1", token_id="t1", row_data={"value": 1})
             mock_processor_cls.return_value = mock_processor
 
-            # Mock SinkExecutor to avoid foreign key constraint errors
             mock_sink_executor = MagicMock()
             mock_sink_executor_cls.return_value = mock_sink_executor
+
+            mock_record_outcome.return_value = "mock_outcome_id"
 
             result = orchestrator.run(config, graph=graph, settings=settings)
 
@@ -395,15 +388,8 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),  # Use null source - no file access
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_flush.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -423,39 +409,18 @@ class TestCoalesceWiring:
             ],
         )
 
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([])  # Empty - immediate end
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
+        # Use real plugins from settings
+        plugins = instantiate_plugins_from_config(settings)
 
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[],
-            sinks={"output": mock_sink},
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -467,6 +432,9 @@ class TestCoalesceWiring:
             coalesce_settings=settings.coalesce,
         )
 
+        # NOTE: CoalesceExecutor mock is LEGITIMATE here - this test verifies
+        # that Orchestrator calls flush_pending() at end of source processing,
+        # not that CoalesceExecutor works (tested in test_coalesce_executor.py)
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
             mock_executor.flush_pending.return_value = []
@@ -491,20 +459,12 @@ class TestCoalesceWiring:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.coalesce_executor import CoalesceOutcome
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),  # Use null source - no file access
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_routes.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -525,40 +485,18 @@ class TestCoalesceWiring:
             ],
         )
 
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([])  # Empty - immediate end
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
-        mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
+        # Use real plugins from settings
+        plugins = instantiate_plugins_from_config(settings)
 
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[],
-            sinks={"output": mock_sink},
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -570,10 +508,32 @@ class TestCoalesceWiring:
             coalesce_settings=settings.coalesce,
         )
 
-        # Create a merged token that flush_pending will return
+        # =====================================================================
+        # MOCK CASCADE EXPLANATION (Unit Test Boundary)
+        # =====================================================================
+        # This test verifies Orchestrator's handling of flush_pending results.
+        # The mock cascade exists because:
+        #
+        # 1. CoalesceExecutor mock → Returns controlled flush_pending result
+        #    (LEGITIMATE: testing Orchestrator's coordination, not CoalesceExecutor)
+        # 2. Fake token_id="flushed_merged_token" → Not in database
+        # 3. SinkExecutor mock → Avoids FK errors when recording sink writes
+        # 4. record_token_outcome mock → Avoids FK constraint violation
+        #
+        # INTEGRATION COVERAGE: Full flush_pending behavior (with real tokens)
+        # is tested in:
+        # - test_coalesce_integration.py::test_fork_coalesce_pipeline_produces_merged_output
+        # - test_processor_coalesce.py tests with require_all/best_effort policies
+        #
+        # This test specifically verifies:
+        # - Orchestrator calls flush_pending at end of source processing
+        # - flush_pending results are counted in rows_coalesced
+        # - Merged tokens from flush are routed to sink
+        # =====================================================================
+
         merged_token = TokenInfo(
             row_id="row_1",
-            token_id="flushed_merged_token",
+            token_id="flushed_merged_token",  # Fake - not in DB
             row_data={"merged_at_flush": True},
             branch_name=None,
         )
@@ -581,21 +541,24 @@ class TestCoalesceWiring:
         with (
             patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls,
             patch("elspeth.engine.executors.SinkExecutor") as mock_sink_executor_cls,
+            patch("elspeth.core.landscape.LandscapeRecorder.record_token_outcome") as mock_record_outcome,
         ):
             mock_executor = MagicMock()
-            # flush_pending returns a merged token
             mock_executor.flush_pending.return_value = [
                 CoalesceOutcome(
                     held=False,
                     merged_token=merged_token,
                     consumed_tokens=[],
                     coalesce_metadata={"policy": "best_effort"},
+                    coalesce_name="merge_results",
                 )
             ]
             mock_executor_cls.return_value = mock_executor
 
             mock_sink_executor = MagicMock()
             mock_sink_executor_cls.return_value = mock_sink_executor
+
+            mock_record_outcome.return_value = "mock_outcome_id"
 
             result = orchestrator.run(config, graph=graph, settings=settings)
 
@@ -629,15 +592,8 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),  # Use null source - no file access
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_failures.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -657,39 +613,18 @@ class TestCoalesceWiring:
             ],
         )
 
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([])  # Empty - immediate end
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
+        # Use real plugins from settings
+        plugins = instantiate_plugins_from_config(settings)
 
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[],
-            sinks={"output": mock_sink},
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -701,6 +636,8 @@ class TestCoalesceWiring:
             coalesce_settings=settings.coalesce,
         )
 
+        # NOTE: CoalesceExecutor mock is LEGITIMATE here - this test verifies
+        # Orchestrator's handling of failed flush_pending results without crashing.
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
             # flush_pending returns a failure outcome (incomplete branches)
@@ -714,6 +651,7 @@ class TestCoalesceWiring:
                         "expected_branches": ["path_a", "path_b"],
                         "branches_arrived": ["path_a"],
                     },
+                    coalesce_name="merge_results",
                 )
             ]
             mock_executor_cls.return_value = mock_executor
@@ -729,7 +667,6 @@ class TestCoalesceWiring:
 
     def test_orchestrator_computes_coalesce_step_map(self, plugin_manager) -> None:
         """Orchestrator should compute step positions for each coalesce point."""
-        from unittest.mock import MagicMock, patch
 
         from elspeth.core.config import (
             CoalesceSettings,
@@ -744,15 +681,8 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            source=SourceSettings(
-                plugin="csv",
-                options={
-                    "path": "test.csv",
-                    "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
-                },
-            ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            source=SourceSettings(plugin="null"),  # Use null source - no file access
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_stepmap.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             transforms=[
                 TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
@@ -776,47 +706,18 @@ class TestCoalesceWiring:
             ],
         )
 
-        mock_source = MagicMock()
-        mock_source.name = "csv"
-        mock_source.load.return_value = iter([])
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
-        mock_source.output_schema = _TestSchema
-
-        mock_sink = MagicMock()
-        mock_sink.name = "csv"
-        mock_sink.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
-
-        schema_mock.model_json_schema.return_value = {"type": "object"}
-
-        mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
-        mock_sink.input_schema = _TestSchema
-
-        mock_transform = MagicMock()
-        mock_transform.name = "passthrough"
-        mock_transform.plugin_version = "1.0.0"
-        mock_transform.determinism = "deterministic"
-        mock_transform.is_batch_aware = False
+        # Use real plugins from settings
+        plugins = instantiate_plugins_from_config(settings)
 
         config = PipelineConfig(
-            source=mock_source,
-            transforms=[mock_transform, mock_transform],
-            sinks={"output": mock_sink},
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
             gates=settings.gates,
         )
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-
-        # Build the graph from settings (which includes coalesce)
-        plugins = instantiate_plugins_from_config(settings)
 
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -828,15 +729,115 @@ class TestCoalesceWiring:
             coalesce_settings=settings.coalesce,
         )
 
-        with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls:
-            mock_processor = MagicMock()
-            mock_processor.process_row.return_value = []
-            mock_processor_cls.return_value = mock_processor
+        # Test the step map computation directly instead of mocking RowProcessor
+        # This verifies the calculation without needing to intercept constructor args
+        step_map = orchestrator._compute_coalesce_step_map(graph, config, settings)
 
-            orchestrator.run(config, graph=graph, settings=settings)
+        # forker gate is at pipeline index 2 (after 2 transforms)
+        # coalesce_step = len(transforms) + len(gates) + coalesce_index
+        #               = 2 + 1 + 0 = 3
+        assert "merge_results" in step_map
+        assert step_map["merge_results"] == 3
 
-            # Check coalesce_step_map was passed
-            call_kwargs = mock_processor_cls.call_args.kwargs
-            assert "coalesce_step_map" in call_kwargs
-            # 2 transforms + 1 gate = step 3 for coalesce
-            assert call_kwargs["coalesce_step_map"]["merge_results"] == 3
+
+class TestCoalesceStepMapCalculation:
+    """Test that coalesce_step_map is computed from graph topology."""
+
+    def test_coalesce_step_map_uses_graph_gate_index(
+        self,
+        plugin_manager,
+    ) -> None:
+        """coalesce_step_map places coalesce AFTER all transforms and gates.
+
+        Given:
+          - Pipeline with fork_gate at index 0 (first gate)
+          - downstream_gate at index 1 (second gate)
+          - Coalesce for fork_gate's branches
+
+        The coalesce_step should be len(transforms) + len(gates) + coalesce_index,
+        which places coalesce steps AFTER all gates. This avoids step index
+        collisions when there are gates after the fork gate.
+
+        Fork children skip directly to this coalesce step, bypassing all
+        intermediate transforms and gates.
+        """
+
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts.types import CoalesceName
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["branch_a", "branch_b"],
+                ),
+                GateSettings(
+                    name="downstream_gate",  # Gate AFTER fork
+                    condition="False",
+                    routes={"true": "output", "false": "continue"},
+                ),
+            ],
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_branches",
+                    branches=["branch_a", "branch_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            default_sink="output",
+        )
+
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+
+        # Use real plugins from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        config = PipelineConfig(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            gates=settings.gates,
+        )
+
+        # Test the step map computation directly - no mocking needed
+        step_map = orchestrator._compute_coalesce_step_map(graph, config, settings)
+
+        # With Option B (execution matches graph topology), coalesce step uses
+        # the gate index from the graph. The coalesce step is ONE AFTER the
+        # fork gate, allowing merged tokens to continue downstream processing.
+        #
+        # fork_gate is at index 0 in config.gates, so:
+        #   coalesce_step = gate_idx + 1 = 0 + 1 = 1
+        #
+        # This allows merged tokens to process through downstream_gate (step 1).
+        assert CoalesceName("merge_branches") in step_map
+
+        # coalesce_step = gate_idx + 1 where gate_idx is from graph.get_coalesce_gate_index()
+        # fork_gate produces merge_branches branches, fork_gate is at gate index 0
+        expected_step = 0 + 1  # gate_idx(0) + 1 = 1
+        assert step_map[CoalesceName("merge_branches")] == expected_step

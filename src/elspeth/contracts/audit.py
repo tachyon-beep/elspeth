@@ -9,7 +9,7 @@ garbage from it, something catastrophic happened - crash immediately.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, TypedDict
+from typing import Any, ClassVar, Literal, TypedDict
 
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -23,6 +23,17 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunStatus,
 )
+
+
+def _validate_enum(value: object, enum_type: type, field_name: str) -> None:
+    """Validate that value is an instance of the expected enum type.
+
+    Tier 1 audit data must crash on invalid types - no coercion, no defaults.
+    Per Data Manifesto: If we read garbage from our own database,
+    something catastrophic happened - crash immediately.
+    """
+    if value is not None and not isinstance(value, enum_type):
+        raise TypeError(f"{field_name} must be {enum_type.__name__}, got {type(value).__name__}: {value!r}")
 
 
 @dataclass
@@ -45,6 +56,11 @@ class Run:
     exported_at: datetime | None = None
     export_format: str | None = None
     export_sink: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.status, RunStatus, "status")
+        _validate_enum(self.export_status, ExportStatus, "export_status")
 
 
 @dataclass
@@ -69,6 +85,11 @@ class Node:
     schema_mode: str | None = None  # "dynamic", "strict", "free", "parse"
     schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
 
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.node_type, NodeType, "node_type")
+        _validate_enum(self.determinism, Determinism, "determinism")
+
 
 @dataclass
 class Edge:
@@ -84,6 +105,10 @@ class Edge:
     label: str
     default_mode: RoutingMode  # Strict: enum only
     created_at: datetime
+
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.default_mode, RoutingMode, "default_mode")
 
 
 @dataclass
@@ -322,7 +347,14 @@ class Checkpoint:
     """Checkpoint for crash recovery.
 
     Captures run progress at row/transform boundaries.
+
+    Format Versions:
+        Version 1: Pre-deterministic node IDs (legacy, incompatible)
+        Version 2: Deterministic node IDs (2026-01-24+, current)
     """
+
+    # Current checkpoint format version (ClassVar excludes from dataclass fields)
+    CURRENT_FORMAT_VERSION: ClassVar[int] = 2
 
     checkpoint_id: str
     run_id: str
@@ -337,6 +369,8 @@ class Checkpoint:
     checkpoint_node_config_hash: str | None  # Hash of checkpoint node config only
     # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
+    # Format version for compatibility checking (None = legacy checkpoint pre-versioning)
+    format_version: int | None = None
 
 
 @dataclass

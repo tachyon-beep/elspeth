@@ -1,7 +1,5 @@
 """Tests for database sink plugin."""
 
-import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -123,6 +121,7 @@ class TestDatabaseSink:
 
     def test_batch_write_content_hash_is_payload_hash(self, db_url: str, ctx: PluginContext) -> None:
         """content_hash is SHA-256 of canonical JSON payload BEFORE insert."""
+        from elspeth.core.canonical import stable_hash
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]
@@ -131,10 +130,8 @@ class TestDatabaseSink:
         artifact = sink.write(rows, ctx)
         sink.close()
 
-        # Hash should be of the canonical JSON payload
-        # Note: We use sorted keys for canonical form
-        payload_json = json.dumps(rows, sort_keys=True, separators=(",", ":"))
-        expected_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        # Hash should be of the canonical JSON payload (RFC 8785)
+        expected_hash = stable_hash(rows)
 
         assert artifact.content_hash == expected_hash
 
@@ -153,6 +150,7 @@ class TestDatabaseSink:
     def test_batch_write_empty_list(self, db_url: str, ctx: PluginContext) -> None:
         """Batch write with empty list returns descriptor with zero size."""
         from elspeth.contracts import ArtifactDescriptor
+        from elspeth.core.canonical import stable_hash
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
@@ -162,9 +160,8 @@ class TestDatabaseSink:
 
         assert isinstance(artifact, ArtifactDescriptor)
         assert artifact.size_bytes == 0
-        # Empty payload hash
-        empty_json = json.dumps([], sort_keys=True, separators=(",", ":"))
-        assert artifact.content_hash == hashlib.sha256(empty_json.encode()).hexdigest()
+        # Empty payload hash (canonical JSON of empty list)
+        assert artifact.content_hash == stable_hash([])
 
     def test_has_plugin_version(self) -> None:
         """DatabaseSink has plugin_version attribute."""
@@ -508,3 +505,126 @@ class TestDatabaseSinkSecretHandling:
         )
 
         assert sink._sanitized_url.fingerprint is None
+
+
+class TestDatabaseSinkCanonicalHashing:
+    """Tests for canonical JSON hashing in DatabaseSink.
+
+    Bug: P1-2026-01-21-databasesink-noncanonical-hash
+    DatabaseSink uses json.dumps instead of canonical_json, causing:
+    - Different hashes for unicode (RFC 8785 vs json.dumps escaping)
+    - Crashes with numpy/pandas types
+    - Invalid JSON output with NaN/Infinity (silently)
+
+    The contract (docs/contracts/plugin-protocol.md:685) requires:
+    "SHA-256 of canonical JSON payload BEFORE insert"
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    @pytest.fixture
+    def db_url(self, tmp_path: Path) -> str:
+        """Create a SQLite database URL."""
+        return f"sqlite:///{tmp_path / 'test.db'}"
+
+    def test_content_hash_uses_canonical_json(self, db_url: str, ctx: PluginContext) -> None:
+        """content_hash must use canonical_json, not json.dumps.
+
+        This test uses unicode that produces different output between
+        json.dumps (escapes to \\uXXXX) and canonical_json (literal UTF-8).
+        """
+        from elspeth.core.canonical import stable_hash
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        # Unicode that json.dumps escapes but RFC 8785 keeps literal
+        rows = [{"emoji": "😀", "text": "café"}]
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+
+        artifact = sink.write(rows, ctx)
+        sink.close()
+
+        # Hash MUST match stable_hash (canonical JSON)
+        expected_hash = stable_hash(rows)
+        assert artifact.content_hash == expected_hash, (
+            f"DatabaseSink must use canonical JSON hashing. Got {artifact.content_hash}, expected {expected_hash}"
+        )
+
+    def test_content_hash_rejects_nan(self, db_url: str, ctx: PluginContext) -> None:
+        """content_hash computation must reject NaN values.
+
+        NaN is not valid JSON per RFC 8785. The current buggy implementation
+        silently produces invalid JSON like [{"val":NaN}].
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        rows = [{"value": float("nan")}]
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+
+        # canonical_json raises ValueError for NaN
+        with pytest.raises(ValueError, match="non-finite float"):
+            sink.write(rows, ctx)
+
+        sink.close()
+
+    def test_content_hash_rejects_infinity(self, db_url: str, ctx: PluginContext) -> None:
+        """content_hash computation must reject Infinity values.
+
+        Infinity is not valid JSON per RFC 8785.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        rows = [{"value": float("inf")}]
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+
+        # canonical_json raises ValueError for Infinity
+        with pytest.raises(ValueError, match="non-finite float"):
+            sink.write(rows, ctx)
+
+        sink.close()
+
+    def test_content_hash_handles_numpy_types(self, db_url: str, ctx: PluginContext) -> None:
+        """content_hash must handle numpy types without crashing.
+
+        The current buggy implementation raises TypeError for numpy.int64.
+        canonical_json normalizes these to Python primitives.
+        """
+        import numpy as np
+
+        from elspeth.core.canonical import stable_hash
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        rows = [{"id": np.int64(42), "score": np.float64(3.14)}]
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+
+        # Should not raise - canonical_json normalizes numpy types
+        artifact = sink.write(rows, ctx)
+        sink.close()
+
+        # Hash must match stable_hash
+        expected_hash = stable_hash(rows)
+        assert artifact.content_hash == expected_hash
+
+    def test_payload_size_uses_canonical_bytes(self, db_url: str, ctx: PluginContext) -> None:
+        """payload_size must be byte length of canonical JSON, not json.dumps.
+
+        Unicode characters have different byte lengths depending on escaping:
+        - json.dumps: "😀" -> "\\ud83d\\ude00" (12 bytes)
+        - canonical:  "😀" -> "😀" (4 bytes UTF-8)
+        """
+        from elspeth.core.canonical import canonical_json
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        rows = [{"emoji": "😀"}]
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+
+        artifact = sink.write(rows, ctx)
+        sink.close()
+
+        # Size must match canonical JSON byte length
+        expected_size = len(canonical_json(rows).encode("utf-8"))
+        assert artifact.size_bytes == expected_size, (
+            f"payload_size must use canonical JSON bytes. Got {artifact.size_bytes}, expected {expected_size}"
+        )

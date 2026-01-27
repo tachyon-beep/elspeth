@@ -148,6 +148,10 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["elspeth"]
 
+[tool.ruff.lint.flake8-bugbear]
+# typer.Option/Argument are immutable and safe in function defaults
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["T20"]  # Allow print in tests
 "scripts/**/*.py" = ["T20"]  # Allow print in CLI scripts

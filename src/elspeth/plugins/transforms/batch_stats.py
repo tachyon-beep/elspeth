@@ -97,14 +97,6 @@ class BatchStats(BaseTransform):
             allow_coercion=False,
         )
 
-    @staticmethod
-    def _try_convert_to_float(value: Any) -> float | None:
-        """Try to convert a value to float, returning None if not possible."""
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
     def process(  # type: ignore[override]
         self, rows: list[dict[str, Any]], ctx: PluginContext
     ) -> TransformResult:
@@ -116,20 +108,32 @@ class BatchStats(BaseTransform):
 
         Returns:
             TransformResult with aggregated statistics
+
+        Raises:
+            KeyError: If value_field is missing from any row (upstream bug)
+            TypeError: If value_field is not numeric (upstream bug)
         """
         if not rows:
             # Empty batch - should not happen in normal operation
             return TransformResult.success({"count": 0, "sum": 0, "mean": None, "batch_empty": True})
 
-        # Extract numeric values, skipping non-convertible ones
-        # (Their data can have non-numeric values - this is expected, not a bug)
+        # Extract numeric values - enforce type contract
+        # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[float] = []
-        for row in rows:
-            if self._value_field in row:
-                raw_value = row[self._value_field]
-                converted = self._try_convert_to_float(raw_value)
-                if converted is not None:
-                    values.append(converted)
+        for i, row in enumerate(rows):
+            # Direct access - field must exist (KeyError = upstream bug)
+            raw_value = row[self._value_field]
+
+            # Contract enforcement: value_field must be numeric (int or float)
+            # Tier 2 pipeline data - wrong types indicate upstream bug
+            if not isinstance(raw_value, (int, float)):
+                raise TypeError(
+                    f"Field '{self._value_field}' must be numeric (int or float), "
+                    f"got {type(raw_value).__name__} in row {i}. "
+                    f"This indicates an upstream validation bug - check source schema or prior transforms."
+                )
+
+            values.append(float(raw_value))
 
         count = len(values)
         total = sum(values) if values else 0

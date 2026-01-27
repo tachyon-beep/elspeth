@@ -25,7 +25,7 @@ class TestLandscapeRecorderNodes:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={"path": "data.csv"},
             sequence=0,
@@ -54,7 +54,7 @@ class TestLandscapeRecorderNodes:
         node_from_str = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform2",
-            node_type="transform",  # String
+            node_type=NodeType.TRANSFORM,  # Also enum now
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -65,12 +65,12 @@ class TestLandscapeRecorderNodes:
         assert node_from_str.node_type == "transform"
 
     def test_register_node_invalid_type_raises(self) -> None:
-        """Test that invalid node_type string raises ValueError."""
+        """Test that invalid node_type string raises TypeError."""
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
-        with pytest.raises(ValueError, match="transfom"):  # Note typo
+        with pytest.raises(TypeError, match=r"node_type must be NodeType, got str: 'transfom'"):
             recorder.register_node(
                 run_id=run.run_id,
                 plugin_name="bad",
@@ -88,7 +88,7 @@ class TestLandscapeRecorderNodes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -96,7 +96,7 @@ class TestLandscapeRecorderNodes:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -121,7 +121,7 @@ class TestLandscapeRecorderNodes:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -129,7 +129,7 @@ class TestLandscapeRecorderNodes:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -154,7 +154,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="source_1",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -163,7 +163,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="sink_1",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -210,7 +210,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -219,7 +219,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="gate",
             plugin_name="threshold",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -228,7 +228,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="sink_high",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -237,7 +237,7 @@ class TestLandscapeRecorderEdges:
             run_id=run.run_id,
             node_id="sink_low",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -286,7 +286,7 @@ class TestSchemaRecording:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={"path": "data.csv"},
             schema_config=schema_config,
@@ -313,7 +313,7 @@ class TestSchemaRecording:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={"path": "data.csv"},
             schema_config=schema_config,
@@ -343,7 +343,7 @@ class TestSchemaRecording:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={"path": "data.csv"},
             schema_config=schema_config,
@@ -374,7 +374,7 @@ class TestSchemaRecording:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,

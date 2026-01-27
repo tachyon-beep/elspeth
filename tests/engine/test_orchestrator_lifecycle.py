@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, NodeID, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, SinkName, SourceRow
+from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -33,12 +34,11 @@ if TYPE_CHECKING:
 class TestLifecycleHooks:
     """Orchestrator invokes plugin lifecycle hooks."""
 
-    def test_on_start_called_before_processing(self) -> None:
+    def test_on_start_called_before_processing(self, landscape_db: LandscapeDB) -> None:
         """on_start() called before any rows processed."""
         from unittest.mock import MagicMock
 
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -57,7 +57,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
@@ -66,10 +66,11 @@ class TestLifecycleHooks:
                 call_order.append("process")
                 return TransformResult.success(row)
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -99,9 +100,10 @@ class TestLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("transform", node_type="transform", plugin_name="tracked")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -115,13 +117,12 @@ class TestLifecycleHooks:
         assert call_order[0] == "on_start"
         assert "process" in call_order
 
-    def test_on_complete_called_after_all_rows(self) -> None:
+    def test_on_complete_called_after_all_rows(self, landscape_db: LandscapeDB) -> None:
         """on_complete() called after all rows processed."""
         from unittest.mock import MagicMock
 
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
@@ -138,7 +139,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
@@ -150,10 +151,11 @@ class TestLifecycleHooks:
             def on_complete(self, ctx: Any) -> None:
                 call_order.append("on_complete")
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -182,9 +184,10 @@ class TestLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("transform", node_type="transform", plugin_name="tracked")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -200,13 +203,12 @@ class TestLifecycleHooks:
         # All processing should happen before on_complete
         assert call_order.count("process") == 2
 
-    def test_on_complete_called_on_error(self) -> None:
+    def test_on_complete_called_on_error(self, landscape_db: LandscapeDB) -> None:
         """on_complete() called even when run fails."""
         from unittest.mock import MagicMock
 
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         completed: list[bool] = []
@@ -221,7 +223,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -232,10 +234,11 @@ class TestLifecycleHooks:
             def on_complete(self, ctx: Any) -> None:
                 completed.append(True)
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -263,9 +266,10 @@ class TestLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="failing")
-        graph.add_node("transform", node_type="transform", plugin_name="failing")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="failing", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -284,12 +288,11 @@ class TestLifecycleHooks:
 class TestSourceLifecycleHooks:
     """Tests for source plugin lifecycle hook calls."""
 
-    def test_source_lifecycle_hooks_called(self) -> None:
+    def test_source_lifecycle_hooks_called(self, landscape_db: LandscapeDB) -> None:
         """Source on_start, on_complete should be called around loading."""
         from unittest.mock import MagicMock
 
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -314,7 +317,7 @@ class TestSourceLifecycleHooks:
             def close(self) -> None:
                 call_order.append("source_close")
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         source = TrackedSource()
         mock_sink = MagicMock()
@@ -336,8 +339,9 @@ class TestSourceLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="tracked_source")
-        graph.add_node("sink", node_type="sink", plugin_name="csv")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="tracked_source", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}  # type: ignore[assignment]
         graph._sink_id_map = {SinkName("output"): NodeID("sink")}
@@ -358,12 +362,11 @@ class TestSourceLifecycleHooks:
 class TestSinkLifecycleHooks:
     """Tests for sink plugin lifecycle hook calls."""
 
-    def test_sink_lifecycle_hooks_called(self) -> None:
+    def test_sink_lifecycle_hooks_called(self, landscape_db: LandscapeDB) -> None:
         """Sink on_start and on_complete should be called."""
         from unittest.mock import MagicMock
 
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -387,10 +390,11 @@ class TestSinkLifecycleHooks:
             def close(self) -> None:
                 call_order.append("sink_close")
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -410,8 +414,9 @@ class TestSinkLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("sink", node_type="sink", plugin_name="tracked_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}  # type: ignore[assignment]
         graph._sink_id_map = {SinkName("output"): NodeID("sink")}
@@ -427,13 +432,12 @@ class TestSinkLifecycleHooks:
         assert "sink_on_complete" in call_order, "Sink on_complete should be called"
         assert call_order.index("sink_on_complete") > call_order.index("sink_write"), "Sink on_complete should be called after write"
 
-    def test_sink_on_complete_called_even_on_error(self) -> None:
+    def test_sink_on_complete_called_even_on_error(self, landscape_db: LandscapeDB) -> None:
         """Sink on_complete should be called even when run fails."""
         from unittest.mock import MagicMock
 
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
@@ -449,7 +453,7 @@ class TestSinkLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({})
+                super().__init__({"schema": {"fields": "dynamic"}})
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -475,10 +479,11 @@ class TestSinkLifecycleHooks:
             def close(self) -> None:
                 pass
 
-        db = LandscapeDB.in_memory()
+        db = landscape_db
 
         mock_source = MagicMock()
         mock_source.name = "csv"
+        mock_source._on_validation_failure = "discard"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
         schema_mock = MagicMock()
@@ -498,9 +503,10 @@ class TestSinkLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("transform", node_type="transform", plugin_name="failing")
-        graph.add_node("sink", node_type="sink", plugin_name="tracked_sink")
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}

@@ -9,10 +9,11 @@ for audit integrity.
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, or_, select, union
 
+from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.schema import (
     calls_table,
     node_states_table,
@@ -23,21 +24,6 @@ from elspeth.core.landscape.schema import (
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
-
-
-class PayloadStoreProtocol(Protocol):
-    """Protocol for PayloadStore to avoid circular imports.
-
-    Defines the minimal interface required by PurgeManager.
-    """
-
-    def exists(self, content_hash: str) -> bool:
-        """Check if content exists."""
-        ...
-
-    def delete(self, content_hash: str) -> bool:
-        """Delete content by hash. Returns True if deleted."""
-        ...
 
 
 @dataclass
@@ -64,7 +50,7 @@ class PurgeManager:
     from the PayloadStore while preserving audit hashes in Landscape.
     """
 
-    def __init__(self, db: "LandscapeDB", payload_store: PayloadStoreProtocol) -> None:
+    def __init__(self, db: "LandscapeDB", payload_store: PayloadStore) -> None:
         """Initialize PurgeManager.
 
         Args:

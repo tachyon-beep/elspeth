@@ -15,6 +15,8 @@ deterministic across Python versions but is appropriate for quarantined data
 where the content is already flagged as problematic.
 """
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import math
@@ -22,13 +24,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 import rfc8785
 
 if TYPE_CHECKING:
-    import networkx as nx
-
     from elspeth.core.dag import ExecutionGraph
 
 # Version string stored with every run for hash verification
@@ -172,11 +173,55 @@ def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def compute_full_topology_hash(graph: ExecutionGraph) -> str:
+    """Compute hash of complete DAG topology for checkpoint validation.
+
+    Unlike upstream-only hashing, this ensures ANY topology change
+    (including sibling branches in multi-sink DAGs) invalidates checkpoint resume.
+
+    This enforces the audit integrity invariant: one run_id = one configuration.
+    A single run cannot contain outputs produced under different pipeline configs.
+
+    Args:
+        graph: Execution graph to hash
+
+    Returns:
+        SHA-256 hash of canonical full topology representation.
+    """
+    nx_graph = graph.get_nx_graph()
+
+    topology_data = {
+        "nodes": sorted(
+            [
+                {
+                    "node_id": n,
+                    "plugin_name": graph.get_node_info(n).plugin_name,
+                    "config_hash": stable_hash(graph.get_node_info(n).config),
+                }
+                for n in nx_graph.nodes()
+            ],
+            key=lambda x: x["node_id"],
+        ),
+        "edges": sorted(
+            [_edge_to_canonical_dict(nx_graph, u, v, k) for u, v, k in nx_graph.edges(keys=True)],
+            key=lambda x: (x["from"], x["to"], x["key"]),
+        ),
+    }
+
+    return stable_hash(topology_data)
+
+
 def compute_upstream_topology_hash(
-    graph: "ExecutionGraph",
+    graph: ExecutionGraph,
     node_id: str,
 ) -> str:
     """Compute hash of upstream topology (nodes + edges) for checkpoint validation.
+
+    NOTE: This function is DEPRECATED for checkpoint validation in multi-sink DAGs.
+    Use compute_full_topology_hash() instead to ensure ALL branches are validated.
+
+    This function is kept for backwards compatibility with existing code that
+    needs upstream-only topology hashing for other purposes (e.g., lineage queries).
 
     Captures both:
     - Which nodes must execute before checkpoint node
@@ -193,8 +238,6 @@ def compute_upstream_topology_hash(
     Returns:
         SHA-256 hash of canonical upstream topology representation.
     """
-    import networkx as nx
-
     # Get NetworkX graph via public accessor
     nx_graph = graph.get_nx_graph()
 
@@ -229,7 +272,7 @@ def compute_upstream_topology_hash(
 
 
 def _edge_to_canonical_dict(
-    graph: "nx.MultiDiGraph[Any]",
+    graph: nx.MultiDiGraph[Any],
     u: str,
     v: str,
     k: str,

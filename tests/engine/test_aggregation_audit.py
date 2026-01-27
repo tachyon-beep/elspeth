@@ -14,7 +14,7 @@ import pytest
 
 from elspeth.contracts import BatchPendingError, TokenInfo
 from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
-from elspeth.contracts.enums import BatchStatus, NodeStateStatus, TriggerType
+from elspeth.contracts.enums import BatchStatus, NodeStateStatus, NodeType, TriggerType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -94,7 +94,7 @@ class BatchPendingTransform(_TestTransformBase):
         """Raises BatchPendingError to simulate async batch submission."""
         raise BatchPendingError(
             batch_id="test-batch-123",
-            status="submitted",
+            status=BatchStatus.EXECUTING,  # Batch submitted and executing
             check_after_seconds=300,
             checkpoint={"batch_id": "test-batch-123", "rows": len(row) if isinstance(row, list) else 1},
             node_id=self.node_id,
@@ -129,7 +129,7 @@ def aggregation_node_id(recorder: LandscapeRecorder, run_id: str) -> NodeID:
     node = recorder.register_node(
         run_id=run_id,
         plugin_name="mock_batch_transform",
-        node_type="aggregation",
+        node_type=NodeType.AGGREGATION,
         plugin_version="1.0.0",
         config={},
         schema_config=DYNAMIC_SCHEMA,
@@ -143,7 +143,7 @@ def source_node_id(recorder: LandscapeRecorder, run_id: str) -> str:
     node = recorder.register_node(
         run_id=run_id,
         plugin_name="test_source",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_version="1.0.0",
         config={},
         schema_config=DYNAMIC_SCHEMA,
@@ -244,7 +244,7 @@ class TestAggregationFlushAuditTrail:
         transform.node_id = aggregation_node_id
 
         # Execute flush
-        result, _consumed_tokens = aggregation_executor.execute_flush(
+        result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -263,7 +263,7 @@ class TestAggregationFlushAuditTrail:
         # Find the state for our aggregation node
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
-        assert agg_state.status == "completed"
+        assert agg_state.status == NodeStateStatus.COMPLETED
         assert isinstance(agg_state, NodeStateCompleted)
 
         # Verify audit fields: input_hash computed from batch input
@@ -370,7 +370,7 @@ class TestAggregationFlushAuditTrail:
         states = recorder.get_node_states_for_token(token.token_id)
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
-        assert agg_state.status == "failed"
+        assert agg_state.status == NodeStateStatus.FAILED
         assert isinstance(agg_state, NodeStateFailed)
 
         # Verify failed state has input_hash (batch input was captured before failure)
@@ -420,7 +420,7 @@ class TestAggregationFlushAuditTrail:
         transform = ErrorResultTransform()
         transform.node_id = aggregation_node_id
 
-        result, _consumed_tokens = aggregation_executor.execute_flush(
+        result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -444,7 +444,7 @@ class TestAggregationFlushAuditTrail:
         states = recorder.get_node_states_for_token(token.token_id)
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
-        assert agg_state.status == "failed"
+        assert agg_state.status == NodeStateStatus.FAILED
         assert isinstance(agg_state, NodeStateFailed)
 
         # Verify failed state has input_hash (batch input was captured)
@@ -571,7 +571,7 @@ class TestAggregationFlushAuditTrail:
         transform = MockBatchTransform()
         transform.node_id = aggregation_node_id
 
-        _result, consumed_tokens = aggregation_executor.execute_flush(
+        _result, consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -620,7 +620,7 @@ class TestAggregationFlushAuditTrail:
             run_id=run_id,
             plugin_name="batch_pending_transform",
             plugin_version="1.0.0",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
@@ -665,7 +665,7 @@ class TestAggregationFlushAuditTrail:
 
         # Verify BatchPendingError was raised with correct attributes
         assert exc_info.value.batch_id == "test-batch-123"
-        assert exc_info.value.status == "submitted"
+        assert exc_info.value.status == BatchStatus.EXECUTING
 
         # === CRITICAL ASSERTIONS (Bug Fix Verification) ===
 
@@ -723,7 +723,7 @@ class TestAggregationFlushAuditTrail:
 
             # Batch status should still be "executing" (not completed/failed)
             # because BatchPendingError indicates work is in progress
-            assert batch.status == "executing", (
+            assert batch.status == BatchStatus.EXECUTING, (
                 f"Batch status is '{batch.status}' but should be 'executing' after BatchPendingError (work is pending, not complete)"
             )
 
@@ -747,7 +747,7 @@ class TestAggregationFlushAuditTrail:
             run_id=run_id,
             plugin_name="test_transform",
             plugin_version="1.0.0",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
@@ -773,7 +773,7 @@ class TestAggregationFlushAuditTrail:
 
         state_pending = recorder.complete_node_state(
             state_id=state_open.state_id,
-            status="pending",
+            status=NodeStateStatus.PENDING,
             duration_ms=100.0,
         )
 
@@ -789,7 +789,7 @@ class TestAggregationFlushAuditTrail:
         # In a real scenario, this would happen on retry after polling batch status
         state_completed = recorder.complete_node_state(
             state_id=state_open.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"result": 84},
             duration_ms=150.0,  # Updated duration including batch wait time
         )

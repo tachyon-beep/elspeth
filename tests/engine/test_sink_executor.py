@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_sink
 
@@ -75,7 +76,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_output",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={"path": "/tmp/output.csv"},
             schema_config=DYNAMIC_SCHEMA,
@@ -116,6 +117,7 @@ class TestSinkExecutor:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="mock_sink",
         )
 
         # Verify artifact returned with correct info
@@ -158,7 +160,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="empty_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -181,6 +183,7 @@ class TestSinkExecutor:
             tokens=[],
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="empty_sink",
         )
 
         assert artifact is None
@@ -203,7 +206,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="exploding_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -243,6 +246,7 @@ class TestSinkExecutor:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=5,
+                sink_name="failing_sink",
             )
 
         # Verify failure recorded for ALL tokens
@@ -276,7 +280,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -329,6 +333,7 @@ class TestSinkExecutor:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=5,
+                sink_name="batch_sink",
             )
             artifacts.append(artifact)
 
@@ -358,7 +363,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="linked_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -398,6 +403,7 @@ class TestSinkExecutor:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="linked_sink",
         )
 
         # Get first token's state
@@ -424,7 +430,7 @@ class TestSinkExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="webhook_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -481,6 +487,7 @@ class TestSinkExecutor:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="external_call_sink",
         )
 
         # Verify sink succeeded

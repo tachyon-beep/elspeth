@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, Mock
 import httpx
 import pytest
 
-from elspeth.contracts import BatchPendingError, CallStatus, CallType
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -82,7 +82,7 @@ class TestLLMTransformIntegration:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -279,18 +279,16 @@ class TestLLMTransformIntegration:
             }
         )
 
-        result = transform.process({"text": "test"}, ctx)
+        from elspeth.plugins.clients.llm import RateLimitError
 
-        # Transform should return retryable error
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "rate_limited"
-        assert result.retryable is True
+        with pytest.raises(RateLimitError):
+            transform.process({"text": "test"}, ctx)
 
         # Audit trail should record as error
         calls = recorder.get_calls(state_id)
         assert len(calls) == 1
         assert calls[0].status == CallStatus.ERROR
+        assert "rate" in calls[0].error_json.lower()
 
     def test_system_prompt_included_when_configured(self, recorder: LandscapeRecorder, setup_state: tuple[str, str, str, str, str]) -> None:
         """Verify system prompt is included in API call."""
@@ -370,7 +368,7 @@ class TestOpenRouterLLMTransformIntegration:
         node = recorder.register_node(
             run_id=run_id,
             plugin_name="openrouter_llm",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -858,7 +856,7 @@ class TestAuditedLLMClientIntegration:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,

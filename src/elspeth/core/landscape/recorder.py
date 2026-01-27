@@ -49,11 +49,12 @@ from elspeth.contracts import (
     TokenOutcome,
     TokenParent,
     TransformErrorRecord,
+    TriggerType,
     ValidationErrorRecord,
 )
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
-from elspeth.core.landscape._helpers import coerce_enum, generate_id, now
+from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.repositories import (
     ArtifactRepository,
@@ -108,7 +109,7 @@ class LandscapeRecorder:
 
         run = recorder.begin_run(config={"source": "data.csv"})
         # ... execute pipeline ...
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
     """
 
     def __init__(self, db: LandscapeDB, *, payload_store: Any | None = None) -> None:
@@ -156,7 +157,7 @@ class LandscapeRecorder:
         *,
         run_id: str | None = None,
         reproducibility_grade: str | None = None,
-        status: RunStatus | str = RunStatus.RUNNING,
+        status: RunStatus = RunStatus.RUNNING,
         source_schema_json: str | None = None,
     ) -> Run:
         """Begin a new pipeline run.
@@ -166,20 +167,14 @@ class LandscapeRecorder:
             canonical_version: Version of canonical hash algorithm
             run_id: Optional run ID (generated if not provided)
             reproducibility_grade: Optional grade (FULL_REPRODUCIBLE, etc.)
-            status: Initial run status (defaults to RUNNING)
+            status: Initial RunStatus (defaults to RUNNING)
             source_schema_json: Optional serialized source schema for resume type restoration.
                 Should be Pydantic model_json_schema() output. Required for proper resume
                 type fidelity (datetime/Decimal restoration from payload JSON strings).
 
         Returns:
             Run model with generated run_id
-
-        Raises:
-            ValueError: If status string is not a valid RunStatus value
         """
-        # Validate and coerce status enum early - fail fast on typos
-        status_enum = coerce_enum(status, RunStatus)
-
         run_id = run_id or generate_id()
         settings_json = canonical_json(config)
         config_hash = stable_hash(config)
@@ -191,7 +186,7 @@ class LandscapeRecorder:
             config_hash=config_hash,
             settings_json=settings_json,
             canonical_version=canonical_version,
-            status=status_enum,  # Store enum; str subclass works with DB
+            status=status,
             reproducibility_grade=reproducibility_grade,
         )
 
@@ -213,7 +208,7 @@ class LandscapeRecorder:
     def complete_run(
         self,
         run_id: str,
-        status: RunStatus | str,
+        status: RunStatus,
         *,
         reproducibility_grade: str | None = None,
     ) -> Run:
@@ -221,24 +216,19 @@ class LandscapeRecorder:
 
         Args:
             run_id: Run to complete
-            status: Final status (completed, failed) - must be valid RunStatus
+            status: Final RunStatus (COMPLETED or FAILED)
             reproducibility_grade: Optional final grade
 
         Returns:
             Updated Run model
-
-        Raises:
-            ValueError: If status string is not a valid RunStatus value
         """
-        # Validate and coerce status enum early - fail fast on typos
-        status_enum = coerce_enum(status, RunStatus)
         timestamp = now()
 
         self._ops.execute_update(
             runs_table.update()
             .where(runs_table.c.run_id == run_id)
             .values(
-                status=status_enum.value,  # Store string in DB
+                status=status.value,
                 completed_at=timestamp,
                 reproducibility_grade=reproducibility_grade,
             )
@@ -320,7 +310,7 @@ class LandscapeRecorder:
 
         return edge_map
 
-    def update_run_status(self, run_id: str, status: RunStatus | str) -> None:
+    def update_run_status(self, run_id: str, status: RunStatus) -> None:
         """Update run status without setting completed_at.
 
         Used for intermediate status changes (e.g., paused → running during resume).
@@ -328,38 +318,27 @@ class LandscapeRecorder:
 
         Args:
             run_id: Run to update
-            status: New status - must be valid RunStatus
-
-        Raises:
-            ValueError: If status string is not a valid RunStatus value
+            status: New RunStatus
 
         Note:
             This encapsulates run status updates for Orchestrator recovery.
             Only updates status field - does not set completed_at or reproducibility_grade.
         """
-        # Validate and coerce status enum - fail fast on typos
-        status_enum = coerce_enum(status, RunStatus)
+        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
 
-        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status_enum.value))
-
-    def list_runs(self, *, status: RunStatus | str | None = None) -> list[Run]:
+    def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.
 
         Args:
-            status: Optional filter by status (running, completed, failed)
+            status: Optional RunStatus filter
 
         Returns:
             List of Run models, ordered by started_at (newest first)
-
-        Raises:
-            ValueError: If status string is not a valid RunStatus value
         """
         query = select(runs_table).order_by(runs_table.c.started_at.desc())
 
         if status is not None:
-            # Validate and coerce status enum - fail fast on typos
-            status_enum = coerce_enum(status, RunStatus)
-            query = query.where(runs_table.c.status == status_enum.value)
+            query = query.where(runs_table.c.status == status.value)
 
         rows = self._ops.execute_fetchall(query)
         return [self._run_repo.load(row) for row in rows]
@@ -367,7 +346,7 @@ class LandscapeRecorder:
     def set_export_status(
         self,
         run_id: str,
-        status: ExportStatus | str,
+        status: ExportStatus,
         *,
         error: str | None = None,
         export_format: str | None = None,
@@ -380,24 +359,18 @@ class LandscapeRecorder:
 
         Args:
             run_id: Run to update
-            status: Export status (ExportStatus enum or string: pending, completed, failed)
-            error: Error message if status is 'failed'
+            status: ExportStatus (PENDING, COMPLETED, or FAILED)
+            error: Error message if status is FAILED
             export_format: Format used (csv, json)
             export_sink: Sink name used for export
-
-        Raises:
-            ValueError: If status is not a valid ExportStatus value
         """
-        # Validate and coerce status - crash on invalid values per Data Manifesto
-        status_enum = coerce_enum(status, ExportStatus)
+        updates: dict[str, Any] = {"export_status": status.value}
 
-        updates: dict[str, Any] = {"export_status": status_enum.value}
-
-        if status_enum == ExportStatus.COMPLETED:
+        if status == ExportStatus.COMPLETED:
             updates["exported_at"] = now()
             # Clear stale error when transitioning to completed
             updates["export_error"] = None
-        elif status_enum == ExportStatus.PENDING:
+        elif status == ExportStatus.PENDING:
             # Clear stale error when transitioning to pending
             updates["export_error"] = None
 
@@ -418,14 +391,14 @@ class LandscapeRecorder:
         self,
         run_id: str,
         plugin_name: str,
-        node_type: NodeType | str,
+        node_type: NodeType,
         plugin_version: str,
         config: dict[str, Any],
         *,
         node_id: str | None = None,
         sequence: int | None = None,
         schema_hash: str | None = None,
-        determinism: Determinism | str = Determinism.DETERMINISTIC,
+        determinism: Determinism = Determinism.DETERMINISTIC,
         schema_config: "SchemaConfig",
     ) -> Node:
         """Register a plugin instance (node) in the execution graph.
@@ -433,26 +406,18 @@ class LandscapeRecorder:
         Args:
             run_id: Run this node belongs to
             plugin_name: Name of the plugin
-            node_type: Type (source, transform, gate, aggregation, coalesce, sink)
-                       Accepts NodeType enum or string (will be validated)
+            node_type: NodeType enum (SOURCE, TRANSFORM, GATE, AGGREGATION, COALESCE, SINK)
             plugin_version: Version of the plugin
             config: Plugin configuration
             node_id: Optional node ID (generated if not provided)
             sequence: Position in pipeline
             schema_hash: Optional input/output schema hash
-            determinism: Reproducibility grade (Determinism enum or string)
+            determinism: Determinism enum (defaults to DETERMINISTIC)
             schema_config: Schema configuration for audit trail (WP-11.99)
 
         Returns:
             Node model
-
-        Raises:
-            ValueError: If node_type or determinism string is not a valid enum value
         """
-        # Validate and coerce enums early - fail fast on typos
-        node_type_enum = coerce_enum(node_type, NodeType)
-        determinism_enum = coerce_enum(determinism, Determinism)
-
         node_id = node_id or generate_id()
         config_json = canonical_json(config)
         config_hash = stable_hash(config)
@@ -478,9 +443,9 @@ class LandscapeRecorder:
             node_id=node_id,
             run_id=run_id,
             plugin_name=plugin_name,
-            node_type=node_type_enum,  # Strict: enum type
+            node_type=node_type,
             plugin_version=plugin_version,
-            determinism=determinism_enum,  # Strict: enum type
+            determinism=determinism,
             config_hash=config_hash,
             config_json=config_json,
             schema_hash=schema_hash,
@@ -516,7 +481,7 @@ class LandscapeRecorder:
         from_node_id: str,
         to_node_id: str,
         label: str,
-        mode: RoutingMode | str,
+        mode: RoutingMode,
         *,
         edge_id: str | None = None,
     ) -> Edge:
@@ -527,18 +492,12 @@ class LandscapeRecorder:
             from_node_id: Source node
             to_node_id: Destination node
             label: Edge label ("continue", route name, etc.)
-            mode: Default routing mode (RoutingMode enum or "move"/"copy" string)
+            mode: RoutingMode enum (MOVE or COPY)
             edge_id: Optional edge ID (generated if not provided)
 
         Returns:
             Edge model
-
-        Raises:
-            ValueError: If mode string is not a valid RoutingMode value
         """
-        # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = coerce_enum(mode, RoutingMode)
-
         edge_id = edge_id or generate_id()
         timestamp = now()
 
@@ -548,7 +507,7 @@ class LandscapeRecorder:
             from_node_id=from_node_id,
             to_node_id=to_node_id,
             label=label,
-            default_mode=mode_enum,  # Strict: enum type
+            default_mode=mode,
             created_at=timestamp,
         )
 
@@ -1002,7 +961,7 @@ class LandscapeRecorder:
     def complete_node_state(
         self,
         state_id: str,
-        status: Literal[NodeStateStatus.PENDING, "pending"],
+        status: Literal[NodeStateStatus.PENDING],
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
@@ -1014,7 +973,7 @@ class LandscapeRecorder:
     def complete_node_state(
         self,
         state_id: str,
-        status: Literal[NodeStateStatus.COMPLETED, "completed"],
+        status: Literal[NodeStateStatus.COMPLETED],
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
@@ -1026,7 +985,7 @@ class LandscapeRecorder:
     def complete_node_state(
         self,
         state_id: str,
-        status: Literal[NodeStateStatus.FAILED, "failed", "rejected"],
+        status: Literal[NodeStateStatus.FAILED],
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
@@ -1037,7 +996,7 @@ class LandscapeRecorder:
     def complete_node_state(
         self,
         state_id: str,
-        status: NodeStateStatus | str,
+        status: NodeStateStatus,
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
@@ -1048,7 +1007,7 @@ class LandscapeRecorder:
 
         Args:
             state_id: State to complete
-            status: Final status (pending, completed, failed, or "rejected" which maps to failed)
+            status: NodeStateStatus (PENDING, COMPLETED, or FAILED)
             output_data: Output data for hashing (if success)
             duration_ms: Processing duration (required)
             error: Error details (if failed)
@@ -1058,19 +1017,10 @@ class LandscapeRecorder:
             NodeStatePending if status is pending, NodeStateCompleted if completed, NodeStateFailed if failed
 
         Raises:
-            ValueError: If status is not a valid terminal status
+            ValueError: If status is OPEN (not a valid terminal status)
             ValueError: If duration_ms is not provided
         """
-        # Coerce string status to enum (handle "rejected" as failed)
-        # Check for enum first since NodeStateStatus is a str subclass
-        if isinstance(status, NodeStateStatus):
-            status_enum = status
-        elif status == "rejected":
-            status_enum = NodeStateStatus.FAILED
-        else:
-            status_enum = NodeStateStatus(status)
-
-        if status_enum == NodeStateStatus.OPEN:
+        if status == NodeStateStatus.OPEN:
             raise ValueError("Cannot complete a node state with status OPEN")
 
         if duration_ms is None:
@@ -1085,7 +1035,7 @@ class LandscapeRecorder:
             node_states_table.update()
             .where(node_states_table.c.state_id == state_id)
             .values(
-                status=status_enum.value,
+                status=status.value,
                 output_hash=output_hash,
                 duration_ms=duration_ms,
                 error_json=error_json,
@@ -1121,7 +1071,7 @@ class LandscapeRecorder:
         self,
         state_id: str,
         edge_id: str,
-        mode: RoutingMode | str,
+        mode: RoutingMode,
         reason: dict[str, Any] | None = None,
         *,
         event_id: str | None = None,
@@ -1134,7 +1084,7 @@ class LandscapeRecorder:
         Args:
             state_id: Node state that made the routing decision
             edge_id: Edge that was taken
-            mode: Routing mode (RoutingMode enum or "move"/"copy" string)
+            mode: RoutingMode enum (MOVE or COPY)
             reason: Reason for this routing decision
             event_id: Optional event ID
             routing_group_id: Group ID (for multi-destination routing)
@@ -1143,13 +1093,7 @@ class LandscapeRecorder:
 
         Returns:
             RoutingEvent model
-
-        Raises:
-            ValueError: If mode string is not a valid RoutingMode value
         """
-        # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = coerce_enum(mode, RoutingMode)
-
         event_id = event_id or generate_id()
         routing_group_id = routing_group_id or generate_id()
         reason_hash = stable_hash(reason) if reason else None
@@ -1161,7 +1105,7 @@ class LandscapeRecorder:
             edge_id=edge_id,
             routing_group_id=routing_group_id,
             ordinal=ordinal,
-            mode=mode_enum,  # Strict: enum type
+            mode=mode,
             reason_hash=reason_hash,
             reason_ref=reason_ref,
             created_at=timestamp,
@@ -1319,9 +1263,9 @@ class LandscapeRecorder:
     def update_batch_status(
         self,
         batch_id: str,
-        status: str,
+        status: BatchStatus,
         *,
-        trigger_type: str | None = None,
+        trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
         state_id: str | None = None,
     ) -> None:
@@ -1329,20 +1273,20 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to update
-            status: New status (executing, completed, failed)
-            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            status: New BatchStatus
+            trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Node state for the flush operation
         """
-        updates: dict[str, Any] = {"status": status}
+        updates: dict[str, Any] = {"status": status.value}
 
         if trigger_type:
-            updates["trigger_type"] = trigger_type
+            updates["trigger_type"] = trigger_type.value
         if trigger_reason:
             updates["trigger_reason"] = trigger_reason
         if state_id:
             updates["aggregation_state_id"] = state_id
-        if status in ("completed", "failed"):
+        if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
 
         self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
@@ -1350,9 +1294,9 @@ class LandscapeRecorder:
     def complete_batch(
         self,
         batch_id: str,
-        status: str,
+        status: BatchStatus,
         *,
-        trigger_type: str | None = None,
+        trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
         state_id: str | None = None,
     ) -> Batch:
@@ -1360,8 +1304,8 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to complete
-            status: Final status (completed, failed)
-            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            status: Final BatchStatus (COMPLETED or FAILED)
+            trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Optional node state for the aggregation
 
@@ -1374,8 +1318,8 @@ class LandscapeRecorder:
             batches_table.update()
             .where(batches_table.c.batch_id == batch_id)
             .values(
-                status=status,
-                trigger_type=trigger_type,
+                status=status.value,
+                trigger_type=trigger_type.value if trigger_type else None,
                 trigger_reason=trigger_reason,
                 aggregation_state_id=state_id,
                 completed_at=timestamp,
@@ -1405,14 +1349,14 @@ class LandscapeRecorder:
         self,
         run_id: str,
         *,
-        status: str | None = None,
+        status: BatchStatus | None = None,
         node_id: str | None = None,
     ) -> list[Batch]:
         """Get batches for a run.
 
         Args:
             run_id: Run ID
-            status: Optional status filter
+            status: Optional BatchStatus filter
             node_id: Optional aggregation node filter
 
         Returns:
@@ -1422,7 +1366,7 @@ class LandscapeRecorder:
         query = select(batches_table).where(batches_table.c.run_id == run_id)
 
         if status:
-            query = query.where(batches_table.c.status == status)
+            query = query.where(batches_table.c.status == status.value)
         if node_id:
             query = query.where(batches_table.c.aggregation_node_id == node_id)
 
@@ -1449,7 +1393,7 @@ class LandscapeRecorder:
         query = (
             select(batches_table)
             .where(batches_table.c.run_id == run_id)
-            .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
+            .where(batches_table.c.status.in_([BatchStatus.DRAFT.value, BatchStatus.EXECUTING.value, BatchStatus.FAILED.value]))
             .order_by(batches_table.c.created_at.asc())
         )
         result = self._ops.execute_fetchall(query)
@@ -1952,7 +1896,7 @@ class LandscapeRecorder:
 
         return compute_grade(self._db, run_id)
 
-    def finalize_run(self, run_id: str, status: str) -> Run:
+    def finalize_run(self, run_id: str, status: RunStatus) -> Run:
         """Finalize a run by computing grade and completing it.
 
         Convenience method that:
@@ -1961,7 +1905,7 @@ class LandscapeRecorder:
 
         Args:
             run_id: Run to finalize
-            status: Final status (completed, failed)
+            status: Final RunStatus (COMPLETED or FAILED)
 
         Returns:
             Updated Run model
@@ -1970,6 +1914,81 @@ class LandscapeRecorder:
         return self.complete_run(run_id, status, reproducibility_grade=grade.value)
 
     # === Token Outcome Recording (AUD-001) ===
+
+    def _validate_outcome_fields(
+        self,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None,
+        batch_id: str | None,
+        fork_group_id: str | None,
+        join_group_id: str | None,
+        expand_group_id: str | None,
+        error_hash: str | None,
+    ) -> None:
+        """Validate required fields are present for each outcome type.
+
+        Enforces the token outcome contract from docs/audit/tokens/00-token-outcome-contract.md.
+        This is defense-in-depth: callers SHOULD pass correct fields, but this catches bugs.
+
+        Raises:
+            ValueError: If a required field is missing for the outcome type
+        """
+        # Map outcome to required field(s)
+        # Contract: Each outcome type has specific required fields
+        if outcome == RowOutcome.COMPLETED:
+            if sink_name is None:
+                raise ValueError(
+                    "COMPLETED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.ROUTED:
+            if sink_name is None:
+                raise ValueError(
+                    "ROUTED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FORKED:
+            if fork_group_id is None:
+                raise ValueError(
+                    "FORKED outcome requires fork_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FAILED:
+            if error_hash is None:
+                raise ValueError(
+                    "FAILED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.QUARANTINED:
+            if error_hash is None:
+                raise ValueError(
+                    "QUARANTINED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.CONSUMED_IN_BATCH:
+            if batch_id is None:
+                raise ValueError(
+                    "CONSUMED_IN_BATCH outcome requires batch_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.COALESCED:
+            if join_group_id is None:
+                raise ValueError(
+                    "COALESCED outcome requires join_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.EXPANDED:
+            if expand_group_id is None:
+                raise ValueError(
+                    "EXPANDED outcome requires expand_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.BUFFERED and batch_id is None:
+            raise ValueError(
+                "BUFFERED outcome requires batch_id but got None. Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+            )
+        # No else needed - exhaustive enum handling above
 
     def record_token_outcome(
         self,
@@ -1995,20 +2014,33 @@ class LandscapeRecorder:
             run_id: Current run ID
             token_id: Token that reached this outcome
             outcome: The RowOutcome enum value
-            sink_name: For ROUTED/COMPLETED - which sink
-            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch
-            fork_group_id: For FORKED - the fork group
-            join_group_id: For COALESCED - the join group
-            expand_group_id: For EXPANDED - the expand group
-            error_hash: For FAILED/QUARANTINED - hash of error details
+            sink_name: For ROUTED/COMPLETED - which sink (REQUIRED)
+            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch (REQUIRED)
+            fork_group_id: For FORKED - the fork group (REQUIRED)
+            join_group_id: For COALESCED - the join group (REQUIRED)
+            expand_group_id: For EXPANDED - the expand group (REQUIRED)
+            error_hash: For FAILED/QUARANTINED - hash of error details (REQUIRED)
             context: Optional additional context (stored as JSON)
 
         Returns:
             outcome_id for tracking
 
         Raises:
+            ValueError: If required fields for outcome type are missing
             IntegrityError: If terminal outcome already exists for token
         """
+        # Validate required fields per outcome type (contract enforcement)
+        # See docs/audit/tokens/00-token-outcome-contract.md
+        self._validate_outcome_fields(
+            outcome=outcome,
+            sink_name=sink_name,
+            batch_id=batch_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            expand_group_id=expand_group_id,
+            error_hash=error_hash,
+        )
+
         outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
         context_json = json.dumps(context) if context is not None else None

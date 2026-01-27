@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -26,16 +27,16 @@ def _create_test_graph(checkpoint_node: str = "sink-node") -> ExecutionGraph:
                         If not in default nodes, it will be added as a sink.
     """
     graph = ExecutionGraph()
-    graph.add_node("source-node", node_type="source", plugin_name="test-source", config={})
-    graph.add_node("transform-node", node_type="transform", plugin_name="test-transform", config={})
+    graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="test-source", config={})
+    graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="test-transform", config={})
 
     # Add the checkpoint node if it's custom
     if checkpoint_node not in ["source-node", "transform-node", "sink-node"]:
-        graph.add_node(checkpoint_node, node_type="sink", plugin_name="test-sink", config={})
+        graph.add_node(checkpoint_node, node_type=NodeType.SINK, plugin_name="test-sink", config={})
         graph.add_edge("source-node", "transform-node", label="continue")
         graph.add_edge("transform-node", checkpoint_node, label="continue")
     else:
-        graph.add_node("sink-node", node_type="sink", plugin_name="test-sink", config={})
+        graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="test-sink", config={})
         graph.add_edge("source-node", "transform-node", label="continue")
         graph.add_edge("transform-node", "sink-node", label="continue")
 
@@ -89,7 +90,7 @@ def run_with_checkpoint_and_payloads(
                 config_hash="test",
                 settings_json="{}",
                 canonical_version="sha256-rfc8785-v1",
-                status="failed",
+                status=RunStatus.FAILED,
             )
         )
 
@@ -99,9 +100,9 @@ def run_with_checkpoint_and_payloads(
                 node_id="source-node",
                 run_id=run_id,
                 plugin_name="csv",
-                node_type="source",
+                node_type=NodeType.SOURCE,
                 plugin_version="1.0",
-                determinism="io_read",
+                determinism=Determinism.IO_READ,
                 config_hash="x",
                 config_json="{}",
                 registered_at=now,
