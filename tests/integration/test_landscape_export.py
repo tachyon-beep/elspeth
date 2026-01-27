@@ -14,7 +14,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -279,7 +279,7 @@ class TestSignedExportDeterminism:
                 duration_ms=5.0,
             )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Export the SAME run twice with signing
         signing_key = b"test-determinism-key-12345"

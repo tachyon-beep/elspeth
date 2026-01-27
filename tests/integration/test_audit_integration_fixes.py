@@ -7,7 +7,7 @@ Verifies all integration audit fixes (Tasks 1-7) work together end-to-end.
 
 import pytest
 
-from elspeth.contracts import EdgeInfo, ExecutionError, RoutingMode
+from elspeth.contracts import EdgeInfo, ExecutionError, RoutingMode, RunStatus
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -230,7 +230,7 @@ class TestIntegrationAuditFixes:
         assert ctx.run_id == run.run_id
 
         # Complete the run
-        completed = recorder.complete_run(run.run_id, "completed")
+        completed = recorder.complete_run(run.run_id, RunStatus.COMPLETED)
         assert completed.run_id == run.run_id
 
         # Cleanup

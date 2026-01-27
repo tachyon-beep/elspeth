@@ -43,7 +43,7 @@ class TestLandscapeRecorderRuns:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
-        completed = recorder.complete_run(run.run_id, status="completed")
+        completed = recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         assert completed.status == RunStatus.COMPLETED
         assert completed.completed_at is not None
@@ -57,7 +57,7 @@ class TestLandscapeRecorderRuns:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
-        completed = recorder.complete_run(run.run_id, status="failed")
+        completed = recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         assert completed.status == RunStatus.FAILED
 

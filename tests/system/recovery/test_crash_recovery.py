@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, PluginSchema, RoutingMode, RunStatus, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -352,7 +352,7 @@ class TestResumeIdempotence:
         )
 
         # Mark run as failed (simulating crash)
-        recorder.complete_run(run_id, status="failed")
+        recorder.complete_run(run_id, status=RunStatus.FAILED)
 
         # Phase 2: Resume and process remaining rows
         recovery_mgr = RecoveryManager(db_b, checkpoint_mgr)
@@ -943,7 +943,7 @@ class TestAggregationRecovery:
         )
 
         # Simulate crash
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # Verify can resume
         check = recovery_mgr.can_resume(run.run_id, mock_graph)

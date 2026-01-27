@@ -134,7 +134,7 @@ class TestOrchestratorResume:
 
         # Simulate crash mid-flush
         recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         return {
             "run_id": run.run_id,

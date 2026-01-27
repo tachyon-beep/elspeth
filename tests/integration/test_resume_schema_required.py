@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism
+from elspeth.contracts import Determinism, RunStatus
 from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -161,7 +161,7 @@ class TestResumeSchemaRequired:
         )
 
         # Mark run as failed (so it can be resumed)
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # 3. Verify that attempting to get schema from source without _schema_class returns None
         source_without_schema = SourceWithoutSchema(config={})

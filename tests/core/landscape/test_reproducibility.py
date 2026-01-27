@@ -3,6 +3,8 @@
 
 import pytest
 
+from elspeth.contracts import RunStatus
+
 
 class TestReproducibilityGradeComparison:
     """Verify reproducibility uses proper enum comparison."""
@@ -20,7 +22,7 @@ class TestReproducibilityGradeComparison:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Set to REPLAY_REPRODUCIBLE
         set_run_grade(db, run.run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
@@ -45,7 +47,7 @@ class TestReproducibilityGradeComparison:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Set to FULL_REPRODUCIBLE
         set_run_grade(db, run.run_id, ReproducibilityGrade.FULL_REPRODUCIBLE)
@@ -70,7 +72,7 @@ class TestReproducibilityGradeComparison:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Set to ATTRIBUTABLE_ONLY
         set_run_grade(db, run.run_id, ReproducibilityGrade.ATTRIBUTABLE_ONLY)
@@ -96,7 +98,7 @@ class TestReproducibilityGradeComparison:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Directly set grade to NULL to simulate corruption
         with db.connection() as conn:
@@ -123,7 +125,7 @@ class TestReproducibilityGradeComparison:
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Directly set grade to invalid value to simulate corruption
         with db.connection() as conn:

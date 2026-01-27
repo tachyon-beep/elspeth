@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from elspeth.contracts import RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -84,7 +85,7 @@ class TestExplainFunction:
             data={"id": 1},
         )
         token = recorder.create_token(row_id=row.row_id)
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query lineage
         result = explain(recorder, run_id=run.run_id, token_id=token.token_id)
@@ -173,7 +174,7 @@ class TestExplainFunction:
             sink_name="output",
         )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query lineage
         result = explain(recorder, run_id=run.run_id, token_id=token.token_id)
@@ -247,7 +248,7 @@ class TestExplainFunction:
             sink_name="output",
         )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query by row_id (token must exist but we don't use it directly)
         result = explain(recorder, run_id=run.run_id, row_id=row.row_id)
@@ -314,7 +315,7 @@ class TestExplainFunction:
             sink_name="sink_b",
         )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query with sink disambiguation should work
         result_a = explain(recorder, run_id=run.run_id, row_id=row.row_id, sink="sink_a")
@@ -364,7 +365,7 @@ class TestExplainFunction:
             sink_name="output",
         )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query without sink should work (only one terminal token)
         result = explain(recorder, run_id=run.run_id, row_id=row.row_id)
@@ -405,7 +406,7 @@ class TestExplainFunction:
             sink_name="actual_sink",
         )
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Query for sink that doesn't exist
         result = explain(recorder, run_id=run.run_id, row_id=row.row_id, sink="nonexistent")

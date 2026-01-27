@@ -194,7 +194,7 @@ class TestLandscapeRecorderBatches:
         recorder.update_batch_status(batch2.batch_id, BatchStatus.COMPLETED)
 
         # Get only draft batches
-        drafts = recorder.get_batches(run.run_id, status="draft")
+        drafts = recorder.get_batches(run.run_id, status=BatchStatus.DRAFT)
         assert len(drafts) == 1
         assert drafts[0].batch_id == batch1.batch_id
 

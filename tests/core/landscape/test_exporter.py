@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.contracts import BatchStatus, RoutingMode
+from elspeth.contracts import BatchStatus, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -37,7 +37,7 @@ def populated_db() -> tuple[LandscapeDB, str]:
         data={"name": "Alice", "value": 100},
     )
 
-    recorder.complete_run(run.run_id, status="completed")
+    recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
     return db, run.run_id
 
@@ -175,7 +175,7 @@ class TestLandscapeExporterComplexRun:
             label="continue",
             mode=RoutingMode.MOVE,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -209,7 +209,7 @@ class TestLandscapeExporterComplexRun:
             data={"x": 1},
         )
         token = recorder.create_token(row_id=row.row_id)
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -254,7 +254,7 @@ class TestLandscapeExporterComplexRun:
             output_data={"x": 1},
             duration_ms=10.0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -303,7 +303,7 @@ class TestLandscapeExporterComplexRun:
             content_hash="abc123",
             size_bytes=1024,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -338,7 +338,7 @@ class TestLandscapeExporterComplexRun:
             status=BatchStatus.COMPLETED,
             trigger_reason="count=10",
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -380,7 +380,7 @@ class TestLandscapeExporterComplexRun:
             token_id=token.token_id,
             ordinal=0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -441,7 +441,7 @@ class TestLandscapeExporterComplexRun:
             mode=RoutingMode.MOVE,
             reason={"rule": "value > 1000"},
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -478,7 +478,7 @@ class TestLandscapeExporterComplexRun:
             row_id=row.row_id,
             branches=["a", "b"],
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -675,7 +675,7 @@ class TestLandscapeExporterSigning:
             )
             recorder.complete_batch(batch.batch_id, status=BatchStatus.COMPLETED)
 
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Export multiple times and verify final_hash is identical
         exporter = LandscapeExporter(db, signing_key=b"determinism-test-key")
@@ -711,7 +711,7 @@ class TestLandscapeExporterSigning:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
 
@@ -783,7 +783,7 @@ class TestLandscapeExporterCallRecords:
             output_data={"category": "positive"},
             duration_ms=300.0,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db)
         records = list(exporter.export_run(run.run_id))
@@ -833,7 +833,7 @@ class TestLandscapeExporterManifestIntegrity:
             row_index=0,
             data={"value": 42},
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         exporter = LandscapeExporter(db, signing_key=b"hash-chain-test-key")
         records = list(exporter.export_run(run.run_id, sign=True))
@@ -878,7 +878,7 @@ class TestLandscapeExporterTier1Corruption:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 
         # Corrupt the run status directly in the database
         with db.connection() as conn:

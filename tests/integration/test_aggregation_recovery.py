@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.enums import BatchStatus
+from elspeth.contracts.enums import BatchStatus, RunStatus
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
@@ -100,7 +100,7 @@ class TestAggregationRecoveryIntegration:
 
         # Simulate crash during flush
         recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # === PHASE 2: Verify recovery is possible ===
 
@@ -207,7 +207,7 @@ class TestAggregationRecoveryIntegration:
             graph=mock_graph,
         )
 
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # Verify recovery
         check = recovery_mgr.can_resume(run.run_id, mock_graph)
@@ -482,7 +482,7 @@ class TestAggregationRecoveryIntegration:
         )
 
         # Simulate crash
-        recorder.complete_run(run.run_id, status="failed")
+        recorder.complete_run(run.run_id, status=RunStatus.FAILED)
 
         # === PHASE 2: Resume and verify timeout preservation ===
 

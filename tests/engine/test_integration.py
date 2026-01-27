@@ -25,6 +25,7 @@ from elspeth.contracts import (
     NodeStateCompleted,
     NodeStateStatus,
     RoutingMode,
+    RunStatus,
     SinkName,
     SourceRow,
     TriggerType,
@@ -1310,7 +1311,7 @@ class TestForkIntegration:
         assert routing_event_count == 4, f"Expected 4 routing events, got {routing_event_count}"
 
         # Complete the run
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
 
 class TestAggregationIntegrationDeleted:
@@ -1687,7 +1688,7 @@ class TestForkCoalescePipelineIntegration:
         assert artifacts[0].content_hash == artifact.content_hash
 
         # Complete the run
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
         # Verify audit trail completeness
         # We should have:
@@ -1921,7 +1922,7 @@ class TestForkCoalescePipelineIntegration:
             assert row["from_path_a"] is True, f"Missing path_a data in row {idx}"
             assert row["from_path_b"] is True, f"Missing path_b data in row {idx}"
 
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
 
 class TestComplexDAGIntegration:
@@ -2285,7 +2286,7 @@ class TestComplexDAGIntegration:
         assert artifact.content_hash == "diamond_hash_1"
 
         # Complete the run
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
         # Verify audit trail completeness
         rows = recorder.get_rows(run_id)
@@ -3006,7 +3007,7 @@ class TestExplainQuery:
             duration_ms=5.0,
         )
 
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
         # Now test explain()
         lineage = explain(recorder, run_id, token_id=token.token_id)
@@ -3126,7 +3127,7 @@ class TestExplainQuery:
             trigger_reason="count_reached",
         )
 
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
         # Verify batch_members links aggregation to all input tokens
         batch_members = recorder.get_batch_members(batch.batch_id)
@@ -3318,7 +3319,7 @@ class TestExplainQuery:
             duration_ms=1.0,
         )
 
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
         # Test explain() on the coalesced token
         lineage = explain(recorder, run_id, token_id=merged_token.token_id)

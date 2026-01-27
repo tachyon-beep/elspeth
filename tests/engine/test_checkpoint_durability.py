@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import NodeID, PluginSchema, RoutingMode, RunStatus, SinkName, SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -457,7 +457,7 @@ class TestCheckpointDurability:
             )
 
         # Mark run as failed (simulating crash after 2 rows written)
-        recorder.complete_run(run_id, status="failed")
+        recorder.complete_run(run_id, status=RunStatus.FAILED)
 
         # --- Phase 2: Verify preconditions ---
         # 2 checkpoints exist (for rows 0 and 1)
