@@ -1033,6 +1033,24 @@ class Orchestrator:
                             # Passthrough mode buffered token
                             rows_buffered += 1
 
+                    # ─────────────────────────────────────────────────────────────────
+                    # Check for timed-out coalesces after processing each row
+                    # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+                    # ─────────────────────────────────────────────────────────────────
+                    if coalesce_executor is not None:
+                        flush_step = len(config.transforms) + len(config.gates)
+                        for coalesce_name in coalesce_executor.get_registered_names():
+                            timed_out = coalesce_executor.check_timeouts(
+                                coalesce_name=coalesce_name,
+                                step_in_pipeline=flush_step,
+                            )
+                            for outcome in timed_out:
+                                if outcome.merged_token is not None:
+                                    rows_coalesced += 1
+                                    pending_tokens[default_sink_name].append(outcome.merged_token)
+                                elif outcome.failure_reason:
+                                    rows_coalesce_failed += 1
+
                     # Emit progress every N rows or every M seconds (after outcome counters are updated)
                     # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                     current_time = time.perf_counter()
@@ -1808,6 +1826,24 @@ class Orchestrator:
                         rows_expanded += 1
                     elif result.outcome == RowOutcome.BUFFERED:
                         rows_buffered += 1
+
+                # ─────────────────────────────────────────────────────────────────
+                # Check for timed-out coalesces after processing each row
+                # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+                # ─────────────────────────────────────────────────────────────────
+                if coalesce_executor is not None:
+                    flush_step = len(config.transforms) + len(config.gates)
+                    for coalesce_name in coalesce_executor.get_registered_names():
+                        timed_out = coalesce_executor.check_timeouts(
+                            coalesce_name=coalesce_name,
+                            step_in_pipeline=flush_step,
+                        )
+                        for outcome in timed_out:
+                            if outcome.merged_token is not None:
+                                rows_coalesced += 1
+                                pending_tokens[default_sink_name].append(outcome.merged_token)
+                            elif outcome.failure_reason:
+                                rows_coalesce_failed += 1
 
             # ─────────────────────────────────────────────────────────────────
             # CRITICAL: Flush remaining aggregation buffers at end-of-source

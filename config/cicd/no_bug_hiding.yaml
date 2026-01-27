@@ -420,32 +420,32 @@ allow_hits:
   reason: Fallback for error message - use node_id if gate name not found
   safety: Error message still produced with node_id as fallback
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1348
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1366
   owner: architecture
   reason: 'Trust boundary: JSON schema properties field is optional'
   safety: None check with explicit fallback to empty schema
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1361
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1379
   owner: architecture
   reason: 'Trust boundary: JSON schema required field is optional'
   safety: Empty list default is safe
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1402
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1420
   owner: architecture
   reason: 'Trust boundary: JSON schema type/format fields may be missing'
   safety: None check with type-specific handling
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1410
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1428
   owner: architecture
   reason: 'Trust boundary: JSON schema anyOf items may not have type field'
   safety: None filtered out in set comprehension
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1415
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1433
   owner: architecture
   reason: 'Trust boundary: JSON schema type field may be missing'
   safety: Returns Any for unknown types
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1425
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1443
   owner: architecture
   reason: 'Trust boundary: JSON schema items field for arrays may be missing'
   safety: Returns list[Any] for untyped arrays
