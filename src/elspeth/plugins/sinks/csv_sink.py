@@ -11,9 +11,12 @@ import csv
 import hashlib
 import os
 from collections.abc import Sequence
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+
+if TYPE_CHECKING:
+    from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import PathConfig
 from elspeth.plugins.context import PluginContext
@@ -73,6 +76,67 @@ class CSVSink(BaseSink):
         add to existing output instead of overwriting.
         """
         self._mode = "append"
+
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing CSV file headers against configured schema.
+
+        Checks that:
+        - Strict mode: Headers match schema fields exactly (including order)
+        - Free mode: All schema fields present (extras allowed)
+        - Dynamic mode: No validation (schema adapts to existing headers)
+
+        Returns:
+            OutputValidationResult indicating compatibility.
+        """
+        from elspeth.contracts.sink import OutputValidationResult
+
+        # No file = valid (will create with correct headers)
+        if not self._path.exists():
+            return OutputValidationResult.success()
+
+        # Read existing headers
+        with open(self._path, encoding=self._encoding, newline="") as f:
+            reader = csv.DictReader(f, delimiter=self._delimiter)
+            existing = list(reader.fieldnames or [])
+
+        # Empty file = valid (will write headers on first write)
+        if not existing:
+            return OutputValidationResult.success()
+
+        # Dynamic schema = no validation needed
+        if self._schema_config.is_dynamic:
+            return OutputValidationResult.success(target_fields=existing)
+
+        # Get expected fields from schema (guaranteed non-None when not dynamic)
+        fields = self._schema_config.fields
+        if fields is None:
+            return OutputValidationResult.success(target_fields=existing)
+        expected = [f.name for f in fields]
+        existing_set, expected_set = set(existing), set(expected)
+
+        if self._schema_config.mode == "strict":
+            # Strict: exact match including order
+            if existing != expected:
+                return OutputValidationResult.failure(
+                    message="CSV headers do not match schema (strict mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(expected_set - existing_set),
+                    extra_fields=sorted(existing_set - expected_set),
+                    order_mismatch=(existing_set == expected_set),
+                )
+        else:  # mode == "free"
+            # Free: schema fields must exist (extras allowed)
+            missing = expected_set - existing_set
+            if missing:
+                return OutputValidationResult.failure(
+                    message="CSV missing required schema fields (free mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(missing),
+                )
+
+        return OutputValidationResult.success(target_fields=existing)
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

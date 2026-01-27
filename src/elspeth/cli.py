@@ -1498,6 +1498,28 @@ def resume(
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1) from None
 
+            # Validate output target schema compatibility
+            validation = sink.validate_output_target()
+            if not validation.valid:
+                typer.echo(
+                    f"\nError: Cannot resume with sink '{sink_name}'.\nOutput target schema mismatch: {validation.error_message}",
+                    err=True,
+                )
+                if validation.missing_fields:
+                    typer.echo(f"  Missing fields: {list(validation.missing_fields)}", err=True)
+                if validation.extra_fields:
+                    typer.echo(f"  Extra fields: {list(validation.extra_fields)}", err=True)
+                if validation.order_mismatch:
+                    typer.echo(
+                        "  Note: Fields present but in wrong order (strict mode)",
+                        err=True,
+                    )
+                typer.echo(
+                    "\nHint: Either fix the output file to match schema, or start a new run.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+
             resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)

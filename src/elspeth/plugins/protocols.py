@@ -21,6 +21,7 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.sink import OutputValidationResult
     from elspeth.plugins.context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
 
@@ -496,5 +497,19 @@ class SinkProtocol(Protocol):
 
         Raises:
             NotImplementedError: If sink cannot be resumed despite claiming support.
+        """
+        ...
+
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing output target matches configured schema.
+
+        Called by engine/CLI before write operations in append/resume mode.
+        Returns valid=True by default (dynamic schema or no validation needed).
+
+        Sinks that support resume SHOULD override to validate that existing
+        output target (file/table) schema matches configured schema.
+
+        Returns:
+            OutputValidationResult indicating compatibility.
         """
         ...

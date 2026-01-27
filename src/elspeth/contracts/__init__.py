@@ -117,6 +117,7 @@ from elspeth.contracts.url import (
     SanitizedDatabaseUrl,
     SanitizedWebhookUrl,
 )
+from elspeth.contracts.sink import OutputValidationResult
 
 __all__ = [  # Grouped by category for readability
     # audit
@@ -226,4 +227,6 @@ __all__ = [  # Grouped by category for readability
     "SENSITIVE_PARAMS",
     "SanitizedDatabaseUrl",
     "SanitizedWebhookUrl",
+    # sink
+    "OutputValidationResult",
 ]

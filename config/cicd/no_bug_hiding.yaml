@@ -349,27 +349,27 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
   safety: Graceful default to '<unknown>' - error message still produced with field and message
   expires: null
-- key: cli.py:R1:health:line=1584
+- key: cli.py:R1:health:line=1606
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1596
+- key: cli.py:R4:health:line=1618
   owner: architecture
   reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1612
+- key: cli.py:R1:health:line=1634
   owner: architecture
   reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1624
+- key: cli.py:R4:health:line=1646
   owner: architecture
   reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
   safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1688
+- key: cli.py:R4:health:line=1710
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
@@ -675,12 +675,12 @@ allow_hits:
   reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward compat)'
   safety: Default 0.0 if missing - safe for fresh checkpoints
   expires: null
-- key: plugins/base.py:R1:BaseGate:__init__:line=161
+- key: plugins/base.py:R1:BaseGate:__init__:line=164
   owner: architecture
   reason: 'Optional field: fork_to validated by GateSettings schema - None when gate does not fork'
   safety: Schema validation guarantees valid type; .get() appropriate for optional field
   expires: null
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=92
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=95
   owner: architecture
   reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
   safety: Default empty string when unset is intentional; enables dev mode without fingerprint key

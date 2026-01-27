@@ -11,9 +11,12 @@ Phase 3 Integration:
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+
+if TYPE_CHECKING:
+    from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
     GateResult,
@@ -261,6 +264,22 @@ class BaseSink(ABC):
             f"To make this sink resumable, set supports_resume=True and "
             f"implement configure_for_resume()."
         )
+
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing output target matches configured schema.
+
+        Called by engine/CLI before write operations in append/resume mode.
+        Default returns valid=True (dynamic schema or no existing target).
+
+        Sinks that set supports_resume=True SHOULD override this to validate
+        that the existing output target (file/table) matches the schema.
+
+        Returns:
+            OutputValidationResult indicating compatibility.
+        """
+        from elspeth.contracts.sink import OutputValidationResult
+
+        return OutputValidationResult.success()
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.

@@ -10,9 +10,12 @@ output correct types. Wrong types = upstream bug = crash.
 import hashlib
 import json
 import os
-from typing import IO, Any, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+
+if TYPE_CHECKING:
+    from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import PathConfig
 from elspeth.plugins.context import PluginContext
@@ -77,6 +80,82 @@ class JSONSink(BaseSink):
                 f"Use format='jsonl' for resumable JSON output."
             )
         self._mode = "append"
+
+    def validate_output_target(self) -> "OutputValidationResult":
+        """Validate existing JSONL file structure against configured schema.
+
+        Reads the first line of the JSONL file to check field structure.
+
+        Checks that:
+        - Strict mode: Record fields match schema fields exactly (set comparison)
+        - Free mode: All schema fields present (extras allowed)
+        - Dynamic mode: No validation (schema adapts to existing structure)
+
+        Note: Only JSONL format supports resume. JSON array returns valid=True
+        (it will overwrite anyway).
+
+        Returns:
+            OutputValidationResult indicating compatibility.
+        """
+        from elspeth.contracts.sink import OutputValidationResult
+
+        # Only JSONL supports resume - JSON array rewrites entirely
+        if self._format != "jsonl":
+            return OutputValidationResult.success()
+
+        # No file or empty file = valid (will create on first write)
+        if not self._path.exists() or self._path.stat().st_size == 0:
+            return OutputValidationResult.success()
+
+        # Read first line to check structure
+        with open(self._path, encoding=self._encoding) as f:
+            first_line = f.readline().strip()
+            if not first_line:
+                return OutputValidationResult.success()
+            try:
+                first_record = json.loads(first_line)
+            except json.JSONDecodeError:
+                return OutputValidationResult.failure(message="Existing JSONL file contains invalid JSON")
+
+            # Ensure first record is a dict (JSONL should contain objects)
+            if not isinstance(first_record, dict):
+                return OutputValidationResult.failure(message="Existing JSONL file contains non-object records")
+
+            existing = list(first_record.keys())
+
+        # Dynamic schema = no validation needed
+        if self._schema_config.is_dynamic:
+            return OutputValidationResult.success(target_fields=existing)
+
+        # Get expected fields from schema (guaranteed non-None when not dynamic)
+        fields = self._schema_config.fields
+        if fields is None:
+            return OutputValidationResult.success(target_fields=existing)
+        expected = [f.name for f in fields]
+        existing_set, expected_set = set(existing), set(expected)
+
+        if self._schema_config.mode == "strict":
+            # Strict: exact field match (set comparison)
+            if existing_set != expected_set:
+                return OutputValidationResult.failure(
+                    message="JSONL record fields do not match schema (strict mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(expected_set - existing_set),
+                    extra_fields=sorted(existing_set - expected_set),
+                )
+        else:  # mode == "free"
+            # Free: schema fields must exist (extras allowed)
+            missing = expected_set - existing_set
+            if missing:
+                return OutputValidationResult.failure(
+                    message="JSONL record missing required schema fields (free mode)",
+                    target_fields=existing,
+                    schema_fields=expected,
+                    missing_fields=sorted(missing),
+                )
+
+        return OutputValidationResult.success(target_fields=existing)
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
