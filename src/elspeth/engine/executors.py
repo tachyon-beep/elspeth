@@ -23,7 +23,7 @@ from elspeth.contracts import (
     RoutingSpec,
     TokenInfo,
 )
-from elspeth.contracts.enums import RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.enums import BatchStatus, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -1035,8 +1035,8 @@ class AggregationExecutor:
         # Step 1: Transition batch to "executing"
         self._recorder.update_batch_status(
             batch_id=batch_id,
-            status="executing",
-            trigger_type=trigger_type.value,
+            status=BatchStatus.EXECUTING,
+            trigger_type=trigger_type,
         )
 
         # Step 2: Begin node state for flush operation
@@ -1081,7 +1081,7 @@ class AggregationExecutor:
                 # Keep status as "executing" but set aggregation_state_id.
                 self._recorder.update_batch_status(
                     batch_id=batch_id,
-                    status="executing",
+                    status=BatchStatus.EXECUTING,
                     state_id=state.state_id,
                 )
 
@@ -1106,8 +1106,8 @@ class AggregationExecutor:
                 # Transition batch to failed
                 self._recorder.complete_batch(
                     batch_id=batch_id,
-                    status="failed",
-                    trigger_type=trigger_type.value,
+                    status=BatchStatus.FAILED,
+                    trigger_type=trigger_type,
                     state_id=state.state_id,
                 )
 
@@ -1144,8 +1144,8 @@ class AggregationExecutor:
             # Transition batch to completed
             self._recorder.complete_batch(
                 batch_id=batch_id,
-                status="completed",
-                trigger_type=trigger_type.value,
+                status=BatchStatus.COMPLETED,
+                trigger_type=trigger_type,
                 state_id=state.state_id,
             )
         else:
@@ -1164,8 +1164,8 @@ class AggregationExecutor:
             # Transition batch to failed
             self._recorder.complete_batch(
                 batch_id=batch_id,
-                status="failed",
-                trigger_type=trigger_type.value,
+                status=BatchStatus.FAILED,
+                trigger_type=trigger_type,
                 state_id=state.state_id,
             )
 

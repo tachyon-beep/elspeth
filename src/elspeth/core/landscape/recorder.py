@@ -49,6 +49,7 @@ from elspeth.contracts import (
     TokenOutcome,
     TokenParent,
     TransformErrorRecord,
+    TriggerType,
     ValidationErrorRecord,
 )
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
@@ -1319,9 +1320,9 @@ class LandscapeRecorder:
     def update_batch_status(
         self,
         batch_id: str,
-        status: str,
+        status: BatchStatus,
         *,
-        trigger_type: str | None = None,
+        trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
         state_id: str | None = None,
     ) -> None:
@@ -1329,20 +1330,20 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to update
-            status: New status (executing, completed, failed)
-            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            status: New status (BatchStatus enum)
+            trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Node state for the flush operation
         """
-        updates: dict[str, Any] = {"status": status}
+        updates: dict[str, Any] = {"status": status.value}
 
         if trigger_type:
-            updates["trigger_type"] = trigger_type
+            updates["trigger_type"] = trigger_type.value
         if trigger_reason:
             updates["trigger_reason"] = trigger_reason
         if state_id:
             updates["aggregation_state_id"] = state_id
-        if status in ("completed", "failed"):
+        if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
 
         self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
@@ -1350,9 +1351,9 @@ class LandscapeRecorder:
     def complete_batch(
         self,
         batch_id: str,
-        status: str,
+        status: BatchStatus,
         *,
-        trigger_type: str | None = None,
+        trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
         state_id: str | None = None,
     ) -> Batch:
@@ -1360,8 +1361,8 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to complete
-            status: Final status (completed, failed)
-            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            status: Final status (BatchStatus.COMPLETED or BatchStatus.FAILED)
+            trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Optional node state for the aggregation
 
@@ -1374,8 +1375,8 @@ class LandscapeRecorder:
             batches_table.update()
             .where(batches_table.c.batch_id == batch_id)
             .values(
-                status=status,
-                trigger_type=trigger_type,
+                status=status.value,
+                trigger_type=trigger_type.value if trigger_type else None,
                 trigger_reason=trigger_reason,
                 aggregation_state_id=state_id,
                 completed_at=timestamp,

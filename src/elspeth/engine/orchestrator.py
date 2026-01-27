@@ -2012,7 +2012,7 @@ class Orchestrator:
         for batch in incomplete:
             if batch.status == BatchStatus.EXECUTING:
                 # Crash interrupted mid-execution, mark failed then retry
-                recorder.update_batch_status(batch.batch_id, "failed")
+                recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
                 recorder.retry_batch(batch.batch_id)
             elif batch.status == BatchStatus.FAILED:
                 # Previous failure, retry
