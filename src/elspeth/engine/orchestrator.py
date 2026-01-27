@@ -887,7 +887,9 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
-        pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
+        # Track (token, outcome) pairs for deferred outcome recording
+        # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
+        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -961,7 +963,8 @@ class Orchestrator:
                                 sink_name=quarantine_sink,
                             )
 
-                            pending_tokens[quarantine_sink].append(quarantine_token)
+                            # QUARANTINED outcome already recorded above - pass None to skip re-recording
+                            pending_tokens[quarantine_sink].append((quarantine_token, None))
                         # Emit progress before continue (ensures quarantined rows trigger updates)
                         # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                         current_time = time.perf_counter()
@@ -1016,12 +1019,12 @@ class Orchestrator:
                             # sink durability is achieved. Do NOT record here - that would violate
                             # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
-                            pending_tokens[sink_name].append(result.token)
+                            pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
                         elif result.outcome == RowOutcome.ROUTED:
                             rows_routed += 1
                             # GateExecutor contract: ROUTED outcome always has sink_name set
                             assert result.sink_name is not None
-                            pending_tokens[result.sink_name].append(result.token)
+                            pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                         elif result.outcome == RowOutcome.FAILED:
                             rows_failed += 1
                         elif result.outcome == RowOutcome.QUARANTINED:
@@ -1039,7 +1042,7 @@ class Orchestrator:
                             # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
                             # sink durability is achieved. Consumed tokens have COALESCED recorded
                             # by CoalesceExecutor. The merged token's lineage is in join_group_id.
-                            pending_tokens[default_sink_name].append(result.token)
+                            pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
                         elif result.outcome == RowOutcome.EXPANDED:
                             # Deaggregation parent token - children counted separately
                             rows_expanded += 1
@@ -1063,7 +1066,7 @@ class Orchestrator:
                                     rows_coalesced += 1
                                     # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                                     # AFTER sink durability is achieved.
-                                    pending_tokens[default_sink_name].append(outcome.merged_token)
+                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                                 elif outcome.failure_reason:
                                     rows_coalesce_failed += 1
 
@@ -1121,7 +1124,7 @@ class Orchestrator:
                             rows_coalesced += 1
                             # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                             # AFTER sink durability is achieved.
-                            pending_tokens[default_sink_name].append(outcome.merged_token)
+                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                         elif outcome.failure_reason:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
                             # Audit trail recorded by executor: each consumed token has
@@ -1145,19 +1148,28 @@ class Orchestrator:
 
                     return callback
 
-                for sink_name, tokens in pending_tokens.items():
-                    if tokens and sink_name in config.sinks:
+                for sink_name, token_outcome_pairs in pending_tokens.items():
+                    if token_outcome_pairs and sink_name in config.sinks:
                         sink = config.sinks[sink_name]
                         sink_node_id = sink_id_map[SinkName(sink_name)]
 
-                        sink_executor.write(
-                            sink=sink,
-                            tokens=tokens,
-                            ctx=ctx,
-                            step_in_pipeline=step,
-                            sink_name=sink_name,
-                            on_token_written=checkpoint_after_sink(sink_node_id),
-                        )
+                        # Group tokens by outcome for separate write() calls
+                        # (sink_executor.write() takes a single outcome for all tokens in a batch)
+                        from itertools import groupby
+
+                        # Sort by outcome to enable groupby (None sorts first)
+                        sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
+                        for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                            group_tokens = [token for token, _ in group]
+                            sink_executor.write(
+                                sink=sink,
+                                tokens=group_tokens,
+                                ctx=ctx,
+                                step_in_pipeline=step,
+                                sink_name=sink_name,
+                                outcome=outcome,
+                                on_token_written=checkpoint_after_sink(sink_node_id),
+                            )
 
                 # Emit final progress if we haven't emitted recently or row count not on interval
                 # (RunCompleted will show final summary regardless, but progress shows intermediate state)
@@ -1792,7 +1804,9 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
-        pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
+        # Track (token, outcome) pairs for deferred outcome recording
+        # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
+        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -1828,11 +1842,11 @@ class Orchestrator:
                         # sink durability is achieved. Do NOT record here - that would violate
                         # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
-                        pending_tokens[sink_name].append(result.token)
+                        pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
                         assert result.sink_name is not None
-                        pending_tokens[result.sink_name].append(result.token)
+                        pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                     elif result.outcome == RowOutcome.FAILED:
                         rows_failed += 1
                     elif result.outcome == RowOutcome.QUARANTINED:
@@ -1845,7 +1859,7 @@ class Orchestrator:
                         rows_coalesced += 1
                         # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
                         # sink durability is achieved.
-                        pending_tokens[default_sink_name].append(result.token)
+                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
                     elif result.outcome == RowOutcome.EXPANDED:
                         rows_expanded += 1
                     elif result.outcome == RowOutcome.BUFFERED:
@@ -1867,7 +1881,7 @@ class Orchestrator:
                                 rows_coalesced += 1
                                 # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                                 # AFTER sink durability is achieved.
-                                pending_tokens[default_sink_name].append(outcome.merged_token)
+                                pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                             elif outcome.failure_reason:
                                 rows_coalesce_failed += 1
 
@@ -1898,7 +1912,7 @@ class Orchestrator:
                         rows_coalesced += 1
                         # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                         # AFTER sink durability is achieved.
-                        pending_tokens[default_sink_name].append(outcome.merged_token)
+                        pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
                         rows_coalesce_failed += 1
@@ -1907,16 +1921,24 @@ class Orchestrator:
             sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
             step = len(config.transforms) + len(config.gates) + 1
 
-            for sink_name, tokens in pending_tokens.items():
-                if tokens and sink_name in config.sinks:
+            for sink_name, token_outcome_pairs in pending_tokens.items():
+                if token_outcome_pairs and sink_name in config.sinks:
                     sink = config.sinks[sink_name]
-                    sink_executor.write(
-                        sink=sink,
-                        tokens=tokens,
-                        ctx=ctx,
-                        step_in_pipeline=step,
-                        sink_name=sink_name,
-                    )
+
+                    # Group tokens by outcome for separate write() calls
+                    from itertools import groupby
+
+                    sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
+                    for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                        group_tokens = [token for token, _ in group]
+                        sink_executor.write(
+                            sink=sink,
+                            tokens=group_tokens,
+                            ctx=ctx,
+                            step_in_pipeline=step,
+                            sink_name=sink_name,
+                            outcome=outcome,
+                        )
 
         finally:
             # Call on_complete for all plugins (even on error)
@@ -1983,7 +2005,7 @@ class Orchestrator:
         config: PipelineConfig,
         processor: RowProcessor,
         ctx: PluginContext,
-        pending_tokens: dict[str, list[TokenInfo]],
+        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
         default_sink_name: str,
         run_id: str,
         recorder: LandscapeRecorder,
@@ -2072,15 +2094,10 @@ class Orchestrator:
                         branch_name=buffered_tokens[0].branch_name,
                     )
 
-                    # Record COMPLETED outcome with sink_name (AUD-001 fix)
-                    recorder.record_token_outcome(
-                        run_id=run_id,
-                        token_id=output_token.token_id,
-                        outcome=RowOutcome.COMPLETED,
-                        sink_name=default_sink_name,
-                    )
+                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                    # sink durability is achieved. Do NOT record here.
 
-                    pending_tokens[default_sink_name].append(output_token)
+                    pending_tokens[default_sink_name].append((output_token, RowOutcome.COMPLETED))
                     rows_succeeded += 1
 
                     # Checkpoint the flushed aggregation token
@@ -2098,15 +2115,10 @@ class Orchestrator:
                         step_in_pipeline=agg_step,
                     )
                     for exp_token in expanded:
-                        # Record COMPLETED outcome for each expanded token (AUD-001 fix)
-                        recorder.record_token_outcome(
-                            run_id=run_id,
-                            token_id=exp_token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                            sink_name=default_sink_name,
-                        )
+                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                        # sink durability is achieved. Do NOT record here.
 
-                        pending_tokens[default_sink_name].append(exp_token)
+                        pending_tokens[default_sink_name].append((exp_token, RowOutcome.COMPLETED))
                         rows_succeeded += 1
 
                         # Checkpoint each expanded token

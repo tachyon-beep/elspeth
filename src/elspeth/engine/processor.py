@@ -873,12 +873,10 @@ class RowProcessor:
 
                 # Check if gate routed to a sink (sink_name set by executor)
                 if outcome.sink_name is not None:
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.ROUTED,
-                        sink_name=outcome.sink_name,
-                    )
+                    # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                    # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
+                    # This prevents duplicate outcomes and ensures correct audit semantics:
+                    # outcome is recorded at actual completion, not at routing decision time.
                     return (
                         RowResult(
                             token=current_token,
@@ -1005,12 +1003,8 @@ class RowProcessor:
                         )
                     else:
                         # Routed to error sink
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=current_token.token_id,
-                            outcome=RowOutcome.ROUTED,
-                            sink_name=error_sink,
-                        )
+                        # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                        # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
                         return (
                             RowResult(
                                 token=current_token,
@@ -1114,12 +1108,8 @@ class RowProcessor:
 
             # Check if gate routed to a sink
             if outcome.sink_name is not None:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
-                    outcome=RowOutcome.ROUTED,
-                    sink_name=outcome.sink_name,
-                )
+                # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
+                # SinkExecutor.write() records the outcome AFTER sink durability is achieved.
                 return (
                     RowResult(
                         token=current_token,

@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import SourceRow
+from elspeth.contracts import Determinism, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -193,7 +193,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -204,7 +204,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
 
         config = PipelineConfig(
@@ -276,7 +276,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -287,7 +287,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
 
@@ -440,7 +440,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -451,7 +451,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
 
         config = PipelineConfig(
@@ -543,7 +543,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -554,7 +554,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
 
@@ -681,7 +681,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -692,7 +692,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
 
         config = PipelineConfig(
@@ -802,7 +802,7 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_source.output_schema = schema_mock
-        mock_source.determinism = "deterministic"
+        mock_source.determinism = Determinism.DETERMINISTIC
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
@@ -813,13 +813,13 @@ class TestCoalesceWiring:
         schema_mock.model_json_schema.return_value = {"type": "object"}
 
         mock_sink.input_schema = schema_mock
-        mock_sink.determinism = "deterministic"
+        mock_sink.determinism = Determinism.DETERMINISTIC
         mock_sink.input_schema = _TestSchema
 
         mock_transform = MagicMock()
         mock_transform.name = "passthrough"
         mock_transform.plugin_version = "1.0.0"
-        mock_transform.determinism = "deterministic"
+        mock_transform.determinism = Determinism.DETERMINISTIC
         mock_transform.is_batch_aware = False
 
         config = PipelineConfig(

@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import Determinism, TokenInfo
+from elspeth.contracts import Determinism, NodeType, TokenInfo
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -42,9 +42,9 @@ class TestSinkDurability:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -57,9 +57,9 @@ class TestSinkDurability:
                     node_id="sink",
                     run_id=run_id,
                     plugin_name="csv",
-                    node_type="sink",
+                    node_type=NodeType.SINK,
                     plugin_version="1.0",
-                    determinism="io_write",
+                    determinism=Determinism.IO_WRITE,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -89,8 +89,8 @@ class TestSinkDurability:
         """Create a minimal mock graph."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         return graph
 
     @pytest.fixture
@@ -199,6 +199,7 @@ class TestSinkDurability:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=1,
+                sink_name="output",
                 on_token_written=checkpoint_callback,
             )
 
@@ -283,6 +284,7 @@ class TestSinkDurability:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=1,
+                sink_name="output",
                 on_token_written=failing_checkpoint_callback,
             )
 
@@ -380,6 +382,7 @@ class TestSinkDurability:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=1,
+            sink_name="output",
             on_token_written=tracking_checkpoint_callback,
         )
 

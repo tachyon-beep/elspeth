@@ -21,6 +21,7 @@ from elspeth.contracts import (
     NodeStateOpen,
     RoutingAction,
     RoutingSpec,
+    RowOutcome,
     TokenInfo,
 )
 from elspeth.contracts.enums import (
@@ -1535,19 +1536,20 @@ class SinkExecutor:
         step_in_pipeline: int,
         *,
         sink_name: str,
+        outcome: RowOutcome | None = RowOutcome.COMPLETED,
         on_token_written: Callable[[TokenInfo], None] | None = None,
     ) -> Artifact | None:
         """Write tokens to sink with artifact recording.
 
         CRITICAL: Creates a node_state for EACH token written AND records
-        COMPLETED token outcomes. Both records are created AFTER sink.flush()
+        token outcomes. Both records are created AFTER sink.flush()
         to ensure they only exist when data is durably written.
 
-        This is the ONLY place COMPLETED outcomes should be recorded. Recording
-        COMPLETED here (not in the orchestrator processing loop) ensures the
+        This is the ONLY place terminal outcomes should be recorded for sink-bound
+        tokens. Recording here (not in the orchestrator processing loop) ensures the
         token outcome contract is honored:
-        - Invariant 3: "COMPLETED implies the token has a completed sink node_state"
-        - Invariant 4: "Completed sink node_state implies a COMPLETED token_outcome"
+        - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
+        - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
         Args:
             sink: Sink plugin to write to
@@ -1555,6 +1557,9 @@ class SinkExecutor:
             ctx: Plugin context
             step_in_pipeline: Current position in DAG (Orchestrator is authority)
             sink_name: Name of the sink (for token_outcome recording)
+            outcome: RowOutcome to record (COMPLETED for default sink, ROUTED for gate-routed).
+                    Pass None to skip outcome recording (used when outcome was already recorded,
+                    e.g., QUARANTINED tokens).
             on_token_written: Optional callback called for each token after successful write.
                              Used for post-sink checkpointing.
 
@@ -1646,20 +1651,23 @@ class SinkExecutor:
             size_bytes=artifact_info.size_bytes,
         )
 
-        # Record COMPLETED token outcomes AFTER sink durability is achieved
-        # This is the ONLY correct place to record COMPLETED - after:
+        # Record token outcomes AFTER sink durability is achieved
+        # This is the ONLY correct place to record outcomes for sink-bound tokens - after:
         # 1. sink.write() succeeded
         # 2. sink.flush() succeeded (data is durable)
         # 3. node_states are marked COMPLETED
         # 4. artifact is registered
-        # Recording here ensures Invariant 3: "COMPLETED implies completed sink node_state"
-        for token, _ in states:
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=token.token_id,
-                outcome=RowOutcome.COMPLETED,
-                sink_name=sink_name,
-            )
+        # Recording here ensures Invariant 3: "COMPLETED/ROUTED implies completed sink node_state"
+        #
+        # outcome=None means outcome was already recorded (e.g., QUARANTINED tokens)
+        if outcome is not None:
+            for token, _ in states:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=outcome,  # Use provided outcome (COMPLETED or ROUTED)
+                    sink_name=sink_name,
+                )
 
         # Call checkpoint callback for each token after successful write + flush
         # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.

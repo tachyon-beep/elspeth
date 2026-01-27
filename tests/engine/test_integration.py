@@ -24,6 +24,7 @@ from elspeth.contracts import (
     NodeID,
     NodeStateCompleted,
     NodeStateStatus,
+    NodeType,
     RoutingMode,
     RunStatus,
     SinkName,
@@ -157,7 +158,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     # Add source
     graph.add_node(
         "source",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_name=config.source.name,
         config=schema_config,
     )
@@ -170,7 +171,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         transform_ids[i] = node_id
         graph.add_node(
             node_id,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name=t.name,
             config=schema_config,
         )
@@ -184,7 +185,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         sink_ids[sink_name] = node_id
         graph.add_node(
             node_id,
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_name=sink.name,
             config=schema_config,
         )
@@ -198,7 +199,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
         config_gate_ids[gate_config.name] = node_id
         graph.add_node(
             node_id,
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name=f"config_gate:{gate_config.name}",
             config={
                 "schema": schema_config["schema"],
@@ -1161,7 +1162,7 @@ class TestForkIntegration:
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="list_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -1170,7 +1171,7 @@ class TestForkIntegration:
         gate_node = recorder.register_node(
             run_id=run_id,
             plugin_name="config_gate:fork_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -1180,7 +1181,7 @@ class TestForkIntegration:
         path_a_node = recorder.register_node(
             run_id=run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -1188,7 +1189,7 @@ class TestForkIntegration:
         path_b_node = recorder.register_node(
             run_id=run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -1198,7 +1199,7 @@ class TestForkIntegration:
         recorder.register_node(
             run_id=run_id,
             plugin_name="collect_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -1665,6 +1666,7 @@ class TestForkCoalescePipelineIntegration:
             tokens=[outcome2.merged_token],
             ctx=ctx,
             step_in_pipeline=4,
+            sink_name="output",
         )
 
         # CRITICAL VERIFICATION: Sink received 1 merged row, not 2 fork children
@@ -1910,6 +1912,7 @@ class TestForkCoalescePipelineIntegration:
             tokens=merged_tokens,
             ctx=ctx,
             step_in_pipeline=3,
+            sink_name="output",
         )
 
         # Verify sink received exactly 3 merged rows
@@ -2268,6 +2271,7 @@ class TestComplexDAGIntegration:
             tokens=[outcome2.merged_token],
             ctx=ctx,
             step_in_pipeline=4,
+            sink_name="output",
         )
 
         # Verify sink received exactly 1 merged row (not 2 separate branch outputs)
@@ -2955,14 +2959,14 @@ class TestExplainQuery:
             from_node_id=source_node.node_id,
             to_node_id=transform_node.node_id,
             label="continue",
-            mode="move",
+            mode=RoutingMode.MOVE,
         )
         recorder.register_edge(
             run_id=run_id,
             from_node_id=transform_node.node_id,
             to_node_id=sink_node.node_id,
             label="continue",
-            mode="move",
+            mode=RoutingMode.MOVE,
         )
 
         # Create a row and token

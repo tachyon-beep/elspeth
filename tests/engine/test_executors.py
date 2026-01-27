@@ -27,7 +27,7 @@ from elspeth.contracts import (
     RoutingAction,
     TokenInfo,
 )
-from elspeth.contracts.enums import RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -252,7 +252,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -307,7 +307,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -362,7 +362,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -414,7 +414,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -469,7 +469,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -562,7 +562,7 @@ class MockGate:
     config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
     input_schema = _TestSchema
     output_schema = _TestSchema
-    determinism = "deterministic"
+    determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
 
     def __init__(
@@ -603,7 +603,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -613,7 +613,7 @@ class TestGateExecutor:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="next_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -680,7 +680,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -690,7 +690,7 @@ class TestGateExecutor:
         error_sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="error_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -760,7 +760,7 @@ class TestGateExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -815,7 +815,7 @@ class TestGateExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -904,7 +904,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -926,7 +926,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -980,7 +980,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1029,7 +1029,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1089,7 +1089,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1140,7 +1140,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1191,7 +1191,7 @@ class TestAggregationExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_stats",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1316,7 +1316,7 @@ class TestSinkExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1354,6 +1354,7 @@ class TestSinkExecutor:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="mock_sink",
         )
 
         assert artifact is not None
@@ -1371,7 +1372,7 @@ class TestSinkExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1393,6 +1394,7 @@ class TestSinkExecutor:
             tokens=[],  # Empty
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="mock_sink",
         )
 
         assert artifact is None
@@ -1409,7 +1411,7 @@ class TestSinkExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1448,6 +1450,7 @@ class TestSinkExecutor:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=5,
+                sink_name="mock_sink",
             )
 
     def test_requires_sink_node_id_set(
@@ -1480,6 +1483,7 @@ class TestSinkExecutor:
                 tokens=tokens,
                 ctx=ctx,
                 step_in_pipeline=5,
+                sink_name="mock_sink",
             )
 
     def test_on_token_written_callback_called(
@@ -1493,7 +1497,7 @@ class TestSinkExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mock_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1535,6 +1539,7 @@ class TestSinkExecutor:
             tokens=tokens,
             ctx=ctx,
             step_in_pipeline=5,
+            sink_name="mock_sink",
             on_token_written=on_written,
         )
 
