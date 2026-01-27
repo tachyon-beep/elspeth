@@ -1320,7 +1320,7 @@ class LandscapeRecorder:
     def update_batch_status(
         self,
         batch_id: str,
-        status: BatchStatus,
+        status: BatchStatus | str,
         *,
         trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
@@ -1330,12 +1330,17 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to update
-            status: New status (BatchStatus enum)
+            status: New status (BatchStatus enum or string value)
             trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Node state for the flush operation
+
+        Raises:
+            ValueError: If status string is not a valid BatchStatus value
         """
-        updates: dict[str, Any] = {"status": status.value}
+        # Validate and coerce status enum early - fail fast on typos
+        status_enum = coerce_enum(status, BatchStatus)
+        updates: dict[str, Any] = {"status": status_enum.value}
 
         if trigger_type:
             updates["trigger_type"] = trigger_type.value
@@ -1343,7 +1348,7 @@ class LandscapeRecorder:
             updates["trigger_reason"] = trigger_reason
         if state_id:
             updates["aggregation_state_id"] = state_id
-        if status in (BatchStatus.COMPLETED, BatchStatus.FAILED):
+        if status_enum in (BatchStatus.COMPLETED, BatchStatus.FAILED):
             updates["completed_at"] = now()
 
         self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
@@ -1351,7 +1356,7 @@ class LandscapeRecorder:
     def complete_batch(
         self,
         batch_id: str,
-        status: BatchStatus,
+        status: BatchStatus | str,
         *,
         trigger_type: TriggerType | None = None,
         trigger_reason: str | None = None,
@@ -1361,21 +1366,26 @@ class LandscapeRecorder:
 
         Args:
             batch_id: Batch to complete
-            status: Final status (BatchStatus.COMPLETED or BatchStatus.FAILED)
+            status: Final status (BatchStatus.COMPLETED or BatchStatus.FAILED, or string value)
             trigger_type: TriggerType enum value
             trigger_reason: Human-readable reason for the trigger
             state_id: Optional node state for the aggregation
 
         Returns:
             Updated Batch model
+
+        Raises:
+            ValueError: If status string is not a valid BatchStatus value
         """
+        # Validate and coerce status enum early - fail fast on typos
+        status_enum = coerce_enum(status, BatchStatus)
         timestamp = now()
 
         self._ops.execute_update(
             batches_table.update()
             .where(batches_table.c.batch_id == batch_id)
             .values(
-                status=status.value,
+                status=status_enum.value,
                 trigger_type=trigger_type.value if trigger_type else None,
                 trigger_reason=trigger_reason,
                 aggregation_state_id=state_id,
