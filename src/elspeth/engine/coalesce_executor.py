@@ -463,7 +463,7 @@ class CoalesceExecutor:
 
     def flush_pending(
         self,
-        step_in_pipeline: int,
+        step_map: dict[str, int],
     ) -> list[CoalesceOutcome]:
         """Flush all pending coalesces (called at end-of-source or shutdown).
 
@@ -473,7 +473,7 @@ class CoalesceExecutor:
         For first policy: should never have pending (merges immediately).
 
         Args:
-            step_in_pipeline: Current position in DAG
+            step_map: Map of coalesce_name -> step_in_pipeline for audit trail
 
         Returns:
             List of CoalesceOutcomes for all pending coalesces
@@ -486,6 +486,7 @@ class CoalesceExecutor:
             settings = self._settings[coalesce_name]
             node_id = self._node_ids[coalesce_name]
             pending = self._pending[key]
+            step_in_pipeline = step_map[coalesce_name]
 
             if settings.policy == "best_effort":
                 # Always merge whatever arrived

@@ -217,15 +217,16 @@ class CheckpointManager:
             IncompatibleCheckpointError: If checkpoint format version is incompatible
         """
         # Check format version if available (new checkpoints)
+        # CRITICAL: Reject BOTH older AND newer versions - cross-version resume is unsupported
         if checkpoint.format_version is not None:
-            if checkpoint.format_version < Checkpoint.CURRENT_FORMAT_VERSION:
+            if checkpoint.format_version != Checkpoint.CURRENT_FORMAT_VERSION:
                 raise IncompatibleCheckpointError(
                     f"Checkpoint '{checkpoint.checkpoint_id}' has incompatible format version "
-                    f"(checkpoint: v{checkpoint.format_version}, required: v{Checkpoint.CURRENT_FORMAT_VERSION}). "
-                    "Resume not supported across format upgrades. "
+                    f"(checkpoint: v{checkpoint.format_version}, current: v{Checkpoint.CURRENT_FORMAT_VERSION}). "
+                    "Resume requires exact format version match. "
                     "Please restart pipeline from beginning."
                 )
-            return  # Version is compatible
+            return  # Version matches exactly
 
         # Legacy checkpoint (format_version is None) - fall back to date check
         # This handles checkpoints created before versioning was added

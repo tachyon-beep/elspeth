@@ -439,38 +439,39 @@ class Orchestrator:
         config: PipelineConfig,
         settings: "ElspethSettings | None",
     ) -> dict[CoalesceName, int]:
-        """Compute coalesce step positions AFTER all transforms and gates.
+        """Compute coalesce step positions aligned with graph topology.
 
-        Coalesce step = len(transforms) + len(gates) + coalesce_index
+        Coalesce step = gate_idx + 1 (step after the producing fork gate)
 
-        This ensures coalesce steps are in a separate index space from
-        transform/gate steps, avoiding step index collisions. Fork children
-        skip directly to these coalesce steps, bypassing all intermediate
-        transforms and gates between the fork point and coalesce.
+        This ensures:
+        1. Fork children skip to coalesce step and merge before downstream processing
+        2. Merged tokens continue from the coalesce step, executing downstream nodes
+        3. Execution path matches graph topology (coalesce → downstream → sink)
 
-        The graph is used to validate that coalesce settings have corresponding
-        fork gates, but the step computation is based on the pipeline structure.
+        The graph's coalesce_gate_index provides the pipeline position of each
+        coalesce's producing fork gate. The coalesce step is one position after
+        that gate, allowing merged tokens to traverse downstream nodes.
 
         Args:
-            graph: The execution graph (used for validation)
+            graph: The execution graph (provides coalesce gate positions)
             config: Pipeline configuration
             settings: Elspeth settings (may be None)
 
         Returns:
             Dict mapping coalesce name to its step index in the pipeline
         """
-        # Validate graph has coalesce gate mappings (ensures consistency)
-        _ = graph.get_coalesce_gate_index() if settings and settings.coalesce else {}
-
         coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
-            num_transforms = len(config.transforms)
-            num_gates = len(config.gates) if config.gates else 0
-            for i, cs in enumerate(settings.coalesce):
-                # Coalesce steps are AFTER all transforms and gates
-                # This ensures fork children skip all intermediate gates when
-                # they start at the coalesce step
-                coalesce_step_map[CoalesceName(cs.name)] = num_transforms + num_gates + i
+            # Get actual gate positions from graph topology
+            coalesce_gate_index = graph.get_coalesce_gate_index()
+
+            for cs in settings.coalesce:
+                coalesce_name = CoalesceName(cs.name)
+                # Coalesce step is one AFTER the fork gate
+                # This allows merged tokens to continue downstream processing
+                gate_idx = coalesce_gate_index[coalesce_name]
+                coalesce_step_map[coalesce_name] = gate_idx + 1
+
         return coalesce_step_map
 
     def run(
@@ -1081,18 +1082,49 @@ class Orchestrator:
                     # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
                     # ─────────────────────────────────────────────────────────────────
                     if coalesce_executor is not None:
-                        flush_step = len(config.transforms) + len(config.gates)
-                        for coalesce_name in coalesce_executor.get_registered_names():
+                        total_steps = len(config.transforms) + len(config.gates)
+                        for coalesce_name_str in coalesce_executor.get_registered_names():
+                            coalesce_name = CoalesceName(coalesce_name_str)
+                            coalesce_step = coalesce_step_map[coalesce_name]
                             timed_out = coalesce_executor.check_timeouts(
-                                coalesce_name=coalesce_name,
-                                step_in_pipeline=flush_step,
+                                coalesce_name=coalesce_name_str,
+                                step_in_pipeline=coalesce_step,
                             )
                             for outcome in timed_out:
                                 if outcome.merged_token is not None:
                                     rows_coalesced += 1
-                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                    # AFTER sink durability is achieved.
-                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                    # Check if merged token should continue downstream processing
+                                    if coalesce_step < total_steps:
+                                        # Continue processing through downstream nodes
+                                        continuation_results = processor.process_token(
+                                            token=outcome.merged_token,
+                                            transforms=config.transforms,
+                                            ctx=ctx,
+                                            start_step=coalesce_step,
+                                        )
+                                        for cont_result in continuation_results:
+                                            if cont_result.outcome == RowOutcome.COMPLETED:
+                                                sink_name = default_sink_name
+                                                if (
+                                                    cont_result.token.branch_name is not None
+                                                    and cont_result.token.branch_name in config.sinks
+                                                ):
+                                                    sink_name = cont_result.token.branch_name
+                                                pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                            elif cont_result.outcome == RowOutcome.ROUTED:
+                                                rows_routed += 1
+                                                # sink_name is guaranteed non-None for ROUTED outcome
+                                                routed_sink = cont_result.sink_name or default_sink_name
+                                                pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                            elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                                rows_quarantined += 1
+                                            elif cont_result.outcome == RowOutcome.FAILED:
+                                                rows_failed += 1
+                                    else:
+                                        # No downstream nodes - send directly to sink
+                                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                        # AFTER sink durability is achieved.
+                                        pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                                 elif outcome.failure_reason:
                                     rows_coalesce_failed += 1
 
@@ -1139,18 +1171,49 @@ class Orchestrator:
 
                 # Flush pending coalesce operations at end-of-source
                 if coalesce_executor is not None:
-                    # Step for coalesce flush = after all transforms and gates
-                    flush_step = len(config.transforms) + len(config.gates)
-                    pending_outcomes = coalesce_executor.flush_pending(flush_step)
+                    total_steps = len(config.transforms) + len(config.gates)
+                    # Convert CoalesceName -> str for CoalesceExecutor API
+                    flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
+                    pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
 
                     # Handle any merged tokens from flush
                     for outcome in pending_outcomes:
                         if outcome.merged_token is not None:
-                            # Successful merge - route to output sink
+                            # Successful merge
                             rows_coalesced += 1
-                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                            # AFTER sink durability is achieved.
-                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                            # Get the correct step for this coalesce
+                            # outcome.coalesce_name is guaranteed non-None when merged_token is not None
+                            coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
+                            coalesce_step = coalesce_step_map[coalesce_name]
+                            # Check if merged token should continue downstream processing
+                            if coalesce_step < total_steps:
+                                # Continue processing through downstream nodes
+                                continuation_results = processor.process_token(
+                                    token=outcome.merged_token,
+                                    transforms=config.transforms,
+                                    ctx=ctx,
+                                    start_step=coalesce_step,
+                                )
+                                for cont_result in continuation_results:
+                                    if cont_result.outcome == RowOutcome.COMPLETED:
+                                        sink_name = default_sink_name
+                                        if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
+                                            sink_name = cont_result.token.branch_name
+                                        pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                    elif cont_result.outcome == RowOutcome.ROUTED:
+                                        rows_routed += 1
+                                        # sink_name is guaranteed non-None for ROUTED outcome
+                                        routed_sink = cont_result.sink_name or default_sink_name
+                                        pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                    elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                        rows_quarantined += 1
+                                    elif cont_result.outcome == RowOutcome.FAILED:
+                                        rows_failed += 1
+                            else:
+                                # No downstream nodes - send directly to sink
+                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                # AFTER sink durability is achieved.
+                                pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                         elif outcome.failure_reason:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
                             # Audit trail recorded by executor: each consumed token has
@@ -1892,18 +1955,46 @@ class Orchestrator:
                 # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
                 # ─────────────────────────────────────────────────────────────────
                 if coalesce_executor is not None:
-                    flush_step = len(config.transforms) + len(config.gates)
-                    for coalesce_name in coalesce_executor.get_registered_names():
+                    total_steps = len(config.transforms) + len(config.gates)
+                    for coalesce_name_str in coalesce_executor.get_registered_names():
+                        coalesce_name = CoalesceName(coalesce_name_str)
+                        coalesce_step = coalesce_step_map[coalesce_name]
                         timed_out = coalesce_executor.check_timeouts(
-                            coalesce_name=coalesce_name,
-                            step_in_pipeline=flush_step,
+                            coalesce_name=coalesce_name_str,
+                            step_in_pipeline=coalesce_step,
                         )
                         for outcome in timed_out:
                             if outcome.merged_token is not None:
                                 rows_coalesced += 1
-                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                # AFTER sink durability is achieved.
-                                pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                # Check if merged token should continue downstream processing
+                                if coalesce_step < total_steps:
+                                    # Continue processing through downstream nodes
+                                    continuation_results = processor.process_token(
+                                        token=outcome.merged_token,
+                                        transforms=config.transforms,
+                                        ctx=ctx,
+                                        start_step=coalesce_step,
+                                    )
+                                    for cont_result in continuation_results:
+                                        if cont_result.outcome == RowOutcome.COMPLETED:
+                                            sink_name = default_sink_name
+                                            if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
+                                                sink_name = cont_result.token.branch_name
+                                            pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                        elif cont_result.outcome == RowOutcome.ROUTED:
+                                            rows_routed += 1
+                                            # sink_name is guaranteed non-None for ROUTED outcome
+                                            routed_sink = cont_result.sink_name or default_sink_name
+                                            pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                        elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                            rows_quarantined += 1
+                                        elif cont_result.outcome == RowOutcome.FAILED:
+                                            rows_failed += 1
+                                else:
+                                    # No downstream nodes - send directly to sink
+                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                    # AFTER sink durability is achieved.
+                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                             elif outcome.failure_reason:
                                 rows_coalesce_failed += 1
 
@@ -1926,15 +2017,47 @@ class Orchestrator:
 
             # Flush pending coalesce operations
             if coalesce_executor is not None:
-                flush_step = len(config.transforms) + len(config.gates)
-                pending_outcomes = coalesce_executor.flush_pending(flush_step)
+                total_steps = len(config.transforms) + len(config.gates)
+                # Convert CoalesceName -> str for CoalesceExecutor API
+                flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
+                pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
 
                 for outcome in pending_outcomes:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
-                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                        # AFTER sink durability is achieved.
-                        pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                        # Get the correct step for this coalesce
+                        # outcome.coalesce_name is guaranteed non-None when merged_token is not None
+                        coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
+                        coalesce_step = coalesce_step_map[coalesce_name]
+                        # Check if merged token should continue downstream processing
+                        if coalesce_step < total_steps:
+                            # Continue processing through downstream nodes
+                            continuation_results = processor.process_token(
+                                token=outcome.merged_token,
+                                transforms=config.transforms,
+                                ctx=ctx,
+                                start_step=coalesce_step,
+                            )
+                            for cont_result in continuation_results:
+                                if cont_result.outcome == RowOutcome.COMPLETED:
+                                    sink_name = default_sink_name
+                                    if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
+                                        sink_name = cont_result.token.branch_name
+                                    pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                elif cont_result.outcome == RowOutcome.ROUTED:
+                                    rows_routed += 1
+                                    # sink_name is guaranteed non-None for ROUTED outcome
+                                    routed_sink = cont_result.sink_name or default_sink_name
+                                    pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                    rows_quarantined += 1
+                                elif cont_result.outcome == RowOutcome.FAILED:
+                                    rows_failed += 1
+                        else:
+                            # No downstream nodes - send directly to sink
+                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                            # AFTER sink durability is achieved.
+                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
                         rows_coalesce_failed += 1

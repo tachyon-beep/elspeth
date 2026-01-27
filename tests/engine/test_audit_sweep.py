@@ -891,7 +891,10 @@ class TestAuditSweepForkCoalesce:
         # If we get here, verify normal operation
         assert run.rows_processed == 1
         assert run.rows_forked == 1
-        assert run.rows_coalesced == 1
+        # With Option B (execution matches graph topology), merged tokens that have
+        # downstream nodes continue processing and return as COMPLETED, not COALESCED.
+        # The passthrough_gate is downstream of the coalesce, so merged token traverses it.
+        assert run.rows_succeeded == 1
         assert len(sink.results) == 1
 
         # Audit trail should be clean

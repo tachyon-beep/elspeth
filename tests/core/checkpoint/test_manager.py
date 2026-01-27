@@ -477,7 +477,53 @@ class TestCheckpointManager:
         assert "format version" in error_msg.lower()
         assert "v1" in error_msg  # Old version
         assert f"v{Checkpoint.CURRENT_FORMAT_VERSION}" in error_msg  # Required version
-        assert "Resume not supported" in error_msg
+        # P2b fix: Now rejects both older AND newer versions (exact match required)
+        assert "exact format version match" in error_msg
+
+    def test_newer_format_version_rejected(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
+        """P2b fix: Checkpoints with NEWER format_version should also be rejected.
+
+        Cross-version resume is not supported in either direction. If a checkpoint
+        was created by a future version of the software, we cannot safely resume
+        because the newer version may have changes we don't understand.
+
+        This test verifies the P2b fix: version comparison changed from `<` to `!=`.
+        """
+        from elspeth.contracts import Checkpoint
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        recent_date = datetime.now(UTC)
+        checkpoint_id = "cp-newer-version"
+        future_version = Checkpoint.CURRENT_FORMAT_VERSION + 1  # Newer than current
+
+        with manager._db.engine.connect() as conn:
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id="run-001",
+                    token_id="tok-001",
+                    node_id="node-001",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    upstream_topology_hash="newer-version-upstream-hash",
+                    checkpoint_node_config_hash="newer-version-node-config-hash",
+                    created_at=recent_date,
+                    format_version=future_version,  # NEWER format version
+                )
+            )
+            conn.commit()
+
+        # P2b fix: Attempting to load should raise IncompatibleCheckpointError
+        # Previous behavior: Would have accepted (only rejected older versions)
+        with pytest.raises(IncompatibleCheckpointError) as exc_info:
+            manager.get_latest_checkpoint("run-001")
+
+        error_msg = str(exc_info.value)
+        assert checkpoint_id in error_msg
+        assert "format version" in error_msg.lower()
+        assert f"v{future_version}" in error_msg  # Newer version in checkpoint
+        assert f"v{Checkpoint.CURRENT_FORMAT_VERSION}" in error_msg  # Current version
+        assert "exact format version match" in error_msg
 
     def test_create_checkpoint_requires_graph(self, manager: CheckpointManager, setup_run: str) -> None:
         """Bug #9: Verify checkpoint creation fails if graph parameter is None.

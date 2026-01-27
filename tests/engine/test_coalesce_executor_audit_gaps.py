@@ -254,7 +254,7 @@ class TestCoalesceAuditGap1b:
         executor.accept(token_b, "quorum_merge", step_in_pipeline=2)
 
         # Flush at end-of-source (triggers failure)
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"quorum_merge": 2})
         assert len(flushed) == 1
 
         failure_outcome = flushed[0]
@@ -404,7 +404,7 @@ class TestCoalesceAuditGap2:
         executor.accept(token_c, "merge_all", step_in_pipeline=2)
 
         # End-of-source: flush pending (A will never arrive)
-        flushed = executor.flush_pending(step_in_pipeline=2)
+        flushed = executor.flush_pending(step_map={"merge_all": 2})
         assert len(flushed) == 1
 
         failure_outcome = flushed[0]

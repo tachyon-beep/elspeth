@@ -827,14 +827,17 @@ class TestCoalesceStepMapCalculation:
         # Test the step map computation directly - no mocking needed
         step_map = orchestrator._compute_coalesce_step_map(graph, config, settings)
 
-        # Verify: coalesce step is AFTER all transforms and gates
-        # num_transforms = 0, num_gates = 2, coalesce_index = 0
-        # coalesce_step = 0 + 2 + 0 = 2
+        # With Option B (execution matches graph topology), coalesce step uses
+        # the gate index from the graph. The coalesce step is ONE AFTER the
+        # fork gate, allowing merged tokens to continue downstream processing.
         #
-        # This ensures fork children skip both fork_gate (step 0) and
-        # downstream_gate (step 1) by starting at step 2 (the coalesce step).
+        # fork_gate is at index 0 in config.gates, so:
+        #   coalesce_step = gate_idx + 1 = 0 + 1 = 1
+        #
+        # This allows merged tokens to process through downstream_gate (step 1).
         assert CoalesceName("merge_branches") in step_map
 
-        # coalesce_step = num_transforms + num_gates + coalesce_index
-        expected_step = 0 + 2 + 0  # transforms(0) + gates(2) + coalesce_index(0) = 2
+        # coalesce_step = gate_idx + 1 where gate_idx is from graph.get_coalesce_gate_index()
+        # fork_gate produces merge_branches branches, fork_gate is at gate index 0
+        expected_step = 0 + 1  # gate_idx(0) + 1 = 1
         assert step_map[CoalesceName("merge_branches")] == expected_step
