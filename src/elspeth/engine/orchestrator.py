@@ -10,6 +10,7 @@ Coordinates:
 - Post-run audit export (when configured)
 """
 
+import hashlib
 import json
 import os
 import time
@@ -945,6 +946,19 @@ class Orchestrator:
                                 row_index=row_index,
                                 row_data=source_item.row,
                             )
+
+                            # Record QUARANTINED outcome with error_hash for audit trail
+                            # Per CLAUDE.md: every row must reach exactly one terminal state
+                            error_detail = source_item.quarantine_error or "unknown_validation_error"
+                            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+                            recorder.record_token_outcome(
+                                run_id=run_id,
+                                token_id=quarantine_token.token_id,
+                                outcome=RowOutcome.QUARANTINED,
+                                error_hash=quarantine_error_hash,
+                                sink_name=quarantine_sink,
+                            )
+
                             pending_tokens[quarantine_sink].append(quarantine_token)
                         # Emit progress before continue (ensures quarantined rows trigger updates)
                         # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
