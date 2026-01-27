@@ -6,6 +6,7 @@ Tokens are correlated by row_id (same source row that was forked).
 
 import hashlib
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -101,7 +102,12 @@ class CoalesceExecutor:
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
         # Used to detect late arrivals after merge and reject them gracefully
-        self._completed_keys: set[tuple[str, str]] = set()
+        # Uses OrderedDict as bounded LRU set to prevent unbounded memory growth
+        # (values are None, we only care about key presence and insertion order)
+        self._completed_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
+        # Maximum completed keys to retain (prevents OOM in long-running pipelines)
+        # Late arrivals after eviction create new pending entries (timeout/flush correctly)
+        self._max_completed_keys: int = 10000
 
     def register_coalesce(
         self,
@@ -126,6 +132,22 @@ class CoalesceExecutor:
             List of registered coalesce names
         """
         return list(self._settings.keys())
+
+    def _mark_completed(self, key: tuple[str, str]) -> None:
+        """Mark a coalesce key as completed with bounded memory.
+
+        Uses LRU eviction to prevent unbounded memory growth in long-running
+        pipelines. When max capacity is exceeded, oldest entries are removed.
+        Late arrivals after eviction will create new pending entries which
+        timeout or flush correctly - acceptable trade-off vs OOM.
+
+        Args:
+            key: (coalesce_name, row_id) tuple to mark as completed
+        """
+        self._completed_keys[key] = None
+        # Evict oldest entries if over capacity
+        while len(self._completed_keys) > self._max_completed_keys:
+            self._completed_keys.popitem(last=False)
 
     def accept(
         self,
@@ -332,7 +354,7 @@ class CoalesceExecutor:
 
         # Clean up pending state and mark as completed
         del self._pending[key]
-        self._completed_keys.add(key)  # Track completion to reject late arrivals
+        self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
 
         return CoalesceOutcome(
             held=False,
@@ -525,7 +547,7 @@ class CoalesceExecutor:
                         )
 
                     del self._pending[key]
-                    self._completed_keys.add(key)  # Track completion to reject late arrivals
+                    self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                     results.append(
                         CoalesceOutcome(
                             held=False,
@@ -575,7 +597,7 @@ class CoalesceExecutor:
                     )
 
                 del self._pending[key]
-                self._completed_keys.add(key)  # Track completion to reject late arrivals
+                self._mark_completed(key)  # Track completion to reject late arrivals (bounded)
                 results.append(
                     CoalesceOutcome(
                         held=False,
