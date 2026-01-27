@@ -675,12 +675,12 @@ allow_hits:
   reason: 'Optional field: fork_to validated by GateSettings schema - None when gate does not fork'
   safety: Schema validation guarantees valid type; .get() appropriate for optional field
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1019
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1023
   owner: architecture
   reason: 'Pydantic model_config: extra key is optional in Pydantic ConfigDict'
   safety: Returns None when extra not set (Pydantic default behavior)
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1020
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1024
   owner: architecture
   reason: 'Pydantic model_config: extra key is optional in Pydantic ConfigDict'
   safety: Returns None when extra not set (Pydantic default behavior)

@@ -84,6 +84,7 @@ class ExecutionGraph:
         self._default_sink: str = ""
         self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
         self._route_resolution_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
+        self._coalesce_gate_index: dict[CoalesceName, int] = {}  # coalesce_name -> gate pipeline index
 
     @property
     def node_count(self) -> int:
@@ -695,6 +696,9 @@ class ExecutionGraph:
                     raise GraphValidationError(
                         f"Coalesce '{coalesce_name}' has no producing gate. This should have been caught by branch validation."
                     )
+
+        # Store for external access
+        graph._coalesce_gate_index = coalesce_gate_index
 
         # ===== CONNECT GATE CONTINUE ROUTES =====
         # CRITICAL FIX: Handle ALL continue routes, not just "true"
