@@ -899,10 +899,11 @@ class RowProcessor:
                             child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
                             child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
 
+                        # Children skip directly to coalesce step (or next step if no coalesce)
                         child_items.append(
                             _WorkItem(
                                 token=child_token,
-                                start_step=next_step,
+                                start_step=child_coalesce_step if child_coalesce_step is not None else next_step,
                                 coalesce_at_step=child_coalesce_step,
                                 coalesce_name=child_coalesce_name,
                             )
