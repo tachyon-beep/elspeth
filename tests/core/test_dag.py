@@ -1440,7 +1440,16 @@ class TestCoalesceNodes:
             "output": DummySink("output"),
             "path_a": DummySink("path_a"),
         }
-        gate = DummyGate({"fork_to": ["path_a", "path_a"], "schema": {"fields": "dynamic"}})
+        # Plugin gates must NOT have "fork" as a route target - they use
+        # RoutingAction.fork_to_paths() in evaluate() instead.
+        # Routes here just define non-fork routing options.
+        gate = DummyGate(
+            {
+                "routes": {"default": "continue"},
+                "fork_to": ["path_a", "path_a"],  # Duplicate branch - should be rejected
+                "schema": {"fields": "dynamic"},
+            }
+        )
 
         with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
             ExecutionGraph.from_plugin_instances(
