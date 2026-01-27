@@ -1178,6 +1178,27 @@ def _expand_template_files(
     return result
 
 
+def _recursive_lower_keys(obj: Any) -> Any:
+    """Recursively lowercase all dictionary keys.
+
+    Dynaconf returns nested dictionaries with UPPERCASE keys (from env vars),
+    but Pydantic expects lowercase field names. This function converts all
+    keys at all nesting levels to lowercase.
+
+    Args:
+        obj: Any value - dicts are processed recursively, lists have their
+             elements processed, other types pass through unchanged.
+
+    Returns:
+        The input with all dict keys lowercased at all levels.
+    """
+    if isinstance(obj, dict):
+        return {k.lower(): _recursive_lower_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_recursive_lower_keys(item) for item in obj]
+    return obj
+
+
 def load_settings(config_path: Path) -> ElspethSettings:
     """Load settings from YAML file with environment variable overrides.
 
@@ -1216,7 +1237,7 @@ def load_settings(config_path: Path) -> ElspethSettings:
     # Dynaconf returns uppercase keys; convert to lowercase for Pydantic
     # Also filter out internal Dynaconf settings
     internal_keys = {"LOAD_DOTENV", "ENVIRONMENTS", "SETTINGS_FILES"}
-    raw_config = {k.lower(): v for k, v in dynaconf_settings.as_dict().items() if k not in internal_keys}
+    raw_config = {k.lower(): _recursive_lower_keys(v) for k, v in dynaconf_settings.as_dict().items() if k not in internal_keys}
 
     # Expand ${VAR} and ${VAR:-default} patterns in config values
     raw_config = _expand_env_vars(raw_config)
