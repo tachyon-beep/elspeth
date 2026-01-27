@@ -110,6 +110,7 @@ from elspeth.contracts.events import (
     RunCompletionStatus,
 )
 from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
 from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
@@ -207,6 +208,9 @@ __all__ = [  # Grouped by category for readability
     "validate_row",
     # engine
     "RetryPolicy",
+    # payload_store
+    "IntegrityError",
+    "PayloadStore",
     # events
     "PhaseAction",
     "PhaseCompleted",
