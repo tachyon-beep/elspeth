@@ -855,6 +855,126 @@ class TestCoalesceWiring:
             # Check coalesce_step_map was passed
             call_kwargs = mock_processor_cls.call_args.kwargs
             assert "coalesce_step_map" in call_kwargs
-            # 2 transforms + 1 gate = base_step 3, coalesce step = base_step + 1 = 4
-            # (Fixed in P1 step_index collision fix - coalesce must use distinct step after gates)
-            assert call_kwargs["coalesce_step_map"]["merge_results"] == 4
+            # forker gate is at pipeline index 2 (after 2 transforms)
+            # coalesce_step = gate_pipeline_index + 1 = 2 + 1 = 3
+            assert call_kwargs["coalesce_step_map"]["merge_results"] == 3
+
+
+class TestCoalesceStepMapCalculation:
+    """Test that coalesce_step_map is computed from graph topology."""
+
+    def test_coalesce_step_map_uses_graph_gate_index(
+        self,
+        plugin_manager,
+    ) -> None:
+        """coalesce_step_map should use gate index from graph, not config order.
+
+        Given:
+          - Pipeline with fork_gate at index 0 (first gate)
+          - Coalesce for that fork's branches
+
+        The coalesce_step should be len(transforms) + gate_index + 1,
+        NOT len(transforms) + len(gates) + 1.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts.types import CoalesceName
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["branch_a", "branch_b"],
+                ),
+                GateSettings(
+                    name="downstream_gate",  # Gate AFTER fork
+                    condition="False",
+                    routes={"true": "output", "false": "continue"},
+                ),
+            ],
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_branches",
+                    branches=["branch_a", "branch_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            default_sink="output",
+        )
+
+        db = LandscapeDB.in_memory()
+        orchestrator = Orchestrator(db)
+
+        # Build graph from settings
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        mock_source = MagicMock()
+        mock_source.name = "null"
+        mock_source._on_validation_failure = "discard"
+        mock_source.load.return_value = iter([])
+        mock_source.plugin_version = "1.0.0"
+        mock_source.determinism = Determinism.DETERMINISTIC
+        mock_source.output_schema = _TestSchema
+
+        mock_sink = MagicMock()
+        mock_sink.name = "json"
+        mock_sink.plugin_version = "1.0.0"
+        mock_sink.determinism = Determinism.DETERMINISTIC
+        mock_sink.input_schema = _TestSchema
+
+        config = PipelineConfig(
+            source=mock_source,
+            transforms=[],
+            sinks={"output": mock_sink},
+            gates=settings.gates,
+        )
+
+        # Capture the coalesce_step_map passed to RowProcessor
+        captured_step_map: dict = {}
+
+        with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls:
+            mock_processor = MagicMock()
+            mock_processor.process_row.return_value = []
+            mock_processor_cls.return_value = mock_processor
+
+            orchestrator.run(config, graph=graph, settings=settings)
+
+            # Capture the step_map
+            call_kwargs = mock_processor_cls.call_args.kwargs
+            captured_step_map = call_kwargs.get("coalesce_step_map", {})
+
+        # Verify: coalesce step should be gate_pipeline_index + 1
+        # fork_gate is at pipeline_index 0 (first node in this config with no transforms)
+        # coalesce_step = pipeline_index(0) + 1 = 1
+        # NOT the old calculation: transforms(0) + total_gates(2) + 1 + coalesce_offset = 3
+        assert CoalesceName("merge_branches") in captured_step_map
+
+        # fork_gate is at pipeline index 0 (no transforms in this test, so gate is first node)
+        # coalesce_step = gate_pipeline_index + 1 = 0 + 1 = 1
+        expected_step = 0 + 1  # gate_pipeline_index + 1
+        assert captured_step_map[CoalesceName("merge_branches")] == expected_step

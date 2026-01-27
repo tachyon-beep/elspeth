@@ -433,6 +433,45 @@ class Orchestrator:
                 raise ValueError(f"Sink '{sink_name}' not found in graph. Available sinks: {list(sink_id_map.keys())}")
             sink.node_id = sink_id_map[SinkName(sink_name)]
 
+    def _compute_coalesce_step_map(
+        self,
+        graph: ExecutionGraph,
+        config: PipelineConfig,
+        settings: "ElspethSettings | None",
+    ) -> dict[CoalesceName, int]:
+        """Compute coalesce step positions from graph topology.
+
+        Coalesce step = gate_pipeline_index + 1
+
+        The gate_pipeline_index from graph.get_coalesce_gate_index() is the full
+        pipeline index (includes transforms + gates up to that point). We add 1
+        to place the coalesce step RIGHT AFTER its producing fork gate.
+
+        This aligns processor execution with graph topology:
+        - Fork children skip directly to coalesce_step (not through all remaining gates)
+        - Merged token continues from coalesce to downstream nodes
+
+        Args:
+            graph: The execution graph
+            config: Pipeline configuration (unused, kept for API consistency)
+            settings: Elspeth settings (may be None)
+
+        Returns:
+            Dict mapping coalesce name to its step index in the pipeline
+        """
+        # Silence unused parameter warning
+        _ = config
+
+        coalesce_step_map: dict[CoalesceName, int] = {}
+        if settings is not None and settings.coalesce:
+            coalesce_gate_index = graph.get_coalesce_gate_index()
+            for coalesce_name, gate_pipeline_idx in coalesce_gate_index.items():
+                # Coalesce step is RIGHT AFTER its producing fork gate
+                # gate_pipeline_idx already includes all prior transforms and gates,
+                # so coalesce happens at step (gate_pipeline_idx + 1)
+                coalesce_step_map[coalesce_name] = gate_pipeline_idx + 1
+        return coalesce_step_map
+
     def run(
         self,
         config: PipelineConfig,
@@ -834,22 +873,8 @@ class Orchestrator:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
-        # Compute coalesce step positions
-        # Coalesce step = AFTER all transforms and gates (base_step + 1 + i)
-        #
-        # CRITICAL: Must use base_step + 1 (not base_step) to avoid step_index collision.
-        # The last gate uses step = base_step (len(transforms) + len(gates)), so coalesce
-        # must use a different step index. Using base_step + 1 ensures coalesce has a
-        # unique step after all gates.
-        #
-        # This also requires the processor to pass step_completed >= coalesce_at_step
-        # in the final _maybe_coalesce_token call (see RowProcessor changes).
-        coalesce_step_map: dict[CoalesceName, int] = {}
-        if settings is not None and settings.coalesce:
-            base_step = len(config.transforms) + len(config.gates)
-            for i, cs in enumerate(settings.coalesce):
-                # Each coalesce gets step AFTER transforms/gates (+1) plus its offset
-                coalesce_step_map[CoalesceName(cs.name)] = base_step + 1 + i
+        # Compute coalesce step positions FROM GRAPH TOPOLOGY
+        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
@@ -1757,12 +1782,8 @@ class Orchestrator:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
-        # Compute coalesce step positions (same as main run path)
-        coalesce_step_map: dict[CoalesceName, int] = {}
-        if settings is not None and settings.coalesce:
-            base_step = len(config.transforms) + len(config.gates)
-            for i, cs in enumerate(settings.coalesce):
-                coalesce_step_map[CoalesceName(cs.name)] = base_step + 1 + i
+        # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
+        coalesce_step_map = self._compute_coalesce_step_map(graph, config, settings)
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
