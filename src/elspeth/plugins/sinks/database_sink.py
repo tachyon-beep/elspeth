@@ -7,8 +7,6 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
-import hashlib
-import json
 import os
 from typing import Any, Literal
 
@@ -18,6 +16,7 @@ from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 from elspeth.contracts.url import SanitizedDatabaseUrl
+from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext
@@ -213,10 +212,12 @@ class DatabaseSink(BaseSink):
                 This indicates a bug in an upstream transform.
         """
         # Compute canonical JSON payload BEFORE any database operation
-        payload_json = json.dumps(rows, sort_keys=True, separators=(",", ":"))
-        payload_bytes = payload_json.encode("utf-8")
-        content_hash = hashlib.sha256(payload_bytes).hexdigest()
-        payload_size = len(payload_bytes)
+        # Uses RFC 8785 canonical JSON for deterministic hashing:
+        # - Normalizes pandas/numpy types to JSON primitives
+        # - Rejects NaN/Infinity (invalid JSON per RFC 8785)
+        # - Deterministic unicode escaping
+        content_hash = stable_hash(rows)
+        payload_size = len(canonical_json(rows).encode("utf-8"))
 
         if not rows:
             # Empty batch - return descriptor without DB operations

@@ -124,3 +124,34 @@ Recent git history shows the file has received security fixes (dd3bed7, e3c72a8)
 4. Audit trail integrity compromised - hashes won't match `stable_hash()` computations elsewhere in the system
 
 **Recommendation**: Keep open - this is a P1 audit integrity bug that needs fixing before production use.
+
+## Fix Applied (2026-01-28)
+
+**Status**: FIXED
+
+**Fixed by**: Claude Code (fix/rc1-bug-burndown-session-6)
+
+**Changes made**:
+
+1. **`src/elspeth/plugins/sinks/database_sink.py`**:
+   - Replaced `json.dumps` + `hashlib.sha256` with `stable_hash()` from `elspeth.core.canonical`
+   - Replaced manual byte counting with `canonical_json().encode()` for payload_size
+   - Removed unused `import hashlib` and `import json`
+   - Added import for `canonical_json, stable_hash`
+
+2. **`tests/plugins/sinks/test_database_sink.py`**:
+   - Added new test class `TestDatabaseSinkCanonicalHashing` with 5 tests:
+     - `test_content_hash_uses_canonical_json` - Unicode hashing (emoji, accents)
+     - `test_content_hash_rejects_nan` - NaN rejection
+     - `test_content_hash_rejects_infinity` - Infinity rejection
+     - `test_content_hash_handles_numpy_types` - numpy.int64/float64 normalization
+     - `test_payload_size_uses_canonical_bytes` - Correct byte counting
+   - Updated existing tests to use `stable_hash()` instead of hardcoded `json.dumps`
+   - Removed unused `import hashlib` and `import json`
+
+**Verification**:
+- All 27 database_sink tests pass
+- All 79 sink tests pass
+- mypy and ruff checks pass
+
+**Breaking change**: Hash values for database artifacts will differ from previous versions when data contains unicode characters. This is correct behavior per RFC 8785.
