@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
+from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
+from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
 
 from elspeth import __version__
@@ -196,6 +198,11 @@ def run(
     # Load and validate config via Pydantic
     try:
         config = load_settings(settings_path)
+    except (YamlParserError, YamlScannerError) as e:
+        # YAML syntax errors (malformed YAML) - show helpful message
+        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
+        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        raise typer.Exit(1) from None
     except FileNotFoundError:
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
@@ -839,6 +846,11 @@ def validate(
     # Load and validate config via Pydantic
     try:
         config = load_settings(settings_path)
+    except (YamlParserError, YamlScannerError) as e:
+        # YAML syntax errors (malformed YAML) - show helpful message
+        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
+        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        raise typer.Exit(1) from None
     except FileNotFoundError:
         typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
