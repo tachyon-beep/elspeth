@@ -816,6 +816,19 @@ class ExecutionGraph:
         """
         return dict(self._branch_to_coalesce)
 
+    def get_coalesce_gate_index(self) -> dict[CoalesceName, int]:
+        """Get coalesce_name -> producing gate pipeline index mapping.
+
+        Returns the pipeline index of the gate that produces each coalesce's
+        branches. Used by orchestrator to compute coalesce_step_map aligned
+        with graph topology.
+
+        Returns:
+            Dict mapping coalesce name to the pipeline index of its producing
+            fork gate. Empty dict if no coalesce configured.
+        """
+        return dict(self._coalesce_gate_index)  # Return copy to prevent mutation
+
     def get_default_sink(self) -> str:
         """Get the default sink name."""
         return self._default_sink

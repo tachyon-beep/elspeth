@@ -2890,3 +2890,93 @@ class TestDeterministicNodeIDs:
         source_id_2 = next(n for n in graph2._graph.nodes() if n.startswith("source_"))
 
         assert source_id_1 != source_id_2
+
+
+class TestCoalesceGateIndex:
+    """Test coalesce_gate_index exposure from ExecutionGraph."""
+
+    def test_get_coalesce_gate_index_returns_copy(self) -> None:
+        """Getter should return a copy to prevent external mutation."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts.types import CoalesceName
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["branch_a", "branch_b"],
+                ),
+            ],
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_branches",
+                    branches=["branch_a", "branch_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            default_sink="output",
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            coalesce_settings=settings.coalesce,
+            default_sink=settings.default_sink,
+        )
+
+        # Get the index
+        index = graph.get_coalesce_gate_index()
+
+        # Verify it contains expected mapping
+        assert CoalesceName("merge_branches") in index
+        assert isinstance(index[CoalesceName("merge_branches")], int)
+
+        # Verify it's a copy (mutation doesn't affect internal state)
+        original_value = index[CoalesceName("merge_branches")]
+        index[CoalesceName("merge_branches")] = 999
+
+        fresh_index = graph.get_coalesce_gate_index()
+        assert fresh_index[CoalesceName("merge_branches")] == original_value
+
+    def test_get_coalesce_gate_index_empty_when_no_coalesce(self) -> None:
+        """Getter returns empty dict when no coalesce configured."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import ElspethSettings, SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            default_sink="output",
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            coalesce_settings=settings.coalesce,
+            default_sink=settings.default_sink,
+        )
+
+        index = graph.get_coalesce_gate_index()
+        assert index == {}

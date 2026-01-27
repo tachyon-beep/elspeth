@@ -395,12 +395,12 @@ allow_hits:
   reason: Optional schema config with explicit default - not all nodes define schemas
   safety: 'Default value is well-defined: dynamic fields'
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1015
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1036
   owner: architecture
   reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1016
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1037
   owner: architecture
   reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
@@ -674,14 +674,4 @@ allow_hits:
   owner: architecture
   reason: 'Optional field: fork_to validated by GateSettings schema - None when gate does not fork'
   safety: Schema validation guarantees valid type; .get() appropriate for optional field
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1023
-  owner: architecture
-  reason: 'Pydantic model_config: extra key is optional in Pydantic ConfigDict'
-  safety: Returns None when extra not set (Pydantic default behavior)
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1024
-  owner: architecture
-  reason: 'Pydantic model_config: extra key is optional in Pydantic ConfigDict'
-  safety: Returns None when extra not set (Pydantic default behavior)
   expires: null
