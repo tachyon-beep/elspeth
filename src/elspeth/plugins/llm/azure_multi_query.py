@@ -305,6 +305,12 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # 6. Parse JSON response (THEIR DATA - wrap)
         # Strip markdown code blocks if present (common LLM behavior)
         content = response.content.strip()
+
+        # DEBUG: Capture pre-processing state for diagnosis
+        _debug_raw_content = response.content
+        _debug_raw_len = len(response.content)
+        _debug_usage = response.usage
+
         if content.startswith("```"):
             # Remove opening fence (```json or ```)
             first_newline = content.find("\n")
@@ -322,7 +328,11 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                     "reason": "json_parse_failed",
                     "error": str(e),
                     "query": spec.output_prefix,
-                    "raw_response": response.content[:500],  # Truncate for audit
+                    "raw_response": _debug_raw_content,  # FULL content for diagnosis
+                    "raw_response_len": _debug_raw_len,
+                    "content_after_strip": content,  # What we tried to parse
+                    "content_after_strip_len": len(content),
+                    "usage": _debug_usage,  # Token counts from API
                 }
             )
 
