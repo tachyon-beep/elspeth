@@ -265,6 +265,26 @@ def _build_fork_coalesce_graph(
     graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
     graph._default_sink = settings.default_sink
 
+    # Compute coalesce_gate_index (mirrors production logic in dag.py)
+    # This maps coalesce name -> pipeline index of the gate that produces its branches
+    # Build pipeline_nodes list (transforms + gates in order)
+    pipeline_nodes = list(transform_ids.values()) + [config_gate_ids[g.name] for g in settings.gates]
+    pipeline_index = {node_id: idx for idx, node_id in enumerate(pipeline_nodes)}
+
+    coalesce_gate_index: dict[CoalesceName, int] = {}
+    for gate_config in settings.gates:
+        if gate_config.fork_to:
+            gate_id = config_gate_ids[gate_config.name]
+            gate_idx = pipeline_index[gate_id]
+            for branch in gate_config.fork_to:
+                if branch in branch_to_coalesce:
+                    coalesce_name = CoalesceName(branch_to_coalesce[branch])
+                    # Use highest gate index if multiple gates produce branches for same coalesce
+                    if coalesce_name not in coalesce_gate_index or gate_idx > coalesce_gate_index[coalesce_name]:
+                        coalesce_gate_index[coalesce_name] = gate_idx
+
+    graph._coalesce_gate_index = coalesce_gate_index
+
     return graph
 
 
