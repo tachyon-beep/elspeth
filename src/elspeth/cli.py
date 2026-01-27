@@ -68,16 +68,30 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-def _load_dotenv() -> bool:
+def _load_dotenv(env_file: Path | None = None) -> bool:
     """Load environment variables from .env file.
 
-    Searches for .env in current directory and parent directories.
-    Does not override existing environment variables.
+    Args:
+        env_file: Explicit path to .env file. If None, searches for .env
+                 in current directory and parent directories.
 
     Returns:
         True if .env was found and loaded, False otherwise.
+
+    Raises:
+        typer.Exit: If explicit env_file path doesn't exist.
     """
     from dotenv import load_dotenv
+
+    if env_file is not None:
+        if not env_file.exists():
+            typer.secho(
+                f"Error: .env file not found: {env_file}",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
+        return load_dotenv(env_file, override=False)
 
     # load_dotenv searches current dir and parents by default
     return load_dotenv(override=False)  # Don't override existing env vars
@@ -97,6 +111,12 @@ def main(
         False,
         "--no-dotenv",
         help="Skip loading .env file.",
+    ),
+    env_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--env-file",
+        help="Path to .env file (skips automatic search).",
+        exists=False,  # We handle existence check ourselves for better error message
     ),
     verbose: bool = typer.Option(
         False,
@@ -119,7 +139,13 @@ def main(
     configure_logging(json_output=json_logs, level=log_level)
 
     if not no_dotenv:
-        _load_dotenv()
+        _load_dotenv(env_file=env_file)
+    elif env_file is not None:
+        typer.secho(
+            "Warning: --env-file ignored because --no-dotenv is set.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 # === Subcommand stubs (to be implemented in later tasks) ===
