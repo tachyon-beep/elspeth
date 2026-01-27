@@ -453,6 +453,7 @@ class TestSinkProtocol:
     def test_batch_sink_implementation(self) -> None:
         """Test sink with batch write returning ArtifactDescriptor."""
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.plugins.context import PluginContext
         from elspeth.plugins.protocols import SinkProtocol
 
@@ -494,6 +495,9 @@ class TestSinkProtocol:
             def configure_for_resume(self) -> None:
                 raise NotImplementedError("BatchMemorySink does not support resume")
 
+            def validate_output_target(self) -> OutputValidationResult:
+                return OutputValidationResult.success()
+
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
@@ -508,6 +512,7 @@ class TestSinkProtocol:
         """Test sink conforming to updated batch protocol."""
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
+        from elspeth.contracts.sink import OutputValidationResult
         from elspeth.plugins.context import PluginContext
         from elspeth.plugins.protocols import SinkProtocol
 
@@ -552,6 +557,9 @@ class TestSinkProtocol:
 
             def configure_for_resume(self) -> None:
                 raise NotImplementedError("MemorySink does not support resume")
+
+            def validate_output_target(self) -> OutputValidationResult:
+                return OutputValidationResult.success()
 
         sink = MemorySink({})
 

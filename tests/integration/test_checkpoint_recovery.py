@@ -535,7 +535,7 @@ class TestCheckpointTopologyHashAtomicity:
         after checkpoint creation.
         """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.canonical import compute_upstream_topology_hash
+        from elspeth.core.canonical import compute_full_topology_hash
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         checkpoint_mgr = test_env["checkpoint_manager"]
@@ -585,7 +585,9 @@ class TestCheckpointTopologyHashAtomicity:
         token = recorder.create_token(row_id=row.row_id)
 
         # Compute expected hash for current graph state
-        expected_hash = compute_upstream_topology_hash(graph, "transform_a")
+        # BUG-COMPAT-01: CheckpointManager now uses full topology hash (not upstream-only)
+        # to ensure changes to ANY branch invalidate checkpoints
+        expected_hash = compute_full_topology_hash(graph)
 
         # Create checkpoint with current graph state
         checkpoint = checkpoint_mgr.create_checkpoint(
@@ -607,7 +609,7 @@ class TestCheckpointTopologyHashAtomicity:
         )
 
         # Compute hash with modified graph
-        modified_hash = compute_upstream_topology_hash(graph, "transform_a")
+        modified_hash = compute_full_topology_hash(graph)
 
         # Verify stored hash still matches ORIGINAL graph, not modified graph
         # (This proves hash was captured atomically at checkpoint creation time)
