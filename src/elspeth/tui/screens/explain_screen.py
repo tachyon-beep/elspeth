@@ -19,6 +19,17 @@ from elspeth.tui.widgets.node_detail import NodeDetailPanel
 logger = structlog.get_logger(__name__)
 
 
+class InvalidStateTransitionError(Exception):
+    """Raised when a state transition is not allowed from the current state."""
+
+    def __init__(self, method: str, current_state: str, allowed_states: list[str]) -> None:
+        self.method = method
+        self.current_state = current_state
+        self.allowed_states = allowed_states
+        allowed = ", ".join(allowed_states)
+        super().__init__(f"{method}() requires state in [{allowed}], but current state is {current_state}")
+
+
 class ScreenStateType(Enum):
     """Discriminator for screen state types."""
 
@@ -311,3 +322,62 @@ class ExplainScreen:
         lines.append(self._detail_panel.render_content())
 
         return "\n".join(lines)
+
+    # =========================================================================
+    # State Transition Methods
+    # =========================================================================
+
+    def load(self, db: LandscapeDB, run_id: str) -> None:
+        """Load pipeline data from database.
+
+        Transitions: UninitializedState → LoadedState | LoadingFailedState
+
+        Args:
+            db: Landscape database connection
+            run_id: Run ID to load
+
+        Raises:
+            InvalidStateTransitionError: If not in UninitializedState.
+                Call clear() first to load different data.
+        """
+        if not isinstance(self._state, UninitializedState):
+            raise InvalidStateTransitionError(
+                method="load",
+                current_state=type(self._state).__name__,
+                allowed_states=["UninitializedState"],
+            )
+
+        self._state = self._load_pipeline_structure(db, run_id)
+
+    def retry(self) -> None:
+        """Retry loading after a failure.
+
+        Transitions: LoadingFailedState → LoadedState | LoadingFailedState
+
+        Uses the db and run_id preserved in LoadingFailedState to attempt
+        loading again. Useful for transient errors like network issues.
+
+        Raises:
+            InvalidStateTransitionError: If not in LoadingFailedState.
+        """
+        if not isinstance(self._state, LoadingFailedState):
+            raise InvalidStateTransitionError(
+                method="retry",
+                current_state=type(self._state).__name__,
+                allowed_states=["LoadingFailedState"],
+            )
+
+        # LoadingFailedState preserves db and run_id for exactly this purpose
+        self._state = self._load_pipeline_structure(self._state.db, self._state.run_id)
+
+    def clear(self) -> None:
+        """Clear loaded data and return to uninitialized state.
+
+        Transitions: Any → UninitializedState
+
+        Resets the screen to its initial state. Call load() after this
+        to load new data.
+        """
+        self._state = UninitializedState()
+        self._selected_node_id = None
+        self._detail_panel.update_state(None)

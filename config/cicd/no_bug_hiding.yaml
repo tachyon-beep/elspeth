@@ -3,10 +3,15 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
-- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_pipeline_structure:line=165
+- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_pipeline_structure:line=176
   owner: architecture
   reason: 'Trust boundary: loading pipeline structure that may fail for corrupt/incomplete runs'
   safety: Errors logged with exc_info; returns LoadingFailedState with error message
+  expires: null
+- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_node_state:line=277
+  owner: architecture
+  reason: 'Trust boundary: loading node state that may fail for invalid node_id or db issues'
+  safety: Errors logged with exc_info; returns None (graceful degradation in TUI)
   expires: null
 - key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=56
   owner: architecture
