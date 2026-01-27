@@ -48,6 +48,8 @@ class CSVSource(BaseSource):
     """
 
     name = "csv"
+    # Override parent type - SourceDataConfig requires this to be set
+    _on_validation_failure: str
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

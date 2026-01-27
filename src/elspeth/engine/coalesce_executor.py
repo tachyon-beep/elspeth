@@ -302,6 +302,17 @@ class CoalesceExecutor:
                 join_group_id=merged_token.join_group_id,
             )
 
+        # Record COALESCED outcome for the merged token itself
+        # BUG FIX (P2-2026-01-27): Previously only consumed tokens had COALESCED recorded.
+        # The merged token also needs an outcome for audit trail completeness, especially
+        # when timeout-triggered merges bypass RowProcessor's normal coalesce handling.
+        self._recorder.record_token_outcome(
+            run_id=self._run_id,
+            token_id=merged_token.token_id,
+            outcome=RowOutcome.COALESCED,
+            join_group_id=merged_token.join_group_id,
+        )
+
         # Build audit metadata
         coalesce_metadata = {
             "policy": settings.policy,

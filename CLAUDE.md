@@ -714,4 +714,4 @@ If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and
 
 ## FINAL COMMENT
 
-If you are proposing or implementing a fix and it invovles 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW.
+If you are proposing or implementing a fix and it invovles 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW. Saying 'I didn't cause this' is not an excuse for disregarding lint, failing tests or CICD. They all must be resolved to merge code, no exceptions. Refusing to do the work now is false economy.

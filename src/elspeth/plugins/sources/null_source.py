@@ -41,6 +41,8 @@ class NullSource(BaseSource):
     plugin_version = "1.0.0"
     determinism = Determinism.DETERMINISTIC
     output_schema: type[PluginSchema] = NullSourceSchema
+    # NullSource yields no rows, so it never quarantines - but set to satisfy protocol
+    _on_validation_failure: str = "discard"
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize NullSource.

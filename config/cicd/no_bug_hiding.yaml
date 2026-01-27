@@ -379,11 +379,11 @@ allow_hits:
   reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed data, etc.)'
   safety: Logged and row quarantined with full error details
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=236
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=232
   owner: architecture
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other
     plugins from cleanup'
-  safety: Errors logged with full details - resource leaks worse than compounding damage
+  safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
 - key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=274
   owner: architecture

@@ -70,6 +70,10 @@ class SourceProtocol(Protocol):
     determinism: Determinism
     plugin_version: str
 
+    # Sink name for quarantined rows, or "discard" to drop invalid rows
+    # All sources must set this - config-based sources get it from SourceDataConfig
+    _on_validation_failure: str
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...

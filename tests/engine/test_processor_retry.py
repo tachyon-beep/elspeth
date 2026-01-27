@@ -531,3 +531,188 @@ class TestRowProcessorRecovery:
             "buffer": [1, 2],
             "count": 2,
         }
+
+
+class TestNoRetryAuditCompleteness:
+    """Tests for audit trail completeness when retry_manager is None.
+
+    BUG: When retry is disabled and retryable exceptions occur:
+    1. No transform_error is recorded (bypasses TransformExecutor error handling)
+    2. If on_error is None, creates invalid ROUTED outcome with sink_name=None
+
+    These tests verify the audit trail remains complete even without retry.
+    """
+
+    def test_no_retry_retryable_exception_records_transform_error(self) -> None:
+        """Retryable exceptions in no-retry mode must record transform_error.
+
+        P2 review comment: In the no-retry path, retryable exceptions are converted
+        into TransformResult.error and returned directly. Because this bypasses
+        TransformExecutor's error-routing logic, no transform_errors entry is
+        recorded, so when retry is disabled and a rate-limit/network error happens,
+        the row is routed but explain() has no transform_error details.
+
+        Expected: transform_errors table should have an entry for the error.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.core.landscape.schema import transform_errors_table
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        # Set up real Landscape
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="llm_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class RateLimitedTransform(BaseTransform):
+            """Transform that raises retryable LLM error."""
+
+            name = "rate_limited"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"on_error": "error_sink"})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                raise LLMClientError("Rate limit exceeded", retryable=True)
+
+        # No retry manager - single attempt
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            retry_manager=None,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process should return error result (not raise)
+        results = processor.process_row(
+            row_index=0,
+            row_data={"x": 1},
+            transforms=[RateLimitedTransform(transform_node.node_id)],
+            ctx=ctx,
+        )
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.outcome == RowOutcome.ROUTED
+
+        # CRITICAL: transform_errors must have an entry for explain() to work
+        with db.engine.connect() as conn:
+            errors = conn.execute(transform_errors_table.select().where(transform_errors_table.c.run_id == run.run_id)).fetchall()
+
+        assert len(errors) >= 1, (
+            "No transform_error recorded when retryable exception occurred in no-retry mode. "
+            "This breaks explain() - the row shows ROUTED but there's no transform_error "
+            "explaining why. The error details are lost."
+        )
+
+        # Verify error has expected content
+        error = errors[0]
+        assert "rate" in error.error_details_json.lower() or "limit" in error.error_details_json.lower(), (
+            f"transform_error should mention rate limit, got: {error.error_details_json}"
+        )
+
+    def test_no_retry_with_on_error_none_raises_instead_of_invalid_routed(self) -> None:
+        """When on_error is None and retryable exception occurs, should fail properly.
+
+        P2 review comment: In the no-retry-manager path, retryable exceptions are
+        converted into TransformResult.error and returned with transform._on_error
+        even if _on_error is None. For pipelines that omit on_error (the default)
+        and hit a retryable ConnectionError/LLMClientError, process_row records a
+        ROUTED outcome with sink_name=None and the orchestrator later asserts on
+        result.sink_name, leaving a bogus terminal outcome in the audit trail
+        before crashing.
+
+        Expected: Should raise RuntimeError (like TransformExecutor does) when
+        on_error is None and an error result is produced.
+        """
+        import pytest
+
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+
+        # Set up real Landscape
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="network_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class NetworkFailTransform(BaseTransform):
+            """Transform that raises retryable network error with no on_error."""
+
+            name = "network_fail"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, node_id: str) -> None:
+                # NO on_error configured - this is the default
+                super().__init__({})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                raise ConnectionError("Network unreachable")
+
+        # No retry manager - single attempt
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            retry_manager=None,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Should raise RuntimeError, not return invalid ROUTED with sink_name=None
+        with pytest.raises(RuntimeError) as exc_info:
+            processor.process_row(
+                row_index=0,
+                row_data={"x": 1},
+                transforms=[NetworkFailTransform(transform_node.node_id)],
+                ctx=ctx,
+            )
+
+        # Error message should explain the problem
+        assert "on_error" in str(exc_info.value).lower(), f"RuntimeError should mention missing on_error config, got: {exc_info.value}"

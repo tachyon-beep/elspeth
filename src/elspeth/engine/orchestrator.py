@@ -217,31 +217,32 @@ class Orchestrator:
         ---------------------------------------------------
         Cleanup is best-effort even if individual close() fails. This violates
         the general principle that plugin method exceptions should crash, but
-        is justified for cleanup specifically:
-
-        1. Called in finally block - crash prevents other plugins from cleanup
-        2. Resource leaks worse than ignoring close() bugs during teardown
-        3. Errors ARE logged - bugs aren't silently swallowed
-        4. Close() bugs should be fixed, but shouldn't compound damage
-
-        In normal operation (process(), evaluate(), etc.), plugin bugs crash
-        immediately. Only cleanup gets special treatment.
+        attempts all cleanups, then raises if any failed. Per CLAUDE.md, plugins
+        are system-owned code and bugs must crash - but we collect errors first
+        to ensure all plugins get cleanup attempts before failing.
         """
         import structlog
 
         logger = structlog.get_logger()
+        cleanup_errors: list[tuple[str, Exception]] = []
 
         for transform in config.transforms:
             try:
                 transform.close()
             except Exception as e:
-                # Log but don't raise - best-effort cleanup
+                # Collect error but continue to attempt other cleanups
                 logger.warning(
                     "Transform cleanup failed - plugin close() raised exception",
                     transform=transform.name,
                     error=str(e),
                     error_type=type(e).__name__,
                 )
+                cleanup_errors.append((transform.name, e))
+
+        # After attempting all cleanups, raise if any failed (plugins are system code)
+        if cleanup_errors:
+            error_summary = "; ".join(f"{name}: {type(e).__name__}: {e}" for name, e in cleanup_errors)
+            raise RuntimeError(f"Plugin cleanup failed for {len(cleanup_errors)} transform(s): {error_summary}")
 
     def _validate_route_destinations(
         self,
@@ -269,19 +270,21 @@ class Orchestrator:
             RouteValidationError: If any route references a non-existent sink
         """
         # Build reverse lookup: node_id -> gate name
+        # All gates in transforms and config_gates MUST have entries in their ID maps
+        # (graph construction bug if missing)
         node_id_to_gate_name: dict[str, str] = {}
         for seq, transform in enumerate(transforms):
             if isinstance(transform, GateProtocol):
-                node_id = transform_id_map.get(seq)
-                if node_id is not None:
-                    node_id_to_gate_name[node_id] = transform.name
+                # Graph must have ID for every transform - crash if missing
+                node_id = transform_id_map[seq]
+                node_id_to_gate_name[node_id] = transform.name
 
         # Add config gates to the lookup
         if config_gate_id_map and config_gates:
             for gate_config in config_gates:
-                node_id = config_gate_id_map.get(GateName(gate_config.name))
-                if node_id is not None:
-                    node_id_to_gate_name[node_id] = gate_config.name
+                # Graph must have ID for every config gate - crash if missing
+                node_id = config_gate_id_map[GateName(gate_config.name)]
+                node_id_to_gate_name[node_id] = gate_config.name
 
         # Check each route destination
         for (gate_node_id, route_label), destination in route_resolution_map.items():
@@ -295,7 +298,8 @@ class Orchestrator:
 
             # destination should be a sink name
             if destination not in available_sinks:
-                gate_name = node_id_to_gate_name.get(gate_node_id, gate_node_id)
+                # Every gate in route_resolution_map MUST have a name mapping
+                gate_name = node_id_to_gate_name[gate_node_id]
                 raise RouteValidationError(
                     f"Gate '{gate_name}' can route to '{destination}' "
                     f"(via route label '{route_label}') but no sink named "
@@ -366,18 +370,8 @@ class Orchestrator:
             RouteValidationError: If source on_validation_failure references
                 a non-existent sink
         """
-        # Check if source has _on_validation_failure attribute
-        # This is set by sources that inherit from SourceDataConfig
-        on_validation_failure = getattr(source, "_on_validation_failure", None)
-
-        if on_validation_failure is None:
-            # Source doesn't use on_validation_failure - that's fine
-            return
-
-        # Skip validation if not a string (e.g., MagicMock in tests)
-        # Real sources always have string values from SourceDataConfig
-        if not isinstance(on_validation_failure, str):
-            return
+        # _on_validation_failure is required by SourceProtocol
+        on_validation_failure = source._on_validation_failure
 
         if on_validation_failure == "discard":
             # "discard" is a special value, not a sink name
@@ -705,9 +699,9 @@ class Orchestrator:
                     plugin_version = plugin.plugin_version
                     determinism = plugin.determinism
 
-                # Get schema_config from node_info config or default to dynamic
-                # Schema is specified in pipeline config, not plugin attributes
-                schema_dict = node_info.config.get("schema", {"fields": "dynamic"})
+                # Get schema_config from node_info config
+                # DataPluginConfig enforces that all data plugins have schema
+                schema_dict = node_info.config["schema"]
                 schema_config = SchemaConfig.from_dict(schema_dict)
 
                 recorder.register_node(
@@ -1377,11 +1371,12 @@ class Orchestrator:
         from elspeth.contracts import PluginSchema
 
         # Extract field definitions from Pydantic JSON schema
-        properties = schema_dict.get("properties")
-        if properties is None:
+        # This is OUR data (from Landscape DB) - crash if malformed
+        if "properties" not in schema_dict:
             raise ValueError(
                 "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
             )
+        properties = schema_dict["properties"]
 
         if not properties:
             raise ValueError(
@@ -1390,7 +1385,11 @@ class Orchestrator:
                 "The original source schema must have at least one field."
             )
 
-        required_fields = set(schema_dict.get("required", []))
+        # "required" is optional in JSON Schema spec - empty list is valid default
+        if "required" in schema_dict:
+            required_fields = set(schema_dict["required"])
+        else:
+            required_fields = set()
 
         # Build field definitions for create_model
         field_definitions: dict[str, Any] = {}
@@ -1431,7 +1430,8 @@ class Orchestrator:
         from decimal import Decimal
 
         # Check for datetime first (string with format annotation)
-        if field_info.get("type") == "string" and field_info.get("format") == "date-time":
+        # "format" is optional in JSON Schema, so check with "in" first
+        if "type" in field_info and field_info["type"] == "string" and "format" in field_info and field_info["format"] == "date-time":
             return datetime
 
         # Check for Decimal (anyOf pattern)
@@ -1439,25 +1439,27 @@ class Orchestrator:
             # Pydantic emits: {"anyOf": [{"type": "number"}, {"type": "string"}]}
             # This indicates Decimal (accepts both for parsing flexibility)
             any_of_types = field_info["anyOf"]
-            type_strs = {item.get("type") for item in any_of_types if "type" in item}
+            # Only consider items that have "type" key, then access directly
+            type_strs = {item["type"] for item in any_of_types if "type" in item}
             if {"number", "string"}.issubset(type_strs):
                 return Decimal
 
-        # Get basic type
-        field_type_str = field_info.get("type")
-        if field_type_str is None:
+        # Get basic type - required for all non-anyOf fields
+        if "type" not in field_info:
             raise ValueError(
                 f"Resume failed: Field '{field_name}' has no 'type' in schema. "
                 f"Schema definition: {field_info}. "
                 f"Cannot determine Python type for field."
             )
+        field_type_str = field_info["type"]
 
         # Handle array types
         if field_type_str == "array":
-            items_schema = field_info.get("items")
-            if items_schema is None:
+            # "items" is optional in JSON Schema arrays
+            if "items" not in field_info:
                 # Generic list without item type constraint
                 return list
+            # items_schema = field_info["items"]  # Available if needed for recursive handling
             # For typed arrays, we'd need recursive handling
             # For now, return list (Pydantic will validate items at parse time)
             return list

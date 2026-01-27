@@ -443,3 +443,137 @@ class TestCoalesceAuditGap2:
         assert all(o.outcome == RowOutcome.FAILED for o in child_outcomes), (
             f"All fork children should eventually reach FAILED outcome. Got outcomes: {[o.outcome for o in child_outcomes]}"
         )
+
+
+class TestCoalesceTimeoutAuditGap:
+    """Gap: Timeout-merged tokens missing COALESCED outcome in orchestrator.
+
+    BUG: When check_timeouts() returns a merged token, the orchestrator
+    only queues it for the sink but never records a COALESCED outcome for
+    the merged token. This breaks audit trail consistency.
+
+    Normal path (RowProcessor): Records COALESCED for merged token
+    Timeout path (Orchestrator): Only increments rows_coalesced counter
+
+    The consumed tokens get COALESCED recorded by CoalesceExecutor._execute_merge,
+    but the merged token itself needs an outcome too.
+    """
+
+    def test_timeout_merged_token_records_coalesced_outcome(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Timeout-merged tokens must have COALESCED outcome recorded.
+
+        P2 review comment: When a timeout fires, this block appends
+        outcome.merged_token to pending_tokens but never records a COALESCED
+        outcome for that merged token. CoalesceExecutor._execute_merge only
+        records COALESCED for the consumed branch tokens, so any best_effort/
+        quorum timeout merge leaves the merged token without a terminal outcome.
+
+        Expected: Merged token should have RowOutcome.COALESCED recorded with
+        join_group_id, just like the normal coalesce path in RowProcessor.
+        """
+        import time
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="timeout_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure best_effort coalesce with timeout
+        settings = CoalesceSettings(
+            name="timeout_merge",
+            branches=["path_a", "path_b"],
+            policy="best_effort",  # Merges whatever arrived on timeout
+            merge="union",
+            timeout_seconds=0.01,  # Very short for testing
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create and fork initial token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+        )
+
+        # Only path_a arrives (path_b is "slow")
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+
+        outcome_a = executor.accept(token_a, "timeout_merge", step_in_pipeline=2)
+        assert outcome_a.held is True  # Waiting for path_b
+
+        # Wait for timeout to elapse
+        time.sleep(0.02)
+
+        # Check timeouts - should trigger merge with what arrived
+        timed_out = executor.check_timeouts(
+            coalesce_name="timeout_merge",
+            step_in_pipeline=2,
+        )
+
+        # Verify timeout triggered
+        assert len(timed_out) == 1
+        timeout_outcome = timed_out[0]
+        assert timeout_outcome.merged_token is not None
+        merged_token = timeout_outcome.merged_token
+
+        # CRITICAL: The merged token must have a COALESCED outcome
+        # This is what the bug is about - check_timeouts returns the merged
+        # token but orchestrator never records its outcome
+        merged_outcome = recorder.get_token_outcome(merged_token.token_id)
+
+        assert merged_outcome is not None, (
+            f"Timeout-merged token {merged_token.token_id} has NO token_outcome! "
+            f"Orchestrator's check_timeouts handler only queues the merged token "
+            f"for the sink but never records its COALESCED outcome. "
+            f"Expected: RowOutcome.COALESCED with join_group_id"
+        )
+
+        assert merged_outcome.outcome == RowOutcome.COALESCED, f"Merged token should have outcome=COALESCED, got {merged_outcome.outcome}"
+
+        assert merged_outcome.join_group_id is not None, "Merged token COALESCED outcome must have join_group_id"
+
+        # The consumed token (path_a) should also have COALESCED
+        # (This is already done by _execute_merge, but verify for completeness)
+        consumed_outcome = recorder.get_token_outcome(token_a.token_id)
+        assert consumed_outcome is not None
+        assert consumed_outcome.outcome == RowOutcome.COALESCED
