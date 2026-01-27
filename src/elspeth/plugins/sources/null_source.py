@@ -48,7 +48,9 @@ class NullSource(BaseSource):
         """Initialize NullSource.
 
         Args:
-            config: Configuration dict (ignored - NullSource needs no config).
+            config: Configuration dict. NullSource requires no specific config,
+                but BaseSource expects schema config. If not provided, defaults
+                to dynamic schema since NullSource never validates rows anyway.
         """
         config_copy = dict(config)
         if "schema" not in config_copy:

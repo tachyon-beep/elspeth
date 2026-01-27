@@ -102,7 +102,7 @@ class CoalesceExecutor:
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
         # Completed coalesces: tracks keys that have already merged/failed
         # Used to detect late arrivals after merge and reject them gracefully
-        # Uses OrderedDict as bounded LRU set to prevent unbounded memory growth
+        # Uses OrderedDict as bounded FIFO set to prevent unbounded memory growth
         # (values are None, we only care about key presence and insertion order)
         self._completed_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         # Maximum completed keys to retain (prevents OOM in long-running pipelines)
@@ -136,7 +136,7 @@ class CoalesceExecutor:
     def _mark_completed(self, key: tuple[str, str]) -> None:
         """Mark a coalesce key as completed with bounded memory.
 
-        Uses LRU eviction to prevent unbounded memory growth in long-running
+        Uses FIFO eviction to prevent unbounded memory growth in long-running
         pipelines. When max capacity is exceeded, oldest entries are removed.
         Late arrivals after eviction will create new pending entries which
         timeout or flush correctly - acceptable trade-off vs OOM.
