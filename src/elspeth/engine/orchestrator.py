@@ -835,13 +835,21 @@ class Orchestrator:
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
         # Compute coalesce step positions
-        # Coalesce step = after all transforms and gates
+        # Coalesce step = AFTER all transforms and gates (base_step + 1 + i)
+        #
+        # CRITICAL: Must use base_step + 1 (not base_step) to avoid step_index collision.
+        # The last gate uses step = base_step (len(transforms) + len(gates)), so coalesce
+        # must use a different step index. Using base_step + 1 ensures coalesce has a
+        # unique step after all gates.
+        #
+        # This also requires the processor to pass step_completed >= coalesce_at_step
+        # in the final _maybe_coalesce_token call (see RowProcessor changes).
         coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
             base_step = len(config.transforms) + len(config.gates)
             for i, cs in enumerate(settings.coalesce):
-                # Each coalesce gets its own step (in case of multiple)
-                coalesce_step_map[CoalesceName(cs.name)] = base_step + i
+                # Each coalesce gets step AFTER transforms/gates (+1) plus its offset
+                coalesce_step_map[CoalesceName(cs.name)] = base_step + 1 + i
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
@@ -1064,6 +1072,14 @@ class Orchestrator:
                             for outcome in timed_out:
                                 if outcome.merged_token is not None:
                                     rows_coalesced += 1
+                                    # P1 FIX: Record COMPLETED for timeout-triggered merged token
+                                    # (Same pattern as flush_pending and normal COALESCED result)
+                                    recorder.record_token_outcome(
+                                        run_id=run_id,
+                                        token_id=outcome.merged_token.token_id,
+                                        outcome=RowOutcome.COMPLETED,
+                                        sink_name=default_sink_name,
+                                    )
                                     pending_tokens[default_sink_name].append(outcome.merged_token)
                                 elif outcome.failure_reason:
                                     rows_coalesce_failed += 1
@@ -1750,12 +1766,12 @@ class Orchestrator:
                 coalesce_node_id = coalesce_id_map[CoalesceName(coalesce_settings.name)]
                 coalesce_executor.register_coalesce(coalesce_settings, coalesce_node_id)
 
-        # Compute coalesce step positions
+        # Compute coalesce step positions (same as main run path)
         coalesce_step_map: dict[CoalesceName, int] = {}
         if settings is not None and settings.coalesce:
             base_step = len(config.transforms) + len(config.gates)
             for i, cs in enumerate(settings.coalesce):
-                coalesce_step_map[CoalesceName(cs.name)] = base_step + i
+                coalesce_step_map[CoalesceName(cs.name)] = base_step + 1 + i
 
         # Convert aggregation_settings keys from str to NodeID
         typed_aggregation_settings: dict[NodeID, AggregationSettings] = {NodeID(k): v for k, v in config.aggregation_settings.items()}
@@ -1880,6 +1896,14 @@ class Orchestrator:
                         for outcome in timed_out:
                             if outcome.merged_token is not None:
                                 rows_coalesced += 1
+                                # P1 FIX: Record COMPLETED for timeout-triggered merged token
+                                # (Same pattern as flush_pending and normal COALESCED result)
+                                recorder.record_token_outcome(
+                                    run_id=run_id,
+                                    token_id=outcome.merged_token.token_id,
+                                    outcome=RowOutcome.COMPLETED,
+                                    sink_name=default_sink_name,
+                                )
                                 pending_tokens[default_sink_name].append(outcome.merged_token)
                             elif outcome.failure_reason:
                                 rows_coalesce_failed += 1

@@ -855,5 +855,6 @@ class TestCoalesceWiring:
             # Check coalesce_step_map was passed
             call_kwargs = mock_processor_cls.call_args.kwargs
             assert "coalesce_step_map" in call_kwargs
-            # 2 transforms + 1 gate = step 3 for coalesce
-            assert call_kwargs["coalesce_step_map"]["merge_results"] == 3
+            # 2 transforms + 1 gate = base_step 3, coalesce step = base_step + 1 = 4
+            # (Fixed in P1 step_index collision fix - coalesce must use distinct step after gates)
+            assert call_kwargs["coalesce_step_map"]["merge_results"] == 4

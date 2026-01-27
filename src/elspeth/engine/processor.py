@@ -1180,11 +1180,15 @@ class RowProcessor:
             if handled:
                 return (result, child_items)
 
+        # Final coalesce check after all transforms/gates
+        # Use total_steps + 1 to match coalesce_at_step calculation (which is base_step + 1 + i)
+        # This ensures step_completed >= coalesce_at_step when all processing is done
+        final_step = total_steps + 1 if coalesce_at_step is not None else total_steps
         handled, result = self._maybe_coalesce_token(
             current_token,
             coalesce_at_step=coalesce_at_step,
             coalesce_name=coalesce_name,
-            step_completed=total_steps,
+            step_completed=final_step,
             total_steps=total_steps,
             child_items=child_items,
         )
