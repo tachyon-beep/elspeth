@@ -98,6 +98,7 @@ class CheckpointManager:
                     created_at=created_at,
                     upstream_topology_hash=upstream_topology_hash,
                     checkpoint_node_config_hash=checkpoint_node_config_hash,
+                    format_version=Checkpoint.CURRENT_FORMAT_VERSION,
                 )
             )
             # begin() auto-commits on clean exit, auto-rollbacks on exception
@@ -112,6 +113,7 @@ class CheckpointManager:
             upstream_topology_hash=upstream_topology_hash,
             checkpoint_node_config_hash=checkpoint_node_config_hash,
             aggregation_state_json=agg_json,
+            format_version=Checkpoint.CURRENT_FORMAT_VERSION,
         )
 
     def get_latest_checkpoint(self, run_id: str) -> Checkpoint | None:
@@ -147,6 +149,7 @@ class CheckpointManager:
             upstream_topology_hash=result.upstream_topology_hash,
             checkpoint_node_config_hash=result.checkpoint_node_config_hash,
             aggregation_state_json=result.aggregation_state_json,
+            format_version=result.format_version,  # None for legacy checkpoints
         )
 
         # Validate checkpoint compatibility before returning
@@ -179,6 +182,7 @@ class CheckpointManager:
                 upstream_topology_hash=r.upstream_topology_hash,
                 checkpoint_node_config_hash=r.checkpoint_node_config_hash,
                 aggregation_state_json=r.aggregation_state_json,
+                format_version=r.format_version,  # None for legacy checkpoints
             )
             for r in results
         ]
@@ -200,23 +204,31 @@ class CheckpointManager:
             return result.rowcount
 
     def _validate_checkpoint_compatibility(self, checkpoint: Checkpoint) -> None:
-        """Verify checkpoint was created with compatible node ID generation.
+        """Verify checkpoint was created with compatible format version.
 
         CRITICAL: Node IDs changed from random UUID to deterministic hash-based
-        in 2026-01-24. Old checkpoints cannot be resumed because node IDs will
-        not match between checkpoint and current graph.
+        in format version 2. Old checkpoints cannot be resumed because node IDs
+        will not match between checkpoint and current graph.
 
         Args:
             checkpoint: Checkpoint to validate
 
         Raises:
-            IncompatibleCheckpointError: If checkpoint predates deterministic node IDs
+            IncompatibleCheckpointError: If checkpoint format version is incompatible
         """
-        # Check if checkpoint has deterministic node IDs
-        # Old checkpoints: created_at before 2026-01-24
-        # New checkpoints: created_at on or after 2026-01-24
+        # Check format version if available (new checkpoints)
+        if checkpoint.format_version is not None:
+            if checkpoint.format_version < Checkpoint.CURRENT_FORMAT_VERSION:
+                raise IncompatibleCheckpointError(
+                    f"Checkpoint '{checkpoint.checkpoint_id}' has incompatible format version "
+                    f"(checkpoint: v{checkpoint.format_version}, required: v{Checkpoint.CURRENT_FORMAT_VERSION}). "
+                    "Resume not supported across format upgrades. "
+                    "Please restart pipeline from beginning."
+                )
+            return  # Version is compatible
 
-        # Simple heuristic: if created_at before 2026-01-24, warn about incompatibility
+        # Legacy checkpoint (format_version is None) - fall back to date check
+        # This handles checkpoints created before versioning was added
         cutoff_date = datetime(2026, 1, 24, tzinfo=UTC)
 
         # Handle timezone-naive datetimes from SQLite (assume UTC if naive)
@@ -226,8 +238,8 @@ class CheckpointManager:
 
         if checkpoint_created_at < cutoff_date:
             raise IncompatibleCheckpointError(
-                f"Checkpoint '{checkpoint.checkpoint_id}' created before deterministic node IDs "
-                f"(created: {checkpoint_created_at.isoformat()}, cutoff: {cutoff_date.isoformat()}). "
-                "Resume not supported across this upgrade. "
+                f"Checkpoint '{checkpoint.checkpoint_id}' is a legacy checkpoint without version "
+                f"(created: {checkpoint_created_at.isoformat()}). "
+                "Resume not supported for pre-versioned checkpoints. "
                 "Please restart pipeline from beginning."
             )

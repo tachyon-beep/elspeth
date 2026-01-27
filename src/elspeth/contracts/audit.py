@@ -9,7 +9,7 @@ garbage from it, something catastrophic happened - crash immediately.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, TypedDict
+from typing import Any, ClassVar, Literal, TypedDict
 
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -322,7 +322,14 @@ class Checkpoint:
     """Checkpoint for crash recovery.
 
     Captures run progress at row/transform boundaries.
+
+    Format Versions:
+        Version 1: Pre-deterministic node IDs (legacy, incompatible)
+        Version 2: Deterministic node IDs (2026-01-24+, current)
     """
+
+    # Current checkpoint format version (ClassVar excludes from dataclass fields)
+    CURRENT_FORMAT_VERSION: ClassVar[int] = 2
 
     checkpoint_id: str
     run_id: str
@@ -337,6 +344,8 @@ class Checkpoint:
     checkpoint_node_config_hash: str | None  # Hash of checkpoint node config only
     # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
+    # Format version for compatibility checking (None = legacy checkpoint pre-versioning)
+    format_version: int | None = None
 
 
 @dataclass

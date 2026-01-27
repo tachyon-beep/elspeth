@@ -329,7 +329,7 @@ class TestCheckpointManager:
         # Verify error message contains useful information
         error_msg = str(exc_info.value)
         assert checkpoint_id in error_msg
-        assert "deterministic node IDs" in error_msg
+        assert "legacy checkpoint" in error_msg  # Legacy checkpoints without format_version
         assert "Resume not supported" in error_msg
 
     def test_new_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
@@ -400,6 +400,83 @@ class TestCheckpointManager:
         checkpoint = manager.get_latest_checkpoint("run-001")
         assert checkpoint is not None
         assert checkpoint.checkpoint_id == checkpoint_id
+
+    def test_versioned_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
+        """Checkpoints with current format_version should be accepted.
+
+        New checkpoints include format_version=2 which explicitly indicates
+        compatibility with deterministic node IDs.
+        """
+        from elspeth.contracts import Checkpoint
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        checkpoint_id = "cp-versioned"
+        now = datetime.now(UTC)
+
+        with manager._db.engine.connect() as conn:
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id="run-001",
+                    token_id="tok-001",
+                    node_id="node-001",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    upstream_topology_hash="versioned-upstream-hash",
+                    checkpoint_node_config_hash="versioned-node-config-hash",
+                    created_at=now,
+                    format_version=Checkpoint.CURRENT_FORMAT_VERSION,  # Explicitly versioned
+                )
+            )
+            conn.commit()
+
+        # Should load successfully
+        checkpoint = manager.get_latest_checkpoint("run-001")
+        assert checkpoint is not None
+        assert checkpoint.checkpoint_id == checkpoint_id
+        assert checkpoint.format_version == Checkpoint.CURRENT_FORMAT_VERSION
+
+    def test_old_format_version_rejected(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
+        """Checkpoints with old format_version should be rejected.
+
+        format_version=1 indicates pre-deterministic node IDs, which are
+        incompatible with the current system.
+        """
+        from elspeth.contracts import Checkpoint
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        # Use a recent date to ensure the rejection is based on version, not date
+        recent_date = datetime.now(UTC)
+        checkpoint_id = "cp-old-version"
+
+        with manager._db.engine.connect() as conn:
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id="run-001",
+                    token_id="tok-001",
+                    node_id="node-001",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    upstream_topology_hash="old-version-upstream-hash",
+                    checkpoint_node_config_hash="old-version-node-config-hash",
+                    created_at=recent_date,  # Recent date - rejection should be version-based
+                    format_version=1,  # Old format version
+                )
+            )
+            conn.commit()
+
+        # Attempting to load should raise IncompatibleCheckpointError
+        with pytest.raises(IncompatibleCheckpointError) as exc_info:
+            manager.get_latest_checkpoint("run-001")
+
+        # Verify error message mentions version incompatibility
+        error_msg = str(exc_info.value)
+        assert checkpoint_id in error_msg
+        assert "format version" in error_msg.lower()
+        assert "v1" in error_msg  # Old version
+        assert f"v{Checkpoint.CURRENT_FORMAT_VERSION}" in error_msg  # Required version
+        assert "Resume not supported" in error_msg
 
     def test_create_checkpoint_requires_graph(self, manager: CheckpointManager, setup_run: str) -> None:
         """Bug #9: Verify checkpoint creation fails if graph parameter is None.
