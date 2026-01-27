@@ -271,12 +271,15 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         llm_client = self._get_llm_client(state_id)
 
         # 5. Call LLM (EXTERNAL - wrap, raise CapacityError for retry)
+        # Use per-query max_tokens if specified, otherwise fall back to transform default
+        effective_max_tokens = spec.max_tokens or self._max_tokens
+
         # Build kwargs for LLM call
         llm_kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
-            "max_tokens": self._max_tokens,
+            "max_tokens": effective_max_tokens,
         }
 
         # Add response_format if configured (OpenAI expects {"type": "json_object"})
@@ -302,14 +305,30 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 retryable=False,
             )
 
-        # 6. Parse JSON response (THEIR DATA - wrap)
+        # 6. Check for response truncation BEFORE parsing
+        # If completion_tokens equals max_tokens, the response was likely truncated
+        # usage dict is created by AuditedLLMClient - keys are always present (OUR data)
+        completion_tokens = response.usage["completion_tokens"]
+        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+            return TransformResult.error(
+                {
+                    "reason": "response_truncated",
+                    "error": (
+                        f"LLM response was truncated at {completion_tokens} tokens "
+                        f"(max_tokens={effective_max_tokens}). "
+                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                    ),
+                    "query": spec.output_prefix,
+                    "max_tokens": effective_max_tokens,
+                    "completion_tokens": completion_tokens,
+                    "prompt_tokens": response.usage["prompt_tokens"],
+                    "raw_response_preview": response.content[:500] if response.content else None,
+                }
+            )
+
+        # 7. Parse JSON response (THEIR DATA - wrap)
         # Strip markdown code blocks if present (common LLM behavior)
         content = response.content.strip()
-
-        # DEBUG: Capture pre-processing state for diagnosis
-        _debug_raw_content = response.content
-        _debug_raw_len = len(response.content)
-        _debug_usage = response.usage
 
         if content.startswith("```"):
             # Remove opening fence (```json or ```)
@@ -328,11 +347,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                     "reason": "json_parse_failed",
                     "error": str(e),
                     "query": spec.output_prefix,
-                    "raw_response": _debug_raw_content,  # FULL content for diagnosis
-                    "raw_response_len": _debug_raw_len,
-                    "content_after_strip": content,  # What we tried to parse
-                    "content_after_strip_len": len(content),
-                    "usage": _debug_usage,  # Token counts from API
+                    "raw_response": response.content,
+                    "content_after_fence_strip": content,
+                    "usage": response.usage,
                 }
             )
 

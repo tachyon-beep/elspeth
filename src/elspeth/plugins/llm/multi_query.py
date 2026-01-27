@@ -24,6 +24,7 @@ class QuerySpec:
         output_prefix: Prefix for output fields (e.g., "cs1_diagnosis")
         criterion_data: Full criterion object for template injection
         case_study_data: Full case study object for template injection
+        max_tokens: Optional per-query max_tokens override (criterion > case_study > transform default)
     """
 
     case_study_name: str
@@ -32,6 +33,7 @@ class QuerySpec:
     output_prefix: str
     criterion_data: dict[str, Any]
     case_study_data: dict[str, Any]
+    max_tokens: int | None = None
 
     def build_template_context(self, row: dict[str, Any]) -> dict[str, Any]:
         """Build template context for this query.
@@ -73,12 +75,14 @@ class CaseStudyConfig(PluginConfig):
         input_fields: Row field names to map to input_1, input_2, etc.
         context: Context type (e.g., "Capability", "Capacity") for template use
         description: Human-readable description of this case study type
+        max_tokens: Optional max_tokens override for all queries using this case study
     """
 
     name: str = Field(..., description="Case study identifier")
     input_fields: list[str] = Field(..., description="Row fields to map to input_N")
     context: str | None = Field(None, description="Context type (e.g., Capability, Capacity)")
     description: str | None = Field(None, description="Human-readable description")
+    max_tokens: int | None = Field(None, gt=0, description="Max tokens override for this case study")
 
     @field_validator("input_fields")
     @classmethod
@@ -109,12 +113,14 @@ class CriterionConfig(PluginConfig):
         code: Short code for lookups (e.g., "DIAG")
         description: Human-readable description
         subcriteria: List of subcriteria names/descriptions
+        max_tokens: Optional max_tokens override for queries using this criterion
     """
 
     name: str = Field(..., description="Criterion identifier")
     code: str | None = Field(None, description="Short code for lookups")
     description: str | None = Field(None, description="Human-readable description")
     subcriteria: list[str] = Field(default_factory=list, description="Subcriteria list")
+    max_tokens: int | None = Field(None, gt=0, description="Max tokens override for this criterion")
 
     def to_template_data(self) -> dict[str, Any]:
         """Convert to dict for template injection."""
@@ -168,6 +174,8 @@ class MultiQueryConfig(AzureOpenAIConfig):
     def expand_queries(self) -> list[QuerySpec]:
         """Expand config into QuerySpec list (case_studies x criteria).
 
+        max_tokens precedence: criterion > case_study > transform default (None here)
+
         Returns:
             List of QuerySpec, one per (case_study, criterion) pair
         """
@@ -175,6 +183,8 @@ class MultiQueryConfig(AzureOpenAIConfig):
 
         for case_study in self.case_studies:
             for criterion in self.criteria:
+                # Criterion override takes precedence over case_study override
+                effective_max_tokens = criterion.max_tokens or case_study.max_tokens
                 spec = QuerySpec(
                     case_study_name=case_study.name,
                     criterion_name=criterion.name,
@@ -182,6 +192,7 @@ class MultiQueryConfig(AzureOpenAIConfig):
                     output_prefix=f"{case_study.name}_{criterion.name}",
                     criterion_data=criterion.to_template_data(),
                     case_study_data=case_study.to_template_data(),
+                    max_tokens=effective_max_tokens,
                 )
                 specs.append(spec)
 
