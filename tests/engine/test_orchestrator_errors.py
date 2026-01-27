@@ -20,7 +20,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -101,7 +101,7 @@ class TestOrchestratorErrorHandling:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError, match="Transform exploded!"):
-            orchestrator.run(config, graph=build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify run was marked as failed in Landscape audit trail
         # Query for all runs and find the one that was created
@@ -206,7 +206,7 @@ class TestOrchestratorSourceQuarantineValidation:
 
         # Should fail at initialization with clear error message
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify error message contains helpful information
         error_msg = str(exc_info.value)
@@ -312,7 +312,7 @@ class TestOrchestratorQuarantineMetrics:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify counts
         assert run_result.status == "completed"
@@ -405,7 +405,7 @@ class TestSourceQuarantineTokenOutcome:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify run completed successfully
         assert run_result.status == "completed"

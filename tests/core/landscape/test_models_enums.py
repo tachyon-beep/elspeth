@@ -2,14 +2,16 @@
 
 from datetime import UTC, datetime
 
-from elspeth.contracts.enums import (
+from elspeth.contracts import (
     Determinism,
+    Edge,
     ExportStatus,
+    Node,
     NodeType,
     RoutingMode,
+    Run,
     RunStatus,
 )
-from elspeth.core.landscape.models import Edge, Node, Run
 
 
 class TestModelEnumTypes:

@@ -24,7 +24,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -112,7 +112,7 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.status == "completed"
         assert run_result.rows_processed == 3
@@ -186,7 +186,7 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.status == "completed"
         # value=10 and value=30 go to default, value=100 goes to high
@@ -280,7 +280,7 @@ class TestOrchestratorMultipleTransforms:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.status == "completed"
         assert len(sink.results) == 1
@@ -349,7 +349,7 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.status == "completed"
         assert run_result.rows_processed == 1
@@ -423,7 +423,7 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.status == "completed"
         assert run_result.rows_processed == 0

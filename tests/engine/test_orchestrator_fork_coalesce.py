@@ -21,7 +21,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -118,7 +118,7 @@ class TestOrchestratorForkExecution:
             sinks={"default": as_sink(sink)},
         )
 
-        graph = build_test_graph(config)
+        graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
         run_result = orchestrator.run(config, graph=graph)

@@ -42,7 +42,7 @@ from tests.conftest import (
 )
 
 
-def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple linear graph for testing.
 
     Creates: source -> transforms... -> sinks
@@ -212,7 +212,7 @@ class TestCheckpointDurability:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
         assert result.status == "completed"
         assert result.rows_processed == 5
 
@@ -239,7 +239,7 @@ class TestCheckpointDurability:
         )
 
         # Get sink node_id from graph
-        test_graph = _build_test_graph(config)
+        test_graph = _build_production_graph(config)
         sink_node_id = test_graph.get_sink_id_map()[SinkName("default")]
 
         # Verify node_states exist for all rows at sink
@@ -481,7 +481,7 @@ class TestCheckpointDurability:
         )
 
         # Build graph for topology validation
-        graph = _build_test_graph(config)
+        graph = _build_production_graph(config)
 
         # Verify can_resume returns True
         resume_check = recovery.can_resume(run_id, graph)
@@ -505,7 +505,7 @@ class TestCheckpointDurability:
         result = orchestrator.resume(
             resume_point,
             config,
-            graph=_build_test_graph(config),
+            graph=_build_production_graph(config),
             payload_store=payload_store,
         )
 
@@ -543,7 +543,7 @@ class TestCheckpointDurability:
         )
 
         # Get sink node_id from graph
-        resume_graph = _build_test_graph(config)
+        resume_graph = _build_production_graph(config)
         sink_node_id = resume_graph.get_sink_id_map()[SinkName("default")]
 
         with db.engine.connect() as conn:
@@ -641,7 +641,7 @@ class TestCheckpointDurability:
         )
 
         with pytest.raises(RuntimeError, match="Simulated sink failure"):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config))
 
         # Verify: NO checkpoints created because batch failed
         run_id = _get_latest_run_id(db)
@@ -730,7 +730,7 @@ class TestCheckpointDurability:
             sinks={"default": as_sink(sink)},
         )
 
-        graph = _build_test_graph(config)
+        graph = _build_production_graph(config)
         # P3 Fix: Use public API for accessing graph internals
         sink_node_id = graph.get_sink_id_map()[SinkName("default")]
         transform_node_id = graph.get_transform_id_map()[0]
@@ -848,7 +848,7 @@ class TestCheckpointDurability:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
         assert result.status == "completed"
 
         # Verify timing: 0 checkpoints before write, N after
@@ -950,7 +950,7 @@ class TestCheckpointTimingInvariants:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
         assert result.status == "completed"
 
         # With 5 rows and checkpoint_interval=2:
@@ -1044,7 +1044,7 @@ class TestCheckpointTimingInvariants:
             checkpoint_settings=checkpoint_settings,
         )
 
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
         assert result.status == "completed"
 
         # No checkpoints when disabled
@@ -1126,6 +1126,6 @@ class TestCheckpointTimingInvariants:
         )
 
         # Should run successfully without checkpointing
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
         assert result.status == "completed"
         assert len(sink.results) == 3

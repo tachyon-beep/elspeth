@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, PluginSchema, SinkName, SourceRow
+from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
@@ -23,85 +23,10 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
-    from elspeth.core.dag import ExecutionGraph
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine.orchestrator import PipelineConfig
-
-
-def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build a simple graph for testing.
-
-    Creates a linear graph matching the PipelineConfig structure:
-    source -> transforms... -> sinks
-    """
-    from elspeth.contracts import RoutingMode
-    from elspeth.core.dag import ExecutionGraph
-    from elspeth.plugins.base import BaseGate
-
-    graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
-
-    # Add source
-    graph.add_node(
-        "source",
-        node_type="source",
-        plugin_name=config.source.name,
-        config=schema_config,
-    )
-
-    # Add transforms and populate transform_id_map
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        is_gate = isinstance(t, BaseGate)
-        graph.add_node(
-            node_id,
-            node_type="gate" if is_gate else "transform",
-            plugin_name=t.name,
-            config=schema_config,
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(
-            node_id,
-            node_type="sink",
-            plugin_name=sink.name,
-            config=schema_config,
-        )
-
-    # Populate route resolution map
-    route_resolution_map: dict[tuple[str, str], str] = {}
-
-    # Add edge from last node to output sink
-    if "default" in sink_ids:
-        output_sink = "default"
-    elif sink_ids:
-        output_sink = next(iter(sink_ids))
-    else:
-        output_sink = ""
-
-    if output_sink:
-        graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal ID maps - cast to proper types for type safety
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    config_gate_id_map: dict[GateName, NodeID] = {}
-    graph._config_gate_id_map = config_gate_id_map
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-    graph._default_sink = output_sink
-
-    return graph
 
 
 # ============================================================================
@@ -186,7 +111,7 @@ class TestTransformErrorSinkValidation:
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify source.load was NOT called (validation happens before processing)
         assert not source.load_called
@@ -263,7 +188,7 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         error_msg = str(exc_info.value)
         # Error should mention the transform name
@@ -339,7 +264,7 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "discard" is valid
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
         assert result.status == "completed"
 
     def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB) -> None:
@@ -407,7 +332,7 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - None is valid (no error routing configured)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
         assert result.status == "completed"
 
     def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB) -> None:
@@ -479,7 +404,7 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "error_sink" exists
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
         assert result.status == "completed"
 
     def test_validation_occurs_before_row_processing(self, landscape_db: LandscapeDB) -> None:
@@ -565,7 +490,7 @@ class TestTransformErrorSinkValidation:
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify NOTHING was processed - validation caught error before processing started
         assert not call_tracking["source_load_called"], "source.load() should NOT be called"

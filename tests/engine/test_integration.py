@@ -18,7 +18,17 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, NodeStateCompleted, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import (
+    BatchStatus,
+    GateName,
+    NodeID,
+    NodeStateCompleted,
+    NodeStateStatus,
+    RoutingMode,
+    SinkName,
+    SourceRow,
+    TriggerType,
+)
 from elspeth.core.config import GateSettings
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
@@ -128,7 +138,7 @@ class _CollectSink(_TestSinkBase):
         pass
 
 
-def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple graph for testing (temporary until from_config is wired).
 
     Creates a linear graph matching the PipelineConfig structure:
@@ -347,7 +357,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         # Verify run result
         assert result.status == "completed"
@@ -493,7 +503,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 5
@@ -614,7 +624,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 4
@@ -746,7 +756,7 @@ class TestNoSilentAuditLoss:
 
         # This MUST raise RouteValidationError at startup, not silently fail
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config))
 
         # Verify error message includes the missing sink name
         assert "phantom" in str(exc_info.value)
@@ -845,7 +855,7 @@ class TestNoSilentAuditLoss:
 
         # Exception must propagate
         with pytest.raises(RuntimeError, match="Intentional explosion"):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config))
 
         # Run must be marked as failed in audit trail
         from elspeth.contracts import RunStatus
@@ -926,7 +936,7 @@ class TestNoSilentAuditLoss:
 
         # Exception must propagate
         with pytest.raises(OSError, match="Sink explosion"):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config))
 
         # Run must be marked as failed in audit trail
         from elspeth.contracts import RunStatus
@@ -1009,7 +1019,7 @@ class TestAuditTrailCompleteness:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 0
@@ -1091,7 +1101,7 @@ class TestAuditTrailCompleteness:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         assert result.status == "completed"
 
@@ -2456,7 +2466,7 @@ class TestComplexDAGIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         # ================================================================
         # Verify all metrics are non-negative
@@ -2665,7 +2675,7 @@ class TestRetryIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config), settings=settings)
+        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings)
 
         # Verify run completed successfully
         assert result.status == RunStatus.COMPLETED
@@ -2828,7 +2838,7 @@ class TestRetryIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config), settings=settings)
+        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings)
 
         # Run completes (partial success)
         assert result.status == RunStatus.COMPLETED
@@ -2976,7 +2986,7 @@ class TestExplainQuery:
         transformed_data = {"value": 84, "name": "test_row", "doubled": True}
         recorder.complete_node_state(
             state_id=state1.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=transformed_data,
             duration_ms=10.0,
         )
@@ -2991,7 +3001,7 @@ class TestExplainQuery:
         )
         recorder.complete_node_state(
             state_id=state2.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=transformed_data,
             duration_ms=5.0,
         )
@@ -3089,7 +3099,7 @@ class TestExplainQuery:
             )
             recorder.complete_node_state(
                 state_id=state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data={"accepted": True},
                 duration_ms=1.0,
             )
@@ -3111,7 +3121,8 @@ class TestExplainQuery:
         # Complete the batch
         recorder.complete_batch(
             batch_id=batch.batch_id,
-            status="completed",
+            status=BatchStatus.COMPLETED,
+            trigger_type=TriggerType.COUNT,
             trigger_reason="count_reached",
         )
 
@@ -3239,7 +3250,7 @@ class TestExplainQuery:
         )
         recorder.complete_node_state(
             state_id=gate_state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"forked_to": ["path_a", "path_b"]},
             duration_ms=1.0,
         )
@@ -3264,7 +3275,7 @@ class TestExplainQuery:
             )
             recorder.complete_node_state(
                 state_id=branch_state.state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data={f"{child.branch_name}_result": True},
                 duration_ms=5.0,
             )
@@ -3287,7 +3298,7 @@ class TestExplainQuery:
         )
         recorder.complete_node_state(
             state_id=coalesce_state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"merged": True, "path_a_result": True, "path_b_result": True},
             duration_ms=2.0,
         )
@@ -3302,7 +3313,7 @@ class TestExplainQuery:
         )
         recorder.complete_node_state(
             state_id=sink_state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"written": True},
             duration_ms=1.0,
         )
@@ -3459,7 +3470,7 @@ class TestErrorRecovery:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         # Pipeline completes despite failures
         assert result.status == RunStatus.COMPLETED, f"Expected COMPLETED, got {result.status}"
@@ -3577,7 +3588,7 @@ class TestErrorRecovery:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config))
 
         # Basic verification
         assert result.status == RunStatus.COMPLETED

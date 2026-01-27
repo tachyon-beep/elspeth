@@ -20,7 +20,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -154,7 +154,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_settings=settings,
         )
-        result = orchestrator.run(config, graph=build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -252,7 +252,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_settings=settings,
         )
-        result = orchestrator.run(config, graph=build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 7
@@ -339,7 +339,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_settings=settings,
         )
-        result = orchestrator.run(config, graph=build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
 
@@ -616,7 +616,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_settings=settings,
         )
-        result = orchestrator.run(config, graph=build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
 
@@ -698,7 +698,7 @@ class TestOrchestratorCheckpointing:
             db=checkpoint_db,
             checkpoint_settings=settings,
         )
-        result = orchestrator.run(config, graph=build_test_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert result.status == "completed"
         assert result.rows_processed == 1

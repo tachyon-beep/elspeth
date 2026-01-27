@@ -121,7 +121,7 @@ class TestPhase3AModels:
     """Tests for model classes added in Phase 3A."""
 
     def test_routing_event_model(self) -> None:
-        from elspeth.core.landscape.models import RoutingEvent
+        from elspeth.contracts import RoutingEvent, RoutingMode
 
         event = RoutingEvent(
             event_id="evt1",
@@ -129,14 +129,13 @@ class TestPhase3AModels:
             edge_id="edge1",
             routing_group_id="grp1",
             ordinal=0,
-            mode="move",
+            mode=RoutingMode.MOVE,
             created_at=None,  # type: ignore[arg-type]  # Will be set in real use
         )
         assert event.event_id == "evt1"
 
     def test_batch_model(self) -> None:
-        from elspeth.contracts.enums import BatchStatus
-        from elspeth.core.landscape.models import Batch
+        from elspeth.contracts import Batch, BatchStatus
 
         batch = Batch(
             batch_id="batch1",
@@ -161,8 +160,7 @@ class TestNodesDeterminismColumn:
     def test_node_model_has_determinism_field(self) -> None:
         from datetime import UTC, datetime
 
-        from elspeth.contracts import Determinism, NodeType
-        from elspeth.core.landscape.models import Node
+        from elspeth.contracts import Determinism, Node, NodeType
 
         node = Node(
             node_id="node-001",
@@ -258,7 +256,7 @@ class TestPhase5CheckpointSchema:
         assert "checkpoints" in tables
 
     def test_checkpoint_model(self) -> None:
-        from elspeth.core.landscape.models import Checkpoint
+        from elspeth.contracts import Checkpoint
 
         checkpoint = Checkpoint(
             checkpoint_id="cp-001",
@@ -274,7 +272,7 @@ class TestPhase5CheckpointSchema:
 
     def test_checkpoint_model_with_aggregation_state(self) -> None:
         """Verify Checkpoint model supports aggregation state."""
-        from elspeth.core.landscape.models import Checkpoint
+        from elspeth.contracts import Checkpoint
 
         checkpoint = Checkpoint(
             checkpoint_id="cp-002",
@@ -304,7 +302,7 @@ class TestArtifactsIdempotencyKey:
         """Artifact model should have idempotency_key field."""
         from dataclasses import fields
 
-        from elspeth.core.landscape.models import Artifact
+        from elspeth.contracts import Artifact
 
         field_names = [f.name for f in fields(Artifact)]
         assert "idempotency_key" in field_names
@@ -315,9 +313,7 @@ class TestBatchStatusType:
 
     def test_batch_status_is_typed(self) -> None:
         """Batch.status should accept BatchStatus enum."""
-
-        from elspeth.contracts.enums import BatchStatus
-        from elspeth.core.landscape.models import Batch
+        from elspeth.contracts import Batch, BatchStatus
 
         batch = Batch(
             batch_id="b1",

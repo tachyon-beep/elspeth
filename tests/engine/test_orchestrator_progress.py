@@ -10,14 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import Determinism, SourceRow
+from elspeth.contracts import SourceRow
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
     as_sink,
     as_source,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
@@ -85,7 +85,7 @@ class TestOrchestratorProgress:
         orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
-            graph=build_test_graph(config),
+            graph=build_production_graph(config),
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
@@ -156,7 +156,7 @@ class TestOrchestratorProgress:
 
         orchestrator = Orchestrator(db)
         # Run without progress callback - should not crash
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         assert run_result.rows_processed == 50
 
@@ -228,7 +228,7 @@ class TestOrchestratorProgress:
         orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
-            graph=build_test_graph(config),
+            graph=build_production_graph(config),
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
@@ -259,9 +259,7 @@ class TestOrchestratorProgress:
         Regression test: progress was showing ✓0 for pipelines with gates
         because routed rows weren't included in rows_succeeded.
         """
-        from unittest.mock import MagicMock
-
-        from elspeth.contracts import ProgressEvent, SourceRow
+        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
@@ -269,18 +267,32 @@ class TestOrchestratorProgress:
 
         db = LandscapeDB.in_memory()
 
-        # Mock source that yields 150 rows
-        mock_source = MagicMock()
-        mock_source.name = "test_source"
-        mock_source._on_validation_failure = "discard"
-        mock_source.determinism = Determinism.IO_READ
-        mock_source.plugin_version = "1.0.0"
-        schema_mock = MagicMock()
+        class ValueSchema(PluginSchema):
+            value: int
 
-        schema_mock.model_json_schema.return_value = {"type": "object"}
+        class RoutingTestSource(_TestSourceBase):
+            """Source that yields 150 rows for routing tests."""
 
-        mock_source.output_schema = schema_mock
-        mock_source.load.return_value = iter([SourceRow.valid({"value": i}) for i in range(150)])
+            name = "routing_test_source"
+            output_schema = ValueSchema
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                for i in range(150):
+                    yield SourceRow.valid({"value": i})
+
+        class TrackingSink(_TestSinkBase):
+            """Sink that tracks whether it received writes."""
+
+            name = "tracking_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+                self.write_called = False
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.write_called = True
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
 
         # Config-driven gate: always routes to "routed_sink"
         routing_gate = GateSettings(
@@ -289,23 +301,14 @@ class TestOrchestratorProgress:
             routes={"true": "routed_sink", "false": "continue"},
         )
 
-        # Mock sinks
-        mock_default = MagicMock()
-        mock_default.name = "default_sink"
-        mock_default.determinism = Determinism.IO_WRITE
-        mock_default.plugin_version = "1.0.0"
-        mock_default.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
-
-        mock_routed = MagicMock()
-        mock_routed.name = "routed_sink"
-        mock_routed.determinism = Determinism.IO_WRITE
-        mock_routed.plugin_version = "1.0.0"
-        mock_routed.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="def456")
+        source = RoutingTestSource()
+        default_sink = TrackingSink()
+        routed_sink = TrackingSink()
 
         config = PipelineConfig(
-            source=mock_source,
+            source=as_source(source),
             transforms=[],
-            sinks={"default": mock_default, "routed_sink": mock_routed},
+            sinks={"default": as_sink(default_sink), "routed_sink": as_sink(routed_sink)},
             gates=[routing_gate],
         )
 
@@ -323,7 +326,7 @@ class TestOrchestratorProgress:
         orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
-            graph=build_test_graph(config),
+            graph=build_production_graph(config),
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
@@ -350,5 +353,5 @@ class TestOrchestratorProgress:
         assert final_event.rows_succeeded == 150
 
         # Verify routed sink received rows, default did not
-        assert mock_routed.write.called
-        assert not mock_default.write.called
+        assert routed_sink.write_called
+        assert not default_sink.write_called

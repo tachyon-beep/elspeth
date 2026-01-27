@@ -45,7 +45,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
@@ -513,7 +513,7 @@ class TestForkJoinEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         stats = get_fork_group_stats(db, run.run_id)
         assert stats["total_fork_groups"] == 0

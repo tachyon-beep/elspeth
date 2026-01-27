@@ -22,7 +22,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     from elspeth.contracts.results import TransformResult
@@ -102,7 +102,7 @@ class TestOrchestratorAuditTrail:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify audit trail
         from elspeth.contracts import RunStatus
@@ -751,7 +751,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify config was recorded
         recorder = LandscapeRecorder(db)
@@ -826,7 +826,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_test_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config))
 
         # Query Landscape to verify empty config was recorded
         recorder = LandscapeRecorder(db)

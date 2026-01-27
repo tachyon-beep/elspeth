@@ -49,7 +49,7 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
@@ -273,7 +273,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # THE INVARIANT: No tokens should be missing terminal outcomes
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -310,7 +310,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # Count expected outcomes
         expected_errors = sum(1 for r in rows if r.get("fail"))
@@ -344,7 +344,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # Get all outcomes and verify they're valid enum values
         outcomes = get_all_token_outcomes(db, run.run_id)
@@ -379,7 +379,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # No rows means no tokens
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -406,7 +406,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         assert len(sink.results) == n
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -428,7 +428,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         assert len(sink.results) == len(rows)
         missing = count_tokens_missing_terminal(db, run.run_id)

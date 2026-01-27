@@ -2,223 +2,98 @@
 """Shared helpers for orchestrator tests.
 
 Extracted from test_orchestrator.py to support split test modules.
+
+This module provides graph construction using the production code path
+(ExecutionGraph.from_plugin_instances), ensuring tests exercise the same
+code that runs in production. This catches bugs that would otherwise hide
+in manually constructed test graphs (see BUG-LINEAGE-01 for historical context).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import GateName, NodeID, RoutingMode, SinkName
-from elspeth.plugins.base import BaseGate
-
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
     from elspeth.engine.orchestrator import PipelineConfig
 
 
-def _dynamic_schema_config() -> dict[str, Any]:
-    return {"schema": {"fields": "dynamic"}}
-
-
-def build_test_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build a simple graph for testing (temporary until from_config is wired).
-
-    Creates a linear graph matching the PipelineConfig structure:
-    source -> transforms... -> config gates... -> sinks
-
-    For gates, creates additional edges to all sinks (gates can route anywhere).
-    Route labels use sink names for simplicity in tests.
-    """
-    from elspeth.core.dag import ExecutionGraph
-
-    graph = ExecutionGraph()
-
-    # Add source
-    graph.add_node(
-        "source",
-        node_type="source",
-        plugin_name=config.source.name,
-        config=_dynamic_schema_config(),
-    )
-
-    # Add transforms and populate transform_id_map
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        is_gate = isinstance(t, BaseGate)
-        graph.add_node(
-            node_id,
-            node_type="gate" if is_gate else "transform",
-            plugin_name=t.name,
-            config=_dynamic_schema_config(),
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks first (need sink_ids for gate routing)
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(
-            node_id,
-            node_type="sink",
-            plugin_name=sink.name,
-            config=_dynamic_schema_config(),
-        )
-
-    # Populate route resolution map: (gate_id, label) -> sink_name
-    route_resolution_map: dict[tuple[str, str], str] = {}
-
-    # Handle plugin-based gates in transforms
-    for i, t in enumerate(config.transforms):
-        if isinstance(t, BaseGate):  # It's a gate
-            gate_id = f"transform_{i}"
-            for sink_name in sink_ids:
-                route_resolution_map[(gate_id, sink_name)] = sink_name
-
-    # Add config-driven gates (from config.gates)
-    config_gate_ids: dict[str, str] = {}
-    for gate_config in config.gates:
-        gate_id = f"config_gate_{gate_config.name}"
-        config_gate_ids[gate_config.name] = gate_id
-
-        # Store condition in node config for audit trail
-        gate_node_config = {
-            "condition": gate_config.condition,
-            "routes": dict(gate_config.routes),
-        }
-        if gate_config.fork_to:
-            gate_node_config["fork_to"] = list(gate_config.fork_to)
-
-        graph.add_node(
-            gate_id,
-            node_type="gate",
-            plugin_name=f"config_gate:{gate_config.name}",
-            config={
-                **_dynamic_schema_config(),
-                **gate_node_config,
-            },
-        )
-
-        # Edge from previous node
-        graph.add_edge(prev, gate_id, label="continue", mode=RoutingMode.MOVE)
-
-        # Config gate routes to sinks
-        for route_label, target in gate_config.routes.items():
-            route_resolution_map[(gate_id, route_label)] = target
-
-            if target == "continue":
-                continue  # Not a sink route - no edge to create
-            if target in sink_ids:
-                graph.add_edge(gate_id, sink_ids[target], label=route_label, mode=RoutingMode.MOVE)
-
-        prev = gate_id
-
-    # Add edges from transforms to sinks (for plugin-based gates and linear flow)
-    for sink_name in sink_ids:
-        node_id = sink_ids[sink_name]
-        # Gates can route to any sink
-        for i, t in enumerate(config.transforms):
-            if isinstance(t, BaseGate):
-                gate_id = f"transform_{i}"
-                graph.add_edge(gate_id, node_id, label=sink_name, mode=RoutingMode.MOVE)
-
-    # Edge from last node to output sink
-    if "default" in sink_ids:
-        output_sink = "default"
-    elif sink_ids:
-        output_sink = next(iter(sink_ids))
-    else:
-        output_sink = ""
-
-    if output_sink:
-        graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal ID maps - cast to proper types for type safety
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-    graph._default_sink = output_sink
-
-    return graph
-
-
-def build_fork_test_graph(
+def build_production_graph(
     config: PipelineConfig,
-    fork_paths: dict[int, list[str]],  # transform_index -> list of fork path names
+    default_sink: str | None = None,
 ) -> ExecutionGraph:
-    """Build a test graph that supports fork operations.
+    """Build graph using production code path (from_plugin_instances).
+
+    Uses the same code path as production, ensuring tests catch bugs that
+    would otherwise hide in manually constructed test graphs.
 
     Args:
-        config: Pipeline configuration
-        fork_paths: Maps transform index to list of fork path names
-                   e.g., {0: ["path_a", "path_b"]} means transform_0 forks to those paths
+        config: PipelineConfig with source, transforms, sinks, gates, etc.
+        default_sink: Output sink name. If None, uses "default" or first sink.
+
+    Returns:
+        ExecutionGraph built via production factory method.
+
+    Raises:
+        GraphValidationError: If graph construction fails validation.
+
+    Example:
+        >>> config = PipelineConfig(
+        ...     source=my_source,
+        ...     transforms=[transform_a, transform_b],
+        ...     sinks={"default": my_sink},
+        ... )
+        >>> graph = build_production_graph(config)
     """
+    from elspeth.core.config import AggregationSettings
     from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.protocols import TransformProtocol
 
-    graph = ExecutionGraph()
+    # Determine default sink
+    if default_sink is None:
+        if "default" in config.sinks:
+            default_sink = "default"
+        elif config.sinks:
+            default_sink = next(iter(config.sinks))
+        else:
+            default_sink = ""
 
-    # Add source
-    graph.add_node(
-        "source",
-        node_type="source",
-        plugin_name=config.source.name,
-        config=_dynamic_schema_config(),
+    # Separate transforms from gates (gates are handled via config.gates)
+    # Only TransformProtocol instances go into the transforms list
+    row_transforms: list[TransformProtocol] = []
+    aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]] = {}
+
+    for transform in config.transforms:
+        # config.transforms is list[RowPlugin] = list[TransformProtocol | GateProtocol]
+        # Only TransformProtocol instances should be passed to from_plugin_instances
+        if isinstance(transform, TransformProtocol):
+            row_transforms.append(transform)
+
+    # Build aggregations dict from config.aggregation_settings
+    # The settings dict maps agg_name -> AggregationSettings
+    # We need to find/create the transform instance for each
+    for agg_name, agg_settings in config.aggregation_settings.items():
+        # For test purposes, create a minimal transform if not already present
+        # In production, the transform would be instantiated from the plugin name
+        # Here we create a passthrough for testing
+        from tests.conftest import _TestTransformBase
+
+        class _AggTransform(_TestTransformBase):
+            name = agg_settings.plugin
+
+            def process(self, row: dict[str, Any], ctx: Any) -> Any:
+                from elspeth.plugins.results import TransformResult
+
+                return TransformResult.success(row)
+
+        aggregations[agg_name] = (_AggTransform(), agg_settings)
+
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        transforms=row_transforms,
+        sinks=config.sinks,
+        aggregations=aggregations,
+        gates=list(config.gates),
+        default_sink=default_sink,
+        coalesce_settings=list(config.coalesce_settings) if config.coalesce_settings else None,
     )
-
-    # Add transforms
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        is_gate = isinstance(t, BaseGate)
-        graph.add_node(
-            node_id,
-            node_type="gate" if is_gate else "transform",
-            plugin_name=t.name,
-            config=_dynamic_schema_config(),
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(
-            node_id,
-            node_type="sink",
-            plugin_name=sink.name,
-            config=_dynamic_schema_config(),
-        )
-
-    # Add edge from last transform to default sink
-    if "default" in sink_ids:
-        graph.add_edge(prev, sink_ids["default"], label="continue", mode=RoutingMode.MOVE)
-
-    # Populate internal maps - cast to proper types for type safety
-    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
-    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
-    graph._default_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
-
-    # Build route resolution map with fork support
-    route_resolution_map: dict[tuple[str, str], str] = {}
-    for i, paths in fork_paths.items():
-        gate_id = f"transform_{i}"
-        for path_name in paths:
-            # Fork paths resolve to "fork" (special handling in executor)
-            route_resolution_map[(gate_id, path_name)] = "fork"
-            # Add edge for each fork path (needed for edge_map lookup)
-            # Fork paths go to the NEXT transform (or sink if last)
-            next_node = f"transform_{i + 1}" if i + 1 < len(config.transforms) else sink_ids["default"]
-            graph.add_edge(gate_id, next_node, label=path_name, mode=RoutingMode.COPY)
-
-    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
-
-    return graph

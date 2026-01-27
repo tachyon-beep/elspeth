@@ -1,16 +1,28 @@
 # tests/core/landscape/test_models.py
-"""Tests for Landscape database models."""
+"""Tests for Landscape audit contracts instantiation.
+
+NOTE: These tests were previously testing elspeth.core.landscape.models
+which has been removed. Tests now verify the canonical contracts in
+elspeth.contracts.audit behave correctly.
+"""
 
 from datetime import UTC, datetime
 
+from elspeth.contracts import (
+    Determinism,
+    Node,
+    NodeType,
+    Row,
+    Run,
+    RunStatus,
+    Token,
+)
+
 
 class TestRunModel:
-    """Run table model."""
+    """Run audit contract."""
 
     def test_create_run(self) -> None:
-        from elspeth.contracts import RunStatus
-        from elspeth.core.landscape.models import Run
-
         run = Run(
             run_id="run-001",
             started_at=datetime.now(UTC),
@@ -24,12 +36,9 @@ class TestRunModel:
 
 
 class TestNodeModel:
-    """Node table model."""
+    """Node audit contract."""
 
     def test_create_node(self) -> None:
-        from elspeth.contracts import Determinism, NodeType
-        from elspeth.core.landscape.models import Node
-
         node = Node(
             node_id="node-001",
             run_id="run-001",
@@ -46,11 +55,9 @@ class TestNodeModel:
 
 
 class TestRowModel:
-    """Row table model."""
+    """Row audit contract."""
 
     def test_create_row(self) -> None:
-        from elspeth.core.landscape.models import Row
-
         row = Row(
             row_id="row-001",
             run_id="run-001",
@@ -63,11 +70,9 @@ class TestRowModel:
 
 
 class TestTokenModel:
-    """Token table model."""
+    """Token audit contract."""
 
     def test_create_token(self) -> None:
-        from elspeth.core.landscape.models import Token
-
         token = Token(
             token_id="token-001",
             row_id="row-001",

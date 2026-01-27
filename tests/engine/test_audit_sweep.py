@@ -29,7 +29,7 @@ from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase
-from tests.engine.orchestrator_test_helpers import build_test_graph
+from tests.engine.orchestrator_test_helpers import build_production_graph
 
 if TYPE_CHECKING:
     pass
@@ -279,7 +279,7 @@ class TestAuditSweepSimplePipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # Verify rows processed
         assert len(sink.results) == 3
@@ -305,7 +305,7 @@ class TestAuditSweepSimplePipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         assert len(sink.results) == 0
         assert_audit_sweep_clean(db, run.run_id)
@@ -348,7 +348,7 @@ class TestAuditSweepGateRouting:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # All rows should continue to default (COMPLETED outcome)
         assert len(default_sink.results) == 3
@@ -395,7 +395,7 @@ class TestAuditSweepErrorHandling:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         # value=2 should be quarantined, others processed
         assert len(sink.results) == 2
@@ -425,7 +425,7 @@ class TestAuditSweepMetrics:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_test_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config))
 
         results = run_audit_sweep(db, run.run_id)
 
