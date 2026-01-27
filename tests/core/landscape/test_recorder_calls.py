@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts import CallStatus, CallType, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -34,7 +34,7 @@ class TestRecordCall:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -364,7 +364,7 @@ class TestRecordCall:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -414,7 +414,7 @@ class TestCallPayloadPersistence:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -587,7 +587,7 @@ class TestFindCallByRequestHashRunIsolation:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -703,7 +703,7 @@ class TestFindCallByRequestHashRunIsolation:
         recorder.register_node(
             run_id=run_b.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,

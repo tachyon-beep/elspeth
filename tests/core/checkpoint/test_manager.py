@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ class TestCheckpointManager:
         from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={})
         return graph
 
     @pytest.fixture
@@ -53,7 +54,7 @@ class TestCheckpointManager:
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="running",
+                    status=RunStatus.RUNNING,
                 )
             )
             conn.execute(
@@ -61,9 +62,9 @@ class TestCheckpointManager:
                     node_id="node-001",
                     run_id="run-001",
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=datetime.now(UTC),
@@ -268,7 +269,7 @@ class TestCheckpointManager:
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             # Create node
@@ -277,9 +278,9 @@ class TestCheckpointManager:
                     node_id="node-old",
                     run_id=run_id,
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
                     registered_at=old_date,

@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import TransformResult
+from elspeth.contracts import NodeType, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -138,7 +138,7 @@ def node_id(recorder: LandscapeRecorder, run_id: str) -> str:
     node = recorder.register_node(
         run_id=run_id,
         plugin_name="azure_multi_query_llm",
-        node_type="transform",
+        node_type=NodeType.TRANSFORM,
         plugin_version="1.0",
         config={},
         schema_config=schema,

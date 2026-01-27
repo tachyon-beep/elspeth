@@ -5,7 +5,7 @@ Validates the ExecutionResult contract including required/optional keys.
 
 from typing import get_type_hints
 
-from elspeth.contracts import ExecutionResult
+from elspeth.contracts import ExecutionResult, RunStatus
 
 
 class TestExecutionResult:
@@ -62,7 +62,7 @@ class TestExecutionResultContract:
         hints = get_type_hints(ExecutionResult)
         # Required fields
         assert hints["run_id"] is str
-        assert hints["status"] is str
+        assert hints["status"] is RunStatus
         assert hints["rows_processed"] is int
         # Optional fields
         assert hints["rows_succeeded"] is int

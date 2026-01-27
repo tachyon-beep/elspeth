@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeStateCompleted, NodeStateFailed
+from elspeth.contracts import NodeStateCompleted, NodeStateFailed, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_transform
 
@@ -30,7 +30,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="double",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -92,7 +92,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="failing",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -163,7 +163,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="exploding",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -226,7 +226,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -285,7 +285,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="identity",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -350,7 +350,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="discarding",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -421,7 +421,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="routing_to_error",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -478,7 +478,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="successful",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -536,7 +536,7 @@ class TestTransformExecutor:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="attempt_test",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -615,7 +615,7 @@ class TestTransformErrorIdRegression:
         node1 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",  # Same name as node2!
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={"field": "email"},
             schema_config=DYNAMIC_SCHEMA,
@@ -623,7 +623,7 @@ class TestTransformErrorIdRegression:
         node2 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",  # Same name as node1!
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={"field": "phone"},
             schema_config=DYNAMIC_SCHEMA,

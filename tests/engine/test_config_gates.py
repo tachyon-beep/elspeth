@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -218,7 +218,7 @@ def _build_test_graph_with_config_gates(
     # Add source
     graph.add_node(
         "source",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_name=config.source.name,
         config=schema_config,
     )
@@ -231,7 +231,7 @@ def _build_test_graph_with_config_gates(
         transform_ids[i] = node_id
         graph.add_node(
             node_id,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name=t.name,
             config=schema_config,
         )
@@ -245,7 +245,7 @@ def _build_test_graph_with_config_gates(
         sink_ids[sink_name] = node_id
         graph.add_node(
             node_id,
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_name=sink.name,
             config=schema_config,
         )
@@ -259,7 +259,7 @@ def _build_test_graph_with_config_gates(
         config_gate_ids[gate_config.name] = node_id
         graph.add_node(
             node_id,
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name=f"config_gate:{gate_config.name}",
             config={
                 "schema": schema_config["schema"],

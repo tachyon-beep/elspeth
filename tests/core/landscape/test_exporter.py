@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.contracts import BatchStatus, RoutingMode, RunStatus
+from elspeth.contracts import BatchStatus, NodeStateStatus, NodeType, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -24,7 +24,7 @@ def populated_db() -> tuple[LandscapeDB, str]:
         run_id=run.run_id,
         node_id="source_1",
         plugin_name="csv",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_version="1.0.0",
         config={"path": "input.csv"},
         schema_config=DYNAMIC_SCHEMA,
@@ -154,7 +154,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -163,7 +163,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -197,7 +197,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -229,7 +229,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="transform",
             plugin_name="passthrough",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -250,7 +250,7 @@ class TestLandscapeExporterComplexRun:
         )
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"x": 1},
             duration_ms=10.0,
         )
@@ -275,7 +275,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -324,7 +324,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="aggregator",
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -359,7 +359,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="aggregator",
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -400,7 +400,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="gate",
             plugin_name="threshold",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -409,7 +409,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="sink",
             plugin_name="csv",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -461,7 +461,7 @@ class TestLandscapeExporterComplexRun:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -612,7 +612,7 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 node_id=f"node_{i}",
                 plugin_name="test",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
                 config={"index": i},
                 schema_config=DYNAMIC_SCHEMA,
@@ -654,7 +654,7 @@ class TestLandscapeExporterSigning:
                     )
                     recorder.complete_node_state(
                         state.state_id,
-                        status="completed",
+                        status=NodeStateStatus.COMPLETED,
                         output_data={"result": i * j + k},  # Required for COMPLETED states
                         duration_ms=5.0,
                     )
@@ -706,7 +706,7 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 node_id=f"node_{i}",
                 plugin_name="test",
-                node_type="transform",
+                node_type=NodeType.TRANSFORM,
                 plugin_version="1.0.0",
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
@@ -746,7 +746,7 @@ class TestLandscapeExporterCallRecords:
             run_id=run.run_id,
             node_id="llm_transform",
             plugin_name="llm_classifier",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -779,7 +779,7 @@ class TestLandscapeExporterCallRecords:
 
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"category": "positive"},
             duration_ms=300.0,
         )
@@ -822,7 +822,7 @@ class TestLandscapeExporterManifestIntegrity:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -873,7 +873,7 @@ class TestLandscapeExporterTier1Corruption:
             run_id=run.run_id,
             node_id="source",
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

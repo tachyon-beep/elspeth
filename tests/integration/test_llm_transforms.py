@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, Mock
 import httpx
 import pytest
 
-from elspeth.contracts import BatchPendingError, CallStatus, CallType
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
@@ -82,7 +82,7 @@ class TestLLMTransformIntegration:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -368,7 +368,7 @@ class TestOpenRouterLLMTransformIntegration:
         node = recorder.register_node(
             run_id=run_id,
             plugin_name="openrouter_llm",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,
@@ -856,7 +856,7 @@ class TestAuditedLLMClientIntegration:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=schema,

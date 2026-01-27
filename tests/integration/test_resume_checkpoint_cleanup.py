@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from elspeth.contracts import Determinism, NodeType
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -37,8 +38,8 @@ class TestResumeCheckpointCleanup:
         """Create a simple source -> sink graph."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="test_source", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue")
         return graph
 
@@ -78,9 +79,9 @@ class TestResumeCheckpointCleanup:
                     node_id="source",
                     run_id=run.run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,

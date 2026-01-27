@@ -1,5 +1,6 @@
 """Tests for explain command TUI integration."""
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.tui.screens.explain_screen import (
     LoadedState,
@@ -64,7 +65,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -72,7 +73,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -105,7 +106,7 @@ class TestExplainScreen:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -150,7 +151,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -158,7 +159,7 @@ class TestExplainScreen:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

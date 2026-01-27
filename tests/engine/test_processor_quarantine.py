@@ -8,6 +8,7 @@ Tests the full quarantine flow including:
 
 from typing import Any
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -45,7 +46,7 @@ class TestQuarantineIntegration:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -53,7 +54,7 @@ class TestQuarantineIntegration:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -142,7 +143,7 @@ class TestQuarantineIntegration:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -150,7 +151,7 @@ class TestQuarantineIntegration:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="strict_validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

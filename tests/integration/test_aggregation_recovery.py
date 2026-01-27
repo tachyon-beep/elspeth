@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts.enums import BatchStatus, RunStatus
+from elspeth.contracts.enums import BatchStatus, Determinism, NodeType, RunStatus
 from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
@@ -44,9 +44,9 @@ class TestAggregationRecoveryIntegration:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
-        graph.add_node("sum_aggregator", node_type="aggregation", plugin_name="test", config=schema_config)
-        graph.add_node("count_aggregator", node_type="aggregation", plugin_name="count_agg", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
+        graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=schema_config)
+        graph.add_node("count_aggregator", node_type=NodeType.AGGREGATION, plugin_name="count_agg", config=schema_config)
         return graph
 
     def test_full_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -163,7 +163,7 @@ class TestAggregationRecoveryIntegration:
             db,
             run.run_id,
             extra_nodes=[
-                ("count_aggregator", "count_agg", "aggregation"),
+                ("count_aggregator", "count_agg", NodeType.AGGREGATION),
             ],
         )
 
@@ -322,7 +322,7 @@ class TestAggregationRecoveryIntegration:
         db: LandscapeDB,
         run_id: str,
         *,
-        extra_nodes: list[tuple[str, str, str]] | None = None,
+        extra_nodes: list[tuple[str, str, NodeType]] | None = None,
     ) -> None:
         """Register nodes using raw SQL to avoid schema_config requirement.
 
@@ -342,9 +342,9 @@ class TestAggregationRecoveryIntegration:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -357,9 +357,9 @@ class TestAggregationRecoveryIntegration:
                     node_id="sum_aggregator",
                     run_id=run_id,
                     plugin_name="sum_agg",
-                    node_type="aggregation",
+                    node_type=NodeType.AGGREGATION,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -376,7 +376,7 @@ class TestAggregationRecoveryIntegration:
                             plugin_name=plugin_name,
                             node_type=node_type,
                             plugin_version="1.0",
-                            determinism="deterministic",
+                            determinism=Determinism.DETERMINISTIC,
                             config_hash="test",
                             config_json="{}",
                             registered_at=now,

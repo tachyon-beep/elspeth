@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType, RowOutcome
+from elspeth.contracts import NodeType, RoutingMode, RowOutcome, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 
@@ -420,7 +420,7 @@ class TestEngineIntegrationOutcomes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -428,7 +428,7 @@ class TestEngineIntegrationOutcomes:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -472,7 +472,7 @@ class TestEngineIntegrationOutcomes:
         states = recorder.get_node_states_for_token(result.token_id)
         assert len(states) == 1, "Should have node_state for the transform"
         state = states[0]
-        assert state.status.value == "completed", "Transform should complete successfully"
+        assert state.status == RunStatus.COMPLETED, "Transform should complete successfully"
         assert state.input_hash is not None, "Input hash should be recorded"
         assert hasattr(state, "output_hash") and state.output_hash is not None, "Output hash should be recorded"
 
@@ -482,7 +482,7 @@ class TestEngineIntegrationOutcomes:
 
         from pydantic import ConfigDict
 
-        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts import NodeType, PluginSchema, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
@@ -501,7 +501,7 @@ class TestEngineIntegrationOutcomes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -509,7 +509,7 @@ class TestEngineIntegrationOutcomes:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="validator",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -559,7 +559,7 @@ class TestEngineIntegrationOutcomes:
 
     def test_processor_records_forked_outcome_with_fork_group_id(self) -> None:
         """RowProcessor should record FORKED outcome with fork_group_id and parent lineage."""
-        from elspeth.contracts import RoutingMode, RowOutcome
+        from elspeth.contracts import NodeType, RowOutcome
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -574,7 +574,7 @@ class TestEngineIntegrationOutcomes:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -582,7 +582,7 @@ class TestEngineIntegrationOutcomes:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -590,7 +590,7 @@ class TestEngineIntegrationOutcomes:
         path_a = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -598,7 +598,7 @@ class TestEngineIntegrationOutcomes:
         path_b = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),

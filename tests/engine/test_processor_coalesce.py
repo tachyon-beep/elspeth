@@ -13,6 +13,7 @@ Gates are config-driven using GateSettings.
 
 from typing import TYPE_CHECKING, Any
 
+from elspeth.contracts import NodeType, RunStatus
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
@@ -45,7 +46,7 @@ class TestRowProcessorCoalesce:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -466,7 +467,7 @@ class TestRowProcessorCoalesce:
             assert len(coalesce_states) == 1, "Child token should have exactly one coalesce node_state"
 
             coalesce_state = coalesce_states[0]
-            assert coalesce_state.status.value == "completed"
+            assert coalesce_state.status == RunStatus.COMPLETED
 
         # === Audit Trail: Verify merged token has join_group_id ===
         merged_token_record = recorder.get_token(merged_token.token_id)
@@ -1254,7 +1255,7 @@ class TestCoalesceLinkage:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

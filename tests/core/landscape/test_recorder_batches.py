@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from elspeth.contracts import BatchStatus
+from elspeth.contracts import BatchStatus, Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB
 
@@ -22,9 +22,10 @@ class TestLandscapeRecorderBatches:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
+            determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
@@ -46,9 +47,10 @@ class TestLandscapeRecorderBatches:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
+            determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
@@ -88,9 +90,10 @@ class TestLandscapeRecorderBatches:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
+            determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
@@ -119,9 +122,10 @@ class TestLandscapeRecorderBatches:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
+            determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
@@ -177,9 +181,10 @@ class TestLandscapeRecorderBatches:
         agg = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sum_agg",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
+            determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
@@ -204,7 +209,6 @@ class TestBatchRecoveryQueries:
 
     def test_get_incomplete_batches_returns_draft_and_executing(self, landscape_db: LandscapeDB) -> None:
         """get_incomplete_batches() finds batches needing recovery."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)
@@ -251,7 +255,6 @@ class TestBatchRecoveryQueries:
 
     def test_get_incomplete_batches_includes_failed_for_retry(self, landscape_db: LandscapeDB) -> None:
         """Failed batches are returned for potential retry."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)
@@ -282,7 +285,6 @@ class TestBatchRecoveryQueries:
 
     def test_get_incomplete_batches_ordered_by_created_at(self, landscape_db: LandscapeDB) -> None:
         """Batches returned in creation order for deterministic recovery."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)
@@ -316,8 +318,6 @@ class TestBatchRetry:
 
     def test_retry_batch_increments_attempt_and_resets_status(self, landscape_db: LandscapeDB) -> None:
         """retry_batch() creates new attempt with draft status."""
-
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)
@@ -353,7 +353,6 @@ class TestBatchRetry:
 
     def test_retry_batch_preserves_members(self, landscape_db: LandscapeDB) -> None:
         """retry_batch() copies batch members to new batch."""
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)
@@ -413,7 +412,6 @@ class TestBatchRetry:
         """Can only retry failed batches."""
         import pytest
 
-        from elspeth.contracts import Determinism, NodeType
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
         recorder = LandscapeRecorder(landscape_db)

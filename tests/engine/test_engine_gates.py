@@ -20,7 +20,7 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import GateName, NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -284,7 +284,7 @@ def _build_test_graph_with_config_gates(
     # Add source
     graph.add_node(
         "source",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_name=config.source.name,
         config=schema_config,
     )
@@ -297,7 +297,7 @@ def _build_test_graph_with_config_gates(
         transform_ids[i] = node_id
         graph.add_node(
             node_id,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name=t.name,
             config=schema_config,
         )
@@ -311,7 +311,7 @@ def _build_test_graph_with_config_gates(
         sink_ids[sink_name] = node_id
         graph.add_node(
             node_id,
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_name=sink.name,
             config=schema_config,
         )
@@ -325,7 +325,7 @@ def _build_test_graph_with_config_gates(
         config_gate_ids[gate_config.name] = node_id
         graph.add_node(
             node_id,
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name=f"config_gate:{gate_config.name}",
             config={
                 "schema": schema_config["schema"],
@@ -1204,11 +1204,11 @@ class TestEndToEndPipeline:
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
-        graph.add_node("transform_0", node_type="transform", plugin_name="normalize", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
+        graph.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="normalize", config=schema_config)
         graph.add_node(
             "config_gate_confidence_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name="config_gate:confidence_gate",
             config={
                 "schema": schema_config["schema"],
@@ -1216,8 +1216,8 @@ class TestEndToEndPipeline:
                 "routes": dict(gate.routes),
             },
         )
-        graph.add_node("sink_default", node_type="sink", plugin_name="collect", config=schema_config)
-        graph.add_node("sink_low_conf", node_type="sink", plugin_name="collect", config=schema_config)
+        graph.add_node("sink_default", node_type=NodeType.SINK, plugin_name="collect", config=schema_config)
+        graph.add_node("sink_low_conf", node_type=NodeType.SINK, plugin_name="collect", config=schema_config)
 
         graph.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge(
@@ -1514,7 +1514,7 @@ class TestGateRuntimeErrors:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="config_gate:missing_test",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0.0",
             config={"condition": "row['nonexistent'] > 0"},
             schema_config=schema_config,
@@ -1614,7 +1614,7 @@ class TestGateRuntimeErrors:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="config_gate:optional_test",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0.0",
             config={"condition": "row.get('optional', 0) > 5"},
             schema_config=schema_config,
@@ -1623,7 +1623,7 @@ class TestGateRuntimeErrors:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="next_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=schema_config,

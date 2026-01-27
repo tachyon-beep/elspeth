@@ -7,7 +7,7 @@ Tests the topological validation approach that allows safe config changes
 
 from datetime import UTC, datetime
 
-from elspeth.contracts import Checkpoint, RoutingMode
+from elspeth.contracts import Checkpoint, NodeType, RoutingMode
 from elspeth.core.canonical import stable_hash
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.dag import ExecutionGraph
@@ -21,12 +21,12 @@ class TestForkJoinTopology:
         # Original graph: source → gate → path_A → coalesce → checkpoint
         #                              → path_B ────┘
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        original_graph.add_node("path_A", node_type="transform", plugin_name="passthrough", config={"version": "v1"})
-        original_graph.add_node("path_B", node_type="transform", plugin_name="passthrough", config={"version": "v1"})
-        original_graph.add_node("coalesce", node_type="coalesce", plugin_name="coalesce")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        original_graph.add_node("path_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config={"version": "v1"})
+        original_graph.add_node("path_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config={"version": "v1"})
+        original_graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="coalesce")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         original_graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("gate", "path_A", label="branch_a", mode=RoutingMode.COPY)
@@ -53,12 +53,12 @@ class TestForkJoinTopology:
 
         # Modified graph: change path_A config
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        modified_graph.add_node("path_A", node_type="transform", plugin_name="passthrough", config={"version": "v2"})  # CHANGED
-        modified_graph.add_node("path_B", node_type="transform", plugin_name="passthrough", config={"version": "v1"})
-        modified_graph.add_node("coalesce", node_type="coalesce", plugin_name="coalesce")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        modified_graph.add_node("path_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config={"version": "v2"})  # CHANGED
+        modified_graph.add_node("path_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config={"version": "v1"})
+        modified_graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="coalesce")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         modified_graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         modified_graph.add_edge("gate", "path_A", label="branch_a", mode=RoutingMode.COPY)
@@ -79,11 +79,11 @@ class TestForkJoinTopology:
         # Original: checkpoint → gate → path_A → sink_A
         #                             → path_B → sink_B
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
-        original_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        original_graph.add_node("path_A", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("sink_A", node_type="sink", plugin_name="csv")
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        original_graph.add_node("path_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("sink_A", node_type=NodeType.SINK, plugin_name="csv")
 
         original_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("checkpoint_node", "gate", label="continue", mode=RoutingMode.MOVE)
@@ -107,13 +107,13 @@ class TestForkJoinTopology:
 
         # Modified: Add new fork path after checkpoint
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
-        modified_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        modified_graph.add_node("path_A", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("path_C", node_type="transform", plugin_name="new_transform")  # NEW
-        modified_graph.add_node("sink_A", node_type="sink", plugin_name="csv")
-        modified_graph.add_node("sink_C", node_type="sink", plugin_name="csv")  # NEW
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
+        modified_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        modified_graph.add_node("path_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("path_C", node_type=NodeType.TRANSFORM, plugin_name="new_transform")  # NEW
+        modified_graph.add_node("sink_A", node_type=NodeType.SINK, plugin_name="csv")
+        modified_graph.add_node("sink_C", node_type=NodeType.SINK, plugin_name="csv")  # NEW
 
         modified_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
         modified_graph.add_edge("checkpoint_node", "gate", label="continue", mode=RoutingMode.MOVE)
@@ -135,10 +135,10 @@ class TestTransitiveUpstreamChanges:
         """Changing node 2+ hops upstream should reject."""
         # Original: source → A → B → checkpoint
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv", config={"path": "input.csv"})
-        original_graph.add_node("transform_A", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("transform_B", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config={"path": "input.csv"})
+        original_graph.add_node("transform_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("transform_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         original_graph.add_edge("source", "transform_A", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("transform_A", "transform_B", label="continue", mode=RoutingMode.MOVE)
@@ -161,10 +161,10 @@ class TestTransitiveUpstreamChanges:
 
         # Modified: change source config (grandparent of checkpoint)
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv", config={"path": "input_v2.csv"})  # CHANGED
-        modified_graph.add_node("transform_A", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("transform_B", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config={"path": "input_v2.csv"})  # CHANGED
+        modified_graph.add_node("transform_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("transform_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         modified_graph.add_edge("source", "transform_A", label="continue", mode=RoutingMode.MOVE)
         modified_graph.add_edge("transform_A", "transform_B", label="continue", mode=RoutingMode.MOVE)
@@ -181,11 +181,11 @@ class TestTransitiveUpstreamChanges:
         """Inserting transform far upstream should reject."""
         # Original: source → A → B → C → checkpoint
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("transform_A", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("transform_B", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("transform_C", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("transform_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("transform_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("transform_C", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         original_graph.add_edge("source", "transform_A", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("transform_A", "transform_B", label="continue", mode=RoutingMode.MOVE)
@@ -209,12 +209,12 @@ class TestTransitiveUpstreamChanges:
 
         # Modified: insert NEW transform far upstream (between source and A)
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("transform_NEW", node_type="transform", plugin_name="field_mapper")  # NEW
-        modified_graph.add_node("transform_A", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("transform_B", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("transform_C", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("transform_NEW", node_type=NodeType.TRANSFORM, plugin_name="field_mapper")  # NEW
+        modified_graph.add_node("transform_A", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("transform_B", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("transform_C", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         modified_graph.add_edge("source", "transform_NEW", label="continue", mode=RoutingMode.MOVE)  # NEW
         modified_graph.add_edge("transform_NEW", "transform_A", label="continue", mode=RoutingMode.MOVE)  # NEW
@@ -235,10 +235,10 @@ class TestParallelEdgeValidation:
         """Parallel edges must have different keys in hash."""
         # Gate with fork creates parallel edges to same transform
         graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        graph.add_node("transform", node_type="transform", plugin_name="passthrough")
-        graph.add_node("checkpoint", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph.add_node("checkpoint", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         # Two parallel edges from gate to transform (different route labels)
         graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
@@ -251,10 +251,10 @@ class TestParallelEdgeValidation:
 
         # Create second graph with only one edge
         graph2 = ExecutionGraph()
-        graph2.add_node("source", node_type="source", plugin_name="csv")
-        graph2.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        graph2.add_node("transform", node_type="transform", plugin_name="passthrough")
-        graph2.add_node("checkpoint", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        graph2.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph2.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        graph2.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        graph2.add_node("checkpoint", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         graph2.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         graph2.add_edge("gate", "transform", label="route_A", mode=RoutingMode.COPY)  # Only route_A
@@ -269,10 +269,10 @@ class TestParallelEdgeValidation:
         """Adding second edge between same nodes should reject."""
         # Original: source → gate --[approved]--> transform → checkpoint
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        original_graph.add_node("upstream_transform", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        original_graph.add_node("upstream_transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         original_graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("gate", "upstream_transform", label="approved", mode=RoutingMode.MOVE)
@@ -295,10 +295,10 @@ class TestParallelEdgeValidation:
 
         # Modified: Add second parallel edge between gate and upstream_transform
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("gate", node_type="gate", plugin_name="threshold_gate")
-        modified_graph.add_node("upstream_transform", node_type="transform", plugin_name="passthrough")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("gate", node_type=NodeType.GATE, plugin_name="threshold_gate")
+        modified_graph.add_node("upstream_transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         modified_graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
         modified_graph.add_edge("gate", "upstream_transform", label="approved", mode=RoutingMode.MOVE)
@@ -325,9 +325,9 @@ class TestCheckpointNodeValidation:
         """Resume must reject when checkpoint node is removed from graph."""
         # Original: source → transform → checkpoint_node
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("transform", node_type="transform", plugin_name="passthrough")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "test"})
 
         original_graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         original_graph.add_edge("transform", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
@@ -349,8 +349,8 @@ class TestCheckpointNodeValidation:
 
         # Modified: checkpoint_node is REMOVED
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("transform", node_type="transform", plugin_name="passthrough")
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough")
         # NOTE: checkpoint_node is NOT added
 
         modified_graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
@@ -366,8 +366,8 @@ class TestCheckpointNodeValidation:
         """Resume must reject when checkpoint node config changes."""
         # Original: source → checkpoint_node with config {"prompt": "original"}
         original_graph = ExecutionGraph()
-        original_graph.add_node("source", node_type="source", plugin_name="csv")
-        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "original"})
+        original_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        original_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "original"})
 
         original_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
 
@@ -388,8 +388,8 @@ class TestCheckpointNodeValidation:
 
         # Modified: SAME topology, DIFFERENT checkpoint node config
         modified_graph = ExecutionGraph()
-        modified_graph.add_node("source", node_type="source", plugin_name="csv")
-        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "changed"})  # CHANGED
+        modified_graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        modified_graph.add_node("checkpoint_node", node_type=NodeType.TRANSFORM, plugin_name="llm", config={"prompt": "changed"})  # CHANGED
 
         modified_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -23,7 +24,7 @@ class TestLandscapeRecorderArtifacts:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -66,7 +67,7 @@ class TestLandscapeRecorderArtifacts:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -128,7 +129,7 @@ class TestLandscapeRecorderArtifacts:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -190,7 +191,7 @@ class TestLandscapeRecorderArtifacts:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -233,7 +234,7 @@ class TestLandscapeRecorderArtifacts:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -262,7 +263,7 @@ class TestLandscapeRecorderArtifacts:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -296,7 +297,7 @@ class TestLandscapeRecorderArtifacts:
         node1 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -304,7 +305,7 @@ class TestLandscapeRecorderArtifacts:
         node2 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

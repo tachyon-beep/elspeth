@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import NodeType, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -149,7 +149,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -208,7 +208,7 @@ class TestCSVSourceDiscardContract:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),

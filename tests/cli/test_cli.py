@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from elspeth.contracts import NodeStateStatus, RowOutcome, RunStatus
+from elspeth.contracts import Determinism, NodeStateStatus, NodeType, RowOutcome, RunStatus
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 
 # Note: In Click 8.0+, mix_stderr is no longer a CliRunner parameter.
@@ -323,7 +323,7 @@ class TestPurgeCommand:
             conn.execute(
                 insert(runs_table).values(
                     run_id="old-run-for-confirm",
-                    status="completed",
+                    status=RunStatus.COMPLETED,
                     started_at=old_date,
                     completed_at=old_date,
                     config_hash="abc123",
@@ -336,9 +336,9 @@ class TestPurgeCommand:
                     node_id="source-node-1",
                     run_id="old-run-for-confirm",
                     plugin_name="csv",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="def456",
                     config_json="{}",
                     registered_at=old_date,
@@ -413,7 +413,7 @@ class TestPurgeCommand:
                 conn.execute(
                     insert(runs_table).values(
                         run_id="old-run-123",
-                        status="completed",
+                        status=RunStatus.COMPLETED,
                         started_at=old_date,
                         completed_at=old_date,
                         config_hash="abc123",
@@ -426,9 +426,9 @@ class TestPurgeCommand:
                         node_id="source-node-purge",
                         run_id="old-run-123",
                         plugin_name="csv",
-                        node_type="source",
+                        node_type=NodeType.SOURCE,
                         plugin_version="1.0.0",
-                        determinism="deterministic",
+                        determinism=Determinism.DETERMINISTIC,
                         config_hash="def456",
                         config_json="{}",
                         registered_at=old_date,
@@ -629,7 +629,7 @@ default_sink: output
             conn.execute(
                 insert(runs_table).values(
                     run_id="completed-run-001",
-                    status="completed",
+                    status=RunStatus.COMPLETED,
                     started_at=now,
                     completed_at=now,
                     config_hash="abc123",
@@ -700,7 +700,7 @@ default_sink: output
             conn.execute(
                 insert(runs_table).values(
                     run_id="running-run-001",
-                    status="running",
+                    status=RunStatus.RUNNING,
                     started_at=now,
                     completed_at=None,
                     config_hash="abc123",
@@ -744,7 +744,7 @@ default_sink: output
             conn.execute(
                 insert(runs_table).values(
                     run_id="failed-no-checkpoint-001",
-                    status="failed",
+                    status=RunStatus.FAILED,
                     started_at=now,
                     completed_at=now,
                     config_hash="abc123",
@@ -851,7 +851,7 @@ default_sink: output
             conn.execute(
                 insert(runs_table).values(
                     run_id=run_id,
-                    status="failed",
+                    status=RunStatus.FAILED,
                     started_at=now,
                     completed_at=now,
                     config_hash="abc123",
@@ -860,8 +860,6 @@ default_sink: output
                 )
             )
             # Insert nodes (source and sink) for FK integrity using actual node IDs
-            from elspeth.contracts import Determinism
-
             source_info = graph.get_node_info(source_node_id)
             conn.execute(
                 insert(nodes_table).values(

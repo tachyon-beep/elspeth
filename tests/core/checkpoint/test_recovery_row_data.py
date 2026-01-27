@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
@@ -79,7 +80,7 @@ class TestRecoveryManagerRowData:
                     config_hash="x",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -87,9 +88,9 @@ class TestRecoveryManagerRowData:
                     node_id="node",
                     run_id=run_id,
                     plugin_name="csv",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="io_read",
+                    determinism=Determinism.IO_READ,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,
@@ -157,7 +158,7 @@ class TestRecoveryManagerRowData:
                     config_hash="x",
                     settings_json="{}",
                     canonical_version="v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
             conn.execute(
@@ -165,9 +166,9 @@ class TestRecoveryManagerRowData:
                     node_id="node",
                     run_id=run_id,
                     plugin_name="csv",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="io_read",
+                    determinism=Determinism.IO_READ,
                     config_hash="x",
                     config_json="{}",
                     registered_at=now,

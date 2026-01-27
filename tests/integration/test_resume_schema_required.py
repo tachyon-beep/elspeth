@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, RunStatus
+from elspeth.contracts import Determinism, NodeType, RunStatus
 from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
@@ -73,8 +73,8 @@ class TestResumeSchemaRequired:
         """Create a simple source -> sink graph."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="source_without_schema", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="source_without_schema", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue")
         return graph
 
@@ -115,9 +115,9 @@ class TestResumeSchemaRequired:
                     node_id="source",
                     run_id=run.run_id,
                     plugin_name="source_without_schema",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -130,9 +130,9 @@ class TestResumeSchemaRequired:
                     node_id="sink",
                     run_id=run.run_id,
                     plugin_name="csv",
-                    node_type="sink",
+                    node_type=NodeType.SINK,
                     plugin_version="1.0",
-                    determinism="io_write",
+                    determinism=Determinism.IO_WRITE,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,

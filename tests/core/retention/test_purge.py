@@ -10,6 +10,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Connection, Table
 
+from elspeth.contracts import (
+    CallStatus,
+    CallType,
+    Determinism,
+    NodeStateStatus,
+    NodeType,
+    RoutingMode,
+    RunStatus,
+)
+
 if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
@@ -39,7 +49,7 @@ def _create_state(
             run_id=run_id,
             step_index=0,
             attempt=0,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             input_hash="input123",
             output_hash="output123",
             started_at=datetime.now(UTC),
@@ -82,8 +92,8 @@ def _create_call(
             call_id=call_id,
             state_id=state_id,
             call_index=0,
-            call_type="llm",
-            status="completed",
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
             request_hash="req_hash",
             request_ref=request_ref,
             response_hash="resp_hash",
@@ -109,7 +119,7 @@ def _create_edge(
             from_node_id=from_node_id,
             to_node_id=to_node_id,
             label="continue",
-            default_mode="move",
+            default_mode=RoutingMode.MOVE,
             created_at=datetime.now(UTC),
         )
     )
@@ -132,7 +142,7 @@ def _create_routing_event(
             edge_id=edge_id,
             routing_group_id=str(uuid4()),
             ordinal=0,
-            mode="move",
+            mode=RoutingMode.MOVE,
             reason_hash="reason_hash",
             reason_ref=reason_ref,
             created_at=datetime.now(UTC),
@@ -146,7 +156,7 @@ def _create_run(
     run_id: str,
     *,
     completed_at: datetime | None = None,
-    status: str = "completed",
+    status: RunStatus = RunStatus.COMPLETED,
 ) -> None:
     """Helper to create a run record."""
     conn.execute(
@@ -174,9 +184,9 @@ def _create_node(
             node_id=node_id,
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
-            determinism="deterministic",
+            determinism=Determinism.DETERMINISTIC,
             config_hash="config123",
             config_json="{}",
             registered_at=datetime.now(UTC),
@@ -288,7 +298,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -328,7 +338,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=recent_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -367,7 +377,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=None,  # Not completed
-                status="running",
+                status=RunStatus.RUNNING,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -405,7 +415,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -444,7 +454,7 @@ class TestFindExpiredRowPayloads:
         test_ref = f"ref_45_days_old_{uuid4()}"
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
                 conn,
@@ -493,7 +503,7 @@ class TestFindExpiredRowPayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
 
@@ -561,7 +571,7 @@ class TestPurgePayloads:
                 runs_table,
                 run_id,
                 completed_at=old_completed_at,
-                status="completed",
+                status=RunStatus.COMPLETED,
             )
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(
@@ -664,9 +674,7 @@ class TestPurgePayloads:
         assert not store.exists(success_ref)
         assert store.exists(fail_ref)
 
-    def test_purge_measures_duration(
-        self, landscape_db: LandscapeDB, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_purge_measures_duration(self, landscape_db: LandscapeDB, monkeypatch: pytest.MonkeyPatch) -> None:
         """Purge measures operation duration using deterministic time."""
         from elspeth.core.retention import purge as purge_module
         from elspeth.core.retention.purge import PurgeManager
@@ -742,7 +750,7 @@ class TestFindExpiredCallPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -788,7 +796,7 @@ class TestFindExpiredCallPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -843,7 +851,7 @@ class TestFindExpiredRoutingPayloads:
         old_completed_at = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, source_node_id, run_id)
             _create_node(conn, nodes_table, sink_node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, source_node_id, row_index=0)
@@ -868,9 +876,7 @@ class TestFindExpiredRoutingPayloads:
 class TestFindExpiredAllPayloadRefs:
     """Tests for the unified find_expired_payload_refs method."""
 
-    def test_find_expired_payload_refs_returns_deduplicated_union(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_find_expired_payload_refs_returns_deduplicated_union(self, landscape_db: LandscapeDB) -> None:
         """All payload types should be returned, deduplicated."""
         from elspeth.core.landscape.schema import (
             calls_table,
@@ -905,7 +911,7 @@ class TestFindExpiredAllPayloadRefs:
         routing_ref = f"routing_reason_ref_{uuid4()}"
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, source_node_id, run_id)
             _create_node(conn, nodes_table, sink_node_id, run_id)
             _create_row(
@@ -952,9 +958,7 @@ class TestFindExpiredAllPayloadRefs:
         assert expired.count(call_resp_ref) == 1
         assert expired.count(routing_ref) == 1
 
-    def test_find_expired_payload_refs_respects_retention(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_find_expired_payload_refs_respects_retention(self, landscape_db: LandscapeDB) -> None:
         """Recent call/routing payloads should not be found."""
         from elspeth.core.landscape.schema import (
             calls_table,
@@ -980,7 +984,7 @@ class TestFindExpiredAllPayloadRefs:
         recent_completed_at = datetime.now(UTC) - timedelta(days=10)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_id, completed_at=recent_completed_at, status="completed")
+            _create_run(conn, runs_table, run_id, completed_at=recent_completed_at, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_id, run_id)
             _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
             _create_token(conn, tokens_table, token_id, row_id)
@@ -1007,9 +1011,7 @@ class TestContentAddressableSharedRefs:
     multiple runs. Purge must exclude refs still used by non-expired runs.
     """
 
-    def test_shared_row_ref_excluded_when_used_by_recent_run(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_shared_row_ref_excluded_when_used_by_recent_run(self, landscape_db: LandscapeDB) -> None:
         """Shared row payload ref should NOT be purged if a recent run uses it.
 
         Scenario:
@@ -1039,7 +1041,7 @@ class TestContentAddressableSharedRefs:
 
         with db.connection() as conn:
             # Create Run A (expired) with shared ref
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1053,7 +1055,7 @@ class TestContentAddressableSharedRefs:
             )
 
             # Create Run B (NOT expired) with SAME shared ref
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(
                 conn,
@@ -1073,9 +1075,7 @@ class TestContentAddressableSharedRefs:
             f"Shared ref {shared_ref} should NOT be returned for deletion because Run B (10 days old) still needs it"
         )
 
-    def test_shared_call_ref_excluded_when_used_by_recent_run(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_shared_call_ref_excluded_when_used_by_recent_run(self, landscape_db: LandscapeDB) -> None:
         """Shared call payload ref should NOT be purged if a recent run uses it."""
         from elspeth.core.landscape.schema import (
             calls_table,
@@ -1108,7 +1108,7 @@ class TestContentAddressableSharedRefs:
             row_a_id = str(uuid4())
             token_a_id = str(uuid4())
             state_a_id = str(uuid4())
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(conn, rows_table, row_a_id, run_a_id, node_a_id, row_index=0)
             _create_token(conn, tokens_table, token_a_id, row_a_id)
@@ -1120,7 +1120,7 @@ class TestContentAddressableSharedRefs:
             row_b_id = str(uuid4())
             token_b_id = str(uuid4())
             state_b_id = str(uuid4())
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(conn, rows_table, row_b_id, run_b_id, node_b_id, row_index=0)
             _create_token(conn, tokens_table, token_b_id, row_b_id)
@@ -1151,7 +1151,7 @@ class TestContentAddressableSharedRefs:
         old_completed = datetime.now(UTC) - timedelta(days=60)
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1168,9 +1168,7 @@ class TestContentAddressableSharedRefs:
 
         assert exclusive_ref in expired, f"Exclusive ref {exclusive_ref} SHOULD be returned for deletion because no active run needs it"
 
-    def test_shared_ref_excluded_when_used_by_running_run(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_shared_ref_excluded_when_used_by_running_run(self, landscape_db: LandscapeDB) -> None:
         """Shared ref should NOT be purged if an incomplete (running) run uses it."""
         from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
         from elspeth.core.retention.purge import PurgeManager
@@ -1191,7 +1189,7 @@ class TestContentAddressableSharedRefs:
         node_b_id = str(uuid4())
 
         with db.connection() as conn:
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, node_a_id, run_a_id)
             _create_row(
                 conn,
@@ -1204,7 +1202,7 @@ class TestContentAddressableSharedRefs:
             )
 
             # Running run (completed_at=None, status=running)
-            _create_run(conn, runs_table, run_b_id, completed_at=None, status="running")
+            _create_run(conn, runs_table, run_b_id, completed_at=None, status=RunStatus.RUNNING)
             _create_node(conn, nodes_table, node_b_id, run_b_id)
             _create_row(
                 conn,
@@ -1235,9 +1233,7 @@ class TestCallJoinRunIsolation:
     nodes table (the run_id is denormalized on node_states for this purpose).
     """
 
-    def test_expired_call_ref_returned_when_same_node_id_exists_in_recent_run(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_expired_call_ref_returned_when_same_node_id_exists_in_recent_run(self, landscape_db: LandscapeDB) -> None:
         """BUG TEST: Expired run's call ref should be returned even when recent run has same node_id.
 
         Scenario:
@@ -1289,7 +1285,7 @@ class TestCallJoinRunIsolation:
 
         with db.connection() as conn:
             # === Run A (expired) ===
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
             _create_row(conn, rows_table, row_a_id, run_a_id, shared_node_id, row_index=0)
             _create_token(conn, tokens_table, token_a_id, row_a_id)
@@ -1297,7 +1293,7 @@ class TestCallJoinRunIsolation:
             _create_call(conn, calls_table, call_a_id, state_a_id, response_ref="ref-A-should-be-purged")
 
             # === Run B (recent) ===
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
             _create_row(conn, rows_table, row_b_id, run_b_id, shared_node_id, row_index=0)
             _create_token(conn, tokens_table, token_b_id, row_b_id)
@@ -1319,9 +1315,7 @@ class TestCallJoinRunIsolation:
         # ref-B should NOT be returned (Run B is recent)
         assert "ref-B-keep" not in expired, f"ref-B from recent Run B should NOT be returned for purge. Got expired refs: {expired}"
 
-    def test_recent_call_ref_not_returned_when_expired_run_has_same_node_id(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_recent_call_ref_not_returned_when_expired_run_has_same_node_id(self, landscape_db: LandscapeDB) -> None:
         """Verify recent run's call ref is protected even when expired run has same node_id.
 
         This is the inverse scenario - verifying that we don't accidentally purge
@@ -1354,7 +1348,7 @@ class TestCallJoinRunIsolation:
 
         with db.connection() as conn:
             # Run A (expired)
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)
             row_a_id = str(uuid4())
             token_a_id = str(uuid4())
@@ -1365,7 +1359,7 @@ class TestCallJoinRunIsolation:
             _create_call(conn, calls_table, str(uuid4()), state_a_id, response_ref="ref-old")
 
             # Run B (recent)
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)
             row_b_id = str(uuid4())
             token_b_id = str(uuid4())
@@ -1390,9 +1384,7 @@ class TestRoutingJoinRunIsolation:
     The fix: Use node_states.run_id directly instead of joining through nodes.
     """
 
-    def test_expired_routing_ref_returned_when_same_node_id_exists_in_recent_run(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_expired_routing_ref_returned_when_same_node_id_exists_in_recent_run(self, landscape_db: LandscapeDB) -> None:
         """BUG TEST: Expired run's routing ref should be returned even when recent run has same node_id.
 
         Same pattern as call_join test - the ambiguous join causes routing refs
@@ -1428,7 +1420,7 @@ class TestRoutingJoinRunIsolation:
 
         with db.connection() as conn:
             # === Run A (expired) ===
-            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status="completed")
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_a_id)  # Same node_id!
             _create_node(conn, nodes_table, sink_node_id_a, run_a_id)
             row_a_id = str(uuid4())
@@ -1445,7 +1437,7 @@ class TestRoutingJoinRunIsolation:
             )
 
             # === Run B (recent) ===
-            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status="completed")
+            _create_run(conn, runs_table, run_b_id, completed_at=recent_completed, status=RunStatus.COMPLETED)
             _create_node(conn, nodes_table, shared_node_id, run_b_id)  # Same node_id!
             _create_node(conn, nodes_table, sink_node_id_b, run_b_id)
             row_b_id = str(uuid4())

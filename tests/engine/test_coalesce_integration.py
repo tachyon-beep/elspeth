@@ -22,7 +22,10 @@ from elspeth.contracts import (
     CoalesceName,
     GateName,
     NodeID,
+    NodeStateStatus,
+    NodeType,
     RoutingMode,
+    RunStatus,
     SinkName,
     SourceRow,
 )
@@ -125,7 +128,7 @@ def _build_fork_coalesce_graph(
     source_id = "source_test"
     graph.add_node(
         source_id,
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_name=config.source.name,
         config=schema_config,
     )
@@ -138,7 +141,7 @@ def _build_fork_coalesce_graph(
         transform_ids[i] = node_id
         graph.add_node(
             node_id,
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_name=t.name,
             config=schema_config,
         )
@@ -150,7 +153,7 @@ def _build_fork_coalesce_graph(
     for sink_name, sink in config.sinks.items():
         node_id = f"sink_{sink_name}"
         sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
+        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
 
     # Add config gates (from settings.gates)
     config_gate_ids: dict[str, str] = {}
@@ -169,7 +172,7 @@ def _build_fork_coalesce_graph(
 
         graph.add_node(
             gate_id,
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name=f"config_gate:{gate_config.name}",
             config={
                 "schema": schema_config["schema"],
@@ -209,7 +212,7 @@ def _build_fork_coalesce_graph(
 
         graph.add_node(
             cid,
-            node_type="coalesce",
+            node_type=NodeType.COALESCE,
             plugin_name=f"coalesce:{coalesce_config.name}",
             config=coalesce_node_config,
         )
@@ -602,7 +605,7 @@ class TestCoalesceAuditTrail:
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         # Verify run completed
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
         assert result.rows_coalesced == 1
 
         # Query the audit trail for complete verification
@@ -623,10 +626,7 @@ class TestCoalesceAuditTrail:
         with landscape_db.connection() as conn:
             # Find coalesce node for this run
             nodes_result = conn.execute(
-                nodes_table.select().where(
-                    (nodes_table.c.node_type == "coalesce") &
-                    (nodes_table.c.run_id == run_id)
-                )
+                nodes_table.select().where((nodes_table.c.node_type == NodeType.COALESCE) & (nodes_table.c.run_id == run_id))
             ).fetchall()
 
             assert len(nodes_result) == 1
@@ -636,15 +636,14 @@ class TestCoalesceAuditTrail:
             # Find node states for coalesce (filter by run_id)
             states_result = conn.execute(
                 node_states_table.select().where(
-                    (node_states_table.c.node_id == coalesce_node.node_id) &
-                    (node_states_table.c.run_id == run_id)
+                    (node_states_table.c.node_id == coalesce_node.node_id) & (node_states_table.c.run_id == run_id)
                 )
             ).fetchall()
 
             # Should have 2 node states (one for each consumed token from path_a and path_b)
             assert len(states_result) == 2
             for state in states_result:
-                assert state.status == "completed"
+                assert state.status == NodeStateStatus.COMPLETED
                 # P1: Verify hashes are non-null
                 assert state.input_hash is not None, "Node state must have input_hash for audit trail"
                 assert state.output_hash is not None, "Completed node state must have output_hash"
@@ -663,19 +662,17 @@ class TestCoalesceAuditTrail:
             # P1: Verify the parent token had FORKED outcome
             # Find gate node for this run
             gate_nodes = conn.execute(
-                nodes_table.select().where(
-                    (nodes_table.c.node_type == "gate") &
-                    (nodes_table.c.run_id == run_id)
-                )
+                nodes_table.select().where((nodes_table.c.node_type == NodeType.GATE) & (nodes_table.c.run_id == run_id))
             ).fetchall()
             assert len(gate_nodes) == 1, "Should have exactly one gate node"
 
             # Get all tokens for this run (join through rows table since tokens doesn't have run_id)
             from sqlalchemy import select
+
             all_tokens = conn.execute(
-                select(tokens_table).select_from(
-                    tokens_table.join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
-                ).where(rows_table.c.run_id == run_id)
+                select(tokens_table)
+                .select_from(tokens_table.join(rows_table, tokens_table.c.row_id == rows_table.c.row_id))
+                .where(rows_table.c.run_id == run_id)
             ).fetchall()
 
             # Find tokens with fork_group_id (these are fork children)
@@ -686,8 +683,7 @@ class TestCoalesceAuditTrail:
             run_token_ids = [t.token_id for t in all_tokens]
             forked_outcomes = conn.execute(
                 token_outcomes_table.select().where(
-                    (token_outcomes_table.c.outcome == "forked") &
-                    (token_outcomes_table.c.token_id.in_(run_token_ids))
+                    (token_outcomes_table.c.outcome == "forked") & (token_outcomes_table.c.token_id.in_(run_token_ids))
                 )
             ).fetchall()
             assert len(forked_outcomes) >= 1, "Should have at least 1 FORKED outcome"
@@ -721,9 +717,7 @@ class TestCoalesceAuditTrail:
             assert parent_ids == set(consumed_token_ids), "Merged token parents should match consumed tokens"
 
             # P1: Verify artifacts have content_hash, artifact_type, sink_node_id (for this run)
-            artifacts = conn.execute(
-                artifacts_table.select().where(artifacts_table.c.run_id == run_id)
-            ).fetchall()
+            artifacts = conn.execute(artifacts_table.select().where(artifacts_table.c.run_id == run_id)).fetchall()
             assert len(artifacts) >= 1, "Should have at least 1 artifact from sink"
             for artifact in artifacts:
                 assert artifact.content_hash is not None, "Artifact must have content_hash"
@@ -910,7 +904,7 @@ class TestCoalesceTimeoutIntegration:
         end_time = time.monotonic()
 
         # Basic sanity checks - all rows should complete
-        assert result.status == "completed"
+        assert result.status == RunStatus.COMPLETED
         assert result.rows_processed == 3
         assert result.rows_forked == 3  # All 3 rows were forked
         assert result.rows_coalesced == 3  # All 3 should coalesce

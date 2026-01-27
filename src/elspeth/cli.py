@@ -603,7 +603,7 @@ def _execute_pipeline(
 
         return {
             "run_id": result.run_id,
-            "status": result.status.value,  # Convert enum to string for TypedDict
+            "status": result.status,  # RunStatus enum (str subclass)
             "rows_processed": result.rows_processed,
         }
     finally:
@@ -815,7 +815,7 @@ def _execute_pipeline_with_instances(
 
         return {
             "run_id": result.run_id,
-            "status": result.status.value,  # Convert enum to string for TypedDict
+            "status": result.status,  # RunStatus enum (str subclass)
             "rows_processed": result.rows_processed,
         }
     finally:

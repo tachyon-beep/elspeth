@@ -12,9 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import pytest
-
-from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -91,7 +89,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     schema_config = {"schema": {"fields": "dynamic"}}
 
     # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name, config=schema_config)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
 
     # Add transforms
     transform_ids: dict[int, NodeID] = {}
@@ -99,7 +97,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for i, t in enumerate(config.transforms):
         node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
-        graph.add_node(node_id, node_type="transform", plugin_name=t.name, config=schema_config)
+        graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name=t.name, config=schema_config)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
@@ -108,7 +106,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = NodeID(f"sink_{sink_name}")
         sink_ids[SinkName(sink_name)] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
+        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
 
     # Connect last transform to default sink
     if SinkName("default") in sink_ids:
@@ -253,11 +251,11 @@ class TestLineageAfterRetention:
         """
         from datetime import UTC, datetime, timedelta
 
+        from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.row_data import RowDataState
         from elspeth.core.payload_store import FilesystemPayloadStore
         from elspeth.core.retention.purge import PurgeManager
         from elspeth.engine.artifacts import ArtifactDescriptor
-        from elspeth.core.landscape.recorder import LandscapeRecorder
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/lineage.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")

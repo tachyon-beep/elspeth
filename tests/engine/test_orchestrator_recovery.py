@@ -57,8 +57,8 @@ class TestOrchestratorResume:
         """Create a minimal mock graph for recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="null", config=schema_config)
-        graph.add_node("agg_node", node_type="aggregation", plugin_name="test_agg", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=schema_config)
         return graph
 
     @pytest.fixture

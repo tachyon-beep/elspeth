@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import Determinism, RunStatus, SourceRow
+from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import (
     Orchestrator,
@@ -464,9 +464,7 @@ class TestNodeTypeMetadata:
     to verify determinism and plugin_version are recorded correctly.
     """
 
-    def test_config_gate_recorded_as_deterministic(
-        self, plugin_manager, landscape_db: LandscapeDB
-    ) -> None:
+    def test_config_gate_recorded_as_deterministic(self, plugin_manager, landscape_db: LandscapeDB) -> None:
         """Config gates should be recorded as DETERMINISTIC in audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -541,16 +539,13 @@ class TestNodeTypeMetadata:
 class TestCheckpointSequencing:
     """Test checkpoint sequence number is properly incremented."""
 
-    def test_sequence_number_increments_on_checkpoint(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_sequence_number_increments_on_checkpoint(self, landscape_db: LandscapeDB) -> None:
         """Lines 151-153: sequence_number must increment for each checkpoint.
 
         Uses frequency="aggregation_only" so _maybe_checkpoint increments
         the counter without attempting DB insert (avoids FK constraint on run_id).
         The increment at line 152 happens unconditionally when checkpointing is enabled.
         """
-        from elspeth.contracts import RoutingMode
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.dag import ExecutionGraph
@@ -568,8 +563,8 @@ class TestCheckpointSequencing:
         # Build graph matching the nodes used in _maybe_checkpoint calls
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source-1", node_type="source", plugin_name="null", config=schema_config)
-        graph.add_node("sink-1", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source-1", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("sink-1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)
 
         # Set the graph on the orchestrator (normally done in execute())
@@ -598,9 +593,7 @@ class TestCheckpointSequencing:
 
         assert orchestrator._sequence_number == 2
 
-    def test_sequence_number_not_incremented_when_disabled(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_sequence_number_not_incremented_when_disabled(self, landscape_db: LandscapeDB) -> None:
         """Lines 147-148: sequence_number should NOT increment when disabled."""
         from elspeth.core.config import CheckpointSettings
 
@@ -622,9 +615,7 @@ class TestCheckpointSequencing:
         # Should NOT have incremented when checkpointing is disabled
         assert orchestrator._sequence_number == 0
 
-    def test_sequence_number_not_incremented_without_manager(
-        self, landscape_db: LandscapeDB
-    ) -> None:
+    def test_sequence_number_not_incremented_without_manager(self, landscape_db: LandscapeDB) -> None:
         """Lines 149-150: sequence_number should NOT increment without manager."""
         from elspeth.core.config import CheckpointSettings
 

@@ -738,7 +738,11 @@ class TestCoalesceExecutorQuorum:
             coalesce_state = coalesce_states[0]
 
             # Verify node state indicates failure
-            assert coalesce_state.status == "failed", f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+            from elspeth.contracts import NodeStateStatus as _NodeStateStatus
+
+            assert coalesce_state.status == _NodeStateStatus.FAILED, (
+                f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+            )
 
             # Verify error_json explains the failure (type narrow to NodeStateFailed)
             from elspeth.contracts import NodeStateFailed

@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -41,7 +42,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -78,7 +79,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -124,7 +125,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -143,7 +144,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -185,7 +186,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -204,7 +205,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -246,7 +247,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -265,7 +266,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -313,7 +314,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -332,7 +333,7 @@ class TestTransformErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -432,7 +433,7 @@ class TestValidationErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -474,7 +475,7 @@ class TestValidationErrorsForeignKeys:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from elspeth.contracts import NodeType, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -26,7 +27,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -35,7 +36,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -44,7 +45,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="seeded_sampler",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             determinism=Determinism.SEEDED,  # seeded counts as reproducible
@@ -53,7 +54,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -79,7 +80,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -88,7 +89,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_classifier",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             determinism=Determinism.EXTERNAL_CALL,  # LLM call
@@ -97,7 +98,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -123,7 +124,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -132,14 +133,14 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        completed_run = recorder.finalize_run(run.run_id, status="completed")
+        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
 
         assert completed_run.status == RunStatus.COMPLETED
         assert completed_run.completed_at is not None
@@ -163,7 +164,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.EXTERNAL_CALL,
@@ -171,7 +172,7 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize with REPLAY_REPRODUCIBLE grade
-        completed_run = recorder.finalize_run(run.run_id, status="completed")
+        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         assert completed_run.reproducibility_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value
 
         # Simulate purge - grade should degrade
@@ -200,7 +201,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
@@ -208,7 +209,7 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize with FULL_REPRODUCIBLE grade
-        completed_run = recorder.finalize_run(run.run_id, status="completed")
+        completed_run = recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         assert completed_run.reproducibility_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
 
         # Simulate purge - grade should NOT degrade
@@ -263,7 +264,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             determinism=Determinism.EXTERNAL_CALL,
@@ -271,7 +272,7 @@ class TestReproducibilityGradeComputation:
         )
 
         # Finalize and degrade to ATTRIBUTABLE_ONLY
-        recorder.finalize_run(run.run_id, status="completed")
+        recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
         update_grade_after_purge(db, run.run_id)
 
         # Verify it's ATTRIBUTABLE_ONLY
@@ -300,7 +301,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -309,7 +310,7 @@ class TestReproducibilityGradeComputation:
         recorder.register_node(
             run_id=run.run_id,
             plugin_name="field_mapper",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

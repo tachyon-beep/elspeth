@@ -13,6 +13,7 @@ because the processor uses isinstance() for type-safe plugin detection.
 
 from typing import Any
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.types import NodeID
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -62,7 +63,7 @@ class TestProcessorBatchTransforms:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -70,7 +71,7 @@ class TestProcessorBatchTransforms:
         sum_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -154,7 +155,7 @@ class TestProcessorBatchTransforms:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -162,7 +163,7 @@ class TestProcessorBatchTransforms:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="double",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -230,7 +231,7 @@ class TestProcessorBatchTransforms:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -238,7 +239,7 @@ class TestProcessorBatchTransforms:
         sum_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="sum",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -363,7 +364,7 @@ class TestProcessorDeaggregation:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -371,7 +372,7 @@ class TestProcessorDeaggregation:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="expander",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -442,7 +443,7 @@ class TestProcessorDeaggregation:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -450,7 +451,7 @@ class TestProcessorDeaggregation:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="bad",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

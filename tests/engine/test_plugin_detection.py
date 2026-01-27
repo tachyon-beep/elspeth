@@ -10,7 +10,7 @@ Aggregation is now handled by batch-aware transforms (is_batch_aware=True).
 
 from typing import Any
 
-from elspeth.contracts import NodeID
+from elspeth.contracts import NodeID, NodeType
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -133,7 +133,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -191,7 +191,7 @@ class TestProcessorRejectsDuckTypedPlugins:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),

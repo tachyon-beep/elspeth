@@ -288,17 +288,17 @@ allow_hits:
   reason: 'UI display fallback: generating human-readable description for classes without ''name'' attr'
   safety: Falls back to class __name__ for display - no control flow or audit impact
   expires: null
-- key: cli.py:R1:_execute_pipeline:_format_run_completed:line=545
+- key: cli.py:R1:_execute_pipeline:_format_run_completed:line=571
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=757
+- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=783
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:_execute_resume_with_instances:_format_run_completed:line=1182
+- key: cli.py:R1:_execute_resume_with_instances:_format_run_completed:line=1208
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
@@ -344,27 +344,27 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
   safety: Graceful default to '<unknown>' - error message still produced with field and message
   expires: null
-- key: cli.py:R1:health:line=1546
+- key: cli.py:R1:health:line=1572
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1558
+- key: cli.py:R4:health:line=1584
   owner: architecture
   reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1574
+- key: cli.py:R1:health:line=1600
   owner: architecture
   reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1586
+- key: cli.py:R4:health:line=1612
   owner: architecture
   reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
   safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1650
+- key: cli.py:R4:health:line=1676
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy

@@ -2332,7 +2332,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
         )
         assert settings_live.run_mode == RunMode.LIVE
 
@@ -2341,7 +2341,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="replay",
+            run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
         assert settings_replay.run_mode == RunMode.REPLAY
@@ -2351,13 +2351,14 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="verify",
+            run_mode=RunMode.VERIFY,
             replay_from="run-abc123",
         )
         assert settings_verify.run_mode == RunMode.VERIFY
 
     def test_replay_mode_requires_source_run_id(self) -> None:
         """Replay mode requires replay_from."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -2365,7 +2366,7 @@ class TestRunModeSettings:
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
                 default_sink="output",
-                run_mode="replay",
+                run_mode=RunMode.REPLAY,
                 # Missing replay_from
             )
 
@@ -2374,6 +2375,7 @@ class TestRunModeSettings:
 
     def test_verify_mode_requires_source_run_id(self) -> None:
         """Verify mode requires replay_from."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings
 
         with pytest.raises(ValidationError) as exc_info:
@@ -2381,7 +2383,7 @@ class TestRunModeSettings:
                 source={"plugin": "csv"},
                 sinks={"output": {"plugin": "csv"}},
                 default_sink="output",
-                run_mode="verify",
+                run_mode=RunMode.VERIFY,
                 # Missing replay_from
             )
 
@@ -2398,7 +2400,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
             # No replay_from
         )
 
@@ -2415,7 +2417,7 @@ class TestRunModeSettings:
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="live",
+            run_mode=RunMode.LIVE,
             replay_from="run-abc123",  # Provided but not required
         )
 
@@ -2449,13 +2451,14 @@ class TestRunModeSettings:
 
     def test_resolve_config_includes_run_mode(self) -> None:
         """resolve_config includes run_mode settings."""
+        from elspeth.contracts.enums import RunMode
         from elspeth.core.config import ElspethSettings, resolve_config
 
         settings = ElspethSettings(
             source={"plugin": "csv"},
             sinks={"output": {"plugin": "csv"}},
             default_sink="output",
-            run_mode="replay",
+            run_mode=RunMode.REPLAY,
             replay_from="run-abc123",
         )
 

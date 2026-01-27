@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from elspeth.contracts import RunStatus
+from elspeth.contracts import NodeStateStatus, NodeType, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -73,7 +73,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -114,7 +114,7 @@ class TestExplainFunction:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -123,7 +123,7 @@ class TestExplainFunction:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="llm_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={"model": "gpt-4"},
             schema_config=DYNAMIC_SCHEMA,
@@ -161,7 +161,7 @@ class TestExplainFunction:
         # Complete node state
         recorder.complete_node_state(
             state_id=node_state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"output": "positive"},
             duration_ms=50.0,
         )
@@ -227,7 +227,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -285,7 +285,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -344,7 +344,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -386,7 +386,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -426,7 +426,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -436,7 +436,7 @@ class TestExplainFunction:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_aggregation",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -484,7 +484,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -539,7 +539,7 @@ class TestExplainFunction:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

@@ -24,13 +24,14 @@ class TestTransformErrorRecording:
         Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
         FK constraints require token and node to exist before error recording.
         """
+        from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
 
         # Create source node
         recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -63,7 +64,7 @@ class TestTransformErrorRecording:
         recorder.register_node(
             run_id=run_id,
             plugin_name="test_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
@@ -222,7 +223,7 @@ class TestExportStatusEnumCoercion:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
-        recorder.set_export_status(run.run_id, "completed")
+        recorder.set_export_status(run.run_id, ExportStatus.COMPLETED)
 
         loaded = recorder.get_run(run.run_id)
 
@@ -252,8 +253,13 @@ class TestExportStatusEnumCoercion:
             f"export_status should be ExportStatus enum, got {type(runs[0].export_status).__name__}"
         )
 
-    def test_set_export_status_validates_status_string(self) -> None:
-        """set_export_status() rejects invalid status strings."""
+    def test_set_export_status_rejects_non_enum(self) -> None:
+        """set_export_status() requires ExportStatus enum, not string.
+
+        Strings passed where ExportStatus is expected will raise AttributeError
+        because strings don't have .value attribute. This is the correct behavior
+        per the strict enum enforcement policy.
+        """
         import pytest
 
         from elspeth.core.landscape.database import LandscapeDB
@@ -264,11 +270,13 @@ class TestExportStatusEnumCoercion:
 
         run = recorder.begin_run(config={}, canonical_version="v1")
 
-        with pytest.raises(ValueError, match="invalid_status"):
-            recorder.set_export_status(run.run_id, "invalid_status")
+        # Passing string instead of ExportStatus enum raises AttributeError
+        with pytest.raises(AttributeError, match="'str' object has no attribute 'value'"):
+            recorder.set_export_status(run.run_id, "invalid_status")  # type: ignore[arg-type]
 
     def test_set_export_status_clears_stale_error_on_completed(self) -> None:
         """Transitioning from failed to completed clears export_error."""
+        from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -278,19 +286,20 @@ class TestExportStatusEnumCoercion:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # First fail with an error
-        recorder.set_export_status(run.run_id, "failed", error="export failed")
+        recorder.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
         r1 = recorder.get_run(run.run_id)
         assert r1 is not None
         assert r1.export_error == "export failed"
 
         # Now complete - error should be cleared
-        recorder.set_export_status(run.run_id, "completed")
+        recorder.set_export_status(run.run_id, ExportStatus.COMPLETED)
         r2 = recorder.get_run(run.run_id)
         assert r2 is not None
         assert r2.export_error is None, f"export_error should be cleared on completed, got {r2.export_error!r}"
 
     def test_set_export_status_clears_stale_error_on_pending(self) -> None:
         """Transitioning from failed to pending clears export_error."""
+        from elspeth.contracts import ExportStatus
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -300,10 +309,10 @@ class TestExportStatusEnumCoercion:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # First fail with an error
-        recorder.set_export_status(run.run_id, "failed", error="export failed")
+        recorder.set_export_status(run.run_id, ExportStatus.FAILED, error="export failed")
 
         # Now set to pending - error should be cleared
-        recorder.set_export_status(run.run_id, "pending")
+        recorder.set_export_status(run.run_id, ExportStatus.PENDING)
         r = recorder.get_run(run.run_id)
         assert r is not None
         assert r.export_error is None

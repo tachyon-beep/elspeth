@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.enums import Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
@@ -128,7 +129,6 @@ class TestAggregationExecutorRestore:
 
     def test_restore_batch_sets_current_batch(self, real_landscape_db) -> None:
         """restore_batch() makes batch the current batch for its node."""
-        from elspeth.contracts.enums import Determinism, NodeType
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
         from elspeth.engine.spans import SpanFactory
@@ -225,7 +225,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="buffer_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -280,7 +280,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="buffer_flush_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -340,7 +340,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="token_track_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -397,7 +397,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="batch_create_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -459,7 +459,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="trigger_update_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -530,7 +530,7 @@ class TestAggregationExecutorBuffering:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="flush_returns_tokens_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -608,7 +608,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="checkpoint_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -699,7 +699,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="empty_buffer_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -736,7 +736,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="restore_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -818,7 +818,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="trigger_restore_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -880,7 +880,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="roundtrip_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -963,7 +963,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="flush_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1075,7 +1075,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="mismatch_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1136,7 +1136,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="size_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1209,7 +1209,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="limit_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1266,7 +1266,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="solution_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1325,7 +1325,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="under_1mb_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1396,7 +1396,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="between_thresholds_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1464,7 +1464,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="empty_state_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1506,7 +1506,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="missing_tokens_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1553,7 +1553,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="invalid_tokens_type_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1599,7 +1599,7 @@ class TestAggregationExecutorCheckpoint:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="missing_token_fields_test",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

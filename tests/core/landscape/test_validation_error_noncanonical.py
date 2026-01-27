@@ -10,6 +10,7 @@ must be quarantined and recorded even when malformed.
 
 import pytest
 
+from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -33,7 +34,7 @@ def recorder() -> LandscapeRecorder:
     rec.register_node(
         run_id="test-run",
         plugin_name="test_source",
-        node_type="source",
+        node_type=NodeType.SOURCE,
         plugin_version="1.0",
         config={},
         schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),

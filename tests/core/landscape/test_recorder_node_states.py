@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from elspeth.contracts import NodeStateStatus, NodeType
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
@@ -22,7 +23,7 @@ class TestLandscapeRecorderNodeStates:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -64,7 +65,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -94,7 +95,7 @@ class TestLandscapeRecorderNodeStates:
 
         completed = recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data=output_data,
             duration_ms=10.5,
         )
@@ -117,7 +118,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -139,7 +140,7 @@ class TestLandscapeRecorderNodeStates:
 
         completed = recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"x": 1, "y": 2},
             duration_ms=10.5,
         )
@@ -160,7 +161,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -182,7 +183,7 @@ class TestLandscapeRecorderNodeStates:
 
         completed = recorder.complete_node_state(
             state_id=state.state_id,
-            status="failed",
+            status=NodeStateStatus.FAILED,
             error={"message": "Validation failed", "code": "E001"},
             duration_ms=5.0,
         )
@@ -206,7 +207,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -229,7 +230,7 @@ class TestLandscapeRecorderNodeStates:
         # Empty output_data={} should succeed, not crash
         completed = recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={},  # Empty dict is valid output
             duration_ms=1.0,
         )
@@ -252,7 +253,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -275,7 +276,7 @@ class TestLandscapeRecorderNodeStates:
         # Empty error={} should be serialized, not dropped
         completed = recorder.complete_node_state(
             state_id=state.state_id,
-            status="failed",
+            status=NodeStateStatus.FAILED,
             error={},  # Empty dict error
             duration_ms=1.0,
         )
@@ -298,7 +299,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -325,6 +326,7 @@ class TestLandscapeRecorderNodeStates:
         assert state.context_before_json == "{}"  # Empty dict serializes to "{}"
 
     def test_retry_increments_attempt(self) -> None:
+        from elspeth.contracts import NodeStateStatus
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -334,7 +336,7 @@ class TestLandscapeRecorderNodeStates:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -356,7 +358,7 @@ class TestLandscapeRecorderNodeStates:
             input_data={},
             attempt=0,
         )
-        recorder.complete_node_state(state1.state_id, status="failed", error={}, duration_ms=1.0)
+        recorder.complete_node_state(state1.state_id, status=NodeStateStatus.FAILED, error={}, duration_ms=1.0)
 
         # Second attempt
         state2 = recorder.begin_node_state(
@@ -398,7 +400,7 @@ class TestNodeStateIntegrityValidation:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -421,7 +423,7 @@ class TestNodeStateIntegrityValidation:
         )
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"result": "ok"},
             duration_ms=10.0,
         )
@@ -461,7 +463,7 @@ class TestNodeStateIntegrityValidation:
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -484,7 +486,7 @@ class TestNodeStateIntegrityValidation:
         )
         recorder.complete_node_state(
             state_id=state.state_id,
-            status="failed",
+            status=NodeStateStatus.FAILED,
             error={"message": "Something went wrong"},
             duration_ms=5.0,
         )
@@ -532,7 +534,7 @@ class TestNodeStateOrderingWithRetries:
         node1 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform_1",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -540,7 +542,7 @@ class TestNodeStateOrderingWithRetries:
         node2 = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform_2",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -565,7 +567,7 @@ class TestNodeStateOrderingWithRetries:
         )
         recorder.complete_node_state(
             state_id=state_0_attempt_1.state_id,
-            status="failed",
+            status=NodeStateStatus.FAILED,
             error={"message": "First failure"},
             duration_ms=10.0,
         )
@@ -580,7 +582,7 @@ class TestNodeStateOrderingWithRetries:
         )
         recorder.complete_node_state(
             state_id=state_0_attempt_0.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"result": "ok"},
             duration_ms=5.0,
         )
@@ -596,7 +598,7 @@ class TestNodeStateOrderingWithRetries:
         )
         recorder.complete_node_state(
             state_id=state_1_attempt_0.state_id,
-            status="completed",
+            status=NodeStateStatus.COMPLETED,
             output_data={"result": "ok2"},
             duration_ms=3.0,
         )

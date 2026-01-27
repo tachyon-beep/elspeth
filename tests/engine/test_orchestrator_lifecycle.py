@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, NodeID, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, SinkName, SourceRow
 from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -101,9 +101,9 @@ class TestLifecycleHooks:
         # Minimal graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="csv", config=schema_config)
-        graph.add_node("transform", node_type="transform", plugin_name="tracked", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -185,9 +185,9 @@ class TestLifecycleHooks:
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="csv", config=schema_config)
-        graph.add_node("transform", node_type="transform", plugin_name="tracked", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -267,9 +267,9 @@ class TestLifecycleHooks:
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="failing", config=schema_config)
-        graph.add_node("transform", node_type="transform", plugin_name="failing", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="failing", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}
@@ -340,8 +340,8 @@ class TestSourceLifecycleHooks:
         # Minimal graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="tracked_source", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="csv", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="tracked_source", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}  # type: ignore[assignment]
         graph._sink_id_map = {SinkName("output"): NodeID("sink")}
@@ -415,8 +415,8 @@ class TestSinkLifecycleHooks:
         # Minimal graph
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="csv", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="tracked_sink", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {}  # type: ignore[assignment]
         graph._sink_id_map = {SinkName("output"): NodeID("sink")}
@@ -504,9 +504,9 @@ class TestSinkLifecycleHooks:
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="csv", config=schema_config)
-        graph.add_node("transform", node_type="transform", plugin_name="failing", config=schema_config)
-        graph.add_node("sink", node_type="sink", plugin_name="tracked_sink", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)
         graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform", "sink", label="continue", mode=RoutingMode.MOVE)
         graph._transform_id_map = {0: NodeID("transform")}

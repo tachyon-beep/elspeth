@@ -9,7 +9,7 @@ GateSettings.
 
 from typing import Any
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeType, RoutingMode
 from elspeth.contracts.types import GateName, NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
@@ -34,7 +34,7 @@ class TestRowProcessorGates:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -42,7 +42,7 @@ class TestRowProcessorGates:
         transform = recorder.register_node(
             run_id=run.run_id,
             plugin_name="final",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -50,7 +50,7 @@ class TestRowProcessorGates:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="pass_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -126,7 +126,7 @@ class TestRowProcessorGates:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -134,7 +134,7 @@ class TestRowProcessorGates:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="router",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -142,7 +142,7 @@ class TestRowProcessorGates:
         sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="high_values",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -210,7 +210,7 @@ class TestRowProcessorGates:
         source = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -218,7 +218,7 @@ class TestRowProcessorGates:
         gate = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -226,7 +226,7 @@ class TestRowProcessorGates:
         path_a = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -234,7 +234,7 @@ class TestRowProcessorGates:
         path_b = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -352,7 +352,7 @@ class TestRowProcessorNestedForks:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -360,7 +360,7 @@ class TestRowProcessorNestedForks:
         transform_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="marker",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -368,7 +368,7 @@ class TestRowProcessorNestedForks:
         gate1_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="fork_gate_1",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -376,7 +376,7 @@ class TestRowProcessorNestedForks:
         gate2_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="fork_gate_2",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

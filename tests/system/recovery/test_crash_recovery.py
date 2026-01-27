@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import Determinism, PluginSchema, RoutingMode, RunStatus, SourceRow
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RunStatus, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -84,14 +84,14 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     graph = ExecutionGraph()
 
     schema_config = {"schema": {"fields": "dynamic"}}
-    graph.add_node("source", node_type="source", plugin_name=config.source.name, config=schema_config)
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
 
     transform_ids: dict[int, NodeID] = {}
     prev = "source"
     for i, t in enumerate(config.transforms):
         node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
-        graph.add_node(node_id, node_type="transform", plugin_name=t.name, config=schema_config)
+        graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name=t.name, config=schema_config)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
@@ -99,7 +99,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     for sink_name, sink in config.sinks.items():
         node_id = NodeID(f"sink_{sink_name}")
         sink_ids[SinkName(sink_name)] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name, config=schema_config)
+        graph.add_node(node_id, node_type=NodeType.SINK, plugin_name=sink.name, config=schema_config)
 
     if SinkName("default") in sink_ids:
         graph.add_edge(prev, sink_ids[SinkName("default")], label="continue", mode=RoutingMode.MOVE)
@@ -267,7 +267,7 @@ class TestResumeIdempotence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="list_source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             node_id="source",
@@ -277,7 +277,7 @@ class TestResumeIdempotence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="doubler",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             node_id="transform_0",
@@ -287,7 +287,7 @@ class TestResumeIdempotence:
         recorder.register_node(
             run_id=run_id,
             plugin_name="collect_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             node_id="sink_default",
@@ -328,9 +328,9 @@ class TestResumeIdempotence:
         # Build graph for checkpoint
         graph_b = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph_b.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
-        graph_b.add_node("transform_0", node_type="transform", plugin_name="doubler", config=schema_config)
-        graph_b.add_node("sink_default", node_type="sink", plugin_name="collect_sink", config=schema_config)
+        graph_b.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
+        graph_b.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="doubler", config=schema_config)
+        graph_b.add_node("sink_default", node_type=NodeType.SINK, plugin_name="collect_sink", config=schema_config)
         graph_b.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph_b.add_edge("transform_0", "sink_default", label="continue", mode=RoutingMode.MOVE)
         graph_b._sink_id_map = {SinkName("default"): NodeID("sink_default")}
@@ -561,8 +561,8 @@ class TestCheckpointRecovery:
         """Create a minimal mock graph for checkpoint recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
-        graph.add_node("transform", node_type="transform", plugin_name="test", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test", config=schema_config)
         return graph
 
     def test_checkpoint_preserves_partial_progress(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -600,7 +600,7 @@ class TestCheckpointRecovery:
                     config_hash="test",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
 
@@ -610,9 +610,9 @@ class TestCheckpointRecovery:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -625,9 +625,9 @@ class TestCheckpointRecovery:
                     node_id="transform",
                     run_id=run_id,
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -719,7 +719,7 @@ class TestCheckpointRecovery:
                     config_hash="test",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
-                    status="failed",
+                    status=RunStatus.FAILED,
                 )
             )
 
@@ -729,9 +729,9 @@ class TestCheckpointRecovery:
                     node_id="source",
                     run_id=run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -744,9 +744,9 @@ class TestCheckpointRecovery:
                     node_id="transform",
                     run_id=run_id,
                     plugin_name="test_transform",
-                    node_type="transform",
+                    node_type=NodeType.TRANSFORM,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -846,8 +846,8 @@ class TestAggregationRecovery:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="test", config=schema_config)
-        graph.add_node("aggregator", node_type="aggregation", plugin_name="sum_agg", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
+        graph.add_node("aggregator", node_type=NodeType.AGGREGATION, plugin_name="sum_agg", config=schema_config)
         return graph
 
     def test_aggregation_state_recovers(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -885,9 +885,9 @@ class TestAggregationRecovery:
                     node_id="source",
                     run_id=run.run_id,
                     plugin_name="test_source",
-                    node_type="source",
+                    node_type=NodeType.SOURCE,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,
@@ -898,9 +898,9 @@ class TestAggregationRecovery:
                     node_id="aggregator",
                     run_id=run.run_id,
                     plugin_name="sum_agg",
-                    node_type="aggregation",
+                    node_type=NodeType.AGGREGATION,
                     plugin_version="1.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="test",
                     config_json="{}",
                     registered_at=now,

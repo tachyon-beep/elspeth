@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import GateName, NodeID, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import GateName, NodeID, NodeType, RoutingMode, SinkName, SourceRow
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSinkBase,
@@ -463,11 +463,11 @@ class TestOrchestratorCheckpointing:
         # Build graph with routing
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("source", node_type="source", plugin_name="list_source", config=schema_config)
-        graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config=schema_config)
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
+        graph.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node(
             "config_gate_split",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_name="config_gate:split",
             config={
                 "schema": schema_config["schema"],
@@ -475,8 +475,8 @@ class TestOrchestratorCheckpointing:
                 "routes": dict(gate_config.routes),
             },
         )
-        graph.add_node("sink_good", node_type="sink", plugin_name="good_sink", config=schema_config)
-        graph.add_node("sink_bad", node_type="sink", plugin_name="bad_sink", config=schema_config)
+        graph.add_node("sink_good", node_type=NodeType.SINK, plugin_name="good_sink", config=schema_config)
+        graph.add_node("sink_bad", node_type=NodeType.SINK, plugin_name="bad_sink", config=schema_config)
 
         graph.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform_0", "config_gate_split", label="continue", mode=RoutingMode.MOVE)

@@ -12,6 +12,7 @@ Extracted from test_processor.py to improve test organization.
 
 from typing import Any
 
+from elspeth.contracts.enums import NodeType
 from elspeth.contracts.types import NodeID
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
@@ -61,7 +62,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -69,7 +70,7 @@ class TestProcessorPassthroughMode:
         enricher_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="passthrough_enricher",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -181,7 +182,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -189,7 +190,7 @@ class TestProcessorPassthroughMode:
         bad_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="bad_passthrough",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -280,7 +281,7 @@ class TestProcessorPassthroughMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -288,7 +289,7 @@ class TestProcessorPassthroughMode:
         enricher_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="enricher",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -296,7 +297,7 @@ class TestProcessorPassthroughMode:
         double_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="double",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -403,7 +404,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -411,7 +412,7 @@ class TestProcessorTransformMode:
         splitter_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -524,7 +525,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -532,7 +533,7 @@ class TestProcessorTransformMode:
         agg_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="aggregator",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -646,7 +647,7 @@ class TestProcessorTransformMode:
         source_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="source",
-            node_type="source",
+            node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -654,7 +655,7 @@ class TestProcessorTransformMode:
         splitter_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="aggregation",
+            node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -662,7 +663,7 @@ class TestProcessorTransformMode:
         doubler_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="doubler",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

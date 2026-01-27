@@ -6,6 +6,7 @@ import pytest
 
 from elspeth.contracts import NodeID, RoutingMode
 from elspeth.contracts.audit import NodeStateFailed
+from elspeth.contracts.enums import NodeStateStatus, NodeType
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_gate
 
@@ -32,7 +33,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="pass_through",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -41,7 +42,7 @@ class TestGateExecutor:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="output",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -106,13 +107,13 @@ class TestGateExecutor:
         # Verify node state recorded as completed
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
-        assert states[0].status == "completed"
+        assert states[0].status == NodeStateStatus.COMPLETED
 
         # Verify routing event recorded for continue (AUD-002)
         events = recorder.get_routing_events(states[0].state_id)
         assert len(events) == 1
         assert events[0].edge_id == continue_edge.edge_id
-        assert events[0].mode == "move"
+        assert events[0].mode == RoutingMode.MOVE
 
     def test_execute_gate_route(self) -> None:
         """Gate routes to sink via route label - routing event recorded."""
@@ -131,7 +132,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="threshold_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={"threshold": 100},
             schema_config=DYNAMIC_SCHEMA,
@@ -139,7 +140,7 @@ class TestGateExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="high_values",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -208,13 +209,13 @@ class TestGateExecutor:
         # Verify node state recorded as completed (terminal state derived from events)
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
-        assert states[0].status == "completed"
+        assert states[0].status == NodeStateStatus.COMPLETED
 
         # Verify routing event recorded
         events = recorder.get_routing_events(states[0].state_id)
         assert len(events) == 1
         assert events[0].edge_id == edge.edge_id
-        assert events[0].mode == "move"
+        assert events[0].mode == RoutingMode.MOVE
 
     def test_missing_edge_raises_error(self) -> None:
         """Gate routing to unregistered route label raises MissingEdgeError."""
@@ -231,7 +232,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="broken_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -299,7 +300,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -307,7 +308,7 @@ class TestGateExecutor:
         path_a_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -315,7 +316,7 @@ class TestGateExecutor:
         path_b_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -423,7 +424,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="splitter",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -431,7 +432,7 @@ class TestGateExecutor:
         path_a_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -439,7 +440,7 @@ class TestGateExecutor:
         path_b_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -520,7 +521,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="exploding_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -563,7 +564,7 @@ class TestGateExecutor:
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
         state = states[0]
-        assert state.status == "failed"
+        assert state.status == NodeStateStatus.FAILED
         # NodeStateFailed has duration_ms - narrow type before accessing
         assert isinstance(state, NodeStateFailed)
         assert state.duration_ms is not None
@@ -583,7 +584,7 @@ class TestGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="api_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -592,7 +593,7 @@ class TestGateExecutor:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="output",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -680,7 +681,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="quality_check",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -689,7 +690,7 @@ class TestConfigGateExecutor:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="next_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -751,7 +752,7 @@ class TestConfigGateExecutor:
         # Verify node state recorded as completed
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
-        assert states[0].status == "completed"
+        assert states[0].status == NodeStateStatus.COMPLETED
 
         # Verify routing event recorded for continue (AUD-002)
         events = recorder.get_routing_events(states[0].state_id)
@@ -774,7 +775,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="quality_check",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -782,7 +783,7 @@ class TestConfigGateExecutor:
         sink_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="review_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -856,7 +857,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="priority_router",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -864,7 +865,7 @@ class TestConfigGateExecutor:
         high_sink = recorder.register_node(
             run_id=run.run_id,
             plugin_name="high_priority_sink",
-            node_type="sink",
+            node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -931,7 +932,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="parallel_analysis",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -939,7 +940,7 @@ class TestConfigGateExecutor:
         path_a = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_a",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -947,7 +948,7 @@ class TestConfigGateExecutor:
         path_b = recorder.register_node(
             run_id=run.run_id,
             plugin_name="path_b",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1036,7 +1037,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="fork_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1092,7 +1093,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="broken_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1134,7 +1135,7 @@ class TestConfigGateExecutor:
         # Verify failure was recorded
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
-        assert states[0].status == "failed"
+        assert states[0].status == NodeStateStatus.FAILED
 
     def test_execute_config_gate_expression_error_records_failure(self) -> None:
         """Config gate expression failure records audit state."""
@@ -1152,7 +1153,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="error_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1194,7 +1195,7 @@ class TestConfigGateExecutor:
         # Verify failure was recorded
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
-        assert states[0].status == "failed"
+        assert states[0].status == NodeStateStatus.FAILED
 
     def test_execute_config_gate_missing_edge_raises_error(self) -> None:
         """Config gate routing to unregistered edge raises MissingEdgeError."""
@@ -1212,7 +1213,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="routing_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1270,7 +1271,7 @@ class TestConfigGateExecutor:
         gate_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="audit_gate",
-            node_type="gate",
+            node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -1279,7 +1280,7 @@ class TestConfigGateExecutor:
         next_node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="next_transform",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,

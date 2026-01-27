@@ -70,7 +70,7 @@ class TestRunRepository:
             config_hash="abc123",
             settings_json="{}",
             canonical_version="1.0.0",
-            status="running",  # String from DB
+            status=RunStatus.RUNNING,
         )
 
         repo = RunRepository(session=None)
@@ -104,8 +104,8 @@ class TestRunRepository:
             config_hash="abc123",
             settings_json="{}",
             canonical_version="1.0.0",
-            status="completed",
-            export_status="completed",  # String from DB
+            status=RunStatus.COMPLETED,
+            export_status=ExportStatus.COMPLETED,
         )
 
         repo = RunRepository(session=None)
@@ -139,7 +139,7 @@ class TestRunRepository:
             config_hash="abc123",
             settings_json="{}",
             canonical_version="1.0.0",
-            status="running",
+            status=RunStatus.RUNNING,
             export_status=None,  # NULL in DB
         )
 
@@ -178,7 +178,7 @@ class TestRunRepository:
 
         repo = RunRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'invalid_garbage' is not a valid RunStatus"):
             repo.load(db_row)
 
 
@@ -208,9 +208,9 @@ class TestNodeRepository:
             node_id="node-123",
             run_id="run-456",
             plugin_name="csv_source",
-            node_type="source",  # String from DB
+            node_type=NodeType.SOURCE,
             plugin_version="1.0.0",
-            determinism="io_read",  # String from DB
+            determinism=Determinism.IO_READ,
             config_hash="abc123",
             config_json="{}",
             registered_at=datetime.now(UTC),
@@ -249,7 +249,7 @@ class TestNodeRepository:
             plugin_name="plugin",
             node_type="invalid_type",  # Invalid!
             plugin_version="1.0.0",
-            determinism="deterministic",
+            determinism=Determinism.DETERMINISTIC,
             config_hash="abc123",
             config_json="{}",
             registered_at=datetime.now(UTC),
@@ -257,7 +257,7 @@ class TestNodeRepository:
 
         repo = NodeRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'invalid_type' is not a valid NodeType"):
             repo.load(db_row)
 
     def test_load_crashes_on_invalid_determinism(self) -> None:
@@ -283,7 +283,7 @@ class TestNodeRepository:
             node_id="node-123",
             run_id="run-456",
             plugin_name="plugin",
-            node_type="transform",
+            node_type=NodeType.TRANSFORM,
             plugin_version="1.0.0",
             determinism="maybe_deterministic",  # Invalid!
             config_hash="abc123",
@@ -293,7 +293,7 @@ class TestNodeRepository:
 
         repo = NodeRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'maybe_deterministic' is not a valid Determinism"):
             repo.load(db_row)
 
 
@@ -319,7 +319,7 @@ class TestEdgeRepository:
             from_node_id="node-1",
             to_node_id="node-2",
             label="continue",
-            default_mode="move",  # String from DB
+            default_mode=RoutingMode.MOVE,
             created_at=datetime.now(UTC),
         )
 
@@ -354,7 +354,7 @@ class TestEdgeRepository:
 
         repo = EdgeRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'teleport' is not a valid RoutingMode"):
             repo.load(db_row)
 
 
@@ -478,8 +478,8 @@ class TestCallRepository:
             call_id="call-123",
             state_id="state-456",
             call_index=0,
-            call_type="llm",  # String from DB
-            status="success",  # String from DB
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
             request_hash="abc123",
             created_at=datetime.now(UTC),
             latency_ms=150.5,
@@ -516,14 +516,14 @@ class TestCallRepository:
             state_id="state-456",
             call_index=0,
             call_type="invalid_call_type",  # Invalid!
-            status="success",
+            status=CallStatus.SUCCESS,
             request_hash="abc123",
             created_at=datetime.now(UTC),
         )
 
         repo = CallRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'invalid_call_type' is not a valid CallType"):
             repo.load(db_row)
 
     def test_load_crashes_on_invalid_status(self) -> None:
@@ -548,7 +548,7 @@ class TestCallRepository:
             call_id="call-123",
             state_id="state-456",
             call_index=0,
-            call_type="llm",
+            call_type=CallType.LLM,
             status="invalid_status",  # Invalid!
             request_hash="abc123",
             created_at=datetime.now(UTC),
@@ -556,7 +556,7 @@ class TestCallRepository:
 
         repo = CallRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'invalid_status' is not a valid CallStatus"):
             repo.load(db_row)
 
 
@@ -584,7 +584,7 @@ class TestRoutingEventRepository:
             edge_id="edge-789",
             routing_group_id="group-1",
             ordinal=0,
-            mode="move",  # String from DB
+            mode=RoutingMode.MOVE,
             created_at=datetime.now(UTC),
         )
 
@@ -621,7 +621,7 @@ class TestRoutingEventRepository:
 
         repo = RoutingEventRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'teleport' is not a valid RoutingMode"):
             repo.load(db_row)
 
 
@@ -649,7 +649,7 @@ class TestBatchRepository:
             run_id="run-456",
             aggregation_node_id="node-1",
             attempt=1,
-            status="executing",  # String from DB
+            status=BatchStatus.EXECUTING,
             created_at=datetime.now(UTC),
         )
 
@@ -686,5 +686,5 @@ class TestBatchRepository:
 
         repo = BatchRepository(session=None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="'invalid_status' is not a valid BatchStatus"):
             repo.load(db_row)
