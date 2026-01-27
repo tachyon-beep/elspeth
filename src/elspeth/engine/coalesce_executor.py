@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import TokenInfo
-from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.spans import SpanFactory
@@ -203,7 +203,7 @@ class CoalesceExecutor:
             )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
-                status="failed",
+                status=NodeStateStatus.FAILED,
                 error={"failure_reason": "late_arrival_after_merge"},
                 duration_ms=0,
             )
@@ -316,7 +316,7 @@ class CoalesceExecutor:
             # Complete it now that merge is happening
             self._recorder.complete_node_state(
                 state_id=state_id,
-                status="completed",
+                status=NodeStateStatus.COMPLETED,
                 output_data={"merged_into": merged_token.token_id},
                 duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
             )
@@ -533,7 +533,7 @@ class CoalesceExecutor:
                         # Complete it now with failure status
                         self._recorder.complete_node_state(
                             state_id=state_id,
-                            status="failed",
+                            status=NodeStateStatus.FAILED,
                             error={"failure_reason": "quorum_not_met"},
                             duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                         )
@@ -583,7 +583,7 @@ class CoalesceExecutor:
                     # Complete it now with failure status
                     self._recorder.complete_node_state(
                         state_id=state_id,
-                        status="failed",
+                        status=NodeStateStatus.FAILED,
                         error={"failure_reason": "incomplete_branches"},
                         duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                     )

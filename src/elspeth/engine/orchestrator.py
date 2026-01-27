@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
 
-from elspeth.contracts import BatchPendingError, NodeType, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.events import (
     PhaseAction,
@@ -501,7 +501,7 @@ class Orchestrator:
                 )
 
             # Complete run
-            recorder.complete_run(run.run_id, status="completed")
+            recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
             result.status = RunStatus.COMPLETED
             run_completed = True
 
@@ -514,7 +514,7 @@ class Orchestrator:
                 export_config = settings.landscape.export
                 recorder.set_export_status(
                     run.run_id,
-                    status="pending",
+                    status=ExportStatus.PENDING,
                     export_format=export_config.format,
                     export_sink=export_config.sink,
                 )
@@ -529,13 +529,13 @@ class Orchestrator:
                         sinks=config.sinks,
                     )
 
-                    recorder.set_export_status(run.run_id, status="completed")
+                    recorder.set_export_status(run.run_id, status=ExportStatus.COMPLETED)
                     self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
                 except Exception as export_error:
                     self._events.emit(PhaseError(phase=PipelinePhase.EXPORT, error=export_error, target=export_config.sink))
                     recorder.set_export_status(
                         run.run_id,
-                        status="failed",
+                        status=ExportStatus.FAILED,
                         error=str(export_error),
                     )
                     # Re-raise so caller knows export failed
@@ -586,7 +586,7 @@ class Orchestrator:
                 )
             else:
                 # Run failed before completion - emit FAILED status with zero metrics
-                recorder.complete_run(run.run_id, status="failed")
+                recorder.complete_run(run.run_id, status=RunStatus.FAILED)
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -1587,7 +1587,7 @@ class Orchestrator:
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
-            recorder.complete_run(run_id, status="completed")
+            recorder.complete_run(run_id, status=RunStatus.COMPLETED)
 
             # Delete checkpoints on successful completion (Bug #8 fix)
             self._delete_checkpoints(run_id)
@@ -1614,7 +1614,7 @@ class Orchestrator:
         )
 
         # 6. Complete the run
-        recorder.complete_run(run_id, status="completed")
+        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
         result.status = RunStatus.COMPLETED
 
         # 7. Delete checkpoints on successful completion
