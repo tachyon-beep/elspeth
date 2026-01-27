@@ -897,7 +897,15 @@ class RowProcessor:
 
                         if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
                             child_coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
-                            child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
+                            # Tier 1 (Our Data) - crash on missing entry with clear message
+                            try:
+                                child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
+                            except KeyError:
+                                raise ValueError(
+                                    f"Coalesce step not found for '{child_coalesce_name}'. "
+                                    f"This indicates a bug in orchestrator coalesce_step_map construction. "
+                                    f"Available coalesce steps: {list(self._coalesce_step_map.keys())}"
+                                ) from None
 
                         child_items.append(
                             _WorkItem(
@@ -1130,7 +1138,15 @@ class RowProcessor:
 
                     if cfg_branch_name and BranchName(cfg_branch_name) in self._branch_to_coalesce:
                         cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
-                        cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
+                        # Tier 1 (Our Data) - crash on missing entry with clear message
+                        try:
+                            cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
+                        except KeyError:
+                            raise ValueError(
+                                f"Coalesce step not found for '{cfg_coalesce_name}'. "
+                                f"This indicates a bug in orchestrator coalesce_step_map construction. "
+                                f"Available coalesce steps: {list(self._coalesce_step_map.keys())}"
+                            ) from None
 
                     # Children start after ALL transforms, at next config gate
                     child_items.append(
