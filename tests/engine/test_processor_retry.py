@@ -591,8 +591,10 @@ class TestNoRetryAuditCompleteness:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"on_error": "error_sink"})
+                super().__init__({})
                 self.node_id = node_id
+                # Explicitly set _on_error (normally done by config mixins)
+                self._on_error = "error_sink"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 raise LLMClientError("Rate limit exceeded", retryable=True)
@@ -606,7 +608,8 @@ class TestNoRetryAuditCompleteness:
             retry_manager=None,
         )
 
-        ctx = PluginContext(run_id=run.run_id, config={})
+        # Must pass landscape for record_transform_error to work
+        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
 
         # Process should return error result (not raise)
         results = processor.process_row(

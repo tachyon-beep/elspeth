@@ -428,9 +428,9 @@ def as_transform_result(result: Any) -> "TransformResult":
 # Use these for integration tests that validate audit trail integrity.
 
 
-@pytest.fixture
-def real_landscape_db(tmp_path):
-    """Real LandscapeDB with FK constraints enabled.
+@pytest.fixture(scope="module")
+def real_landscape_db(tmp_path_factory):
+    """Real LandscapeDB with FK constraints enabled (module-scoped).
 
     Use this for integration tests that validate:
     - FK constraints are satisfied
@@ -439,6 +439,11 @@ def real_landscape_db(tmp_path):
 
     Returns an in-memory SQLite database with all tables created
     and FK constraints ENABLED (enforced).
+
+    Module scope avoids repeated schema creation (15+ tables, indexes)
+    which takes ~5-10ms per instantiation.
+
+    Tests should use unique run_ids to isolate their data.
 
     Example:
         def test_batch_fk_constraints(real_landscape_db):

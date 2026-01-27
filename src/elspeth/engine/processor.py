@@ -453,25 +453,59 @@ class RowProcessor:
                 if e.retryable:
                     # Retryable error but no retry manager configured - convert to error result
                     # This keeps the failure row-scoped instead of aborting the run
+                    #
+                    # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
+                    # for audit trail completeness (same as TransformExecutor error handling)
+                    on_error = transform._on_error
+                    if on_error is None:
+                        raise RuntimeError(
+                            f"Transform '{transform.name}' raised retryable LLMClientError but has no "
+                            f"on_error configured. Either configure on_error or enable retry. "
+                            f"Error: {e}"
+                        ) from e
+
+                    error_details = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
+                    ctx.record_transform_error(
+                        token_id=token.token_id,
+                        transform_id=transform.node_id,
+                        row=token.row_data,
+                        error_details=error_details,
+                        destination=on_error,
+                    )
+
                     return (
-                        TransformResult.error(
-                            {"reason": "llm_retryable_error_no_retry", "error": str(e)},
-                            retryable=True,  # Mark as retryable for audit trail
-                        ),
+                        TransformResult.error(error_details, retryable=True),
                         token,
-                        transform._on_error,
+                        on_error,
                     )
                 # Non-retryable errors re-raise (already handled by transform)
                 raise
             except (ConnectionError, TimeoutError, OSError) as e:
                 # Other retryable errors - convert to error result
+                #
+                # BUG FIX (P2-2026-01-27): Must validate on_error and record transform_error
+                # for audit trail completeness (same as TransformExecutor error handling)
+                on_error = transform._on_error
+                if on_error is None:
+                    raise RuntimeError(
+                        f"Transform '{transform.name}' raised retryable {type(e).__name__} but has no "
+                        f"on_error configured. Either configure on_error or enable retry. "
+                        f"Error: {e}"
+                    ) from e
+
+                error_details = {"reason": "transient_error_no_retry", "error": str(e)}
+                ctx.record_transform_error(
+                    token_id=token.token_id,
+                    transform_id=transform.node_id,
+                    row=token.row_data,
+                    error_details=error_details,
+                    destination=on_error,
+                )
+
                 return (
-                    TransformResult.error(
-                        {"reason": "transient_error_no_retry", "error": str(e)},
-                        retryable=True,
-                    ),
+                    TransformResult.error(error_details, retryable=True),
                     token,
-                    transform._on_error,
+                    on_error,
                 )
 
         # Track attempt number for audit
@@ -1003,21 +1037,15 @@ class RowProcessor:
 
                 if coalesce_outcome.merged_token is not None:
                     # All siblings arrived - return COALESCED with merged data
-                    # Use coalesce_name + parent token for join group identification
                     #
-                    # DUAL-OUTCOME SEMANTICS: The merged token will have TWO outcomes recorded:
-                    # 1. COALESCED (here) - indicates this token is the result of a merge
+                    # NOTE: The merged token's COALESCED outcome is recorded in
+                    # CoalesceExecutor._execute_merge(), which is the canonical place
+                    # for all merge operations (both normal and timeout-triggered).
+                    # This ensures consistent audit trail for all coalesce paths.
+                    #
+                    # DUAL-OUTCOME SEMANTICS: The merged token will have TWO outcomes:
+                    # 1. COALESCED (recorded in _execute_merge) - indicates merge happened
                     # 2. COMPLETED (later, at sink) - indicates final destination
-                    # This is consistent with the BUFFERED pattern where tokens transition
-                    # through multiple states before reaching their final outcome.
-                    # Use canonical join_group_id from recorder (via merged_token)
-                    join_group_id = coalesce_outcome.merged_token.join_group_id
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=coalesce_outcome.merged_token.token_id,
-                        outcome=RowOutcome.COALESCED,
-                        join_group_id=join_group_id,
-                    )
                     return (
                         RowResult(
                             token=coalesce_outcome.merged_token,

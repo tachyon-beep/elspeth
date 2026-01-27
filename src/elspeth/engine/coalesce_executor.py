@@ -302,16 +302,12 @@ class CoalesceExecutor:
                 join_group_id=merged_token.join_group_id,
             )
 
-        # Record COALESCED outcome for the merged token itself
-        # BUG FIX (P2-2026-01-27): Previously only consumed tokens had COALESCED recorded.
-        # The merged token also needs an outcome for audit trail completeness, especially
-        # when timeout-triggered merges bypass RowProcessor's normal coalesce handling.
-        self._recorder.record_token_outcome(
-            run_id=self._run_id,
-            token_id=merged_token.token_id,
-            outcome=RowOutcome.COALESCED,
-            join_group_id=merged_token.join_group_id,
-        )
+        # NOTE: The merged token does NOT get COALESCED recorded here.
+        # - Consumed tokens: COALESCED (terminal) - they've been absorbed into the merge
+        # - Merged token: Will get COMPLETED when it reaches a sink, or COALESCED if
+        #   consumed by an outer coalesce (nested coalesce scenario)
+        # Recording COALESCED for merged token here would break nested coalesces where
+        # the inner merge result becomes a consumed token in the outer merge.
 
         # Build audit metadata
         coalesce_metadata = {
