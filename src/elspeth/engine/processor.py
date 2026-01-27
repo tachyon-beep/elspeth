@@ -1132,11 +1132,11 @@ class RowProcessor:
                         cfg_coalesce_name = self._branch_to_coalesce[BranchName(cfg_branch_name)]
                         cfg_coalesce_step = self._coalesce_step_map[cfg_coalesce_name]
 
-                    # Children start after ALL transforms, at next config gate
+                    # Children skip directly to coalesce step (or next config gate if no coalesce)
                     child_items.append(
                         _WorkItem(
                             token=child_token,
-                            start_step=len(transforms) + next_config_step,
+                            start_step=cfg_coalesce_step if cfg_coalesce_step is not None else len(transforms) + next_config_step,
                             coalesce_at_step=cfg_coalesce_step,
                             coalesce_name=cfg_coalesce_name,
                         )
