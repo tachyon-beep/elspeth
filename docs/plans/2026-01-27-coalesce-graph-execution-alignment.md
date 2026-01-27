@@ -59,6 +59,17 @@ Both paths use `start_step=next_step` instead of `start_step=coalesce_step`. Bot
 
 - `test_duplicate_fork_branches_rejected_in_plugin_gate` fails due to missing `routes` key in test fixture (unrelated to this fix)
 
+### 🟢 Line Number Update (2026-01-28)
+
+**Commit 588cec0** (`fix(audit): record COMPLETED outcomes only after sink durability`) removed ~65 lines from orchestrator.py, shifting line numbers:
+
+| Task 3 Reference | Original | Updated | Reason |
+|------------------|----------|---------|--------|
+| Main run path | 837-852 | **847-852** | +10 lines (code above shifted) |
+| Resume path | 1769-1774 | **1761-1765** | -8 lines (code removed above) |
+
+**Impact:** Line numbers only. The coalesce_step_map calculation logic is unchanged and still requires fixing.
+
 ---
 
 ## Pre-Implementation Checklist
@@ -273,8 +284,8 @@ EOF
 ## Task 3: Update Orchestrator to Use Graph's Coalesce Gate Index
 
 **Files:**
-- Modify: `src/elspeth/engine/orchestrator.py:837-852` (main run path)
-- Modify: `src/elspeth/engine/orchestrator.py:1769-1774` (resume path)
+- Modify: `src/elspeth/engine/orchestrator.py:847-852` (main run path)
+- Modify: `src/elspeth/engine/orchestrator.py:1761-1765` (resume path)
 - Test: `tests/engine/test_orchestrator_fork_coalesce.py`
 
 **IMPROVEMENT: Extract shared helper to avoid duplication**
@@ -418,7 +429,7 @@ Expected: FAIL (currently calculates step as 3, not 1)
 
 **Step 4: Update main run path in orchestrator**
 
-Replace lines 837-852 in `src/elspeth/engine/orchestrator.py` with:
+Replace lines 847-852 in `src/elspeth/engine/orchestrator.py` with:
 
 ```python
         # Compute coalesce step positions FROM GRAPH TOPOLOGY
@@ -427,7 +438,7 @@ Replace lines 837-852 in `src/elspeth/engine/orchestrator.py` with:
 
 **Step 5: Update resume path in orchestrator**
 
-Replace lines 1769-1774 in `src/elspeth/engine/orchestrator.py` with:
+Replace lines 1761-1765 in `src/elspeth/engine/orchestrator.py` with:
 
 ```python
         # Compute coalesce step positions FROM GRAPH TOPOLOGY (same as main run path)
