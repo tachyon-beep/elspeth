@@ -430,6 +430,17 @@ class TestExplainFunction:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+
+        # Create aggregation node for batch (BUFFERED requires batch_id)
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_aggregation",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=node.node_id,
@@ -438,12 +449,18 @@ class TestExplainFunction:
         )
         token = recorder.create_token(row_id=row.row_id)
 
-        # Record non-terminal outcome (BUFFERED)
+        # Create batch for BUFFERED outcome (required by contract)
+        batch = recorder.create_batch(
+            run_id=run.run_id,
+            aggregation_node_id=agg_node.node_id,
+        )
+
+        # Record non-terminal outcome (BUFFERED) with required batch_id
         recorder.record_token_outcome(
             token_id=token.token_id,
             run_id=run.run_id,
             outcome=RowOutcome.BUFFERED,
-            sink_name=None,
+            batch_id=batch.batch_id,
         )
 
         # Query should return None (row still processing)

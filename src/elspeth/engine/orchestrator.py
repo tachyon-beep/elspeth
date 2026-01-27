@@ -1033,6 +1033,15 @@ class Orchestrator:
                         elif result.outcome == RowOutcome.COALESCED:
                             # Merged token from coalesce - route to output sink
                             rows_coalesced += 1
+                            # P1 FIX: Record COMPLETED for merged token reaching sink
+                            # Consumed tokens already have COALESCED recorded by CoalesceExecutor.
+                            # The merged token's lineage is encoded in its join_group_id.
+                            recorder.record_token_outcome(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                outcome=RowOutcome.COMPLETED,
+                                sink_name=default_sink_name,
+                            )
                             pending_tokens[default_sink_name].append(result.token)
                         elif result.outcome == RowOutcome.EXPANDED:
                             # Deaggregation parent token - children counted separately
@@ -1111,6 +1120,13 @@ class Orchestrator:
                         if outcome.merged_token is not None:
                             # Successful merge - route to output sink
                             rows_coalesced += 1
+                            # P1 FIX: Record COMPLETED for merged token reaching sink
+                            recorder.record_token_outcome(
+                                run_id=run_id,
+                                token_id=outcome.merged_token.token_id,
+                                outcome=RowOutcome.COMPLETED,
+                                sink_name=default_sink_name,
+                            )
                             pending_tokens[default_sink_name].append(outcome.merged_token)
                         elif outcome.failure_reason:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
@@ -1837,6 +1853,13 @@ class Orchestrator:
                         pass
                     elif result.outcome == RowOutcome.COALESCED:
                         rows_coalesced += 1
+                        # P1 FIX: Record COMPLETED for merged token reaching sink
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=result.token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=default_sink_name,
+                        )
                         pending_tokens[default_sink_name].append(result.token)
                     elif result.outcome == RowOutcome.EXPANDED:
                         rows_expanded += 1
@@ -1886,6 +1909,13 @@ class Orchestrator:
                 for outcome in pending_outcomes:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
+                        # P1 FIX: Record COMPLETED for merged token reaching sink
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=outcome.merged_token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=default_sink_name,
+                        )
                         pending_tokens[default_sink_name].append(outcome.merged_token)
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
@@ -2040,7 +2070,7 @@ class Orchestrator:
             )
 
             # Execute flush with END_OF_SOURCE trigger
-            flush_result, buffered_tokens = processor._aggregation_executor.execute_flush(
+            flush_result, buffered_tokens, _batch_id = processor._aggregation_executor.execute_flush(
                 node_id=agg_node_id,
                 transform=agg_transform,
                 ctx=ctx,

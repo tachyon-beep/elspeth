@@ -142,6 +142,8 @@ class TestTransformProtocol:
             name = "double"
             input_schema = InputSchema
             output_schema = OutputSchema
+            routes: ClassVar[dict[str, str]] = {}
+            fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"

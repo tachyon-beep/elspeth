@@ -140,6 +140,8 @@ class BaseGate(ABC):
     name: str
     input_schema: type[PluginSchema]
     output_schema: type[PluginSchema]
+    routes: dict[str, str]
+    fork_to: list[str] | None
     node_id: str | None = None  # Set by orchestrator after registration
 
     # Metadata for Phase 3 audit/reproducibility
@@ -153,6 +155,16 @@ class BaseGate(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self.routes = {}
+        self.fork_to = None
+        if "routes" in config:
+            self.routes = dict(config["routes"])
+        if "fork_to" in config:
+            fork_to = config["fork_to"]
+            if fork_to is None:
+                self.fork_to = None
+            else:
+                self.fork_to = list(fork_to)
 
     @abstractmethod
     def evaluate(

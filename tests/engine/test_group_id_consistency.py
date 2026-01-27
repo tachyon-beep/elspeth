@@ -455,26 +455,27 @@ class TestJoinGroupIDConsistency:
                 """)
             ).fetchone()
             assert merged_row is not None, "Should have at least one token with join_group_id"
-            merged_token_id, canonical_id = merged_row
+            merged_token_id, _ = merged_row
 
-            # Query for merged token's own COALESCED outcome
-            # (merged token gets BOTH COALESCED outcome AND later COMPLETED outcome at sink)
+            # Query for merged token's terminal outcome (COMPLETED when reaching sink)
+            # P1 FIX: Merged tokens now get COMPLETED recorded when routed to sink.
+            # The token's coalesce lineage is encoded in its join_group_id field.
             merged_outcome = conn.execute(
                 text("""
-                SELECT join_group_id
+                SELECT outcome, sink_name
                 FROM token_outcomes
-                WHERE token_id = :token_id AND outcome = :outcome
+                WHERE token_id = :token_id AND is_terminal = 1
                 """),
-                {"token_id": merged_token_id, "outcome": RowOutcome.COALESCED.value},
+                {"token_id": merged_token_id},
             ).fetchone()
 
-        # Merged token should have COALESCED outcome
-        # (This tests processor.py line 980-986 uses canonical ID)
-        if merged_outcome is not None:
-            outcome_join_group_id = merged_outcome[0]
-            assert outcome_join_group_id == canonical_id, (
-                f"Merged token's COALESCED outcome join_group_id ({outcome_join_group_id}) must match tokens.join_group_id ({canonical_id})"
-            )
+        # Merged token MUST have a terminal outcome (audit completeness requirement)
+        assert merged_outcome is not None, (
+            f"Merged token {merged_token_id} has NO terminal outcome! Every token must reach exactly one terminal state."
+        )
+        outcome, sink_name = merged_outcome
+        assert outcome == RowOutcome.COMPLETED.value, f"Merged token reaching sink should have COMPLETED outcome, got {outcome}"
+        assert sink_name is not None, "COMPLETED outcome must have sink_name"
 
 
 class TestExpandGroupIDConsistency:
@@ -622,7 +623,7 @@ class TestExpandGroupIDConsistency:
 class TestSequentialCoalesces:
     """Verify multiple coalesce operations each get distinct join_group_ids."""
 
-    @pytest.mark.skip(reason="Sequential coalesce not supported in processor (coalesce runs after final gate)")
+    @pytest.mark.skip(reason="Sequential coalesce pipelines not yet supported in test setup")
     def test_sequential_coalesces_have_different_join_group_ids(self) -> None:
         """Pipeline with fork->coalesce->fork->coalesce should have two DIFFERENT join_group_ids."""
         db = LandscapeDB("sqlite:///:memory:")

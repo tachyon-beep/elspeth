@@ -980,7 +980,7 @@ class AggregationExecutor:
         ctx: PluginContext,
         step_in_pipeline: int,
         trigger_type: TriggerType,
-    ) -> tuple[TransformResult, list[TokenInfo]]:
+    ) -> tuple[TransformResult, list[TokenInfo], str]:
         """Execute a batch flush with full audit recording.
 
         This method:
@@ -998,7 +998,7 @@ class AggregationExecutor:
             trigger_type: What triggered the flush (COUNT, TIMEOUT, END_OF_SOURCE, etc.)
 
         Returns:
-            Tuple of (TransformResult with audit fields, list of consumed tokens)
+            Tuple of (TransformResult with audit fields, list of consumed tokens, batch_id)
 
         Raises:
             Exception: Re-raised from transform.process() after recording failure
@@ -1169,7 +1169,11 @@ class AggregationExecutor:
                 state_id=state.state_id,
             )
 
-        # Step 6: Reset for next batch and clear buffers
+        # Step 6: Save batch_id before reset (needed by caller for CONSUMED_IN_BATCH)
+        # Note: batch_id was validated at the start of this method
+        flushed_batch_id = batch_id
+
+        # Reset for next batch and clear buffers
         self._reset_batch_state(node_id)
         self._buffers[node_id] = []
         self._buffer_tokens[node_id] = []
@@ -1179,7 +1183,7 @@ class AggregationExecutor:
         if evaluator is not None:
             evaluator.reset()
 
-        return result, buffered_tokens
+        return result, buffered_tokens, flushed_batch_id
 
     def _reset_batch_state(self, node_id: NodeID) -> None:
         """Reset batch tracking state for next batch.

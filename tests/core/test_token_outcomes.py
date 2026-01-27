@@ -284,22 +284,43 @@ class TestRecordTokenOutcome:
 
     def test_record_buffered_then_terminal(self, recorder, run_with_token) -> None:
         """BUFFERED followed by terminal should succeed."""
-        from elspeth.contracts import RowOutcome
+        from elspeth.contracts import Determinism, NodeType, RowOutcome
+        from elspeth.contracts.schema import SchemaConfig
 
         run, token = run_with_token
 
-        # First record BUFFERED (non-terminal) - no batch_id needed
+        # Create an aggregation node (required for batches)
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="agg_node_1",
+            plugin_name="test_aggregation",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        # Create a batch (required for batch_id FK)
+        batch = recorder.create_batch(
+            run_id=run.run_id,
+            aggregation_node_id="agg_node_1",
+        )
+
+        # First record BUFFERED (non-terminal) with required batch_id
         recorder.record_token_outcome(
             run_id=run.run_id,
             token_id=token.token_id,
             outcome=RowOutcome.BUFFERED,
+            batch_id=batch.batch_id,
         )
 
-        # Then record terminal outcome - should succeed
+        # Then record terminal outcome with same batch_id
         outcome_id = recorder.record_token_outcome(
             run_id=run.run_id,
             token_id=token.token_id,
             outcome=RowOutcome.CONSUMED_IN_BATCH,
+            batch_id=batch.batch_id,
         )
 
         assert outcome_id is not None
@@ -330,6 +351,151 @@ class TestRecordTokenOutcome:
             )
 
 
+class TestOutcomeContractValidation:
+    """Test that record_token_outcome enforces required fields per outcome type.
+
+    See docs/audit/tokens/00-token-outcome-contract.md for the contract.
+    """
+
+    @pytest.fixture
+    def run_with_token(self, recorder):
+        """Create a run with a token for testing validation."""
+        from elspeth.contracts import Determinism, NodeType
+        from elspeth.contracts.schema import SchemaConfig
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="src",
+            plugin_name="test",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
+        token = recorder.create_token(row.row_id)
+        return run, token
+
+    def test_completed_requires_sink_name(self, recorder, run_with_token) -> None:
+        """COMPLETED outcome must have sink_name."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="COMPLETED outcome requires sink_name"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+            )
+
+    def test_routed_requires_sink_name(self, recorder, run_with_token) -> None:
+        """ROUTED outcome must have sink_name."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="ROUTED outcome requires sink_name"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.ROUTED,
+            )
+
+    def test_forked_requires_fork_group_id(self, recorder, run_with_token) -> None:
+        """FORKED outcome must have fork_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="FORKED outcome requires fork_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FORKED,
+            )
+
+    def test_failed_requires_error_hash(self, recorder, run_with_token) -> None:
+        """FAILED outcome must have error_hash."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="FAILED outcome requires error_hash"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.FAILED,
+            )
+
+    def test_quarantined_requires_error_hash(self, recorder, run_with_token) -> None:
+        """QUARANTINED outcome must have error_hash."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="QUARANTINED outcome requires error_hash"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.QUARANTINED,
+            )
+
+    def test_coalesced_requires_join_group_id(self, recorder, run_with_token) -> None:
+        """COALESCED outcome must have join_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="COALESCED outcome requires join_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COALESCED,
+            )
+
+    def test_expanded_requires_expand_group_id(self, recorder, run_with_token) -> None:
+        """EXPANDED outcome must have expand_group_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="EXPANDED outcome requires expand_group_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.EXPANDED,
+            )
+
+    def test_buffered_requires_batch_id(self, recorder, run_with_token) -> None:
+        """BUFFERED outcome must have batch_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="BUFFERED outcome requires batch_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.BUFFERED,
+            )
+
+    def test_consumed_in_batch_requires_batch_id(self, recorder, run_with_token) -> None:
+        """CONSUMED_IN_BATCH outcome must have batch_id."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        with pytest.raises(ValueError, match="CONSUMED_IN_BATCH outcome requires batch_id"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.CONSUMED_IN_BATCH,
+            )
+
+
 class TestGetTokenOutcome:
     """Test get_token_outcome() method."""
 
@@ -352,9 +518,7 @@ class TestGetTokenOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        outcome_id = recorder.record_token_outcome(
-            run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out"
-        )
+        outcome_id = recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
         return run, token, outcome_id
 
     def test_get_token_outcome_returns_dataclass(self, recorder, run_with_outcome) -> None:
@@ -367,9 +531,7 @@ class TestGetTokenOutcome:
         assert result.token_id == token.token_id
         assert result.outcome.value == "completed"
 
-    def test_get_token_outcome_returns_terminal_over_buffered(
-        self, recorder, run_with_outcome
-    ) -> None:
+    def test_get_token_outcome_returns_terminal_over_buffered(self, recorder, run_with_outcome) -> None:
         """Should return terminal outcome, not BUFFERED."""
         _run, token, _ = run_with_outcome
         # The fixture already recorded COMPLETED (terminal)
@@ -402,9 +564,7 @@ class TestExplainIncludesOutcome:
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
-        recorder.record_token_outcome(
-            run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out"
-        )
+        recorder.record_token_outcome(run.run_id, token.token_id, RowOutcome.COMPLETED, sink_name="out")
 
         result = explain(recorder, run.run_id, token_id=token.token_id)
 

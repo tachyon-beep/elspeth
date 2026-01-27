@@ -1042,7 +1042,7 @@ class TestAggregationExecutorCheckpoint:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Execute flush - should NOT crash with IndexError
-        result, consumed_tokens = executor.execute_flush(
+        result, consumed_tokens, _batch_id = executor.execute_flush(
             node_id=node_id,
             transform=as_transform(transform),
             ctx=ctx,

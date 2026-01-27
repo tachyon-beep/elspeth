@@ -1971,6 +1971,81 @@ class LandscapeRecorder:
 
     # === Token Outcome Recording (AUD-001) ===
 
+    def _validate_outcome_fields(
+        self,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None,
+        batch_id: str | None,
+        fork_group_id: str | None,
+        join_group_id: str | None,
+        expand_group_id: str | None,
+        error_hash: str | None,
+    ) -> None:
+        """Validate required fields are present for each outcome type.
+
+        Enforces the token outcome contract from docs/audit/tokens/00-token-outcome-contract.md.
+        This is defense-in-depth: callers SHOULD pass correct fields, but this catches bugs.
+
+        Raises:
+            ValueError: If a required field is missing for the outcome type
+        """
+        # Map outcome to required field(s)
+        # Contract: Each outcome type has specific required fields
+        if outcome == RowOutcome.COMPLETED:
+            if sink_name is None:
+                raise ValueError(
+                    "COMPLETED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.ROUTED:
+            if sink_name is None:
+                raise ValueError(
+                    "ROUTED outcome requires sink_name but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FORKED:
+            if fork_group_id is None:
+                raise ValueError(
+                    "FORKED outcome requires fork_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.FAILED:
+            if error_hash is None:
+                raise ValueError(
+                    "FAILED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.QUARANTINED:
+            if error_hash is None:
+                raise ValueError(
+                    "QUARANTINED outcome requires error_hash but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.CONSUMED_IN_BATCH:
+            if batch_id is None:
+                raise ValueError(
+                    "CONSUMED_IN_BATCH outcome requires batch_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.COALESCED:
+            if join_group_id is None:
+                raise ValueError(
+                    "COALESCED outcome requires join_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.EXPANDED:
+            if expand_group_id is None:
+                raise ValueError(
+                    "EXPANDED outcome requires expand_group_id but got None. "
+                    "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+                )
+        elif outcome == RowOutcome.BUFFERED and batch_id is None:
+            raise ValueError(
+                "BUFFERED outcome requires batch_id but got None. Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+            )
+        # No else needed - exhaustive enum handling above
+
     def record_token_outcome(
         self,
         run_id: str,
@@ -1995,20 +2070,33 @@ class LandscapeRecorder:
             run_id: Current run ID
             token_id: Token that reached this outcome
             outcome: The RowOutcome enum value
-            sink_name: For ROUTED/COMPLETED - which sink
-            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch
-            fork_group_id: For FORKED - the fork group
-            join_group_id: For COALESCED - the join group
-            expand_group_id: For EXPANDED - the expand group
-            error_hash: For FAILED/QUARANTINED - hash of error details
+            sink_name: For ROUTED/COMPLETED - which sink (REQUIRED)
+            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch (REQUIRED)
+            fork_group_id: For FORKED - the fork group (REQUIRED)
+            join_group_id: For COALESCED - the join group (REQUIRED)
+            expand_group_id: For EXPANDED - the expand group (REQUIRED)
+            error_hash: For FAILED/QUARANTINED - hash of error details (REQUIRED)
             context: Optional additional context (stored as JSON)
 
         Returns:
             outcome_id for tracking
 
         Raises:
+            ValueError: If required fields for outcome type are missing
             IntegrityError: If terminal outcome already exists for token
         """
+        # Validate required fields per outcome type (contract enforcement)
+        # See docs/audit/tokens/00-token-outcome-contract.md
+        self._validate_outcome_fields(
+            outcome=outcome,
+            sink_name=sink_name,
+            batch_id=batch_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            expand_group_id=expand_group_id,
+            error_hash=error_hash,
+        )
+
         outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
         context_json = json.dumps(context) if context is not None else None

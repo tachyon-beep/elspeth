@@ -1322,6 +1322,137 @@ class TestCoalesceNodes:
         assert labels == {"path_a", "path_b"}
         assert all(e.mode == RoutingMode.COPY for e in gate_to_coalesce_edges)
 
+    def test_duplicate_fork_branches_rejected_in_config_gate(self, plugin_manager) -> None:
+        """Duplicate branch names in fork_to should be rejected for config gates."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import ElspethSettings, GateSettings, SinkSettings, SourceSettings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_a"],  # Duplicate branch name
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                default_sink=settings.default_sink,
+                coalesce_settings=settings.coalesce,
+            )
+
+    def test_duplicate_fork_branches_rejected_in_plugin_gate(self) -> None:
+        """Duplicate branch names in fork_to should be rejected for plugin gates."""
+        from typing import Any
+
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.plugins.base import BaseGate
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import GateResult, RoutingAction
+
+        class DummySchema(PluginSchema):
+            pass
+
+        class DummySource:
+            name = "dummy_source"
+            output_schema = DummySchema
+            node_id: str | None = None
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0.0"
+            _on_validation_failure = "discard"
+
+            def __init__(self) -> None:
+                self.config = {"schema": {"fields": "dynamic"}}
+
+            def load(self, ctx: PluginContext) -> Any:
+                yield SourceRow.valid({"value": 1})
+
+            def close(self) -> None:
+                pass
+
+            def on_start(self, ctx: PluginContext) -> None:
+                pass
+
+            def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+        class DummySink:
+            input_schema = DummySchema
+            idempotent = True
+            node_id: str | None = None
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0.0"
+
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.config = {"schema": {"fields": "dynamic"}}
+
+            def write(self, rows: Any, ctx: PluginContext) -> ArtifactDescriptor:
+                return ArtifactDescriptor.for_file(path="memory", content_hash="", size_bytes=0)
+
+            def flush(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+            def on_start(self, ctx: PluginContext) -> None:
+                pass
+
+            def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+        class DummyGate(BaseGate):
+            name = "fork_gate"
+            input_schema = DummySchema
+            output_schema = DummySchema
+
+            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                return GateResult(row=row, action=RoutingAction.continue_())
+
+        source = DummySource()
+        sinks = {
+            "output": DummySink("output"),
+            "path_a": DummySink("path_a"),
+        }
+        gate = DummyGate({"fork_to": ["path_a", "path_a"], "schema": {"fields": "dynamic"}})
+
+        with pytest.raises(GraphValidationError, match=r"duplicate fork branches"):
+            ExecutionGraph.from_plugin_instances(
+                source=source,
+                transforms=[gate],
+                sinks=sinks,
+                aggregations={},
+                gates=[],
+                default_sink="output",
+                coalesce_settings=None,
+            )
+
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(
         self,
         plugin_manager,
@@ -1837,9 +1968,17 @@ class TestCoalesceNodes:
 
         # Simulate what orchestrator does (build coalesce_step_map)
         coalesce_step_map: dict[str, int] = {}
-        base_step = len(settings.transforms) + len(settings.gates)
-        for i, cs in enumerate(settings.coalesce):
-            coalesce_step_map[cs.name] = base_step + i
+        branch_steps: dict[str, int] = {}
+        base_step = len(settings.transforms)
+        for gate_idx, gate in enumerate(settings.gates):
+            if gate.fork_to:
+                step = base_step + gate_idx + 1
+                for branch in gate.fork_to:
+                    existing = branch_steps.get(branch)
+                    if existing is None or step > existing:
+                        branch_steps[branch] = step
+        for cs in settings.coalesce:
+            coalesce_step_map[cs.name] = max(branch_steps[branch] for branch in cs.branches)
 
         # CRITICAL CONTRACT: Every value in branch_to_coalesce must be a key in coalesce_step_map
         # This is what processor relies on at lines 695-696
@@ -1920,6 +2059,76 @@ class TestCoalesceNodes:
         assert len(coalesce_to_sink_edges) == 1
         assert coalesce_to_sink_edges[0].label == "continue"
         assert coalesce_to_sink_edges[0].mode == RoutingMode.MOVE
+
+    def test_coalesce_node_connects_to_next_gate(self, plugin_manager) -> None:
+        """Coalesce node should continue to the next gate when one exists."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.contracts import CoalesceName, GateName, RoutingMode
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker1",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+                GateSettings(
+                    name="gate2",
+                    condition="True",
+                    routes={"true": "continue", "false": "continue"},
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName("merge_results")]
+        gate2_id = graph.get_config_gate_id_map()[GateName("gate2")]
+
+        edges = graph.get_edges()
+        coalesce_to_gate_edges = [e for e in edges if e.from_node == coalesce_id and e.to_node == gate2_id]
+
+        assert len(coalesce_to_gate_edges) == 1
+        assert coalesce_to_gate_edges[0].label == "continue"
+        assert coalesce_to_gate_edges[0].mode == RoutingMode.MOVE
 
     def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""

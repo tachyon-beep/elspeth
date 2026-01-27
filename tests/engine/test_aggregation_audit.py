@@ -244,7 +244,7 @@ class TestAggregationFlushAuditTrail:
         transform.node_id = aggregation_node_id
 
         # Execute flush
-        result, _consumed_tokens = aggregation_executor.execute_flush(
+        result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -420,7 +420,7 @@ class TestAggregationFlushAuditTrail:
         transform = ErrorResultTransform()
         transform.node_id = aggregation_node_id
 
-        result, _consumed_tokens = aggregation_executor.execute_flush(
+        result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,
@@ -571,7 +571,7 @@ class TestAggregationFlushAuditTrail:
         transform = MockBatchTransform()
         transform.node_id = aggregation_node_id
 
-        _result, consumed_tokens = aggregation_executor.execute_flush(
+        _result, consumed_tokens, _batch_id = aggregation_executor.execute_flush(
             node_id=aggregation_node_id,
             transform=as_transform(transform),
             ctx=ctx,

@@ -149,6 +149,8 @@ class TransformProtocol(Protocol):
     name: str
     input_schema: type["PluginSchema"]
     output_schema: type["PluginSchema"]
+    routes: dict[str, str]
+    fork_to: list[str] | None
     node_id: str | None  # Set by orchestrator after registration
 
     # Metadata for Phase 3 audit/reproducibility

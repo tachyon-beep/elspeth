@@ -358,6 +358,7 @@ class TestCoalesceWiring:
         with (
             patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls,
             patch("elspeth.engine.executors.SinkExecutor") as mock_sink_executor_cls,
+            patch("elspeth.core.landscape.LandscapeRecorder.record_token_outcome") as mock_record_outcome,
         ):
             mock_processor = MagicMock()
             mock_processor.process_row.return_value = [coalesced_result]
@@ -367,6 +368,10 @@ class TestCoalesceWiring:
             # Mock SinkExecutor to avoid foreign key constraint errors
             mock_sink_executor = MagicMock()
             mock_sink_executor_cls.return_value = mock_sink_executor
+
+            # Mock record_token_outcome to avoid FK errors with fake token IDs
+            # (This test uses mocked RowProcessor that returns fake tokens)
+            mock_record_outcome.return_value = "mock_outcome_id"
 
             result = orchestrator.run(config, graph=graph, settings=settings)
 
@@ -585,6 +590,7 @@ class TestCoalesceWiring:
         with (
             patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls,
             patch("elspeth.engine.executors.SinkExecutor") as mock_sink_executor_cls,
+            patch("elspeth.core.landscape.LandscapeRecorder.record_token_outcome") as mock_record_outcome,
         ):
             mock_executor = MagicMock()
             # flush_pending returns a merged token
@@ -594,12 +600,16 @@ class TestCoalesceWiring:
                     merged_token=merged_token,
                     consumed_tokens=[],
                     coalesce_metadata={"policy": "best_effort"},
+                    coalesce_name="merge_results",
                 )
             ]
             mock_executor_cls.return_value = mock_executor
 
             mock_sink_executor = MagicMock()
             mock_sink_executor_cls.return_value = mock_sink_executor
+
+            # Mock record_token_outcome to avoid FK errors with fake token IDs
+            mock_record_outcome.return_value = "mock_outcome_id"
 
             result = orchestrator.run(config, graph=graph, settings=settings)
 
@@ -719,6 +729,7 @@ class TestCoalesceWiring:
                         "expected_branches": ["path_a", "path_b"],
                         "branches_arrived": ["path_a"],
                     },
+                    coalesce_name="merge_results",
                 )
             ]
             mock_executor_cls.return_value = mock_executor

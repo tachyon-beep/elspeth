@@ -1,7 +1,7 @@
 # tests/plugins/test_protocol_lifecycle.py
 """Tests for plugin lifecycle methods in protocols."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from elspeth.contracts import Determinism, PluginSchema
 from elspeth.plugins.context import PluginContext
@@ -29,6 +29,8 @@ class TestTransformProtocolLifecycle:
             name = "test"
             input_schema = InputSchema
             output_schema = OutputSchema
+            routes: ClassVar[dict[str, str]] = {}
+            fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
@@ -80,6 +82,8 @@ class TestGateProtocolLifecycle:
             name = "test_gate"
             input_schema = RowSchema
             output_schema = RowSchema
+            routes: ClassVar[dict[str, str]] = {}
+            fork_to: list[str] | None = None
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"

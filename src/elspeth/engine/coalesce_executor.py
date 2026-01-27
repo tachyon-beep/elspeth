@@ -29,6 +29,7 @@ class CoalesceOutcome:
         consumed_tokens: Tokens that were merged (marked COALESCED)
         coalesce_metadata: Audit metadata about the merge (branches, policy, etc.)
         failure_reason: Reason for failure if merge failed (timeout, missing branches)
+        coalesce_name: Name of the coalesce point that produced this outcome
     """
 
     held: bool
@@ -36,6 +37,7 @@ class CoalesceOutcome:
     consumed_tokens: list[TokenInfo] = field(default_factory=list)
     coalesce_metadata: dict[str, Any] | None = None
     failure_reason: str | None = None
+    coalesce_name: str | None = None
 
 
 @dataclass
@@ -193,6 +195,7 @@ class CoalesceExecutor:
                     "policy": settings.policy,
                     "reason": "Siblings already merged/failed, this token arrived too late",
                 },
+                coalesce_name=coalesce_name,
             )
 
         if key not in self._pending:
@@ -228,10 +231,11 @@ class CoalesceExecutor:
                 pending=pending,
                 step_in_pipeline=step_in_pipeline,
                 key=key,
+                coalesce_name=coalesce_name,
             )
 
         # Hold token - audit trail already recorded above
-        return CoalesceOutcome(held=True)
+        return CoalesceOutcome(held=True, coalesce_name=coalesce_name)
 
     def _should_merge(
         self,
@@ -263,6 +267,7 @@ class CoalesceExecutor:
         pending: _PendingCoalesce,
         step_in_pipeline: int,
         key: tuple[str, str],
+        coalesce_name: str,
     ) -> CoalesceOutcome:
         """Execute the merge and create merged token."""
         now = time.monotonic()
@@ -334,6 +339,7 @@ class CoalesceExecutor:
             merged_token=merged_token,
             consumed_tokens=consumed_tokens,
             coalesce_metadata=coalesce_metadata,
+            coalesce_name=coalesce_name,
         )
 
     def _merge_data(
@@ -413,6 +419,7 @@ class CoalesceExecutor:
                     pending=pending,
                     step_in_pipeline=step_in_pipeline,
                     key=key,
+                    coalesce_name=coalesce_name,
                 )
                 results.append(outcome)
 
@@ -426,6 +433,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
 
@@ -466,6 +474,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
 
@@ -478,6 +487,7 @@ class CoalesceExecutor:
                         pending=pending,
                         step_in_pipeline=step_in_pipeline,
                         key=key,
+                        coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
                 else:
@@ -526,6 +536,7 @@ class CoalesceExecutor:
                                 "quorum_required": settings.quorum_count,
                                 "branches_arrived": list(pending.arrived.keys()),
                             },
+                            coalesce_name=coalesce_name,
                         )
                     )
 
@@ -575,6 +586,7 @@ class CoalesceExecutor:
                             "expected_branches": settings.branches,
                             "branches_arrived": list(pending.arrived.keys()),
                         },
+                        coalesce_name=coalesce_name,
                     )
                 )
 
