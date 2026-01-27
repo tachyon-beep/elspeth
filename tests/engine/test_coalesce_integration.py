@@ -402,6 +402,180 @@ class TestForkCoalescePipeline:
         assert ids == {1, 2, 3}
 
 
+class TestCoalesceSuccessMetrics:
+    """Test that coalesce success metrics are correctly counted.
+
+    Bug: rows_succeeded was not incremented for coalesced tokens that
+    complete processing, causing under-reported success counts.
+    """
+
+    def test_coalesce_increments_rows_succeeded_for_end_of_pipeline(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Coalesce at end of pipeline should increment rows_succeeded.
+
+        When coalesce is the last step before sink, the merged token
+        goes directly to sink. This must increment rows_succeeded.
+        """
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="list_source",
+                options={},
+            ),
+            sinks={
+                "output": SinkSettings(plugin="collect_sink", options={}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        source = ListSource([{"id": 1, "value": 100}])
+        sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"output": as_sink(sink)},
+            gates=settings.gates,
+            coalesce_settings=settings.coalesce,
+            aggregation_settings={},
+            config={},
+        )
+
+        graph = build_production_graph(config, default_sink=settings.default_sink)
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Core assertion: merged token should be counted as succeeded
+        # Before fix: rows_succeeded was 0 because coalesce didn't increment it
+        assert result.rows_succeeded == 1, (
+            f"Coalesced token should be counted in rows_succeeded. "
+            f"Got rows_succeeded={result.rows_succeeded}, "
+            f"rows_coalesced={result.rows_coalesced}, "
+            f"sink received {len(sink.rows)} rows"
+        )
+
+        # Sanity checks
+        assert result.rows_processed == 1
+        assert result.rows_forked == 1
+        assert result.rows_coalesced == 1
+        assert len(sink.rows) == 1
+
+    def test_coalesce_with_downstream_transform_increments_rows_succeeded(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Mid-pipeline coalesce with downstream processing should count successes.
+
+        When coalesce happens mid-pipeline, the merged token continues through
+        downstream transforms. When it reaches COMPLETED, rows_succeeded must
+        be incremented.
+        """
+        from elspeth.contracts import TransformResult
+
+        class PostCoalesceTransform(BaseTransform):
+            """Transform that runs after coalesce merge."""
+
+            name = "post_coalesce"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.processed_count = 0
+
+            def process(self, row: dict, ctx: Any) -> TransformResult:
+                self.processed_count += 1
+                row["post_processed"] = True
+                return TransformResult.success(row)
+
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="list_source",
+                options={},
+            ),
+            sinks={
+                "output": SinkSettings(plugin="collect_sink", options={}),
+            },
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+            transforms=[
+                # This transform runs AFTER coalesce
+                {"name": "post_coalesce", "plugin": "post_coalesce", "options": {}},
+            ],
+        )
+
+        source = ListSource([{"id": 1, "value": 100}])
+        sink = CollectSink()
+        post_transform = PostCoalesceTransform()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(post_transform)],
+            sinks={"output": as_sink(sink)},
+            gates=settings.gates,
+            coalesce_settings=settings.coalesce,
+            aggregation_settings={},
+            config={},
+        )
+
+        graph = build_production_graph(config, default_sink=settings.default_sink)
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Core assertion: continuation after coalesce should count as succeeded
+        # Before fix: rows_succeeded was 0 because coalesce continuation
+        # didn't increment it when result.outcome == RowOutcome.COMPLETED
+        assert result.rows_succeeded == 1, (
+            f"Coalesced token completing downstream should be counted. "
+            f"Got rows_succeeded={result.rows_succeeded}, "
+            f"rows_coalesced={result.rows_coalesced}, "
+            f"post_transform processed {post_transform.processed_count} rows"
+        )
+
+        # Sanity checks
+        assert result.rows_processed == 1
+        assert result.rows_forked == 1
+        assert result.rows_coalesced == 1
+        # Post-coalesce transform should have processed the merged token
+        assert post_transform.processed_count == 1
+        assert len(sink.rows) == 1
+        assert sink.rows[0].get("post_processed") is True
+
+
 class TestCoalesceAuditTrail:
     """Test that coalesce operations are properly recorded in audit trail."""
 
