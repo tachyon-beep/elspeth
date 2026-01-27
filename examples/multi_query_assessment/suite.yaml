@@ -15,25 +15,20 @@ name: case_study_assessment
 description: Assess multiple case studies against multiple criteria
 
 source:
-  plugin: csv_source
+  plugin: csv
   options:
     path: examples/multi_query_assessment/input.csv
     schema:
+      mode: free
       fields:
-        - name: user_id
-          type: string
-        - name: cs1_background
-          type: string
-        - name: cs1_symptoms
-          type: string
-        - name: cs1_history
-          type: string
-        - name: cs2_background
-          type: string
-        - name: cs2_symptoms
-          type: string
-        - name: cs2_history
-          type: string
+        - "user_id: str"
+        - "cs1_background: str"
+        - "cs1_symptoms: str"
+        - "cs1_history: str"
+        - "cs2_background: str"
+        - "cs2_symptoms: str"
+        - "cs2_history: str"
+    on_validation_failure: discard
 
 transforms:
   - plugin: azure_multi_query_llm
@@ -123,7 +118,14 @@ transforms:
         fields: dynamic
 
 sinks:
-  - name: results
-    plugin: csv_sink
+  results:
+    plugin: csv
     options:
       path: examples/multi_query_assessment/output/results.csv
+      schema:
+        fields: dynamic
+
+default_sink: results
+
+landscape:
+  url: sqlite:///examples/multi_query_assessment/runs/audit.db
