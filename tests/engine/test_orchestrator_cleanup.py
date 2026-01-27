@@ -195,6 +195,7 @@ class TestOrchestratorCleanup:
         that don't override it still satisfy the protocol. This test verifies
         the cleanup process works correctly with the default implementation.
         """
+
         # Transform using BaseTransform's default close() implementation
         class MinimalTransform(BaseTransform):
             name = "minimal"
