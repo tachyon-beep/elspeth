@@ -148,6 +148,44 @@ class TestRunRepository:
 
         assert run.export_status is None
 
+    def test_load_crashes_on_empty_string_export_status(self) -> None:
+        """Repository crashes on empty string export_status per Data Manifesto.
+
+        Empty string in audit DB is corruption - crash immediately, don't mask as None.
+        Per CLAUDE.md Tier 1: "invalid enum value = crash".
+        """
+
+        @dataclass
+        class RunRow:
+            run_id: str
+            started_at: datetime
+            config_hash: str
+            settings_json: str
+            canonical_version: str
+            status: str
+            completed_at: datetime | None = None
+            reproducibility_grade: str | None = None
+            export_status: str | None = None
+            export_error: str | None = None
+            exported_at: datetime | None = None
+            export_format: str | None = None
+            export_sink: str | None = None
+
+        db_row = RunRow(
+            run_id="run-123",
+            started_at=datetime.now(UTC),
+            config_hash="abc123",
+            settings_json="{}",
+            canonical_version="1.0.0",
+            status=RunStatus.RUNNING,
+            export_status="",  # Empty string - corruption, should crash!
+        )
+
+        repo = RunRepository(session=None)
+
+        with pytest.raises(ValueError, match="'' is not a valid ExportStatus"):
+            repo.load(db_row)
+
     def test_load_crashes_on_invalid_status(self) -> None:
         """Repository crashes on invalid status per Data Manifesto."""
 

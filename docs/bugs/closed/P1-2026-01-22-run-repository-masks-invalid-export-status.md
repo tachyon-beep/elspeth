@@ -97,11 +97,46 @@
 
 ## Verification Status
 
-- [ ] Bug confirmed via reproduction
-- [ ] Root cause verified
-- [ ] Fix implemented
-- [ ] Tests added
-- [ ] Fix verified
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution
+
+**Fixed by:** Claude Opus 4.5 (via Claude Code)
+**Date:** 2026-01-28
+**Branch:** fix/rc1-bug-burndown-session-6
+
+### Fix Applied
+
+**File:** `src/elspeth/core/landscape/repositories.py` (line 67-68)
+
+Changed from truthiness check to explicit None check:
+```python
+# Before (buggy):
+export_status=ExportStatus(row.export_status) if row.export_status else None,
+
+# After (fixed):
+# Use explicit is not None check - empty string should raise, not become None (Tier 1)
+export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
+```
+
+### Test Added
+
+**File:** `tests/core/landscape/test_repositories.py`
+
+Added `test_load_crashes_on_empty_string_export_status()` which verifies:
+- Empty string `""` raises `ValueError: '' is not a valid ExportStatus`
+- Matches the Tier 1 "crash on anomaly" requirement from Data Manifesto
+
+### Verification
+
+- All 420 landscape tests pass
+- All 5 RunRepository tests pass
+- mypy: no type errors
+- ruff: all checks passed
 
 ---
 
