@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import base64
+import logging
 import time
+from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from elspeth.contracts import CallStatus, CallType
 from elspeth.plugins.clients.base import AuditedClientBase
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -164,9 +168,24 @@ class AuditedHTTPClient(AuditedClientBase):
             if "application/json" in content_type:
                 try:
                     response_body = response.json()
-                except Exception:
-                    # If JSON decode fails, store as text
-                    response_body = response.text
+                except JSONDecodeError as e:
+                    # JSON parse failed despite Content-Type claiming JSON
+                    # This is a Tier 3 boundary issue - external data doesn't match contract
+                    # Record the failure explicitly for audit trail completeness
+                    logger.warning(
+                        "JSON parse failed despite Content-Type: application/json",
+                        extra={
+                            "url": full_url,
+                            "status_code": response.status_code,
+                            "body_preview": response.text[:200],
+                            "error": str(e),
+                        },
+                    )
+                    response_body = {
+                        "_json_parse_failed": True,
+                        "_error": str(e),
+                        "_raw_text": response.text,
+                    }
             else:
                 # For non-JSON, detect text vs binary content
                 # Text content types: text/*, application/xml, application/x-www-form-urlencoded
