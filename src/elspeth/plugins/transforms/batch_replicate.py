@@ -118,16 +118,29 @@ class BatchReplicate(BaseTransform):
         output_rows: list[dict[str, Any]] = []
 
         for row in rows:
-            # Get copies count, with fallback for missing/invalid values
-            copies = self._default_copies
-            if self._copies_field in row:
+            # Get copies count - field is optional, type must be correct if present
+            if self._copies_field not in row:
+                # Field missing - use default (valid scenario)
+                copies = self._default_copies
+            else:
                 raw_copies = row[self._copies_field]
-                try:
-                    copies = int(raw_copies)
-                    if copies < 1:
-                        copies = self._default_copies
-                except (TypeError, ValueError):
-                    copies = self._default_copies
+
+                # Contract enforcement: copies_field must be int if present
+                # Tier 2 pipeline data - wrong types indicate upstream bug
+                if not isinstance(raw_copies, int):
+                    raise TypeError(
+                        f"Field '{self._copies_field}' must be int, got {type(raw_copies).__name__}. "
+                        f"This indicates an upstream validation bug - check source schema or prior transforms."
+                    )
+
+                # Validate value is positive
+                if raw_copies < 1:
+                    raise ValueError(
+                        f"Field '{self._copies_field}' must be >= 1, got {raw_copies}. "
+                        f"This indicates invalid data - check source validation."
+                    )
+
+                copies = raw_copies
 
             # Create copies of this row
             for copy_idx in range(copies):
