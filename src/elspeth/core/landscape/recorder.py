@@ -109,7 +109,7 @@ class LandscapeRecorder:
 
         run = recorder.begin_run(config={"source": "data.csv"})
         # ... execute pipeline ...
-        recorder.complete_run(run.run_id, status="completed")
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
     """
 
     def __init__(self, db: LandscapeDB, *, payload_store: Any | None = None) -> None:
@@ -1460,7 +1460,7 @@ class LandscapeRecorder:
         query = (
             select(batches_table)
             .where(batches_table.c.run_id == run_id)
-            .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
+            .where(batches_table.c.status.in_([BatchStatus.DRAFT.value, BatchStatus.EXECUTING.value, BatchStatus.FAILED.value]))
             .order_by(batches_table.c.created_at.asc())
         )
         result = self._ops.execute_fetchall(query)
