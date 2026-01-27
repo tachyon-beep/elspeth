@@ -99,7 +99,7 @@ class TestAggregationRecoveryIntegration:
         )
 
         # Simulate crash during flush
-        recorder.update_batch_status(batch.batch_id, "executing")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
         recorder.complete_run(run.run_id, status="failed")
 
         # === PHASE 2: Verify recovery is possible ===
@@ -120,7 +120,7 @@ class TestAggregationRecoveryIntegration:
         assert incomplete[0].status == BatchStatus.EXECUTING
 
         # Mark executing as failed (crash interrupted)
-        recorder.update_batch_status(batch.batch_id, "failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
 
         # Retry the batch
         retry_batch = recorder.retry_batch(batch.batch_id)
@@ -186,7 +186,7 @@ class TestAggregationRecoveryIntegration:
         )
         for i, token in enumerate(tokens[:2]):
             recorder.add_batch_member(sum_batch.batch_id, token.token_id, ordinal=i)
-        recorder.update_batch_status(sum_batch.batch_id, "completed")
+        recorder.update_batch_status(sum_batch.batch_id, BatchStatus.COMPLETED)
 
         # Create batch for count_aggregator (crashed during execution)
         count_batch = recorder.create_batch(
@@ -195,7 +195,7 @@ class TestAggregationRecoveryIntegration:
         )
         for i, token in enumerate(tokens[2:]):
             recorder.add_batch_member(count_batch.batch_id, token.token_id, ordinal=i)
-        recorder.update_batch_status(count_batch.batch_id, "executing")
+        recorder.update_batch_status(count_batch.batch_id, BatchStatus.EXECUTING)
 
         # Checkpoint at last processed token
         checkpoint_mgr.create_checkpoint(
@@ -254,7 +254,7 @@ class TestAggregationRecoveryIntegration:
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
 
         # Mark as failed for retry
-        recorder.update_batch_status(batch.batch_id, "failed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.FAILED)
 
         # Checkpoint
         checkpoint_mgr.create_checkpoint(
@@ -308,12 +308,12 @@ class TestAggregationRecoveryIntegration:
             recorder.retry_batch(batch.batch_id)
 
         # Test with executing status
-        recorder.update_batch_status(batch.batch_id, "executing")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.EXECUTING)
         with pytest.raises(ValueError, match="Can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 
         # Test with completed status
-        recorder.update_batch_status(batch.batch_id, "completed")
+        recorder.update_batch_status(batch.batch_id, BatchStatus.COMPLETED)
         with pytest.raises(ValueError, match="Can only retry failed batches"):
             recorder.retry_batch(batch.batch_id)
 

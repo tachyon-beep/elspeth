@@ -3,7 +3,7 @@
 
 import pytest
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import BatchStatus, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -335,7 +335,7 @@ class TestLandscapeExporterComplexRun:
         )
         recorder.complete_batch(
             batch_id=batch.batch_id,
-            status="completed",
+            status=BatchStatus.COMPLETED,
             trigger_reason="count=10",
         )
         recorder.complete_run(run.run_id, status="completed")
@@ -673,7 +673,7 @@ class TestLandscapeExporterSigning:
                 run_id=run.run_id,
                 aggregation_node_id="node_1",
             )
-            recorder.complete_batch(batch.batch_id, status="completed")
+            recorder.complete_batch(batch.batch_id, status=BatchStatus.COMPLETED)
 
         recorder.complete_run(run.run_id, status="completed")
 
