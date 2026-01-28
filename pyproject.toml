@@ -100,12 +100,18 @@ azure = [
     "jinja2>=3.1,<4",  # Template engine for path templating
 ]
 
+mcp = [
+    # MCP server for Landscape analysis
+    "mcp>=1.0,<2",  # Model Context Protocol SDK
+]
+
 all = [
-    "elspeth[dev,llm,azure]",
+    "elspeth[dev,llm,azure,mcp]",
 ]
 
 [project.scripts]
 elspeth = "elspeth.cli:app"
+elspeth-mcp = "elspeth.mcp:main"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
@@ -186,6 +192,7 @@ module = [
     "opentelemetry.*",
     "hypothesis.*",
     "azure.*",
+    "mcp.*",
 ]
 ignore_missing_imports = true
 

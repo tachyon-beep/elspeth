@@ -456,6 +456,22 @@ elspeth purge --run <run_id>                          # Purge payload data
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
 
+## Landscape MCP Analysis Server
+
+**For debugging and investigation**, there's an MCP server that provides read-only access to the audit database. This is especially useful for Claude Code sessions investigating pipeline failures.
+
+```bash
+# Run the MCP server
+elspeth-mcp --database sqlite:///./state/audit.db
+```
+
+**Key tools for emergencies:**
+- `diagnose()` - First tool when something is broken. Finds failed runs, stuck runs, high error rates
+- `get_failure_context(run_id)` - Deep dive on a specific failure
+- `explain_token(run_id, token_id)` - Complete lineage for a specific row
+
+**Full documentation:** See `docs/guides/landscape-mcp-analysis.md` for the complete tool reference, common workflows, and database schema guide.
+
 ## Technology Stack
 
 ### Core Framework

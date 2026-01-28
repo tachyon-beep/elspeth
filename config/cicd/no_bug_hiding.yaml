@@ -742,3 +742,134 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit still captures actual value
   expires: null
+# MCP Server - handles external data from MCP clients (Tier 3)
+- key: mcp/server.py:R3:_dataclass_to_dict:line=58
+  owner: architecture
+  reason: 'Standard Python idiom: checking for dataclass __dataclass_fields__ attribute'
+  safety: This is the canonical way to detect dataclasses; alternatives require importing typing
+  expires: null
+- key: mcp/server.py:R3:_dataclass_to_dict:line=63
+  owner: architecture
+  reason: 'Standard Python idiom: checking nested values for dataclass fields'
+  safety: Part of recursive dataclass serialization - same pattern as line 58
+  expires: null
+- key: mcp/server.py:R3:_dataclass_to_dict:line=67
+  owner: architecture
+  reason: 'Standard Python idiom: checking for Enum .value attribute'
+  safety: Enum detection for JSON serialization - converts to string representation
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:line=655
+  owner: architecture
+  reason: 'Counter accumulation pattern: failures_by_node may not have entry for all nodes'
+  safety: Default 0 for nodes without failures is correct behavior
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=888
+  owner: architecture
+  reason: 'Framework boundary: SQLAlchemy inspector column dict may not have nullable key'
+  safety: Default True for nullable is safe - matches SQL default
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=894
+  owner: architecture
+  reason: 'Framework boundary: SQLAlchemy inspector PK constraint dict structure varies'
+  safety: Empty list default is safe for tables without primary keys
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:line=1359
+  owner: architecture
+  reason: 'Counter accumulation pattern: status_counts initialized empty and populated dynamically'
+  safety: Default 0 for first occurrence of each status is correct initialization
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1636
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default values match tool schema; MCP client may omit optional args
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1637
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional status filter
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1648
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 100 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1649
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 0 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1654
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional row_id filter
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1655
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 100 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1660
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid - token_id or row_id, not both required
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1661
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid - token_id or row_id, not both required
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1662
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional sink disambiguator
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1667
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default "all" matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1668
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 100 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1673
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional node_id filter
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1674
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional status filter
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1675
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 100 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1682
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: None is valid for optional SQL parameters
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1703
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 10 matches tool schema
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1707
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): MCP arguments from external client - optional parameters'
+  safety: Default 60 matches tool schema
+  expires: null
+- key: mcp/server.py:R4:create_server:call_tool:line=1714
+  owner: architecture
+  reason: 'MCP server boundary: must catch all exceptions and return error to client'
+  safety: Error message returned to MCP client; server continues running for next request
+  expires: null
+- key: mcp/server.py:R1:main:line=1756
+  owner: architecture
+  reason: 'Trust boundary: environment variable ELSPETH_DATABASE_URL is optional external input'
+  safety: Explicit check follows - exits with error message if neither arg nor env var provided
+  expires: null
