@@ -146,6 +146,45 @@ class SourceDataConfig(PathConfig):
         return v.strip()
 
 
+class TabularSourceDataConfig(SourceDataConfig):
+    """Config for sources that read tabular external data with headers.
+
+    Extends SourceDataConfig with field normalization options:
+    - columns: Explicit column names for headerless files
+    - normalize_fields: Auto-normalize messy headers to identifiers
+    - field_mapping: Override specific normalized names
+
+    See docs/plans/2026-01-29-field-normalization-design.md for full specification.
+    """
+
+    columns: list[str] | None = None
+    normalize_fields: bool = False
+    field_mapping: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_normalization_options(self) -> Self:
+        """Validate field normalization option interactions."""
+        from elspeth.core.identifiers import validate_field_names
+
+        # normalize_fields + columns is invalid
+        if self.columns is not None and self.normalize_fields:
+            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
+
+        # field_mapping requires normalize_fields or columns
+        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
+            raise ValueError("field_mapping requires normalize_fields: true or columns config")
+
+        # Validate columns entries are valid identifiers and not keywords
+        if self.columns is not None:
+            validate_field_names(self.columns, "columns")
+
+        # Validate field_mapping values are valid identifiers and not keywords
+        if self.field_mapping is not None and self.field_mapping:
+            validate_field_names(list(self.field_mapping.values()), "field_mapping values")
+
+        return self
+
+
 class TransformDataConfig(DataPluginConfig):
     """Base config for transform plugins with error routing.
 
