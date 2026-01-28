@@ -334,17 +334,14 @@ class PooledExecutor:
         self._semaphore.acquire()
         holding_semaphore = True
 
-        # Track if we just retried - skip pre-dispatch delay after capacity retry
-        # to avoid double-sleeping (we already slept during the retry backoff)
-        just_retried = False
-
         try:
             while True:
                 # Wait for global dispatch gate (ensures pacing between ALL dispatches)
-                # Skip if we just retried - we already slept during retry backoff
-                if not just_retried:
-                    self._wait_for_dispatch_gate()
-                just_retried = False  # Reset for next iteration
+                # CRITICAL: Always check the gate, even after retries. The retry backoff
+                # sleep is for THIS worker's cooldown, but OTHER workers may have
+                # dispatched while we slept. We must check the global gate to maintain
+                # min_dispatch_delay_ms between ALL dispatches across ALL workers.
+                self._wait_for_dispatch_gate()
 
                 try:
                     result = process_fn(row, state_id)
@@ -408,10 +405,9 @@ class PooledExecutor:
                     self._semaphore.acquire()
                     holding_semaphore = True
 
-                    # Mark that we just retried - skip pre-dispatch delay on next iteration
-                    just_retried = True
-
-                    # Retry (continue to top of loop)
+                    # Continue to top of loop for retry
+                    # Note: We DO NOT skip the dispatch gate check after retry.
+                    # The retry backoff is personal cooldown; the gate ensures global pacing.
         finally:
             # Release semaphore only if we're holding it
             # This defensive check ensures correctness even if an unexpected
