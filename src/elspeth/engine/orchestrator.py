@@ -698,20 +698,26 @@ class Orchestrator:
         config_gate_id_map: dict[GateName, NodeID] = graph.get_config_gate_id_map()
         aggregation_id_map: dict[AggregationName, NodeID] = graph.get_aggregation_id_map()
 
-        # Map plugin instances (not config gates or aggregations - they don't have instances)
+        # Build node ID sets for special node types
+        config_gate_node_ids: set[NodeID] = set(config_gate_id_map.values())
+        aggregation_node_ids: set[NodeID] = set(aggregation_id_map.values())
+
+        # Map plugin instances to their node IDs for metadata extraction
+        # Config gates and coalesce nodes don't have plugin instances (they're structural)
+        # Aggregation transforms DO have instances - they're in config.transforms with node_id set
         node_to_plugin: dict[NodeID, Any] = {}
         if source_id is not None:
             node_to_plugin[source_id] = config.source
         for seq, transform in enumerate(config.transforms):
             if seq in transform_id_map:
+                # Regular transform - mapped by sequence number
                 node_to_plugin[transform_id_map[seq]] = transform
+            elif transform.node_id is not None and NodeID(transform.node_id) in aggregation_node_ids:
+                # Aggregation transform - has node_id set by CLI, not in transform_id_map
+                node_to_plugin[NodeID(transform.node_id)] = transform
         for sink_name, sink in config.sinks.items():
             if SinkName(sink_name) in sink_id_map:
                 node_to_plugin[sink_id_map[SinkName(sink_name)]] = sink
-
-        # Config gates, aggregations, and coalesce nodes are identified by their node IDs (no plugin instances)
-        config_gate_node_ids: set[NodeID] = set(config_gate_id_map.values())
-        aggregation_node_ids: set[NodeID] = set(aggregation_id_map.values())
         coalesce_id_map: dict[CoalesceName, NodeID] = graph.get_coalesce_id_map()
         coalesce_node_ids: set[NodeID] = set(coalesce_id_map.values())
 
@@ -727,14 +733,10 @@ class Orchestrator:
             for node_id in execution_order:
                 node_info = graph.get_node_info(node_id)
 
-                # Config gates, aggregations, and coalesce nodes have metadata in graph node, not plugin instances
+                # Config gates and coalesce nodes are structural (no plugin instances)
+                # Aggregations have plugin instances in node_to_plugin (transforms with metadata)
                 if node_id in config_gate_node_ids:
                     # Config gates are deterministic (expression evaluation is deterministic)
-                    plugin_version = "1.0.0"
-                    determinism = Determinism.DETERMINISTIC
-                elif node_id in aggregation_node_ids:
-                    # Aggregations use batch-aware transforms - determinism depends on the transform
-                    # Default to deterministic (statistical operations are typically deterministic)
                     plugin_version = "1.0.0"
                     determinism = Determinism.DETERMINISTIC
                 elif node_id in coalesce_node_ids:

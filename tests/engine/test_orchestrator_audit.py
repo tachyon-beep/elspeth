@@ -1066,3 +1066,149 @@ class TestNodeMetadataFromPlugin:
         assert transform_node.determinism == Determinism.EXTERNAL_CALL, (
             f"Transform determinism should be 'external_call', got '{transform_node.determinism}'"
         )
+
+    def test_aggregation_node_uses_transform_metadata(self) -> None:
+        """Aggregation nodes should use metadata from their batch-aware transform.
+
+        BUG FIX: P2-2026-01-21-orchestrator-aggregation-metadata-hardcoded
+        Previously, aggregation nodes were always registered with hardcoded
+        plugin_version="1.0.0" and determinism=DETERMINISTIC, even when
+        the underlying transform was non-deterministic (e.g., LLM batch).
+
+        This test verifies the fix: aggregation nodes now correctly inherit
+        metadata from their transform plugin instance.
+        """
+        from elspeth.contracts import AggregationName, PluginSchema
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.results import TransformResult
+
+        db = LandscapeDB.in_memory()
+
+        class ValueSchema(PluginSchema):
+            value: int
+
+        class ListSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = ValueSchema
+
+            def __init__(self, data: list[dict[str, Any]]) -> None:
+                self._data = data
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                for _row in self._data:
+                    yield SourceRow.valid(_row)
+
+            def close(self) -> None:
+                pass
+
+        class NonDeterministicBatchTransform(BaseTransform):
+            """Simulates an LLM batch transform - explicitly non-deterministic."""
+
+            name = "nondeterministic_batch"
+            input_schema = ValueSchema
+            output_schema = ValueSchema
+            plugin_version = "2.3.4"  # Custom version - NOT 1.0.0
+            determinism = Determinism.NON_DETERMINISTIC  # LLM-like
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(
+                self,
+                row: dict[str, Any] | list[dict[str, Any]],
+                ctx: Any,
+            ) -> TransformResult:
+                # Batch-aware: handles list or single row
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"value": total})
+                return TransformResult.success(row)
+
+        class CollectSink(_TestSinkBase):
+            name = "test_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                if isinstance(rows, list):
+                    self.results.extend(rows)
+                else:
+                    self.results.append(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        source = ListSource([{"value": 10}, {"value": 20}])
+        batch_transform = NonDeterministicBatchTransform()
+        sink = CollectSink()
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="nondeterministic_batch",
+            trigger=TriggerConfig(count=2),  # Trigger after 2 rows
+            output_mode="single",
+            options={"schema": {"fields": "dynamic"}},
+        )
+
+        # Build graph with aggregation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],  # No regular transforms, only aggregation
+            sinks={"default": as_sink(sink)},
+            aggregations={"test_agg": (batch_transform, agg_settings)},
+            gates=[],
+            default_sink="default",
+        )
+
+        # Get aggregation node ID for later lookup
+        agg_id_map = graph.get_aggregation_id_map()
+        agg_node_id = agg_id_map[AggregationName("test_agg")]
+
+        # Set node_id on transform (as CLI would do)
+        batch_transform.node_id = agg_node_id
+
+        # Build aggregation_settings dict for orchestrator
+        aggregation_settings = {agg_node_id: agg_settings}
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(batch_transform)],  # Aggregation transform in list
+            sinks={"default": as_sink(sink)},
+            aggregation_settings=aggregation_settings,
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph)
+
+        # Query Landscape to verify aggregation node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the aggregation node
+        agg_node = next((n for n in nodes if n.node_id == agg_node_id), None)
+        assert agg_node is not None, f"Aggregation node {agg_node_id} not found in Landscape"
+
+        # CRITICAL: Verify aggregation uses transform's metadata, NOT hardcoded values
+        assert agg_node.plugin_version == "2.3.4", (
+            f"Aggregation plugin_version should be '2.3.4' from transform, got '{agg_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+        assert agg_node.determinism == Determinism.NON_DETERMINISTIC, (
+            f"Aggregation determinism should be 'non_deterministic' from transform, "
+            f"got '{agg_node.determinism}' (was hardcoded to 'deterministic')"
+        )

@@ -177,3 +177,73 @@ Then remove the special case at lines 650-654 so aggregations use the normal met
 A test verifying that when a non-deterministic aggregation transform (like azure_batch) is used, the registered node has:
 - `determinism = Determinism.NON_DETERMINISTIC` (not DETERMINISTIC)
 - `plugin_version` matching the transform's version (not "1.0.0")
+
+---
+
+## CLOSURE: 2026-01-29
+
+**Status:** FIXED
+
+**Fixed By:** Claude Opus 4.5
+
+**Resolution:**
+
+The fix was applied in `src/elspeth/engine/orchestrator.py` with two changes:
+
+### 1. Add aggregation transforms to `node_to_plugin` mapping (lines 701-720)
+
+Moved `aggregation_node_ids` creation earlier and updated the transform loop to include aggregation transforms:
+
+```python
+# Build node ID sets for special node types
+config_gate_node_ids: set[NodeID] = set(config_gate_id_map.values())
+aggregation_node_ids: set[NodeID] = set(aggregation_id_map.values())
+
+# Map plugin instances to their node IDs for metadata extraction
+# Config gates and coalesce nodes don't have plugin instances (they're structural)
+# Aggregation transforms DO have instances - they're in config.transforms with node_id set
+node_to_plugin: dict[NodeID, Any] = {}
+if source_id is not None:
+    node_to_plugin[source_id] = config.source
+for seq, transform in enumerate(config.transforms):
+    if seq in transform_id_map:
+        # Regular transform - mapped by sequence number
+        node_to_plugin[transform_id_map[seq]] = transform
+    elif transform.node_id is not None and transform.node_id in aggregation_node_ids:
+        # Aggregation transform - has node_id set by CLI, not in transform_id_map
+        node_to_plugin[transform.node_id] = transform
+```
+
+### 2. Remove hardcoded aggregation fallback (lines 736-745)
+
+Removed the `elif node_id in aggregation_node_ids` branch that hardcoded metadata. Aggregations now fall through to the normal metadata extraction path:
+
+```python
+# Config gates and coalesce nodes are structural (no plugin instances)
+# Aggregations have plugin instances in node_to_plugin (transforms with metadata)
+if node_id in config_gate_node_ids:
+    plugin_version = "1.0.0"
+    determinism = Determinism.DETERMINISTIC
+elif node_id in coalesce_node_ids:
+    plugin_version = "1.0.0"
+    determinism = Determinism.DETERMINISTIC
+else:
+    # All other nodes (source, transforms, sinks, aggregations) use plugin metadata
+    plugin = node_to_plugin[NodeID(node_id)]
+    plugin_version = plugin.plugin_version
+    determinism = plugin.determinism
+```
+
+**Test Added:**
+
+New test `test_aggregation_node_uses_transform_metadata` in `tests/engine/test_orchestrator_audit.py`:
+- Creates a non-deterministic batch transform with custom version "2.3.4"
+- Creates an aggregation using that transform
+- Verifies the aggregation node in Landscape has `plugin_version="2.3.4"` and `determinism=NON_DETERMINISTIC`
+
+**Tests Passing:**
+
+- All 36 aggregation and orchestrator audit tests pass
+- New test specifically validates the fix
+
+**Verified By:** Claude Opus 4.5 (2026-01-29)
