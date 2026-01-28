@@ -170,3 +170,46 @@ However, this is **TECHNICAL DEBT** because:
 4. Update mock NodeRow in tests to include these fields
 
 This aligns with the audit trail integrity requirements: repository layer must return complete audit records, not partial ones.
+
+---
+
+## CLOSURE: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Unknown (discovered during bug audit)
+
+**Resolution:**
+
+The fix was implemented in `src/elspeth/core/landscape/repositories.py`. The `NodeRepository.load()` method now correctly includes `schema_mode` and `schema_fields`.
+
+**Code (lines 82-109):**
+```python
+def load(self, row: Any) -> Node:
+    """Load Node from database row.
+
+    Converts node_type and determinism strings to enums.
+    Parses schema_fields_json back to list.
+    """
+    import json
+
+    # Parse schema_fields_json back to list
+    schema_fields: list[dict[str, object]] | None = None
+    if row.schema_fields_json is not None:
+        schema_fields = json.loads(row.schema_fields_json)
+
+    return Node(
+        node_id=row.node_id,
+        run_id=row.run_id,
+        # ... other fields ...
+        schema_mode=row.schema_mode,        # ← Now included
+        schema_fields=schema_fields,         # ← Now included (parsed from JSON)
+    )
+```
+
+**Verification:**
+
+- `schema_mode=row.schema_mode` at line 107
+- `schema_fields=schema_fields` at line 108 (parsed from JSON at lines 91-93)
+
+The repository now returns complete Node objects matching the recorder's behavior.

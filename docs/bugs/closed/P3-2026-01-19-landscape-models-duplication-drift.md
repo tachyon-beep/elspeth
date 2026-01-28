@@ -192,3 +192,32 @@ This is safe because:
 - Only tests need updating (internal consumers)
 
 Risk: Low - affects only test code, not production.
+
+---
+
+## CLOSURE: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Unknown (discovered during bug audit)
+
+**Resolution:**
+
+The fix was implemented by deleting `src/elspeth/core/landscape/models.py` entirely, following the CLAUDE.md "No Legacy Code Policy".
+
+**Verification:**
+
+```bash
+$ ls src/elspeth/core/landscape/models.py
+ls: cannot access 'src/elspeth/core/landscape/models.py': No such file or directory
+```
+
+The file no longer exists. All code now uses the single authoritative source:
+- `src/elspeth/contracts/audit.py` - canonical audit dataclasses
+- `src/elspeth/core/landscape/__init__.py` - re-exports from contracts
+
+**Impact:**
+
+- No more duplicate model definitions
+- No more drift between models.py and contracts/audit.py
+- Tests now validate the same contracts used by production code

@@ -146,3 +146,43 @@ The bug remains unfixed in the current codebase. Analysis confirms:
 **Recommendation**: KEEP OPEN
 
 This is a valid P1 bug requiring implementation of the proposed fix: query for tokens lacking completed sink node_states rather than using row_index boundary. A test case for interleaved multi-sink recovery should be added before implementing the fix.
+
+---
+
+## CLOSURE: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Unknown (discovered during bug audit)
+
+**Resolution:**
+
+The fix was implemented in `src/elspeth/core/checkpoint/recovery.py`. The `get_unprocessed_rows()` method (lines 233-310) was completely rewritten to use token outcomes instead of the row_index boundary approach.
+
+**Key changes:**
+
+1. **New approach:** Query for rows whose tokens do NOT have terminal outcomes (COMPLETED, ROUTED, QUARANTINED, FAILED)
+2. **Explicit bug reference:** Code includes comment at line 262-267 citing this bug ID
+3. **Multi-sink safe:** The new approach correctly handles interleaved sink routing
+
+**Code excerpt (lines 257-267):**
+```python
+# Strategy: Find rows whose tokens do NOT have terminal sink outcomes.
+#
+# A token is "complete" if it has a terminal outcome (is_terminal=1)
+# that indicates it reached a sink (COMPLETED or ROUTED).
+#
+# BUG FIX (P1-2026-01-22-recovery-skips-rows-multi-sink):
+# Previous approach used row_index boundary from checkpoint, which
+# failed in multi-sink scenarios where rows interleave between sinks.
+# Example: Row 0→sink_a (done), Row 1→sink_b (failed), Row 2→sink_a (done)
+# Old code: checkpoint at row 2, return rows > 2, miss row 1
+# New code: return rows without terminal outcomes, includes row 1
+```
+
+**Verification:**
+
+The fix correctly handles the scenario described in the bug:
+- Row 0 → sink_a (COMPLETED) - not reprocessed
+- Row 1 → sink_b (no terminal outcome) - reprocessed ✓
+- Row 2 → sink_a (COMPLETED) - not reprocessed
