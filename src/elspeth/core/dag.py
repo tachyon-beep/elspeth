@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 import networkx as nx
 from networkx import MultiDiGraph
 
-from elspeth.contracts import EdgeInfo, RoutingMode
+from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -920,13 +920,20 @@ class ExecutionGraph:
         if producer_schema is None or consumer_schema is None:
             return  # Dynamic schema - compatible with anything
 
-        # Rule 2: Check field compatibility
-        missing_fields = self._get_missing_required_fields(producer_schema, consumer_schema)
-        if missing_fields:
+        # Handle dynamic schemas (no explicit fields + extra='allow')
+        # These are created by _create_dynamic_schema and accept anything
+        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
+        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+        if producer_is_dynamic or consumer_is_dynamic:
+            return  # Dynamic schemas bypass static validation
+
+        # Rule 2: Full compatibility check (missing fields, type mismatches, extra fields)
+        result = check_compatibility(producer_schema, consumer_schema)
+        if not result.compatible:
             raise ValueError(
                 f"Edge from '{from_node_id}' to '{to_node_id}' invalid: "
-                f"producer schema '{producer_schema.__name__}' missing required fields "
-                f"for consumer schema '{consumer_schema.__name__}': {missing_fields}"
+                f"producer schema '{producer_schema.__name__}' incompatible with "
+                f"consumer schema '{consumer_schema.__name__}': {result.error_message}"
             )
 
     def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
@@ -1013,33 +1020,3 @@ class ExecutionGraph:
                     f"first branch has {first_schema.__name__ if first_schema else 'dynamic'}, "
                     f"branch from '{from_id}' has {other_schema.__name__ if other_schema else 'dynamic'}"
                 )
-
-    def _get_missing_required_fields(
-        self,
-        producer_schema: type[PluginSchema] | None,
-        consumer_schema: type[PluginSchema] | None,
-    ) -> list[str]:
-        """Get required fields that producer doesn't provide.
-
-        Args:
-            producer_schema: Schema of data producer
-            consumer_schema: Schema of data consumer
-
-        Returns:
-            List of field names missing from producer
-        """
-        if producer_schema is None or consumer_schema is None:
-            return []  # Dynamic schema
-
-        # Check if either schema is dynamic (no fields + extra='allow')
-        # Dynamic schemas created by _create_dynamic_schema have no fields and extra='allow'
-        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
-        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
-
-        if producer_is_dynamic or consumer_is_dynamic:
-            return []  # Dynamic schema - compatible with anything
-
-        producer_fields = set(producer_schema.model_fields.keys())
-        consumer_required = {name for name, field in consumer_schema.model_fields.items() if field.is_required()}
-
-        return sorted(consumer_required - producer_fields)
