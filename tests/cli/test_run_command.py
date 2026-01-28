@@ -694,3 +694,77 @@ landscape:
             "Rebuilding graph should produce identical node IDs (deterministic generation). "
             "This ensures checkpoint compatibility - same config = same node IDs."
         )
+
+
+class TestRunCommandPayloadStorage:
+    """Regression tests for P0-cli-run-payload-store-not-wired bug.
+
+    Verifies that 'elspeth run --execute' properly wires PayloadStore to the
+    orchestrator so source row payloads are persisted. This is a P0 audit
+    requirement from CLAUDE.md: "Source entry - Raw data stored before any processing".
+    """
+
+    def test_run_stores_source_payloads(self, tmp_path: Path) -> None:
+        """run --execute stores source row payloads to PayloadStore.
+
+        P0 audit requirement from CLAUDE.md:
+        "Source entry - Raw data stored before any processing"
+        """
+        # Setup: Create minimal pipeline config
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id,name\n1,alice\n2,bob\n")
+        output_file = tmp_path / "output.json"
+        landscape_db = tmp_path / "landscape.db"
+        payload_path = tmp_path / "payloads"
+
+        settings = {
+            "source": {
+                "plugin": "csv",
+                "options": {
+                    "path": str(csv_file),
+                    "schema": {"fields": "dynamic"},
+                    "on_validation_failure": "discard",
+                },
+            },
+            "sinks": {
+                "default": {
+                    "plugin": "json",
+                    "options": {"path": str(output_file), "schema": {"fields": "dynamic"}},
+                },
+            },
+            "default_sink": "default",
+            "landscape": {"url": f"sqlite:///{landscape_db}"},
+            "payload_store": {"backend": "filesystem", "base_path": str(payload_path)},
+        }
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(yaml.dump(settings))
+
+        # Execute
+        result = runner.invoke(app, ["run", "-s", str(settings_file), "--execute"])
+        assert result.exit_code == 0, f"Run failed: {result.output}"
+
+        # Verify: source_data_ref must be populated
+        from elspeth.core.landscape.row_data import RowDataState
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        db = LandscapeDB.from_url(f"sqlite:///{landscape_db}")
+        ps = FilesystemPayloadStore(payload_path)
+        recorder = LandscapeRecorder(db, payload_store=ps)
+
+        try:
+            runs = recorder.list_runs()
+            assert len(runs) == 1
+            rows = recorder.get_rows(runs[0].run_id)
+
+            for row in rows:
+                # CRITICAL ASSERTION - P0 audit violation if this fails
+                assert row.source_data_ref is not None, (
+                    f"Row {row.row_id} source_data_ref is NULL - "
+                    "violates CLAUDE.md audit requirement: "
+                    "'Source entry - Raw data stored before any processing'"
+                )
+                # Verify payload is retrievable
+                row_data = recorder.get_row_data(row.row_id)
+                assert row_data.state == RowDataState.AVAILABLE, f"Row {row.row_id} payload not retrievable: {row_data.state}"
+        finally:
+            db.close()

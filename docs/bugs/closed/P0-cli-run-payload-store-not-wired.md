@@ -111,10 +111,25 @@
 
 ## Verification Criteria
 
-- [ ] `elspeth run` creates PayloadStore when configured
-- [ ] `source_rows.source_data_ref` populated for all rows
-- [ ] `explain_token()` returns full source data
-- [ ] Integration test proves end-to-end payload persistence
+- [x] `elspeth run` creates PayloadStore when configured
+- [x] `source_rows.source_data_ref` populated for all rows
+- [x] `explain_token()` returns full source data
+- [x] Integration test proves end-to-end payload persistence
+
+## Resolution
+
+**Fixed in commit on 2026-01-29.**
+
+Changes:
+1. Added PayloadStore wiring in `_execute_pipeline()` (legacy path) at line 418
+2. Added PayloadStore wiring in `_execute_pipeline_with_instances()` (primary path) at line 678
+3. Both paths now pass `payload_store=payload_store` to `orchestrator.run()`
+4. Added `TestRunCommandPayloadStorage` regression test in `tests/cli/test_run_command.py`
+
+Test verification:
+- `tests/cli/test_run_command.py::TestRunCommandPayloadStorage::test_run_stores_source_payloads` - PASSED
+- All 18 CLI tests pass with no regressions
+- `tests/integration/test_source_payload_storage.py` - PASSED
 
 ## Cross-References
 

@@ -416,6 +416,18 @@ def _execute_pipeline(
     db_url = config.landscape.url
     db = LandscapeDB.from_url(db_url)
 
+    # Create payload store for audit compliance
+    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    if config.payload_store.backend != "filesystem":
+        typer.echo(
+            f"Error: Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
+
     try:
         # Instantiate transforms from transforms via PluginManager
         transforms: list[BaseTransform] = []
@@ -615,6 +627,7 @@ def _execute_pipeline(
             pipeline_config,
             graph=graph,
             settings=config,
+            payload_store=payload_store,
         )
 
         return {
@@ -675,6 +688,18 @@ def _execute_pipeline_with_instances(
     # Get database
     db_url = config.landscape.url
     db = LandscapeDB.from_url(db_url)
+
+    # Create payload store for audit compliance
+    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    if config.payload_store.backend != "filesystem":
+        typer.echo(
+            f"Error: Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
 
     try:
         # Build PipelineConfig with pre-instantiated plugins
@@ -836,6 +861,7 @@ def _execute_pipeline_with_instances(
             pipeline_config,
             graph=graph,
             settings=config,
+            payload_store=payload_store,
         )
 
         return {
