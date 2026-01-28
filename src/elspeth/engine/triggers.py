@@ -14,12 +14,17 @@ Trigger types:
 - end_of_source: Implicit - engine handles at source exhaustion (not in TriggerConfig)
 """
 
-import time
-from typing import Literal
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Literal
 
 from elspeth.contracts.enums import TriggerType
 from elspeth.core.config import TriggerConfig
+from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
+
+if TYPE_CHECKING:
+    from elspeth.engine.clock import Clock
 
 
 class TriggerEvaluator:
@@ -43,13 +48,16 @@ class TriggerEvaluator:
                     evaluator.reset()
     """
 
-    def __init__(self, config: TriggerConfig) -> None:
+    def __init__(self, config: TriggerConfig, clock: Clock | None = None) -> None:
         """Initialize evaluator with trigger configuration.
 
         Args:
             config: Trigger configuration from AggregationSettings
+            clock: Optional clock for time access. Defaults to system clock.
+                   Inject MockClock for deterministic testing.
         """
         self._config = config
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._batch_count = 0
         self._first_accept_time: float | None = None
         self._last_triggered: Literal["count", "timeout", "condition"] | None = None
@@ -69,7 +77,7 @@ class TriggerEvaluator:
         """Seconds since first accept in this batch."""
         if self._first_accept_time is None:
             return 0.0
-        return time.monotonic() - self._first_accept_time
+        return self._clock.monotonic() - self._first_accept_time
 
     def get_age_seconds(self) -> float:
         """Get elapsed time since first accept (alias for batch_age_seconds).
@@ -91,7 +99,7 @@ class TriggerEvaluator:
         """
         self._batch_count += 1
         if self._first_accept_time is None:
-            self._first_accept_time = time.monotonic()
+            self._first_accept_time = self._clock.monotonic()
 
     def should_trigger(self) -> bool:
         """Evaluate whether ANY trigger condition is met (OR logic).

@@ -358,6 +358,28 @@ Pipelines compile to DAGs. Linear pipelines are degenerate DAGs (single `continu
 - `token_id`: Instance of row in a specific DAG path
 - `parent_token_id`: Lineage for forks and joins
 
+### Schema Contracts (DAG Validation)
+
+Transforms can declare field requirements that are validated at DAG construction:
+
+```yaml
+# Source guarantees these fields in output
+source:
+  plugin: csv
+  options:
+    schema:
+      fields: dynamic
+      guaranteed_fields: [customer_id, amount]
+
+# Transform requires these fields in input
+transforms:
+  - plugin: llm_classifier
+    options:
+      required_input_fields: [customer_id, amount]
+```
+
+The DAG validates that upstream `guaranteed_fields` satisfy downstream `required_input_fields`. For template-based transforms, use `elspeth.core.templates.extract_jinja2_fields()` to discover template dependencies during development.
+
 ### Transform Subtypes
 
 | Type | Behavior |
@@ -366,6 +388,18 @@ Pipelines compile to DAGs. Linear pipelines are degenerate DAGs (single `continu
 | **Gate** | Evaluate row → decide destination(s) via `continue`, `route_to_sink`, or `fork_to_paths` |
 | **Aggregation** | Collect N rows until trigger → emit result (stateful) |
 | **Coalesce** | Merge results from parallel paths |
+
+#### Aggregation Timeout Behavior
+
+Aggregation triggers fire in two ways:
+- **Count trigger**: Fires immediately when row count threshold is reached
+- **Timeout trigger**: Checked **before** each row is processed
+
+**Known Limitation (True Idle):** Timeout triggers fire when the next row arrives, not during completely idle periods. If no rows arrive, buffered data won't flush until either:
+1. A new row arrives (triggering the timeout check)
+2. The source completes (triggering end-of-source flush)
+
+For streaming sources that may never end, combine timeout with count triggers, or implement periodic heartbeat rows at the source level.
 
 ## Package Management: uv Required
 
@@ -399,11 +433,27 @@ uv pip freeze                   # Show installed packages
 ## Development Commands
 
 ```bash
-# CLI (planned)
-elspeth --settings settings.yaml
-elspeth explain --run latest --row 42
-elspeth validate --settings settings.yaml
-elspeth plugins list
+# Running tests
+.venv/bin/python -m pytest tests/                     # All tests
+.venv/bin/python -m pytest tests/unit/                # Unit tests only
+.venv/bin/python -m pytest tests/integration/         # Integration tests
+.venv/bin/python -m pytest -k "test_fork"             # Tests matching pattern
+.venv/bin/python -m pytest -x                         # Stop on first failure
+
+# Type checking and linting
+.venv/bin/python -m mypy src/
+.venv/bin/python -m ruff check src/
+.venv/bin/python -m ruff check --fix src/             # Auto-fix
+
+# CLI commands
+elspeth run --settings pipeline.yaml --execute        # Execute pipeline
+elspeth resume <run_id>                               # Resume interrupted run
+elspeth validate --settings pipeline.yaml             # Validate config
+elspeth plugins list                                  # List available plugins
+elspeth purge --run <run_id>                          # Purge payload data
+
+# TUI-based commands (RC-1: limited functionality)
+elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
 
 ## Technology Stack
@@ -427,7 +477,6 @@ elspeth plugins list
 | --------- | ---------- | -------- |
 | Canonical JSON | `rfc8785` | Hand-rolled serialization (RFC 8785/JCS standard) |
 | DAG Validation | NetworkX | Custom graph algorithms (acyclicity, topo sort) |
-| Observability | OpenTelemetry + Jaeger | Custom tracing (immediate visualization) |
 | Logging | structlog | Ad-hoc logging (structured events) |
 | Rate Limiting | pyrate-limiter | Custom leaky buckets |
 | Diffing | DeepDiff | Custom comparison (for verify mode) |
@@ -559,23 +608,43 @@ assert lineage.source_row is not None
 assert len(lineage.node_states) > 0
 ```
 
-## Planned Source Layout
+## Source Layout
 
 ```text
-src/elspeth_rapid/
+src/elspeth/
 ├── core/
-│   ├── landscape/      # Audit trail storage
-│   ├── config.py       # Configuration loading
-│   └── canonical.py    # Deterministic hashing
+│   ├── landscape/      # Audit trail storage (recorder, exporter, schema)
+│   ├── checkpoint/     # Crash recovery checkpoints
+│   ├── rate_limit/     # Rate limiting for external calls
+│   ├── retention/      # Payload purge policies
+│   ├── security/       # Secret fingerprinting via HMAC
+│   ├── config.py       # Configuration loading (Dynaconf + Pydantic)
+│   ├── canonical.py    # Deterministic JSON hashing (RFC 8785)
+│   ├── dag.py          # DAG construction and validation (NetworkX)
+│   ├── events.py       # Synchronous event bus for CLI observability
+│   └── payload_store.py # Content-addressable storage for large blobs
+├── contracts/          # Type contracts, schemas, and protocol definitions
 ├── engine/
-│   ├── runner.py       # SDA pipeline execution
-│   ├── row_processor.py
-│   └── artifact_pipeline.py
+│   ├── orchestrator.py # Full run lifecycle management
+│   ├── processor.py    # DAG traversal with work queue
+│   ├── executors.py    # Transform, gate, sink, aggregation executors
+│   ├── coalesce_executor.py # Fork/join barrier with merge policies
+│   ├── artifacts.py    # Artifact pipeline
+│   ├── retry.py        # Tenacity-based retry with backoff
+│   ├── tokens.py       # Token identity and lineage management
+│   ├── triggers.py     # Aggregation trigger evaluation
+│   └── expression_parser.py # AST-based expression parsing (no eval)
 ├── plugins/
-│   ├── sources/        # Data input plugins
-│   ├── transforms/     # Processing plugins
-│   └── sinks/          # Output plugins
-└── cli.py
+│   ├── sources/        # CSVSource, JSONSource, NullSource
+│   ├── transforms/     # FieldMapper, Passthrough, Truncate, etc.
+│   ├── sinks/          # CSVSink, JSONSink, DatabaseSink
+│   ├── llm/            # Azure OpenAI transforms (batch, multi-query)
+│   ├── clients/        # HTTP, LLM, Replayer, Verifier clients
+│   ├── batching/       # Batch-aware transform adapters
+│   └── pooling/        # Thread pool management for plugins
+├── tui/                # Terminal UI (Textual) - explain screens and widgets
+├── cli.py              # Typer CLI (1700+ LOC)
+└── cli_helpers.py      # CLI utility functions
 ```
 
 ## No Legacy Code Policy

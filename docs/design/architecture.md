@@ -274,6 +274,7 @@ These invariants MUST hold across all operations:
 4. **No Orphan Records**: Foreign keys enforced (`PRAGMA foreign_keys=ON` in SQLite)
 5. **Uniqueness**: (run_id, row_id) unique; (state_id, call_index) unique
 6. **Canonical JSON Contract**: Hash algorithm versioned, never silently changed
+7. **Token Data Isolation**: Sibling tokens (from fork or expand) MUST have independent row_data - mutations in one token MUST NOT affect siblings. Enforced via `copy.deepcopy()` in `TokenManager.fork_token()` and `TokenManager.expand_token()`. This guarantees audit trail integrity: each token's recorded data reflects what was actually processed, not mutations from siblings.
 
 ### Row Identity
 

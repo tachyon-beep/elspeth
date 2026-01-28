@@ -259,7 +259,7 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
     Adds Hypothesis property tests for stronger contract guarantees.
     """
 
-    @given(extra_field=st.text(min_size=1, max_size=20).filter(lambda s: s.isidentifier()))
+    @given(extra_field=st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,19}", fullmatch=True))
     @settings(
         max_examples=50,
         suppress_health_check=[

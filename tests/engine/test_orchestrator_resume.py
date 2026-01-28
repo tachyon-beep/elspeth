@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, RunStatus, SinkName
+from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, RowOutcome, RunStatus, SinkName
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -25,6 +25,7 @@ from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
     runs_table,
+    token_outcomes_table,
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -202,6 +203,21 @@ class TestOrchestratorResumeRowProcessing:
                         created_at=now,
                     )
                 )
+
+                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
+                # Rows 3, 4 have no terminal outcomes and will be returned as unprocessed
+                if i < 3:
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-{i:03d}",
+                            run_id=run_id,
+                            token_id=token_id,
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="default",
+                        )
+                    )
 
             conn.commit()
 
@@ -477,3 +493,433 @@ class TestOrchestratorResumeRowProcessing:
 
             assert has_node_states, f"Row {row_id} should have tokens with node_states after resume"
             assert has_outcome, f"Row {row_id} should have tokens with token_outcome after resume"
+
+
+class TestOrchestratorResumeCleanup:
+    """Tests for resource cleanup during Orchestrator.resume().
+
+    P3-2026-01-28: Bug fix ensures transform.close() is called during resume.
+    """
+
+    @pytest.fixture
+    def landscape_db(self, tmp_path: Path) -> LandscapeDB:
+        """Create test database."""
+        return LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+
+    @pytest.fixture
+    def payload_store(self, tmp_path: Path) -> FilesystemPayloadStore:
+        """Create test payload store."""
+        return FilesystemPayloadStore(tmp_path / "payloads")
+
+    @pytest.fixture
+    def checkpoint_manager(self, landscape_db: LandscapeDB) -> CheckpointManager:
+        """Create checkpoint manager."""
+        return CheckpointManager(landscape_db)
+
+    @pytest.fixture
+    def recovery_manager(self, landscape_db: LandscapeDB, checkpoint_manager: CheckpointManager) -> RecoveryManager:
+        """Create recovery manager."""
+        return RecoveryManager(landscape_db, checkpoint_manager)
+
+    @pytest.fixture
+    def orchestrator(self, landscape_db: LandscapeDB, checkpoint_manager: CheckpointManager) -> Orchestrator:
+        """Create orchestrator with checkpoint manager."""
+        return Orchestrator(
+            db=landscape_db,
+            checkpoint_manager=checkpoint_manager,
+        )
+
+    def test_transform_close_called_during_resume(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+        payload_store: FilesystemPayloadStore,
+        orchestrator: Orchestrator,
+        recovery_manager: RecoveryManager,
+        tmp_path: Path,
+    ) -> None:
+        """transform.close() should be called during resume cleanup.
+
+        P3-2026-01-28: Bug fix ensures _process_resumed_rows() finally block
+        calls transform.close() in addition to on_complete().
+        """
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.results import TransformResult
+
+        # Create tracking transform
+        class TrackingTransform(BaseTransform):
+            name = "tracking"
+            input_schema = None  # type: ignore[assignment]
+            output_schema = None  # type: ignore[assignment]
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.close_called = False
+                self.on_complete_called = False
+
+            def process(self, row: dict, ctx: Any) -> TransformResult:
+                return TransformResult.success(row)
+
+            def on_complete(self, ctx: Any) -> None:
+                self.on_complete_called = True
+
+            def close(self) -> None:
+                self.close_called = True
+
+        # Set up fixture run with checkpoint
+        run_id = "test-close-resume"
+        now = datetime.now(UTC)
+
+        source_schema_json = json.dumps({"properties": {"id": {"type": "integer"}}, "required": ["id"]})
+
+        with landscape_db.engine.connect() as conn:
+            # Create run
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="test",
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status=RunStatus.FAILED,
+                    source_schema_json=source_schema_json,
+                )
+            )
+
+            # Create nodes
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="source-node",
+                    run_id=run_id,
+                    plugin_name="null",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="transform-node",
+                    run_id=run_id,
+                    plugin_name="tracking",
+                    node_type=NodeType.TRANSFORM,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink-node",
+                    run_id=run_id,
+                    plugin_name="csv",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.IO_WRITE,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+            # Create edges
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e1-close",
+                    run_id=run_id,
+                    from_node_id="source-node",
+                    to_node_id="transform-node",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e2-close",
+                    run_id=run_id,
+                    from_node_id="transform-node",
+                    to_node_id="sink-node",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+
+            # Create one row that needs processing
+            row_data = {"id": 0}
+            payload_bytes = json.dumps(row_data).encode("utf-8")
+            payload_ref = payload_store.store(payload_bytes)
+
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-close-000",
+                    run_id=run_id,
+                    source_node_id="source-node",
+                    row_index=0,
+                    source_data_hash="hash0",
+                    source_data_ref=payload_ref,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="tok-close-000",
+                    row_id="row-close-000",
+                    created_at=now,
+                )
+            )
+            # Row not marked as completed, so will be processed on resume
+
+            conn.commit()
+
+        # Build graph
+        graph = ExecutionGraph()
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="tracking", config=schema_config)
+        graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
+        graph._sink_id_map = {SinkName("default"): NodeID("sink-node")}
+        graph._transform_id_map = {0: NodeID("transform-node")}
+        graph._config_gate_id_map = {}
+        graph._route_resolution_map = {}
+        graph._default_sink = "default"
+
+        # Create checkpoint - use the existing token for FK integrity
+        checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id="tok-close-000",  # Use actual token for FK constraint
+            node_id="source-node",
+            sequence_number=0,
+            graph=graph,
+        )
+
+        # Get resume point
+        resume_point = recovery_manager.get_resume_point(run_id, graph=graph)
+        assert resume_point is not None
+
+        # Create config with tracking transform
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sources.null_source import NullSource
+
+        output_path = tmp_path / "output.csv"
+        tracking_transform = TrackingTransform()
+
+        config = PipelineConfig(
+            source=NullSource({}),
+            transforms=[tracking_transform],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+        )
+
+        # Act: Resume the run
+        orchestrator.resume(
+            resume_point,
+            config,
+            graph,
+            payload_store=payload_store,
+        )
+
+        # Assert: Both on_complete AND close were called
+        assert tracking_transform.on_complete_called, "transform.on_complete() was not called during resume"
+        assert tracking_transform.close_called, "transform.close() was not called during resume (P3 bug fix)"
+
+    def test_transform_close_called_when_on_complete_fails(
+        self,
+        landscape_db: LandscapeDB,
+        checkpoint_manager: CheckpointManager,
+        payload_store: FilesystemPayloadStore,
+        orchestrator: Orchestrator,
+        recovery_manager: RecoveryManager,
+        tmp_path: Path,
+    ) -> None:
+        """transform.close() should be called even if on_complete() raises.
+
+        Verifies that the suppress(Exception) wrapper in the finally block
+        allows close() to be called even when on_complete() fails.
+        """
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.results import TransformResult
+
+        class FailingOnCompleteTransform(BaseTransform):
+            """Transform where on_complete() raises but close() should still be called."""
+
+            name = "failing_on_complete"
+            input_schema = None  # type: ignore[assignment]
+            output_schema = None  # type: ignore[assignment]
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.close_called = False
+                self.on_complete_called = False
+
+            def process(self, row: dict, ctx: Any) -> TransformResult:
+                return TransformResult.success(row)
+
+            def on_complete(self, ctx: Any) -> None:
+                self.on_complete_called = True
+                raise RuntimeError("on_complete intentionally failed")
+
+            def close(self) -> None:
+                self.close_called = True
+
+        # Set up fixture run with checkpoint (reuse pattern from above test)
+        run_id = "test-close-on-failure"
+        now = datetime.now(UTC)
+
+        source_schema_json = json.dumps({"properties": {"id": {"type": "integer"}}, "required": ["id"]})
+
+        with landscape_db.engine.connect() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=now,
+                    config_hash="test",
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status=RunStatus.FAILED,
+                    source_schema_json=source_schema_json,
+                )
+            )
+
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="source-node-fail",
+                    run_id=run_id,
+                    plugin_name="null",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="transform-node-fail",
+                    run_id=run_id,
+                    plugin_name="failing_on_complete",
+                    node_type=NodeType.TRANSFORM,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink-node-fail",
+                    run_id=run_id,
+                    plugin_name="csv",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.IO_WRITE,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e1-fail",
+                    run_id=run_id,
+                    from_node_id="source-node-fail",
+                    to_node_id="transform-node-fail",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e2-fail",
+                    run_id=run_id,
+                    from_node_id="transform-node-fail",
+                    to_node_id="sink-node-fail",
+                    label="continue",
+                    default_mode=RoutingMode.MOVE,
+                    created_at=now,
+                )
+            )
+
+            row_data = {"id": 0}
+            payload_bytes = json.dumps(row_data).encode("utf-8")
+            payload_ref = payload_store.store(payload_bytes)
+
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-fail-000",
+                    run_id=run_id,
+                    source_node_id="source-node-fail",
+                    row_index=0,
+                    source_data_hash="hash0",
+                    source_data_ref=payload_ref,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="tok-fail-000",
+                    row_id="row-fail-000",
+                    created_at=now,
+                )
+            )
+
+            conn.commit()
+
+        graph = ExecutionGraph()
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source-node-fail", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
+        graph.add_node("transform-node-fail", node_type=NodeType.TRANSFORM, plugin_name="failing_on_complete", config=schema_config)
+        graph.add_node("sink-node-fail", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_edge("source-node-fail", "transform-node-fail", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform-node-fail", "sink-node-fail", label="continue", mode=RoutingMode.MOVE)
+        graph._sink_id_map = {SinkName("default"): NodeID("sink-node-fail")}
+        graph._transform_id_map = {0: NodeID("transform-node-fail")}
+        graph._config_gate_id_map = {}
+        graph._route_resolution_map = {}
+        graph._default_sink = "default"
+
+        checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id="tok-fail-000",
+            node_id="source-node-fail",
+            sequence_number=0,
+            graph=graph,
+        )
+
+        resume_point = recovery_manager.get_resume_point(run_id, graph=graph)
+        assert resume_point is not None
+
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sources.null_source import NullSource
+
+        output_path = tmp_path / "output_fail.csv"
+        failing_transform = FailingOnCompleteTransform()
+
+        config = PipelineConfig(
+            source=NullSource({}),
+            transforms=[failing_transform],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+        )
+
+        # Resume should complete (on_complete exception is suppressed)
+        orchestrator.resume(
+            resume_point,
+            config,
+            graph,
+            payload_store=payload_store,
+        )
+
+        # Assert: on_complete was called (and raised), but close() was STILL called
+        assert failing_transform.on_complete_called, "on_complete() was not called"
+        assert failing_transform.close_called, "close() must be called even when on_complete() raises"

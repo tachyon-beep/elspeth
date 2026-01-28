@@ -76,6 +76,7 @@ class TestLLMConfig:
                 {
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'model'
 
@@ -96,6 +97,7 @@ class TestLLMConfig:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.model == "gpt-4"
@@ -130,6 +132,7 @@ class TestLLMConfig:
                 "model": "gpt-4",
                 "template": "Hello, {{ row.name }}!",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.temperature == 0.0
@@ -145,6 +148,7 @@ class TestLLMConfig:
                 "model": "claude-3-opus",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 0.7,
                 "max_tokens": 1000,
                 "system_prompt": "You are a helpful assistant.",
@@ -167,6 +171,7 @@ class TestLLMConfig:
                 "model": "gpt-4",
                 "template": "{{ row.x }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 0.0,
             }
         )
@@ -178,6 +183,7 @@ class TestLLMConfig:
                 "model": "gpt-4",
                 "template": "{{ row.x }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 2.0,
             }
         )
@@ -190,6 +196,7 @@ class TestLLMConfig:
                     "model": "gpt-4",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "temperature": -0.1,
                 }
             )
@@ -201,6 +208,7 @@ class TestLLMConfig:
                     "model": "gpt-4",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "temperature": 2.1,
                 }
             )
@@ -213,6 +221,7 @@ class TestLLMConfig:
                     "model": "gpt-4",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "max_tokens": 0,
                 }
             )
@@ -223,6 +232,7 @@ class TestLLMConfig:
                     "model": "gpt-4",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "max_tokens": -100,
                 }
             )
@@ -237,6 +247,7 @@ class TestLLMConfig:
                 "lookup": {"key": "value"},
                 "lookup_source": "prompts/lookups.yaml",
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -268,6 +279,7 @@ class TestBaseLLMTransformInit:
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -280,6 +292,7 @@ class TestBaseLLMTransformInit:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -296,6 +309,7 @@ class TestBaseLLMTransformInit:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -310,6 +324,7 @@ class TestBaseLLMTransformInit:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "on_error": "error_sink",
             }
         )
@@ -344,6 +359,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "Hello, {{ row.required_field }}!",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -365,6 +381,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -391,6 +408,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -415,6 +433,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -423,6 +442,7 @@ class TestBaseLLMTransformProcess:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response"] == "Analysis result"
+        assert result.row["llm_response_model"] == "gpt-4"
         assert result.row["llm_response_usage"] == {
             "prompt_tokens": 10,
             "completion_tokens": 20,
@@ -446,6 +466,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "response_field": "analysis",
             }
         )
@@ -455,6 +476,7 @@ class TestBaseLLMTransformProcess:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["analysis"] == "Result"
+        assert result.row["analysis_model"] == "gpt-4"
         assert "analysis_usage" in result.row
         assert "analysis_template_hash" in result.row
         assert "analysis_variables_hash" in result.row
@@ -474,6 +496,7 @@ class TestBaseLLMTransformProcess:
                 "template": "{{ row.text }}",
                 "system_prompt": "You are a helpful assistant.",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -502,6 +525,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -526,6 +550,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 0.7,
                 "max_tokens": 500,
             }
@@ -554,6 +579,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -573,6 +599,7 @@ class TestBaseLLMTransformProcess:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -592,6 +619,7 @@ class TestBaseLLMTransformSchemaHandling:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"mode": "strict", "fields": ["count: int"]},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -608,6 +636,7 @@ class TestBaseLLMTransformSchemaHandling:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 

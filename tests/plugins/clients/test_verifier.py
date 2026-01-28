@@ -99,6 +99,19 @@ class TestVerificationResult:
         # Missing recording is not considered a "difference"
         assert result.has_differences is False
 
+    def test_has_differences_false_when_payload_missing(self) -> None:
+        """has_differences is False when payload is purged (not a real diff)."""
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            recorded_response=None,
+            is_match=False,
+            payload_missing=True,
+        )
+
+        # Missing payload is not considered a "difference"
+        assert result.has_differences is False
+
 
 class TestVerificationReport:
     """Tests for VerificationReport dataclass."""
@@ -111,6 +124,7 @@ class TestVerificationReport:
         assert report.matches == 0
         assert report.mismatches == 0
         assert report.missing_recordings == 0
+        assert report.missing_payloads == 0
         assert report.results == []
 
     def test_success_rate_no_calls(self) -> None:
@@ -297,7 +311,7 @@ class TestCallVerifier:
         request2 = {"id": 2}
         request3 = {"id": 3}
 
-        def find_call_side_effect(run_id: str, call_type: str, request_hash: str) -> Call | None:
+        def find_call_side_effect(run_id: str, call_type: str, request_hash: str, *, sequence_index: int = 0) -> Call | None:
             # First two requests have recordings, third doesn't
             if request_hash == stable_hash(request3):
                 return None
@@ -442,10 +456,11 @@ class TestCallVerifier:
             run_id="run_abc123",
             call_type="http",
             request_hash=request_hash,
+            sequence_index=0,
         )
 
     def test_verify_with_none_recorded_response(self) -> None:
-        """Handles calls where recorded response couldn't be retrieved."""
+        """Handles calls where recorded response payload is missing/purged."""
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
@@ -461,9 +476,14 @@ class TestCallVerifier:
             live_response={"content": "Hello"},
         )
 
-        # Empty dict vs live response will mismatch
+        # Should track as missing payload, not mismatch
         assert result.is_match is False
-        assert result.recorded_response == {}
+        assert result.recorded_response is None
+        assert result.payload_missing is True
+        assert result.has_differences is False  # Not a real difference
+        assert verifier.get_report().missing_payloads == 1
+        # Should not increment mismatches
+        assert verifier.get_report().mismatches == 0
 
     def test_verify_order_independent_comparison(self) -> None:
         """Verifier ignores order in list comparisons."""
@@ -561,3 +581,72 @@ class TestCallVerifier:
 
         # Should match because differences are in ignored paths
         assert result.is_match is True
+
+    def test_duplicate_requests_verify_against_different_recordings(self) -> None:
+        """Duplicate identical requests verify against different recorded responses.
+
+        This tests the scenario where the same request is made multiple times
+        in the original run and each verification compares against the
+        corresponding recorded response.
+
+        Bug: P1-2026-01-21-replay-request-hash-collisions
+        """
+        recorder = self._create_mock_recorder()
+        # Same request data made multiple times
+        request_data = {"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}
+
+        # Track which sequence_index we're being asked for
+        recorded_responses = [
+            {"content": "Response 1 - first call"},
+            {"content": "Response 2 - second call"},
+            {"content": "Response 3 - third call"},
+        ]
+
+        def find_call_side_effect(run_id: str, call_type: str, request_hash: str, *, sequence_index: int = 0) -> Call | None:
+            """Return the Nth call for duplicate request hashes."""
+            if sequence_index >= len(recorded_responses):
+                return None
+            return self._create_mock_call(
+                call_id=f"call_{sequence_index}",
+                request_hash=request_hash,
+            )
+
+        def get_response_side_effect(call_id: str) -> dict[str, object]:
+            """Return response data based on call_id."""
+            idx = int(call_id.split("_")[1])
+            return recorded_responses[idx]
+
+        recorder.find_call_by_request_hash.side_effect = find_call_side_effect
+        recorder.get_call_response_data.side_effect = get_response_side_effect
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+
+        # First verify - matches first recorded response
+        result1 = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"content": "Response 1 - first call"},
+        )
+        assert result1.is_match is True, "First verify should match first recorded response"
+
+        # Second verify - should compare against SECOND recorded response
+        result2 = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"content": "Response 2 - second call"},
+        )
+        assert result2.is_match is True, "Second verify should match second recorded response"
+
+        # Third verify with mismatched response
+        result3 = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"content": "Wrong response"},
+        )
+        assert result3.is_match is False, "Third verify should detect mismatch"
+
+        # Verify report stats
+        report = verifier.get_report()
+        assert report.total_calls == 3
+        assert report.matches == 2
+        assert report.mismatches == 1

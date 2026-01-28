@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
+from elspeth.contracts.enums import TriggerType
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import CheckpointSettings, ElspethSettings
+    from elspeth.engine.clock import Clock
 
 
 @dataclass
@@ -105,6 +107,7 @@ class RunResult:
     rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
     rows_expanded: int = 0  # Deaggregation parent tokens
     rows_buffered: int = 0  # Passthrough mode buffered tokens
+    routed_destinations: dict[str, int] = field(default_factory=dict)  # sink_name -> count
 
 
 class RouteValidationError(Exception):
@@ -142,8 +145,10 @@ class Orchestrator:
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
         checkpoint_settings: "CheckpointSettings | None" = None,
+        clock: "Clock | None" = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
+        from elspeth.engine.clock import DEFAULT_CLOCK
 
         self._db = db
         self._events = event_bus if event_bus is not None else NullEventBus()
@@ -151,6 +156,7 @@ class Orchestrator:
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
         self._checkpoint_settings = checkpoint_settings
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
@@ -541,8 +547,8 @@ class Orchestrator:
                     payload_store=payload_store,
                 )
 
-            # Complete run
-            recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+            # Complete run with reproducibility grade computation
+            recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
             result.status = RunStatus.COMPLETED
             run_completed = True
 
@@ -595,6 +601,8 @@ class Orchestrator:
                     quarantined=result.rows_quarantined,
                     duration_seconds=total_duration,
                     exit_code=0,
+                    routed=result.rows_routed,
+                    routed_destinations=tuple(result.routed_destinations.items()),
                 )
             )
 
@@ -623,11 +631,13 @@ class Orchestrator:
                         quarantined=result.rows_quarantined,
                         duration_seconds=total_duration,
                         exit_code=1,
+                        routed=result.rows_routed,
+                        routed_destinations=tuple(result.routed_destinations.items()),
                     )
                 )
             else:
                 # Run failed before completion - emit FAILED status with zero metrics
-                recorder.complete_run(run.run_id, status=RunStatus.FAILED)
+                recorder.finalize_run(run.run_id, status=RunStatus.FAILED)
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -638,6 +648,8 @@ class Orchestrator:
                         quarantined=0,
                         duration_seconds=total_duration,
                         exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
+                        routed=0,
+                        routed_destinations=(),
                     )
                 )
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
@@ -866,6 +878,7 @@ class Orchestrator:
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
+                clock=self._clock,
             )
 
             # Register each coalesce point
@@ -898,6 +911,7 @@ class Orchestrator:
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
             payload_store=payload_store,
+            clock=self._clock,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -914,9 +928,20 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
+        routed_destinations: dict[str, int] = {}  # Track routing destinations
         # Track (token, outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
+
+        # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        # Maps node_id_str -> (transform, step_in_pipeline)
+        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
+        # for audit recording (to avoid node_state step_index collisions)
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        if config.aggregation_settings:
+            for i, t in enumerate(config.transforms):
+                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1020,6 +1045,43 @@ class Orchestrator:
                     # Extract row data from SourceRow (all source items are SourceRow)
                     row_data: dict[str, Any] = source_item.row
 
+                    # ─────────────────────────────────────────────────────────────────
+                    # Check for timed-out aggregations BEFORE processing this row
+                    # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+                    #
+                    # This is the critical fix: checking timeout BEFORE buffering the
+                    # new row ensures the timed-out batch contains only previously
+                    # buffered rows, not the row that just arrived.
+                    # ─────────────────────────────────────────────────────────────────
+                    (
+                        pre_agg_succ,
+                        pre_agg_fail,
+                        pre_agg_routed,
+                        pre_agg_quarantined,
+                        pre_agg_coalesced,
+                        pre_agg_forked,
+                        pre_agg_expanded,
+                        pre_agg_buffered,
+                        pre_agg_routed_dests,
+                    ) = self._check_aggregation_timeouts(
+                        config=config,
+                        processor=processor,
+                        ctx=ctx,
+                        pending_tokens=pending_tokens,
+                        default_sink_name=default_sink_name,
+                        agg_transform_lookup=agg_transform_lookup,
+                    )
+                    rows_succeeded += pre_agg_succ
+                    rows_failed += pre_agg_fail
+                    rows_routed += pre_agg_routed
+                    rows_quarantined += pre_agg_quarantined
+                    rows_coalesced += pre_agg_coalesced
+                    rows_forked += pre_agg_forked
+                    rows_expanded += pre_agg_expanded
+                    rows_buffered += pre_agg_buffered
+                    for dest, count in pre_agg_routed_dests.items():
+                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+
                     results = processor.process_row(
                         row_index=row_index,
                         row_data=row_data,
@@ -1051,6 +1113,7 @@ class Orchestrator:
                             rows_routed += 1
                             # GateExecutor contract: ROUTED outcome always has sink_name set
                             assert result.sink_name is not None
+                            routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
                             pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                         elif result.outcome == RowOutcome.FAILED:
                             rows_failed += 1
@@ -1117,6 +1180,7 @@ class Orchestrator:
                                                 rows_routed += 1
                                                 # sink_name is guaranteed non-None for ROUTED outcome
                                                 routed_sink = cont_result.sink_name or default_sink_name
+                                                routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                                                 pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
                                             elif cont_result.outcome == RowOutcome.QUARANTINED:
                                                 rows_quarantined += 1
@@ -1158,7 +1222,17 @@ class Orchestrator:
                 # CRITICAL: Flush remaining aggregation buffers at end-of-source
                 # ─────────────────────────────────────────────────────────────────
                 if config.aggregation_settings:
-                    agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                    (
+                        agg_succeeded,
+                        agg_failed,
+                        agg_routed,
+                        agg_quarantined,
+                        agg_coalesced,
+                        agg_forked,
+                        agg_expanded,
+                        agg_buffered,
+                        agg_routed_dests,
+                    ) = self._flush_remaining_aggregation_buffers(
                         config=config,
                         processor=processor,
                         ctx=ctx,
@@ -1171,6 +1245,14 @@ class Orchestrator:
                     )
                     rows_succeeded += agg_succeeded
                     rows_failed += agg_failed
+                    rows_routed += agg_routed
+                    rows_quarantined += agg_quarantined
+                    rows_coalesced += agg_coalesced
+                    rows_forked += agg_forked
+                    rows_expanded += agg_expanded
+                    rows_buffered += agg_buffered
+                    for dest, count in agg_routed_dests.items():
+                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
                 # Flush pending coalesce operations at end-of-source
                 if coalesce_executor is not None:
@@ -1208,6 +1290,7 @@ class Orchestrator:
                                         rows_routed += 1
                                         # sink_name is guaranteed non-None for ROUTED outcome
                                         routed_sink = cont_result.sink_name or default_sink_name
+                                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                                         pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
                                     elif cont_result.outcome == RowOutcome.QUARANTINED:
                                         rows_quarantined += 1
@@ -1330,6 +1413,7 @@ class Orchestrator:
             rows_coalesce_failed=rows_coalesce_failed,
             rows_expanded=rows_expanded,
             rows_buffered=rows_buffered,
+            routed_destinations=routed_destinations,
         )
 
     def _export_landscape(
@@ -1672,7 +1756,7 @@ class Orchestrator:
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
-            recorder.complete_run(run_id, status=RunStatus.COMPLETED)
+            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
             # Delete checkpoints on successful completion (Bug #8 fix)
             self._delete_checkpoints(run_id)
@@ -1684,6 +1768,7 @@ class Orchestrator:
                 rows_succeeded=0,
                 rows_failed=0,
                 rows_routed=0,
+                routed_destinations={},
             )
 
         # 5. Process unprocessed rows
@@ -1698,8 +1783,8 @@ class Orchestrator:
             payload_store=payload_store,
         )
 
-        # 6. Complete the run
-        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
+        # 6. Complete the run with reproducibility grade
+        recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
         result.status = RunStatus.COMPLETED
 
         # 7. Delete checkpoints on successful completion
@@ -1845,6 +1930,7 @@ class Orchestrator:
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
+                clock=self._clock,
             )
 
             for coalesce_settings in settings.coalesce:
@@ -1878,6 +1964,7 @@ class Orchestrator:
             coalesce_step_map=coalesce_step_map,
             restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
+            clock=self._clock,
         )
 
         # Process rows - Buffer TOKENS
@@ -1894,9 +1981,19 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
+        routed_destinations: dict[str, int] = {}  # Track routing destinations
         # Track (token, outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
+
+        # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
+        # for audit recording (to avoid node_state step_index collisions)
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        if config.aggregation_settings:
+            for i, t in enumerate(config.transforms):
+                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -1912,6 +2009,39 @@ class Orchestrator:
             #    optimization
             for row_id, _row_index, row_data in unprocessed_rows:
                 rows_processed += 1
+
+                # ─────────────────────────────────────────────────────────────────
+                # Check for timed-out aggregations BEFORE processing this row
+                # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+                # ─────────────────────────────────────────────────────────────────
+                (
+                    pre_agg_succ,
+                    pre_agg_fail,
+                    pre_agg_routed,
+                    pre_agg_quarantined,
+                    pre_agg_coalesced,
+                    pre_agg_forked,
+                    pre_agg_expanded,
+                    pre_agg_buffered,
+                    pre_agg_routed_dests,
+                ) = self._check_aggregation_timeouts(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                    default_sink_name=default_sink_name,
+                    agg_transform_lookup=agg_transform_lookup,
+                )
+                rows_succeeded += pre_agg_succ
+                rows_failed += pre_agg_fail
+                rows_routed += pre_agg_routed
+                rows_quarantined += pre_agg_quarantined
+                rows_coalesced += pre_agg_coalesced
+                rows_forked += pre_agg_forked
+                rows_expanded += pre_agg_expanded
+                rows_buffered += pre_agg_buffered
+                for dest, count in pre_agg_routed_dests.items():
+                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
                 results = processor.process_existing_row(
                     row_id=row_id,
@@ -1936,6 +2066,7 @@ class Orchestrator:
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
                         assert result.sink_name is not None
+                        routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
                         pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                     elif result.outcome == RowOutcome.FAILED:
                         rows_failed += 1
@@ -1991,6 +2122,7 @@ class Orchestrator:
                                             rows_routed += 1
                                             # sink_name is guaranteed non-None for ROUTED outcome
                                             routed_sink = cont_result.sink_name or default_sink_name
+                                            routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                                             pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
                                         elif cont_result.outcome == RowOutcome.QUARANTINED:
                                             rows_quarantined += 1
@@ -2008,7 +2140,17 @@ class Orchestrator:
             # CRITICAL: Flush remaining aggregation buffers at end-of-source
             # ─────────────────────────────────────────────────────────────────
             if config.aggregation_settings:
-                agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                (
+                    agg_succeeded,
+                    agg_failed,
+                    agg_routed,
+                    agg_quarantined,
+                    agg_coalesced,
+                    agg_forked,
+                    agg_expanded,
+                    agg_buffered,
+                    agg_routed_dests,
+                ) = self._flush_remaining_aggregation_buffers(
                     config=config,
                     processor=processor,
                     ctx=ctx,
@@ -2020,6 +2162,14 @@ class Orchestrator:
                 )
                 rows_succeeded += agg_succeeded
                 rows_failed += agg_failed
+                rows_routed += agg_routed
+                rows_quarantined += agg_quarantined
+                rows_coalesced += agg_coalesced
+                rows_forked += agg_forked
+                rows_expanded += agg_expanded
+                rows_buffered += agg_buffered
+                for dest, count in agg_routed_dests.items():
+                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
             # Flush pending coalesce operations
             if coalesce_executor is not None:
@@ -2055,6 +2205,7 @@ class Orchestrator:
                                     rows_routed += 1
                                     # sink_name is guaranteed non-None for ROUTED outcome
                                     routed_sink = cont_result.sink_name or default_sink_name
+                                    routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                                     pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
                                 elif cont_result.outcome == RowOutcome.QUARANTINED:
                                     rows_quarantined += 1
@@ -2102,9 +2253,16 @@ class Orchestrator:
                 with suppress(Exception):
                     sink.on_complete(ctx)
 
+            # Close all transforms (release resources - file handles, connections, etc.)
+            # Mirrors _cleanup_transforms() pattern from _execute_run()
+            for transform in config.transforms:
+                with suppress(Exception):
+                    transform.close()
+
             # Close all sinks (NOT source - wasn't opened)
             for sink in config.sinks.values():
-                sink.close()
+                with suppress(Exception):
+                    sink.close()
 
         # Clear graph after execution completes
         self._current_graph = None
@@ -2122,6 +2280,7 @@ class Orchestrator:
             rows_coalesce_failed=rows_coalesce_failed,
             rows_expanded=rows_expanded,
             rows_buffered=rows_buffered,
+            routed_destinations=routed_destinations,
         )
 
     def _handle_incomplete_batches(
@@ -2153,6 +2312,214 @@ class Orchestrator:
                 recorder.retry_batch(batch.batch_id)
             # DRAFT batches continue normally (collection resumes)
 
+    def _find_aggregation_transform(
+        self,
+        config: PipelineConfig,
+        agg_node_id_str: str,
+        agg_name: str,
+    ) -> tuple[TransformProtocol, int]:
+        """Find the batch-aware transform for an aggregation node.
+
+        Args:
+            config: Pipeline configuration with transforms
+            agg_node_id_str: The aggregation node ID as string
+            agg_name: Human-readable aggregation name (for error messages)
+
+        Returns:
+            Tuple of (transform, step_index) where step_index is the 0-indexed
+            position in the pipeline
+
+        Raises:
+            RuntimeError: If no batch-aware transform found for the aggregation
+        """
+        agg_transform: TransformProtocol | None = None
+        agg_step = len(config.transforms)
+
+        for i, t in enumerate(config.transforms):
+            if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
+                agg_transform = t
+                agg_step = i
+                break
+
+        if agg_transform is None:
+            raise RuntimeError(
+                f"No batch-aware transform found for aggregation '{agg_name}' "
+                f"(node_id={agg_node_id_str}). This indicates a bug in graph construction "
+                f"or pipeline configuration. "
+                f"Available transforms: {[t.node_id for t in config.transforms]}"
+            )
+
+        return agg_transform, agg_step
+
+    def _check_aggregation_timeouts(
+        self,
+        config: PipelineConfig,
+        processor: RowProcessor,
+        ctx: PluginContext,
+        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
+        default_sink_name: str,
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
+    ) -> tuple[int, int, int, int, int, int, int, int, dict[str, int]]:
+        """Check and flush any aggregations whose timeout has expired.
+
+        Called BEFORE processing each row to ensure timeouts fire during active
+        processing, not just at end-of-source. Checking BEFORE buffering ensures
+        timed-out batches don't include the newly arriving row.
+
+        Bug fix: P1-2026-01-22-aggregation-timeout-idle-never-fires
+        Before this fix, should_flush() was only called from buffer_row(),
+        meaning timeouts never fired during idle periods between rows.
+
+        KNOWN LIMITATION (True Idle):
+        Timeouts fire when the next row arrives, not during "true idle" periods.
+        If no rows arrive, buffered data will not flush until either:
+        1. A new row arrives (triggering this timeout check), or
+        2. The source completes (triggering _flush_remaining_aggregation_buffers)
+
+        Example: If timeout_seconds=5 and rows stop arriving at T=10, the batch
+        won't flush until either a new row arrives or the source ends. For
+        streaming sources that may never end, consider using count triggers or
+        implementing periodic polling at the source level.
+
+        Args:
+            config: Pipeline configuration with aggregation_settings
+            processor: RowProcessor with public aggregation timeout API
+            ctx: Plugin context for transform execution
+            pending_tokens: Dict of sink_name -> tokens to append results to
+            default_sink_name: Default sink for aggregation output
+            agg_transform_lookup: Pre-computed dict mapping node_id_str -> (transform, step).
+                If None, lookup is computed on each call (less efficient).
+
+        Returns:
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced,
+                      rows_forked, rows_expanded, rows_buffered, routed_destinations)
+        """
+        rows_succeeded = 0
+        rows_failed = 0
+        rows_routed = 0
+        rows_quarantined = 0
+        rows_coalesced = 0
+        rows_forked = 0
+        rows_expanded = 0
+        rows_buffered = 0
+        routed_destinations: dict[str, int] = {}
+
+        for agg_node_id_str, agg_settings in config.aggregation_settings.items():
+            agg_node_id = NodeID(agg_node_id_str)
+
+            # Use public facade method to check timeout (no private member access)
+            should_flush, trigger_type = processor.check_aggregation_timeout(agg_node_id)
+
+            if not should_flush:
+                continue
+
+            # Skip if not a timeout trigger - count triggers are handled in buffer_row
+            if trigger_type != TriggerType.TIMEOUT:
+                continue
+
+            # Check if there are buffered rows
+            buffered_count = processor.get_aggregation_buffer_count(agg_node_id)
+            if buffered_count == 0:
+                continue
+
+            # Get transform and step from pre-computed lookup (O(1)) or compute (O(n))
+            if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
+                agg_transform, agg_step = agg_transform_lookup[agg_node_id_str]
+            else:
+                # Fallback: use helper method if lookup not provided
+                agg_transform, agg_step = self._find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
+
+            # Use handle_timeout_flush for proper output_mode handling
+            # This correctly routes through remaining transforms and gates
+            total_steps = len(config.transforms)
+            completed_results, work_items = processor.handle_timeout_flush(
+                node_id=agg_node_id,
+                transform=agg_transform,
+                ctx=ctx,
+                step=agg_step,
+                total_steps=total_steps,
+                trigger_type=TriggerType.TIMEOUT,
+            )
+
+            # Handle completed results (no more transforms - go to sink)
+            for result in completed_results:
+                if result.outcome == RowOutcome.FAILED:
+                    rows_failed += 1
+                else:
+                    # Route to appropriate sink based on branch_name if set
+                    sink_name = result.token.branch_name or default_sink_name
+                    if sink_name not in pending_tokens:
+                        sink_name = default_sink_name
+                    pending_tokens[sink_name].append((result.token, result.outcome))
+                    rows_succeeded += 1
+
+            # Process work items through remaining transforms
+            # These tokens need to continue through the pipeline
+            for work_item in work_items:
+                # Determine start_step: if coalesce is set, use it directly
+                # Otherwise, add 1 to current position to get next transform
+                if work_item.coalesce_at_step is not None:
+                    continuation_start = work_item.coalesce_at_step
+                else:
+                    continuation_start = work_item.start_step + 1
+                downstream_results = processor.process_token(
+                    token=work_item.token,
+                    transforms=config.transforms,
+                    ctx=ctx,
+                    start_step=continuation_start,
+                    coalesce_at_step=work_item.coalesce_at_step,
+                    coalesce_name=work_item.coalesce_name,
+                )
+
+                for result in downstream_results:
+                    if result.outcome == RowOutcome.FAILED:
+                        rows_failed += 1
+                    elif result.outcome == RowOutcome.COMPLETED:
+                        # Route to appropriate sink
+                        sink_name = result.token.branch_name or default_sink_name
+                        if sink_name not in pending_tokens:
+                            sink_name = default_sink_name
+                        pending_tokens[sink_name].append((result.token, result.outcome))
+                        rows_succeeded += 1
+                    elif result.outcome == RowOutcome.ROUTED:
+                        # Gate routed to named sink - MUST enqueue or row is lost
+                        # GateExecutor contract: ROUTED outcome always has sink_name set
+                        rows_routed += 1
+                        routed_sink = result.sink_name or default_sink_name
+                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
+                    elif result.outcome == RowOutcome.QUARANTINED:
+                        # Row quarantined by downstream transform - already recorded
+                        rows_quarantined += 1
+                    elif result.outcome == RowOutcome.COALESCED:
+                        # Merged token from terminal coalesce - route to output sink
+                        # This handles the case where coalesce is the last step
+                        rows_coalesced += 1
+                        rows_succeeded += 1
+                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                    elif result.outcome == RowOutcome.FORKED:
+                        # Parent token split into multiple paths - children counted separately
+                        rows_forked += 1
+                    elif result.outcome == RowOutcome.EXPANDED:
+                        # Deaggregation parent token - children counted separately
+                        rows_expanded += 1
+                    elif result.outcome == RowOutcome.BUFFERED:
+                        # Passthrough mode buffered token (into downstream aggregation)
+                        rows_buffered += 1
+                    # CONSUMED_IN_BATCH is handled within process_token
+
+        return (
+            rows_succeeded,
+            rows_failed,
+            rows_routed,
+            rows_quarantined,
+            rows_coalesced,
+            rows_forked,
+            rows_expanded,
+            rows_buffered,
+            routed_destinations,
+        )
+
     def _flush_remaining_aggregation_buffers(
         self,
         config: PipelineConfig,
@@ -2164,15 +2531,19 @@ class Orchestrator:
         recorder: LandscapeRecorder,
         checkpoint: bool = True,
         last_node_id: str | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int, int, int, int, int, int, dict[str, int]]:
         """Flush remaining aggregation buffers at end-of-source.
 
         Without this, rows buffered but not yet flushed (e.g., 50 rows
         when trigger is count=100) would be silently lost.
 
+        Uses handle_timeout_flush with END_OF_SOURCE trigger to properly handle
+        all output_mode semantics (single, passthrough, transform) and route
+        tokens through remaining transforms if any exist after the aggregation.
+
         Args:
             config: Pipeline configuration with aggregation_settings
-            processor: RowProcessor with aggregation executor
+            processor: RowProcessor with public aggregation facades
             ctx: Plugin context for transform execution
             pending_tokens: Dict of sink_name -> tokens to append results to
             default_sink_name: Default sink for aggregation output
@@ -2183,106 +2554,153 @@ class Orchestrator:
             last_node_id: Node ID to use for checkpointing (required if checkpoint=True)
 
         Returns:
-            Tuple of (rows_succeeded, rows_failed) from flushing
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced,
+                      rows_forked, rows_expanded, rows_buffered, routed_destinations)
 
         Raises:
             RuntimeError: If no batch-aware transform found for an aggregation
                          (indicates bug in graph construction or pipeline config)
         """
-        from elspeth.contracts import TokenInfo
-        from elspeth.contracts.enums import TriggerType
-
         rows_succeeded = 0
         rows_failed = 0
+        rows_routed = 0
+        rows_quarantined = 0
+        rows_coalesced = 0
+        rows_forked = 0
+        rows_expanded = 0
+        rows_buffered = 0
+        routed_destinations: dict[str, int] = {}
+        total_steps = len(config.transforms)
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
-            # aggregation_settings is keyed by node_id (set in cli.py)
-            # The aggregation name is available via agg_settings.name
-            agg_name = agg_settings.name
             agg_node_id = NodeID(agg_node_id_str)
 
-            # Check if there are buffered rows
-            buffered_count = processor._aggregation_executor.get_buffer_count(agg_node_id)
+            # Use public facade (not private member)
+            buffered_count = processor.get_aggregation_buffer_count(agg_node_id)
             if buffered_count == 0:
                 continue
 
-            # Find the batch-aware transform for this aggregation
-            # Only TransformProtocol can have is_batch_aware (gates cannot)
-            agg_transform: TransformProtocol | None = None
-            for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
-                    agg_transform = t
-                    break
+            # Use helper method for transform lookup
+            agg_transform, agg_step = self._find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
 
-            if agg_transform is None:
-                raise RuntimeError(
-                    f"No batch-aware transform found for aggregation '{agg_name}' "
-                    f"(node_id={agg_node_id}). This indicates a bug in graph construction "
-                    f"or pipeline configuration."
-                )
-
-            # Compute step_in_pipeline for this aggregation
-            agg_step = next(
-                (i for i, t in enumerate(config.transforms) if t.node_id == agg_node_id_str),
-                len(config.transforms),
-            )
-
-            # Execute flush with END_OF_SOURCE trigger
-            flush_result, buffered_tokens, _batch_id = processor._aggregation_executor.execute_flush(
+            # Use handle_timeout_flush with END_OF_SOURCE trigger
+            # This properly handles output_mode and routes through remaining transforms
+            completed_results, work_items = processor.handle_timeout_flush(
                 node_id=agg_node_id,
                 transform=agg_transform,
                 ctx=ctx,
-                step_in_pipeline=agg_step,
+                step=agg_step,
+                total_steps=total_steps,
                 trigger_type=TriggerType.END_OF_SOURCE,
             )
 
-            # Handle the flushed batch result
-            if flush_result.status == "success":
-                if flush_result.row is not None and buffered_tokens:
-                    # Single row output - reuse first buffered token's metadata
-                    output_token = TokenInfo(
-                        token_id=buffered_tokens[0].token_id,
-                        row_id=buffered_tokens[0].row_id,
-                        row_data=flush_result.row,
-                        branch_name=buffered_tokens[0].branch_name,
-                    )
-
-                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                    # sink durability is achieved. Do NOT record here.
-
-                    pending_tokens[default_sink_name].append((output_token, RowOutcome.COMPLETED))
+            # Handle completed results (terminal tokens - go to sink)
+            for result in completed_results:
+                if result.outcome == RowOutcome.FAILED:
+                    rows_failed += 1
+                else:
+                    # Route to appropriate sink based on branch_name if set
+                    sink_name = result.token.branch_name or default_sink_name
+                    if sink_name not in pending_tokens:
+                        sink_name = default_sink_name
+                    pending_tokens[sink_name].append((result.token, result.outcome))
                     rows_succeeded += 1
 
-                    # Checkpoint the flushed aggregation token
+                    # Checkpoint if enabled
                     if checkpoint and last_node_id is not None:
                         self._maybe_checkpoint(
                             run_id=run_id,
-                            token_id=output_token.token_id,
+                            token_id=result.token.token_id,
                             node_id=last_node_id,
                         )
-                elif flush_result.rows is not None and buffered_tokens:
-                    # Multiple row output - use expand_token for proper audit
-                    expanded = processor.token_manager.expand_token(
-                        parent_token=buffered_tokens[0],
-                        expanded_rows=flush_result.rows,
-                        step_in_pipeline=agg_step,
-                    )
-                    for exp_token in expanded:
-                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                        # sink durability is achieved. Do NOT record here.
 
-                        pending_tokens[default_sink_name].append((exp_token, RowOutcome.COMPLETED))
+            # Process work items through remaining transforms
+            # These tokens need to continue through the pipeline
+            for work_item in work_items:
+                # Determine start_step: if coalesce is set, use it directly
+                # Otherwise, add 1 to current position to get next transform
+                if work_item.coalesce_at_step is not None:
+                    continuation_start = work_item.coalesce_at_step
+                else:
+                    continuation_start = work_item.start_step + 1
+                downstream_results = processor.process_token(
+                    token=work_item.token,
+                    transforms=config.transforms,
+                    ctx=ctx,
+                    start_step=continuation_start,
+                    coalesce_at_step=work_item.coalesce_at_step,
+                    coalesce_name=work_item.coalesce_name,
+                )
+
+                for result in downstream_results:
+                    if result.outcome == RowOutcome.FAILED:
+                        rows_failed += 1
+                    elif result.outcome == RowOutcome.COMPLETED:
+                        # Route to appropriate sink
+                        sink_name = result.token.branch_name or default_sink_name
+                        if sink_name not in pending_tokens:
+                            sink_name = default_sink_name
+                        pending_tokens[sink_name].append((result.token, result.outcome))
                         rows_succeeded += 1
 
-                        # Checkpoint each expanded token
+                        # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
                             self._maybe_checkpoint(
                                 run_id=run_id,
-                                token_id=exp_token.token_id,
+                                token_id=result.token.token_id,
                                 node_id=last_node_id,
                             )
-            else:
-                # Flush failed
-                rows_failed += len(buffered_tokens)
+                    elif result.outcome == RowOutcome.ROUTED:
+                        # Gate routed to named sink - MUST enqueue or row is lost
+                        # GateExecutor contract: ROUTED outcome always has sink_name set
+                        rows_routed += 1
+                        routed_sink = result.sink_name or default_sink_name
+                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
 
-        return rows_succeeded, rows_failed
+                        # Checkpoint if enabled
+                        if checkpoint and last_node_id is not None:
+                            self._maybe_checkpoint(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                node_id=last_node_id,
+                            )
+                    elif result.outcome == RowOutcome.QUARANTINED:
+                        # Row quarantined by downstream transform - already recorded
+                        rows_quarantined += 1
+                    elif result.outcome == RowOutcome.COALESCED:
+                        # Merged token from terminal coalesce - route to output sink
+                        # This handles the case where coalesce is the last step
+                        rows_coalesced += 1
+                        rows_succeeded += 1
+                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+
+                        # Checkpoint if enabled
+                        if checkpoint and last_node_id is not None:
+                            self._maybe_checkpoint(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                node_id=last_node_id,
+                            )
+                    elif result.outcome == RowOutcome.FORKED:
+                        # Parent token split into multiple paths - children counted separately
+                        rows_forked += 1
+                    elif result.outcome == RowOutcome.EXPANDED:
+                        # Deaggregation parent token - children counted separately
+                        rows_expanded += 1
+                    elif result.outcome == RowOutcome.BUFFERED:
+                        # Passthrough mode buffered token (into downstream aggregation)
+                        rows_buffered += 1
+                    # CONSUMED_IN_BATCH is handled within process_token
+
+        return (
+            rows_succeeded,
+            rows_failed,
+            rows_routed,
+            rows_quarantined,
+            rows_coalesced,
+            rows_forked,
+            rows_expanded,
+            rows_buffered,
+            routed_destinations,
+        )

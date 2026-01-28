@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -14,6 +14,7 @@ from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
     runs_table,
+    token_outcomes_table,
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -109,6 +110,21 @@ def run_with_checkpoint_and_payloads(
             )
         )
 
+        # Create sink node (needed for token outcomes)
+        conn.execute(
+            nodes_table.insert().values(
+                node_id="sink-node",
+                run_id=run_id,
+                plugin_name="csv_sink",
+                node_type=NodeType.SINK,
+                plugin_version="1.0",
+                determinism=Determinism.DETERMINISTIC,
+                config_hash="x",
+                config_json="{}",
+                registered_at=now,
+            )
+        )
+
         # Create rows with payload data
         for i in range(5):
             row_id = f"row-{i:03d}"
@@ -134,6 +150,21 @@ def run_with_checkpoint_and_payloads(
                     token_id=f"tok-{i:03d}",
                     row_id=row_id,
                     created_at=now,
+                )
+            )
+
+        # Record terminal outcomes for rows 0, 1, 2 (completed before checkpoint)
+        # Rows 3-4 have no outcomes (unprocessed)
+        for i in range(3):
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=f"outcome-{i:03d}",
+                    run_id=run_id,
+                    token_id=f"tok-{i:03d}",
+                    outcome=RowOutcome.COMPLETED.value,
+                    is_terminal=1,
+                    recorded_at=now,
+                    sink_name="sink-node",
                 )
             )
 

@@ -312,7 +312,7 @@ Pipeline configurations in containers should use **absolute container paths**:
 
 ```yaml
 # config/pipeline.yaml
-datasource:
+source:
   plugin: csv
   options:
     path: /app/input/data.csv  # Container path, not host path

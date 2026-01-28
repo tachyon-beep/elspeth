@@ -1,7 +1,5 @@
 """Tests for TriggerEvaluator."""
 
-import time
-
 
 class TestTriggerEvaluator:
     """Tests for TriggerEvaluator class.
@@ -63,13 +61,15 @@ class TestTriggerEvaluator:
     def test_timeout_trigger_reached(self) -> None:
         """Timeout trigger returns True when time exceeded."""
         from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.triggers import TriggerEvaluator
 
+        clock = MockClock(start=0.0)
         config = TriggerConfig(timeout_seconds=0.01)
-        evaluator = TriggerEvaluator(config)
+        evaluator = TriggerEvaluator(config, clock=clock)
 
         evaluator.record_accept()
-        time.sleep(0.02)
+        clock.advance(0.02)  # Advance past timeout
         assert evaluator.should_trigger() is True
 
     def test_condition_trigger_not_met(self) -> None:
@@ -102,17 +102,19 @@ class TestTriggerEvaluator:
     def test_condition_trigger_with_age(self) -> None:
         """Condition trigger can use batch_age_seconds."""
         from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.triggers import TriggerEvaluator
 
+        clock = MockClock(start=0.0)
         config = TriggerConfig(
             condition="row['batch_count'] >= 10 and row['batch_age_seconds'] > 0.01",
         )
-        evaluator = TriggerEvaluator(config)
+        evaluator = TriggerEvaluator(config, clock=clock)
 
         for _ in range(15):
             evaluator.record_accept()
 
-        time.sleep(0.02)
+        clock.advance(0.02)  # Advance past condition threshold
         assert evaluator.should_trigger() is True
 
     def test_combined_count_and_timeout_count_wins(self) -> None:
@@ -133,15 +135,17 @@ class TestTriggerEvaluator:
     def test_combined_count_and_timeout_timeout_wins(self) -> None:
         """Combined triggers: timeout fires first (OR logic)."""
         from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.triggers import TriggerEvaluator
 
+        clock = MockClock(start=0.0)
         config = TriggerConfig(count=1000, timeout_seconds=0.01)
-        evaluator = TriggerEvaluator(config)
+        evaluator = TriggerEvaluator(config, clock=clock)
 
         for _ in range(5):
             evaluator.record_accept()
 
-        time.sleep(0.02)
+        clock.advance(0.02)  # Advance past timeout
 
         result = evaluator.should_trigger()
         assert result is True
@@ -218,14 +222,16 @@ class TestTriggerEvaluator:
     def test_batch_age_seconds_property(self) -> None:
         """batch_age_seconds returns time since first accept."""
         from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.triggers import TriggerEvaluator
 
+        clock = MockClock(start=0.0)
         config = TriggerConfig(timeout_seconds=10.0)
-        evaluator = TriggerEvaluator(config)
+        evaluator = TriggerEvaluator(config, clock=clock)
 
         assert evaluator.batch_age_seconds == 0.0
 
         evaluator.record_accept()
-        time.sleep(0.01)
+        clock.advance(0.5)  # Advance time by 500ms
 
-        assert evaluator.batch_age_seconds > 0.0
+        assert evaluator.batch_age_seconds == 0.5

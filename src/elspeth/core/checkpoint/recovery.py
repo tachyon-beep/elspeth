@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RunStatus
+from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointManager
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.schema import rows_table, runs_table, tokens_table
+from elspeth.core.landscape.schema import (
+    rows_table,
+    runs_table,
+    token_outcomes_table,
+    tokens_table,
+)
 from elspeth.core.payload_store import PayloadStore
 
 if TYPE_CHECKING:
@@ -228,12 +233,14 @@ class RecoveryManager:
     def get_unprocessed_rows(self, run_id: str) -> list[str]:
         """Get row IDs that were not processed before the run failed.
 
-        Derives the row boundary from token lineage:
-        checkpoint.token_id -> tokens.row_id -> rows.row_index
+        Uses token outcomes to determine which rows need processing:
+        - Rows with terminal outcomes (COMPLETED, ROUTED, QUARANTINED, FAILED) are done
+        - Rows whose tokens lack terminal outcomes need reprocessing
 
-        This is correct even when sequence_number != row_index (e.g., forks
-        where one row produces multiple tokens, or failures where sequence
-        doesn't advance).
+        This correctly handles multi-sink scenarios where rows are routed to
+        different sinks in interleaved order. The previous row_index boundary
+        approach would skip rows routed to a failed sink if a later row
+        succeeded on a different sink.
 
         Args:
             run_id: The run to get unprocessed rows for
@@ -247,37 +254,68 @@ class RecoveryManager:
             return []
 
         with self._db.engine.connect() as conn:
-            # Step 1: Find the row_index of the checkpointed token's source row
-            # Join: checkpoint.token_id -> tokens.row_id -> rows.row_index
-            checkpointed_row_index_query = (
-                select(rows_table.c.row_index)
+            # Strategy: Find rows whose tokens do NOT have terminal sink outcomes.
+            #
+            # A token is "complete" if it has a terminal outcome (is_terminal=1)
+            # that indicates it reached a sink (COMPLETED or ROUTED).
+            #
+            # BUG FIX (P1-2026-01-22-recovery-skips-rows-multi-sink):
+            # Previous approach used row_index boundary from checkpoint, which
+            # failed in multi-sink scenarios where rows interleave between sinks.
+            # Example: Row 0→sink_a (done), Row 1→sink_b (failed), Row 2→sink_a (done)
+            # Old code: checkpoint at row 2, return rows > 2, miss row 1
+            # New code: return rows without terminal outcomes, includes row 1
+
+            # Step 1: Get all row_ids for this run
+            all_rows_query = (
+                select(rows_table.c.row_id, rows_table.c.row_index).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
+            )
+            all_rows = conn.execute(all_rows_query).fetchall()
+
+            if not all_rows:
+                return []
+
+            # Step 2: Find tokens with terminal outcomes for this run
+            # Terminal outcomes that should NOT be reprocessed:
+            # - COMPLETED: Row reached output sink successfully
+            # - ROUTED: Row sent to named sink by gate
+            # - QUARANTINED: Row failed validation, stored for investigation (don't auto-retry)
+            # - FAILED: Processing failed, not recoverable (don't auto-retry)
+            #
+            # Note: CONSUMED_IN_BATCH is intentionally excluded - batch completion
+            # determines if those tokens need reprocessing, not individual token outcome.
+            tokens_with_terminal_outcomes_query = (
+                select(tokens_table.c.row_id)
+                .distinct()
                 .select_from(
                     tokens_table.join(
-                        rows_table,
-                        tokens_table.c.row_id == rows_table.c.row_id,
+                        token_outcomes_table,
+                        tokens_table.c.token_id == token_outcomes_table.c.token_id,
                     )
                 )
-                .where(tokens_table.c.token_id == checkpoint.token_id)
-            )
-            checkpointed_row_result = conn.execute(checkpointed_row_index_query).fetchone()
-
-            if checkpointed_row_result is None:
-                raise RuntimeError(
-                    f"Checkpoint references non-existent token: {checkpoint.token_id}. "
-                    "This indicates database corruption or a bug in checkpoint creation."
+                .where(token_outcomes_table.c.run_id == run_id)
+                .where(token_outcomes_table.c.is_terminal == 1)
+                .where(
+                    token_outcomes_table.c.outcome.in_(
+                        [
+                            RowOutcome.COMPLETED.value,
+                            RowOutcome.ROUTED.value,
+                            RowOutcome.QUARANTINED.value,
+                            RowOutcome.FAILED.value,
+                        ]
+                    )
                 )
+            )
+            completed_row_ids = {row.row_id for row in conn.execute(tokens_with_terminal_outcomes_query).fetchall()}
 
-            checkpointed_row_index = checkpointed_row_result.row_index
+            # Step 3: Return rows that are NOT in the completed set
+            # These are rows that either:
+            # - Never started processing (no token outcome)
+            # - Started but failed before reaching a sink (no terminal outcome)
+            # - Were routed to a sink that failed (no terminal outcome recorded)
+            unprocessed = [row.row_id for row in all_rows if row.row_id not in completed_row_ids]
 
-            # Step 2: Find all rows with row_index > checkpointed_row_index
-            result = conn.execute(
-                select(rows_table.c.row_id)
-                .where(rows_table.c.run_id == run_id)
-                .where(rows_table.c.row_index > checkpointed_row_index)
-                .order_by(rows_table.c.row_index)
-            ).fetchall()
-
-        return [row.row_id for row in result]
+        return unprocessed
 
     def _get_run(self, run_id: str) -> Row[Any] | None:
         """Get run metadata from the database.

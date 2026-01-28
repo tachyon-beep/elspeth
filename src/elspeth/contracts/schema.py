@@ -106,9 +106,14 @@ class FieldDefinition:
                 f"(cannot start with a digit)."
             )
 
+        # FIELD_PATTERN regex guarantees field_type is one of the supported literals
+        assert field_type in SUPPORTED_TYPES, f"Regex validation failed: {field_type}"
+        # Cast needed because mypy can't infer type narrowing from set membership
+        typed_field: Literal["str", "int", "float", "bool", "any"] = field_type  # type: ignore[assignment]
+
         return cls(
             name=name,
-            field_type=field_type,  # type: ignore[arg-type]
+            field_type=typed_field,
             required=optional_marker is None,
         )
 
@@ -119,6 +124,51 @@ class FieldDefinition:
             "type": self.field_type,
             "required": self.required,
         }
+
+
+def _parse_field_names_list(value: Any, field_name: str) -> tuple[str, ...] | None:
+    """Parse a list of field names for guaranteed_fields/required_fields.
+
+    Args:
+        value: Raw value from config (should be None or list of strings)
+        field_name: Name of the config field for error messages
+
+    Returns:
+        Tuple of field names, or None if value is None
+
+    Raises:
+        ValueError: If value is not None, a list, or contains non-strings
+    """
+    if value is None:
+        return None
+
+    if not isinstance(value, list):
+        raise ValueError(f"'{field_name}' must be a list of field names, got {type(value).__name__}")
+
+    if len(value) == 0:
+        return None  # Empty list is treated as unspecified
+
+    result: list[str] = []
+    for i, name in enumerate(value):
+        if not isinstance(name, str):
+            raise ValueError(f"'{field_name}[{i}]' must be a string, got {type(name).__name__}")
+        name = name.strip()
+        if not name:
+            raise ValueError(f"'{field_name}[{i}]' cannot be empty or whitespace-only")
+        if not name.isidentifier():
+            raise ValueError(
+                f"'{field_name}[{i}]' must be a valid Python identifier, got '{name}'. "
+                f"Field names must contain only letters, digits, and underscores, "
+                f"and cannot start with a digit."
+            )
+        result.append(name)
+
+    # Check for duplicates
+    if len(result) != len(set(result)):
+        duplicates = sorted({n for n in result if result.count(n) > 1})
+        raise ValueError(f"Duplicate field names in '{field_name}': {', '.join(duplicates)}")
+
+    return tuple(result)
 
 
 def _normalize_field_spec(spec: Any, *, index: int) -> str:
@@ -169,22 +219,44 @@ class SchemaConfig:
     A schema can be either dynamic (accept anything) or explicit
     (validate against specified fields).
 
+    Schema Contracts (for DAG validation):
+        - guaranteed_fields: Fields the producer GUARANTEES will exist in output
+        - required_fields: Fields the consumer REQUIRES in input
+
+    For explicit schemas (mode='strict' or 'free'), the declared fields are
+    implicitly guaranteed. Use guaranteed_fields/required_fields to express
+    contracts for dynamic schemas that still have known field requirements.
+
+    Example YAML for a dynamic schema with explicit contracts:
+        schema:
+          fields: dynamic
+          guaranteed_fields: [customer_id, timestamp]  # Producer guarantees these
+
+        schema:
+          fields: dynamic
+          required_fields: [customer_id, amount]  # Consumer requires these
+
     Attributes:
         mode: "strict" (exact fields), "free" (at least these), or None (dynamic)
         fields: List of FieldDefinitions, or None if dynamic
         is_dynamic: True if schema accepts any fields
+        guaranteed_fields: Field names the producer guarantees (for dynamic schemas)
+        required_fields: Field names the consumer requires (for dynamic schemas)
     """
 
     mode: Literal["strict", "free"] | None
     fields: tuple[FieldDefinition, ...] | None
     is_dynamic: bool
+    guaranteed_fields: tuple[str, ...] | None = None
+    required_fields: tuple[str, ...] | None = None
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> SchemaConfig:
         """Parse schema configuration from dict.
 
         Args:
-            config: Dict with 'fields' key (required) and optional 'mode'
+            config: Dict with 'fields' key (required) and optional 'mode',
+                   'guaranteed_fields', 'required_fields'
 
         Returns:
             SchemaConfig instance
@@ -195,9 +267,19 @@ class SchemaConfig:
         if "fields" not in config:
             raise ValueError("'fields' key is required in schema config. Use 'fields: dynamic' or provide explicit field list.")
 
+        # Parse contract fields (valid for both dynamic and explicit schemas)
+        guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
+        required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")
+
         # Handle serialized dynamic schema (mode="dynamic" from to_dict())
         if config.get("mode") == "dynamic":
-            return cls(mode=None, fields=None, is_dynamic=True)
+            return cls(
+                mode=None,
+                fields=None,
+                is_dynamic=True,
+                guaranteed_fields=guaranteed_fields,
+                required_fields=required_fields,
+            )
 
         fields_value = config["fields"]
 
@@ -207,6 +289,8 @@ class SchemaConfig:
                 mode=None,
                 fields=None,
                 is_dynamic=True,
+                guaranteed_fields=guaranteed_fields,
+                required_fields=required_fields,
             )
 
         # Explicit schema - requires mode
@@ -246,6 +330,8 @@ class SchemaConfig:
             mode=mode,
             fields=parsed_fields,
             is_dynamic=False,
+            guaranteed_fields=guaranteed_fields,
+            required_fields=required_fields,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -255,15 +341,70 @@ class SchemaConfig:
         serialized as "dynamic" for clarity in audit logs. This is intentional:
         - Internal: mode=None, is_dynamic=True (distinguishes from explicit modes)
         - Serialized: mode="dynamic" (clear in audit trail)
+
+        Contract fields (guaranteed_fields, required_fields) are included
+        when present, omitted when None for cleaner audit output.
         """
+        result: dict[str, Any]
         if self.is_dynamic:
-            return {"mode": "dynamic", "fields": None}
-        return {
-            "mode": self.mode,
-            "fields": [f.to_dict() for f in self.fields] if self.fields else [],
-        }
+            result = {"mode": "dynamic", "fields": None}
+        else:
+            result = {
+                "mode": self.mode,
+                "fields": [f.to_dict() for f in self.fields] if self.fields else [],
+            }
+
+        # Include contract fields only when specified (cleaner audit output)
+        if self.guaranteed_fields is not None:
+            result["guaranteed_fields"] = list(self.guaranteed_fields)
+        if self.required_fields is not None:
+            result["required_fields"] = list(self.required_fields)
+
+        return result
 
     @property
     def allows_extra_fields(self) -> bool:
         """Whether extra fields beyond schema are allowed."""
         return self.is_dynamic or self.mode == "free"
+
+    def get_effective_guaranteed_fields(self) -> frozenset[str]:
+        """Get all fields this schema guarantees will exist.
+
+        For explicit schemas (strict/free mode), REQUIRED declared fields are
+        implicitly guaranteed. Optional fields (marked with ?) are NOT guaranteed
+        since producers are allowed to omit them. For dynamic schemas, only
+        explicit guaranteed_fields are considered.
+
+        Returns:
+            Frozenset of field names that are guaranteed to exist.
+        """
+        # Start with explicit guaranteed_fields if any
+        explicit = frozenset(self.guaranteed_fields) if self.guaranteed_fields else frozenset()
+
+        # For explicit schemas, only REQUIRED fields are implicitly guaranteed
+        # Optional fields (f.required == False) may be missing, so they're not guaranteed
+        if self.fields is not None:
+            declared_required = frozenset(f.name for f in self.fields if f.required)
+            return explicit | declared_required
+
+        return explicit
+
+    def get_effective_required_fields(self) -> frozenset[str]:
+        """Get all fields this schema requires in input.
+
+        For explicit schemas (strict/free mode), required declared fields
+        (not optional) are implicitly required. For dynamic schemas, only
+        explicit required_fields are considered.
+
+        Returns:
+            Frozenset of field names that are required.
+        """
+        # Start with explicit required_fields if any
+        explicit = frozenset(self.required_fields) if self.required_fields else frozenset()
+
+        # For explicit schemas, required declared fields are implicitly required
+        if self.fields is not None:
+            declared_required = frozenset(f.name for f in self.fields if f.required)
+            return explicit | declared_required
+
+        return explicit

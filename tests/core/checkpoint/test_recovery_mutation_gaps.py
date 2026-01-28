@@ -638,34 +638,34 @@ class TestGetUnprocessedRowsErrors:
 
         assert result == []
 
-    def test_checkpoint_with_invalid_token_raises_runtime_error(
+    def test_checkpoint_with_deleted_token_returns_row_as_unprocessed(
         self,
         recovery_manager: RecoveryManager,
         in_memory_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
         mock_graph: ExecutionGraph,
     ) -> None:
-        """Lines 243-244: Checkpoint with non-existent token raises RuntimeError.
+        """Deleted token results in row being returned as unprocessed.
 
-        We cannot create a checkpoint with an invalid token_id directly due to FK.
-        Instead, we:
-        1. Create valid data (run, node, row, token)
-        2. Create a valid checkpoint pointing to that token
-        3. Disable FK constraints (SQLite PRAGMA)
-        4. DELETE the token (simulating DB corruption)
-        5. Re-enable FK constraints
-        6. Call get_unprocessed_rows which should raise RuntimeError
+        After P1-2026-01-22-recovery-skips-rows-multi-sink fix, the implementation
+        uses token_outcomes to determine which rows are processed, not token lookups.
+        If a token is deleted (DB corruption), the row won't have terminal outcomes,
+        so it will correctly be returned as unprocessed for reprocessing.
+
+        This is the correct behavior: corrupted data should be recoverable, not crash.
         """
         from sqlalchemy import text
 
         run_id = "test-corrupt-run"
         token_id = "token-to-delete"
+        row_id = "test-row"
 
         # Create all prerequisite records
         _create_run_with_checkpoint_prerequisites(
             in_memory_db,
             run_id=run_id,
             token_id=token_id,
+            row_id=row_id,
             status=RunStatus.FAILED,
         )
 
@@ -686,11 +686,9 @@ class TestGetUnprocessedRowsErrors:
             conn.execute(text("PRAGMA foreign_keys = ON"))
             conn.commit()
 
-        # Now get_unprocessed_rows should raise RuntimeError
-        with pytest.raises(RuntimeError) as exc_info:
-            recovery_manager.get_unprocessed_rows(run_id)
+        # With outcome-based detection, the row has no terminal outcome,
+        # so it should be returned as unprocessed (correct recovery behavior)
+        unprocessed = recovery_manager.get_unprocessed_rows(run_id)
 
-        error_msg = str(exc_info.value)
-        assert token_id in error_msg
-        assert "non-existent token" in error_msg.lower()
-        assert "corruption" in error_msg.lower() or "bug" in error_msg.lower()
+        assert len(unprocessed) == 1
+        assert row_id in unprocessed

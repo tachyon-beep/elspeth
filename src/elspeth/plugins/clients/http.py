@@ -189,7 +189,15 @@ class AuditedHTTPClient(AuditedClientBase):
         """
         call_index = self._next_call_index()
 
-        full_url = f"{self._base_url}{url}" if self._base_url else url
+        # Properly join base_url and url, handling slash combinations
+        if self._base_url:
+            # Normalize: strip trailing slash from base, leading slash from path
+            # Then join with exactly one slash
+            base = self._base_url.rstrip("/")
+            path = url.lstrip("/")
+            full_url = f"{base}/{path}"
+        else:
+            full_url = url
         merged_headers = {**self._default_headers, **(headers or {})}
         effective_timeout = timeout if timeout is not None else self._timeout
 

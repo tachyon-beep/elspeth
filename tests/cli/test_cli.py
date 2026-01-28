@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from elspeth.contracts import Determinism, NodeStateStatus, NodeType, RowOutcome, RunStatus
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 # Note: In Click 8.0+, mix_stderr is no longer a CliRunner parameter.
 # Stderr output is combined with stdout by default when using CliRunner.invoke()
@@ -418,6 +419,7 @@ class TestPurgeCommand:
                         completed_at=old_date,
                         config_hash="abc123",
                         settings_json="{}",
+                        reproducibility_grade=ReproducibilityGrade.REPLAY_REPRODUCIBLE.value,
                         canonical_version="1.0.0",
                     )
                 )

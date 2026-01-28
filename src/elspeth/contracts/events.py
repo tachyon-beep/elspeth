@@ -104,6 +104,10 @@ class RunCompleted:
     """Emitted when pipeline run finishes (success or failure).
 
     Provides final summary for CI integration.
+
+    Routing breakdown:
+    - routed: Total rows routed to non-default sinks (gates or error routing)
+    - routed_destinations: Count per destination sink {sink_name: count}
     """
 
     run_id: str
@@ -114,3 +118,5 @@ class RunCompleted:
     quarantined: int
     duration_seconds: float
     exit_code: int  # 0=success, 1=partial failure, 2=total failure
+    routed: int = 0  # Rows routed to non-default sinks
+    routed_destinations: tuple[tuple[str, int], ...] = ()  # (sink_name, count) pairs

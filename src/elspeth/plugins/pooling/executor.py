@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from threading import Semaphore
+from threading import Lock, Semaphore
 from typing import Any
 
 from elspeth.contracts import TransformResult
@@ -99,6 +99,15 @@ class PooledExecutor:
         # Reorder buffer for strict output ordering
         self._buffer: ReorderBuffer[TransformResult] = ReorderBuffer()
 
+        # Lock to serialize execute_batch calls (single-flight)
+        # This prevents concurrent batches from mixing results in the shared buffer
+        self._batch_lock = Lock()
+
+        # Global dispatch gate - ensures minimum time between dispatches
+        # This implements the design spec: "Dispatcher waits current_delay between dispatches"
+        self._last_dispatch_time: float = 0.0  # time.monotonic() of last dispatch
+        self._dispatch_gate_lock = Lock()  # Serializes dispatch timing coordination
+
         self._shutdown = False
 
     @property
@@ -154,6 +163,9 @@ class PooledExecutor:
 
         Each row is processed with its own state_id for audit trail.
 
+        Note: This method is serialized - only one batch can execute at a time.
+        Concurrent calls will block until the previous batch completes.
+
         Args:
             contexts: List of RowContext with row data and state_ids
             process_fn: Function that processes a single row with state_id
@@ -164,6 +176,26 @@ class PooledExecutor:
         if not contexts:
             return []
 
+        # Serialize batch execution to prevent result mixing
+        # The ReorderBuffer uses sequential indices, so concurrent batches
+        # would interleave indices and cause results to be returned to the wrong caller
+        with self._batch_lock:
+            return self._execute_batch_locked(contexts, process_fn)
+
+    def _execute_batch_locked(
+        self,
+        contexts: list[RowContext],
+        process_fn: Callable[[dict[str, Any], str], TransformResult],
+    ) -> list[TransformResult]:
+        """Internal batch execution (must be called while holding _batch_lock).
+
+        Args:
+            contexts: List of RowContext with row data and state_ids
+            process_fn: Function that processes a single row with state_id
+
+        Returns:
+            List of TransformResults in same order as input contexts
+        """
         # Track futures by their buffer index
         futures: dict[Future[tuple[int, TransformResult]], int] = {}
 
@@ -212,6 +244,58 @@ class PooledExecutor:
 
         return results
 
+    def _wait_for_dispatch_gate(self) -> None:
+        """Wait until we're allowed to dispatch, ensuring global pacing.
+
+        Enforces min_dispatch_delay_ms between consecutive dispatches across
+        ALL workers. This prevents burst traffic that can overwhelm APIs.
+
+        NOTE: This gate only enforces min_dispatch_delay_ms, NOT AIMD delay.
+        AIMD backoff is per-worker retry behavior applied in _execute_single()
+        after capacity errors. Separating these concerns ensures:
+        - Initial dispatches are evenly spaced (global pacing)
+        - Failing workers back off personally (AIMD backoff)
+        - Healthy workers continue at normal pace during pressure
+
+        The lock is only held during check-and-update, not during sleep,
+        allowing other workers to make progress.
+        """
+        delay_ms = self._config.min_dispatch_delay_ms
+        if delay_ms <= 0:
+            return  # No pacing configured
+
+        delay_s = delay_ms / 1000
+        total_wait_ms = 0.0
+
+        while True:
+            with self._dispatch_gate_lock:
+                now = time.monotonic()
+
+                # Handle first dispatch: let it through immediately
+                # _last_dispatch_time == 0 means no dispatch yet (since monotonic() > 0)
+                if self._last_dispatch_time == 0.0:
+                    self._last_dispatch_time = now
+                    break
+
+                time_since_last = now - self._last_dispatch_time
+
+                if time_since_last >= delay_s:
+                    # Gate is open - we can dispatch
+                    self._last_dispatch_time = now
+                    break
+
+                # Calculate remaining wait time
+                remaining_s = delay_s - time_since_last
+                remaining_ms = remaining_s * 1000
+
+            # Sleep OUTSIDE the lock to allow other workers to check
+            time.sleep(remaining_s)
+            total_wait_ms += remaining_ms
+
+        # Record accumulated wait time for audit trail
+        if total_wait_ms > 0:
+            self._throttle.record_throttle_wait(total_wait_ms)
+
     def _execute_single(
         self,
         buffer_idx: int,
@@ -250,20 +334,14 @@ class PooledExecutor:
         self._semaphore.acquire()
         holding_semaphore = True
 
-        # Track if we just retried - skip pre-dispatch delay after capacity retry
-        # to avoid double-sleeping (we already slept during the retry backoff)
-        just_retried = False
-
         try:
             while True:
-                # Apply throttle delay INSIDE worker (after semaphore acquired)
-                # Skip if we just retried - we already slept during retry backoff
-                if not just_retried:
-                    delay_ms = self._throttle.current_delay_ms
-                    if delay_ms > 0:
-                        time.sleep(delay_ms / 1000)
-                        self._throttle.record_throttle_wait(delay_ms)
-                just_retried = False  # Reset for next iteration
+                # Wait for global dispatch gate (ensures pacing between ALL dispatches)
+                # CRITICAL: Always check the gate, even after retries. The retry backoff
+                # sleep is for THIS worker's cooldown, but OTHER workers may have
+                # dispatched while we slept. We must check the global gate to maintain
+                # min_dispatch_delay_ms between ALL dispatches across ALL workers.
+                self._wait_for_dispatch_gate()
 
                 try:
                     result = process_fn(row, state_id)
@@ -327,10 +405,9 @@ class PooledExecutor:
                     self._semaphore.acquire()
                     holding_semaphore = True
 
-                    # Mark that we just retried - skip pre-dispatch delay on next iteration
-                    just_retried = True
-
-                    # Retry (continue to top of loop)
+                    # Continue to top of loop for retry
+                    # Note: We DO NOT skip the dispatch gate check after retry.
+                    # The retry backoff is personal cooldown; the gate ensures global pacing.
         finally:
             # Release semaphore only if we're holding it
             # This defensive check ensures correctness even if an unexpected

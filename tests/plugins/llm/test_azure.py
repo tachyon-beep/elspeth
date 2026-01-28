@@ -93,6 +93,7 @@ class TestAzureOpenAIConfig:
                     "model": "gpt-4",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'deployment_name'
 
@@ -106,6 +107,7 @@ class TestAzureOpenAIConfig:
                     "model": "gpt-4",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'endpoint'
 
@@ -119,6 +121,7 @@ class TestAzureOpenAIConfig:
                     "model": "gpt-4",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'api_key'
 
@@ -158,6 +161,7 @@ class TestAzureOpenAIConfig:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.deployment_name == "my-gpt4o-deployment"
@@ -175,6 +179,7 @@ class TestAzureOpenAIConfig:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.api_version == "2024-10-21"
@@ -189,6 +194,7 @@ class TestAzureOpenAIConfig:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2023-12-01-preview",
             }
         )
@@ -204,6 +210,7 @@ class TestAzureOpenAIConfig:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         # Inherited from LLMConfig
@@ -225,6 +232,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert transform.name == "azure_llm"
@@ -238,6 +246,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2023-12-01-preview",
             }
         )
@@ -255,6 +264,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert transform._model == "my-gpt4o-deployment"
@@ -268,6 +278,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2023-12-01-preview",
             }
         )
@@ -288,6 +299,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert transform.deployment_name == "my-gpt4o-deployment"
@@ -301,6 +313,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert transform.determinism == Determinism.NON_DETERMINISTIC
@@ -314,6 +327,7 @@ class TestAzureLLMTransformInit:
                     "api_key": "azure-api-key",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -326,6 +340,7 @@ class TestAzureLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         ctx = PluginContext(run_id="test-run", config={})
@@ -375,6 +390,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         # Initialize with recorder reference
@@ -529,6 +545,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "system_prompt": "You are a helpful assistant.",
             }
         )
@@ -569,6 +586,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 0.7,
                 "max_tokens": 500,
             }
@@ -607,6 +625,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "response_field": "analysis",
             }
         )
@@ -651,6 +670,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -674,6 +694,7 @@ class TestAzureLLMTransformPipelining:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -742,6 +763,7 @@ class TestAzureLLMTransformIntegration:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -764,6 +786,7 @@ class TestAzureLLMTransformIntegration:
                     Provide a summary.
                 """,
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -811,6 +834,7 @@ class TestAzureLLMTransformIntegration:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -861,6 +885,7 @@ class TestAzureLLMTransformConcurrency:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -907,6 +932,7 @@ class TestAzureLLMTransformConcurrency:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -933,6 +959,7 @@ class TestAzureLLMTransformConcurrency:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)

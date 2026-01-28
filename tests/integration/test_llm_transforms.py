@@ -139,6 +139,7 @@ class TestLLMTransformIntegration:
                 "model": "gpt-4",
                 "template": "Say hello to {{ row.name }}!",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -196,6 +197,7 @@ class TestLLMTransformIntegration:
                 "model": "gpt-4",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -236,6 +238,7 @@ class TestLLMTransformIntegration:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -276,6 +279,7 @@ class TestLLMTransformIntegration:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -320,6 +324,7 @@ class TestLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "system_prompt": "You are a helpful assistant.",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -412,6 +417,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "Analyze: {{ row.text }}",
                 "api_key": "test-api-key",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
         )
@@ -480,6 +486,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "api_key": "test-api-key",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
         )
@@ -537,6 +544,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "api_key": "test-api-key",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
         )
@@ -598,6 +606,7 @@ class TestAzureBatchLLMTransformIntegration:
                 "api_key": "test-key",
                 "template": "Process: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 

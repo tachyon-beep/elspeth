@@ -474,7 +474,10 @@ class TestCoalesceTimeoutAuditGap:
         all consumed branch tokens (the ones that arrived before timeout) have
         COALESCED outcomes recorded with proper join_group_id.
         """
-        import time
+        from elspeth.engine.clock import MockClock
+
+        # Deterministic clock for timeout testing
+        clock = MockClock(start=100.0)
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -513,6 +516,7 @@ class TestCoalesceTimeoutAuditGap:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id=run.run_id,
+            clock=clock,
         )
         executor.register_coalesce(settings, coalesce_node.node_id)
 
@@ -540,8 +544,8 @@ class TestCoalesceTimeoutAuditGap:
         outcome_a = executor.accept(token_a, "timeout_merge", step_in_pipeline=2)
         assert outcome_a.held is True  # Waiting for path_b
 
-        # Wait for timeout to elapse
-        time.sleep(0.02)
+        # Advance clock past timeout
+        clock.advance(0.02)
 
         # Check timeouts - should trigger merge with what arrived
         timed_out = executor.check_timeouts(

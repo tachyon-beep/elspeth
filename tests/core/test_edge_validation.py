@@ -42,7 +42,7 @@ def test_edge_validation_detects_missing_fields() -> None:
     graph.add_edge("source", "sink", label="continue")
 
     # Validation happens when we explicitly call it
-    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+    with pytest.raises(ValueError, match=r"Missing fields.*email"):
         graph.validate_edge_compatibility()
 
 
@@ -148,7 +148,7 @@ def test_gate_walk_through_for_effective_schema() -> None:
 
     # Should walk through gate to find ProducerSchema
     # Then check if ProducerSchema has fields required by ConsumerSchema
-    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+    with pytest.raises(ValueError, match=r"Missing fields.*email"):
         graph.validate_edge_compatibility()
 
 
@@ -167,7 +167,7 @@ def test_chained_gates() -> None:
     graph.add_edge("gate2", "sink", label="continue")
 
     # Should walk gate1 → gate2 → source, find ProducerSchema missing 'email'
-    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+    with pytest.raises(ValueError, match=r"Missing fields.*email"):
         graph.validate_edge_compatibility()
 
 
@@ -206,7 +206,7 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
         input_schema: ClassVar[type[PluginSchema]] = ConsumerSchema  # Needs: id, name, email
 
     # Should fail DURING from_plugin_instances (PHASE 2 validation)
-    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+    with pytest.raises(ValueError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
             source=as_source(MockSource()),
             transforms=[],
@@ -283,3 +283,138 @@ def test_schema_mismatch_error_includes_field_name_and_nodes() -> None:
         assert "db_writer" in error, "Error must name consumer node"
         # Must include missing field name
         assert "email" in error.lower(), "Error must name missing field"
+
+
+def test_edge_validation_detects_type_mismatch() -> None:
+    """Edges should fail if producer type doesn't match consumer expected type.
+
+    Bug: P2-2026-01-21-type-mismatches - Previously only field names were checked,
+    not field types. Producer `value: str` should fail when consumer expects `value: int`.
+    """
+    from pydantic import ConfigDict
+
+    class ProducerWithString(PluginSchema):
+        """Producer outputs string."""
+
+        value: str
+
+    class ConsumerExpectsInt(PluginSchema):
+        """Consumer expects int."""
+
+        model_config = ConfigDict(extra="ignore")
+        value: int
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerWithString)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerExpectsInt)
+    graph.add_edge("source", "sink", label="continue")
+
+    with pytest.raises(ValueError, match=r"Type mismatch.*value.*expected int.*got str"):
+        graph.validate_edge_compatibility()
+
+
+def test_edge_validation_allows_numeric_coercion() -> None:
+    """int -> float coercion should be allowed (Pydantic default)."""
+
+    class ProducerWithInt(PluginSchema):
+        """Producer outputs int."""
+
+        value: int
+
+    class ConsumerExpectsFloat(PluginSchema):
+        """Consumer expects float - int is coercible."""
+
+        value: float
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerWithInt)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=ConsumerExpectsFloat)
+    graph.add_edge("source", "sink", label="continue")
+
+    # Should NOT raise - int is coercible to float
+    graph.validate_edge_compatibility()
+
+
+def test_strict_consumer_rejects_extra_fields() -> None:
+    """Consumer with extra='forbid' should reject producers with extra fields.
+
+    Bug: P2-2026-01-21-strict-extra-fields - Previously extra fields were never
+    checked, allowing schema mismatch when consumer has strict validation.
+    """
+    from pydantic import ConfigDict
+
+    class ProducerWithExtras(PluginSchema):
+        """Producer has more fields than consumer expects."""
+
+        id: int
+        name: str
+        extra_field: str  # This field is NOT in consumer
+
+    class StrictConsumer(PluginSchema):
+        """Consumer forbids extra fields."""
+
+        model_config = ConfigDict(extra="forbid")
+        id: int
+        name: str
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerWithExtras)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=StrictConsumer)
+    graph.add_edge("source", "sink", label="continue")
+
+    with pytest.raises(ValueError, match=r"Extra fields forbidden.*extra_field"):
+        graph.validate_edge_compatibility()
+
+
+def test_permissive_consumer_allows_extra_fields() -> None:
+    """Consumer with extra='ignore' (default) should accept producers with extra fields."""
+
+    class ProducerWithExtras(PluginSchema):
+        """Producer has more fields than consumer needs."""
+
+        id: int
+        name: str
+        extra_field: str
+
+    class PermissiveConsumer(PluginSchema):
+        """Consumer ignores extra fields (default PluginSchema behavior)."""
+
+        id: int
+        name: str
+        # extra='ignore' is the default from PluginSchema base class
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=ProducerWithExtras)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=PermissiveConsumer)
+    graph.add_edge("source", "sink", label="continue")
+
+    # Should NOT raise - extra fields are ignored
+    graph.validate_edge_compatibility()
+
+
+def test_dynamic_producer_with_strict_consumer_passes() -> None:
+    """Dynamic producer should pass validation even with strict consumer.
+
+    Dynamic schemas (no fields + extra='allow') represent runtime-determined
+    schemas that cannot be validated statically. They bypass all validation.
+    """
+    from pydantic import ConfigDict
+
+    from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+    class StrictConsumer(PluginSchema):
+        """Consumer forbids extra fields."""
+
+        model_config = ConfigDict(extra="forbid")
+        id: int
+        name: str
+
+    dynamic_schema = _create_dynamic_schema("DynamicOutput")
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=dynamic_schema)
+    graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=StrictConsumer)
+    graph.add_edge("source", "sink", label="continue")
+
+    # Should NOT raise - dynamic schemas bypass static validation
+    graph.validate_edge_compatibility()

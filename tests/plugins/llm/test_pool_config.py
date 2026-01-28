@@ -18,6 +18,7 @@ class TestPoolConfigDefaults:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -30,6 +31,7 @@ class TestPoolConfigDefaults:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 1,
             }
         )
@@ -48,6 +50,7 @@ class TestPoolConfigExplicit:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 10,
             }
         )
@@ -69,6 +72,7 @@ class TestPoolConfigExplicit:
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
                 "min_dispatch_delay_ms": 10,
                 "max_dispatch_delay_ms": 1000,
@@ -90,6 +94,37 @@ class TestPoolConfigExplicit:
 class TestPoolConfigValidation:
     """Test pool configuration validation."""
 
+    def test_min_dispatch_delay_must_not_exceed_max(self) -> None:
+        """min_dispatch_delay_ms must be <= max_dispatch_delay_ms."""
+        from pydantic import ValidationError
+
+        from elspeth.plugins.pooling import PoolConfig
+
+        with pytest.raises(ValidationError) as exc_info:
+            PoolConfig(
+                pool_size=10,
+                min_dispatch_delay_ms=1000,
+                max_dispatch_delay_ms=100,
+            )
+
+        # Verify the error message mentions the invariant
+        error_str = str(exc_info.value)
+        assert "min_dispatch_delay_ms" in error_str or "cannot exceed" in error_str.lower()
+
+    def test_min_equal_to_max_dispatch_delay_is_allowed(self) -> None:
+        """min_dispatch_delay_ms == max_dispatch_delay_ms should be allowed (fixed delay)."""
+        from elspeth.plugins.pooling import PoolConfig
+
+        # This should NOT raise - equal values are valid (fixed delay)
+        config = PoolConfig(
+            pool_size=10,
+            min_dispatch_delay_ms=500,
+            max_dispatch_delay_ms=500,
+        )
+
+        assert config.min_dispatch_delay_ms == 500
+        assert config.max_dispatch_delay_ms == 500
+
     def test_pool_size_must_be_positive(self) -> None:
         """pool_size must be >= 1."""
         with pytest.raises(PluginConfigError):
@@ -98,6 +133,7 @@ class TestPoolConfigValidation:
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 0,
                 }
             )
@@ -110,6 +146,7 @@ class TestPoolConfigValidation:
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 10,
                     "backoff_multiplier": 0.5,
                 }
@@ -123,6 +160,7 @@ class TestPoolConfigValidation:
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 10,
                     "max_capacity_retry_seconds": 0,
                 }

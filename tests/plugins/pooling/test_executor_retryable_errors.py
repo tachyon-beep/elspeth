@@ -304,3 +304,66 @@ class TestRetryableErrorHandling:
         assert results[0].reason["reason"] == "retry_timeout"
         assert "status_code" not in results[0].reason  # Should NOT include status_code
         assert results[0].reason["error_type"] == "NetworkError"
+
+
+class TestDispatchGateAfterRetry:
+    """Regression tests for dispatch gate behavior after capacity error retries.
+
+    Bug context: Previously, workers that hit capacity errors would skip the
+    dispatch gate check after retry (via `just_retried` flag), which could
+    violate min_dispatch_delay_ms pacing when other workers dispatched during
+    the retry backoff sleep.
+    """
+
+    def test_retry_respects_dispatch_gate_timing(self) -> None:
+        """Verify retries still wait for dispatch gate, ensuring global pacing.
+
+        This test verifies the fix for the bug where retries could bypass
+        the dispatch gate, causing bursts that violate min_dispatch_delay_ms.
+        """
+        # Use significant min_dispatch_delay to make violations detectable
+        config = PoolConfig(
+            pool_size=2,
+            max_capacity_retry_seconds=5,
+            min_dispatch_delay_ms=50,  # 50ms minimum between ALL dispatches
+        )
+
+        dispatch_times: list[float] = []
+        dispatch_lock = __import__("threading").Lock()
+        call_count = [0]
+
+        def process_fn(row: dict[str, Any], state_id: str) -> TransformResult:
+            with dispatch_lock:
+                call_count[0] += 1
+                dispatch_times.append(time.monotonic())
+
+            # First call on row 0 triggers capacity error (retry)
+            if row["id"] == 0 and call_count[0] == 1:
+                # Sleep briefly to let row 1 dispatch while we're "backing off"
+                time.sleep(0.02)  # 20ms
+                raise CapacityError(status_code=429, message="Rate limit")
+
+            return TransformResult.success({"result": "success"})
+
+        executor = PooledExecutor(config)
+        contexts = [
+            RowContext(row={"id": 0}, state_id="test-0", row_index=0),
+            RowContext(row={"id": 1}, state_id="test-1", row_index=1),
+        ]
+
+        executor.execute_batch(contexts, process_fn)
+
+        # Verify we have 3 dispatches: row 0 (fail), row 1 (success), row 0 retry (success)
+        assert len(dispatch_times) == 3
+
+        # Check that ALL consecutive dispatches respect min_dispatch_delay_ms
+        # This is the critical check - the bug would cause a violation here
+        min_delay_s = config.min_dispatch_delay_ms / 1000
+        for i in range(1, len(dispatch_times)):
+            gap = dispatch_times[i] - dispatch_times[i - 1]
+            # Allow 10% tolerance for timing jitter
+            assert gap >= min_delay_s * 0.9, (
+                f"Dispatch gap {i - 1}->{i} was {gap * 1000:.1f}ms, "
+                f"expected >= {config.min_dispatch_delay_ms}ms. "
+                f"This indicates the retry bypassed the dispatch gate."
+            )

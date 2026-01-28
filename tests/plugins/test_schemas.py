@@ -237,3 +237,80 @@ class TestSchemaCompatibility:
         assert result.error_message is not None
         # Error should contain "int | None", not just "Union" or "Optional"
         assert "int | None" in result.error_message or "Optional" not in result.error_message
+
+    def test_extra_fields_detected_with_strict_consumer(self) -> None:
+        """Extra fields should be detected when consumer has extra='forbid'.
+
+        Bug: P2-2026-01-21-strict-extra-fields
+        """
+        from pydantic import ConfigDict
+
+        from elspeth.contracts import PluginSchema, check_compatibility
+
+        class Producer(PluginSchema):
+            x: int
+            y: int
+            extra1: str
+            extra2: str
+
+        class StrictConsumer(PluginSchema):
+            model_config = ConfigDict(extra="forbid")
+            x: int
+            y: int
+
+        result = check_compatibility(Producer, StrictConsumer)
+        assert result.compatible is False
+        assert "extra1" in result.extra_fields
+        assert "extra2" in result.extra_fields
+        assert result.error_message is not None
+        assert "Extra fields forbidden" in result.error_message
+
+    def test_extra_fields_ignored_with_permissive_consumer(self) -> None:
+        """Extra fields should NOT cause incompatibility with default consumer (extra='ignore')."""
+        from elspeth.contracts import PluginSchema, check_compatibility
+
+        class Producer(PluginSchema):
+            x: int
+            y: int
+            extra1: str
+
+        class PermissiveConsumer(PluginSchema):
+            # extra='ignore' is the default from PluginSchema base class
+            x: int
+            y: int
+
+        result = check_compatibility(Producer, PermissiveConsumer)
+        assert result.compatible is True
+        assert result.extra_fields == []
+
+    def test_combined_error_message_format(self) -> None:
+        """Error message should combine missing fields, type mismatches, and extra fields."""
+        from pydantic import ConfigDict
+
+        from elspeth.contracts import PluginSchema, check_compatibility
+
+        class Producer(PluginSchema):
+            x: str  # Type mismatch: consumer expects int
+            extra: str  # Extra field forbidden by consumer
+            # Missing: 'required' field
+
+        class StrictConsumer(PluginSchema):
+            model_config = ConfigDict(extra="forbid")
+            x: int  # Expects int, producer has str
+            required: int  # Not in producer
+
+        result = check_compatibility(Producer, StrictConsumer)
+        assert result.compatible is False
+
+        # All three error types should be present
+        assert result.missing_fields == ["required"]
+        assert len(result.type_mismatches) == 1
+        assert result.type_mismatches[0][0] == "x"  # Field name
+        assert result.extra_fields == ["extra"]
+
+        # Error message should contain all parts
+        error = result.error_message
+        assert error is not None
+        assert "Missing fields" in error
+        assert "Type mismatches" in error
+        assert "Extra fields forbidden" in error

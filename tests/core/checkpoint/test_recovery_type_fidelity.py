@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
 from elspeth.core.canonical import canonical_json
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
+from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, token_outcomes_table, tokens_table
 from elspeth.core.payload_store import FilesystemPayloadStore
 
 
@@ -93,6 +93,21 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
             )
         )
 
+        # Create sink node (needed for token outcomes)
+        conn.execute(
+            nodes_table.insert().values(
+                node_id="sink",
+                run_id=run_id,
+                plugin_name="test_sink",
+                node_type=NodeType.SINK,
+                plugin_version="1.0",
+                determinism=Determinism.DETERMINISTIC,
+                config_hash="test",
+                config_json="{}",
+                registered_at=now,
+            )
+        )
+
     # Step 2: Create rows with typed data (datetime, Decimal)
     original_rows = [
         {"id": 1, "timestamp": datetime(2024, 1, 1, 12, 0, tzinfo=UTC), "amount": Decimal("100.50")},
@@ -146,6 +161,20 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
                 upstream_topology_hash="test-upstream-hash",  # Bug #12: required field
                 checkpoint_node_config_hash="test-node-config-hash",  # Bug #12: required field
                 created_at=now,
+            )
+        )
+
+        # Record terminal outcome for row 0 (completed before checkpoint)
+        # P1-2026-01-22 fix: get_unprocessed_rows uses token_outcomes, not row_index
+        conn.execute(
+            token_outcomes_table.insert().values(
+                outcome_id="outcome_0",
+                run_id=run_id,
+                token_id="token_0",
+                outcome=RowOutcome.COMPLETED.value,
+                is_terminal=1,
+                recorded_at=now,
+                sink_name="sink",
             )
         )
 

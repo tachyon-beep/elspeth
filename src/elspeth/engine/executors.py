@@ -35,6 +35,7 @@ from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
@@ -51,6 +52,7 @@ from elspeth.plugins.results import (
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter
+    from elspeth.engine.clock import Clock
     from elspeth.engine.tokens import TokenManager
 
 __all__ = [
@@ -538,6 +540,17 @@ class GateExecutor:
 
             if destination is None:
                 # Label not in routes config - this is a configuration error
+                # Record failure before raising (per execute_config_gate pattern)
+                route_error: ExecutionError = {
+                    "exception": f"Route label '{route_label}' not found in routes config",
+                    "type": "MissingEdgeError",
+                }
+                self._recorder.complete_node_state(
+                    state_id=state.state_id,
+                    status=NodeStateStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=route_error,
+                )
                 raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
 
             if destination == "continue":
@@ -560,6 +573,17 @@ class GateExecutor:
 
         elif action.kind == RoutingKind.FORK_TO_PATHS:
             if token_manager is None:
+                # Record failure before raising (per execute_config_gate pattern)
+                fork_error: ExecutionError = {
+                    "exception": "fork_to_paths requires TokenManager",
+                    "type": "RuntimeError",
+                }
+                self._recorder.complete_node_state(
+                    state_id=state.state_id,
+                    status=NodeStateStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=fork_error,
+                )
                 raise RuntimeError(
                     f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
                     "Cannot create child tokens - audit integrity would be compromised."
@@ -864,6 +888,7 @@ class AggregationExecutor:
         run_id: str,
         *,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
+        clock: "Clock | None" = None,
     ) -> None:
         """Initialize executor.
 
@@ -872,10 +897,13 @@ class AggregationExecutor:
             span_factory: Span factory for tracing
             run_id: Run identifier for batch creation
             aggregation_settings: Map of node_id -> AggregationSettings for trigger evaluation
+            clock: Optional clock for time access. Defaults to system clock.
+                   Inject MockClock for deterministic testing.
         """
         self._recorder = recorder
         self._spans = span_factory
         self._run_id = run_id
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
         self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
@@ -889,7 +917,7 @@ class AggregationExecutor:
 
         # Create trigger evaluators for each configured aggregation
         for node_id, settings in self._aggregation_settings.items():
-            self._trigger_evaluators[node_id] = TriggerEvaluator(settings.trigger)
+            self._trigger_evaluators[node_id] = TriggerEvaluator(settings.trigger, clock=self._clock)
             self._buffers[node_id] = []
             self._buffer_tokens[node_id] = []
 
@@ -1033,9 +1061,6 @@ class AggregationExecutor:
                 f"restore or buffer management."
             )
 
-        # Compute input hash for batch (hash of all input rows)
-        input_hash = stable_hash(buffered_rows)
-
         # Use first token for node_state (represents the batch operation)
         representative_token = buffered_tokens[0]
 
@@ -1049,6 +1074,10 @@ class AggregationExecutor:
         # Step 2: Begin node state for flush operation
         # Wrap batch rows in a dict for node_state recording
         batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
+
+        # Compute input hash AFTER wrapping (must match what begin_node_state records)
+        # See: P2-2026-01-21-aggregation-input-hash-mismatch
+        input_hash = stable_hash(batch_input)
         state = self._recorder.begin_node_state(
             token_id=representative_token.token_id,
             node_id=node_id,
@@ -1137,9 +1166,16 @@ class AggregationExecutor:
             output_data: dict[str, Any] | list[dict[str, Any]]
             if result.row is not None:
                 output_data = result.row
-            else:
-                assert result.rows is not None
+            elif result.rows is not None:
                 output_data = result.rows
+            else:
+                # Contract violation: success status requires output data
+                raise RuntimeError(
+                    f"Aggregation transform '{transform.name}' returned success status but "
+                    f"neither row nor rows contains data. Batch-aware transforms must return "
+                    f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
+                    f"This is a plugin bug."
+                )
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -1392,7 +1428,7 @@ class AggregationExecutor:
                 elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
                 if elapsed_seconds > 0.0:
                     # Adjust timer: make it think first accept was N seconds ago
-                    evaluator._first_accept_time = time.monotonic() - elapsed_seconds
+                    evaluator._first_accept_time = self._clock.monotonic() - elapsed_seconds
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
@@ -1428,6 +1464,29 @@ class AggregationExecutor:
         if evaluator is None:
             return None
         return evaluator.get_trigger_type()
+
+    def check_flush_status(self, node_id: NodeID) -> tuple[bool, "TriggerType | None"]:
+        """Check flush status and get trigger type in a single operation.
+
+        This is an optimized method that combines should_flush() and get_trigger_type()
+        with a single dict lookup instead of two. Used in the hot path where
+        timeout checks happen before every row is processed.
+
+        Args:
+            node_id: Aggregation node ID
+
+        Returns:
+            Tuple of (should_flush, trigger_type):
+            - should_flush: True if trigger condition is met
+            - trigger_type: The type of trigger that fired, or None
+        """
+        evaluator = self._trigger_evaluators.get(node_id)
+        if evaluator is None:
+            return (False, None)
+
+        should_flush = evaluator.should_trigger()
+        trigger_type = evaluator.get_trigger_type() if should_flush else None
+        return (should_flush, trigger_type)
 
     def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
         """Restore aggregation state from checkpoint.

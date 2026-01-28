@@ -3,12 +3,71 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from elspeth.plugins.config_base import PluginConfig
 from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+
+class OutputFieldType(str, Enum):
+    """Supported types for structured output fields."""
+
+    STRING = "string"
+    INTEGER = "integer"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    ENUM = "enum"
+
+
+class ResponseFormat(str, Enum):
+    """LLM response format modes.
+
+    - STANDARD: Uses {"type": "json_object"} - model outputs JSON but no schema enforcement
+    - STRUCTURED: Uses {"type": "json_schema", ...} - API enforces exact schema compliance
+    """
+
+    STANDARD = "standard"
+    STRUCTURED = "structured"
+
+
+class OutputFieldConfig(PluginConfig):
+    """Configuration for a single output field in the LLM response.
+
+    Attributes:
+        suffix: Column suffix in output row (e.g., "score" -> "{prefix}_score")
+        type: Data type for schema enforcement
+        values: Required for enum type - list of allowed values
+    """
+
+    suffix: str = Field(..., description="Column suffix in output row")
+    type: OutputFieldType = Field(..., description="Data type for schema enforcement")
+    values: list[str] | None = Field(None, description="Allowed values (required for enum type)")
+
+    @model_validator(mode="after")
+    def validate_enum_has_values(self) -> OutputFieldConfig:
+        """Ensure enum type has values list."""
+        if self.type == OutputFieldType.ENUM:
+            if not self.values or len(self.values) == 0:
+                raise ValueError("enum type requires non-empty 'values' list")
+        elif self.values is not None:
+            raise ValueError(f"'values' is only valid for enum type, not {self.type.value}")
+        return self
+
+    def to_json_schema(self) -> dict[str, Any]:
+        """Convert to JSON Schema property definition.
+
+        Returns:
+            JSON Schema dict for this field
+        """
+        if self.type == OutputFieldType.ENUM:
+            # Enum uses 'enum' keyword with allowed values
+            return {"type": "string", "enum": self.values}
+        else:
+            # Direct type mapping
+            return {"type": self.type.value}
 
 
 @dataclass
@@ -32,6 +91,7 @@ class QuerySpec:
     output_prefix: str
     criterion_data: dict[str, Any]
     case_study_data: dict[str, Any]
+    max_tokens: int | None = None  # Per-query override for max_tokens
 
     def build_template_context(self, row: dict[str, Any]) -> dict[str, Any]:
         """Build template context for this query.
@@ -115,6 +175,7 @@ class CriterionConfig(PluginConfig):
     code: str | None = Field(None, description="Short code for lookups")
     description: str | None = Field(None, description="Human-readable description")
     subcriteria: list[str] = Field(default_factory=list, description="Subcriteria list")
+    max_tokens: int | None = Field(None, gt=0, description="Per-criterion max_tokens override")
 
     def to_template_data(self) -> dict[str, Any]:
         """Convert to dict for template injection."""
@@ -132,10 +193,23 @@ class MultiQueryConfig(AzureOpenAIConfig):
     Extends AzureOpenAIConfig with:
     - case_studies: List of case study definitions
     - criteria: List of criterion definitions
-    - output_mapping: JSON field -> row column suffix mapping
-    - response_format: Expected LLM output format (json)
+    - output_mapping: JSON field -> typed output field configuration
+    - response_format: Response format mode (standard or structured)
 
     The cross-product of case_studies x criteria defines all queries.
+
+    Example:
+        output_mapping:
+          score:
+            suffix: score
+            type: integer
+          rationale:
+            suffix: rationale
+            type: string
+          confidence:
+            suffix: confidence
+            type: enum
+            values: [low, medium, high]
     """
 
     case_studies: list[CaseStudyConfig] = Field(
@@ -148,22 +222,64 @@ class MultiQueryConfig(AzureOpenAIConfig):
         description="Criterion definitions",
         min_length=1,
     )
-    output_mapping: dict[str, str] = Field(
+    output_mapping: dict[str, OutputFieldConfig] = Field(
         ...,
-        description="JSON field -> row column suffix mapping",
+        description="JSON field -> typed output field configuration",
     )
-    response_format: str = Field(
-        "json",
-        description="Expected response format",
+    response_format: ResponseFormat = Field(
+        ResponseFormat.STANDARD,
+        description="Response format: 'standard' (JSON mode) or 'structured' (schema-enforced)",
     )
 
-    @field_validator("output_mapping")
+    @field_validator("output_mapping", mode="before")
     @classmethod
-    def validate_output_mapping_not_empty(cls, v: dict[str, str]) -> dict[str, str]:
-        """Ensure at least one output mapping."""
+    def parse_output_mapping(cls, v: Any) -> dict[str, Any]:
+        """Parse output_mapping from config dict format."""
+        if not isinstance(v, dict):
+            raise ValueError("output_mapping must be a dict")
         if not v:
             raise ValueError("output_mapping cannot be empty")
+        # Pydantic will handle nested OutputFieldConfig parsing
         return v
+
+    def build_json_schema(self) -> dict[str, Any]:
+        """Build JSON Schema for structured outputs.
+
+        Returns:
+            Complete JSON Schema dict for the response format
+        """
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+
+        for json_field, field_config in self.output_mapping.items():
+            properties[json_field] = field_config.to_json_schema()
+            required.append(json_field)
+
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def build_response_format(self) -> dict[str, Any]:
+        """Build the response_format parameter for the LLM API.
+
+        Returns:
+            Dict to pass as response_format to the LLM API
+        """
+        if self.response_format == ResponseFormat.STRUCTURED:
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "query_response",
+                    "strict": True,
+                    "schema": self.build_json_schema(),
+                },
+            }
+        else:
+            # Standard JSON mode
+            return {"type": "json_object"}
 
     def expand_queries(self) -> list[QuerySpec]:
         """Expand config into QuerySpec list (case_studies x criteria).
@@ -182,6 +298,7 @@ class MultiQueryConfig(AzureOpenAIConfig):
                     output_prefix=f"{case_study.name}_{criterion.name}",
                     criterion_data=criterion.to_template_data(),
                     case_study_data=case_study.to_template_data(),
+                    max_tokens=criterion.max_tokens,
                 )
                 specs.append(spec)
 

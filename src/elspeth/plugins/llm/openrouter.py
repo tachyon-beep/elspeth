@@ -323,7 +323,9 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
 
-            usage = data.get("usage", {})
+            # OpenRouter can return {"usage": null} or omit usage entirely.
+            # Use `or {}` to handle both missing AND null cases.
+            usage = data.get("usage") or {}
 
             # 7. Build output row (OUR CODE - let exceptions crash)
             output = dict(row)

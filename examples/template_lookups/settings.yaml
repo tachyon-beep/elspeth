@@ -10,7 +10,13 @@ source:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: free
+      fields:
+        - "ticket_id: str"
+        - "category_id: str"
+        - "priority_id: str"
+        - "subject: str"
+        - "body: str"
 
 sinks:
   output:
@@ -45,6 +51,9 @@ transforms:
       temperature: 0.1  # Low temperature for consistent classification
       max_tokens: 500
       response_field: classification
+
+      # Declare fields used by template for DAG validation
+      required_input_fields: [ticket_id, category_id, priority_id, subject, body]
 
       schema:
         fields: dynamic

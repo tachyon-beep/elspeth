@@ -11,7 +11,7 @@ import csv
 import hashlib
 import os
 from collections.abc import Sequence
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
@@ -32,7 +32,7 @@ class CSVSinkConfig(PathConfig):
     delimiter: str = ","
     encoding: str = "utf-8"
     validate_input: bool = False  # Optional runtime validation of incoming rows
-    mode: str = "write"  # "write" (truncate) or "append"
+    mode: Literal["write", "append"] = "write"
 
 
 class CSVSink(BaseSink):
@@ -248,6 +248,21 @@ class CSVSink(BaseSink):
                 existing_fieldnames = reader.fieldnames
 
             if existing_fieldnames:
+                # Validate headers against explicit schema before opening
+                # Dynamic schema = no validation (file headers are authoritative)
+                if not self._schema_config.is_dynamic:
+                    validation = self.validate_output_target()
+                    if not validation.valid:
+                        # Build clear error message
+                        msg_parts = [f"CSV schema mismatch: {validation.error_message}"]
+                        if validation.missing_fields:
+                            msg_parts.append(f"Missing fields: {list(validation.missing_fields)}")
+                        if validation.extra_fields:
+                            msg_parts.append(f"Extra fields: {list(validation.extra_fields)}")
+                        if validation.order_mismatch:
+                            msg_parts.append("Fields present but in wrong order (strict mode)")
+                        raise ValueError(". ".join(msg_parts))
+
                 # Use existing headers, append mode (no header write)
                 self._fieldnames = list(existing_fieldnames)
                 self._file = open(  # noqa: SIM115 - handle kept open for streaming writes, closed in close()

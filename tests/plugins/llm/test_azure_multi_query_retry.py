@@ -40,9 +40,13 @@ def make_config(**overrides: Any) -> dict[str, Any]:
             {"name": "diagnosis", "code": "DIAG"},
             {"name": "treatment", "code": "TREAT"},
         ],
-        "response_format": "json",
-        "output_mapping": {"score": "score", "rationale": "rationale"},
+        "response_format": "standard",
+        "output_mapping": {
+            "score": {"suffix": "score", "type": "integer"},
+            "rationale": {"suffix": "rationale", "type": "string"},
+        },
         "schema": {"fields": "dynamic"},
+        "required_input_fields": [],  # Explicit opt-out for this test
         "pool_size": 4,
         "max_capacity_retry_seconds": 10,  # 10 second retry timeout
     }

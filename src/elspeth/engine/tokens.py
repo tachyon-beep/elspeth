@@ -246,12 +246,15 @@ class TokenManager:
             step_in_pipeline=step_in_pipeline,
         )
 
-        # Build TokenInfo objects with row data
+        # CRITICAL: Use deepcopy to prevent nested mutable objects from being
+        # shared across expanded children. Same reasoning as fork_token - without
+        # this, mutations in one sibling leak to others, corrupting audit trail.
+        # Bug: P2-2026-01-21-expand-token-shared-row-data
         return [
             TokenInfo(
                 row_id=parent_token.row_id,
                 token_id=db_child.token_id,
-                row_data=row_data,
+                row_data=copy.deepcopy(row_data),
                 branch_name=parent_token.branch_name,  # Inherit branch
                 expand_group_id=db_child.expand_group_id,
             )

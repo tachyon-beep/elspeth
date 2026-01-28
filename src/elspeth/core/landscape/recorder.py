@@ -2319,6 +2319,8 @@ class LandscapeRecorder:
         run_id: str,
         call_type: str,
         request_hash: str,
+        *,
+        sequence_index: int = 0,
     ) -> Call | None:
         """Find a call by its request hash within a run.
 
@@ -2329,13 +2331,18 @@ class LandscapeRecorder:
             run_id: Run ID to search within
             call_type: Type of call (llm, http, etc.)
             request_hash: SHA-256 hash of the canonical request data
+            sequence_index: 0-based index for duplicate request hashes.
+                When the same request is made multiple times in a run
+                (e.g., retries, loops), use sequence_index to get the
+                Nth occurrence (0=first, 1=second, etc.).
 
         Returns:
             Call model if found, None otherwise
 
         Note:
-            If multiple calls match (same request made twice), returns
-            the first one chronologically (ordered by created_at).
+            Calls are ordered chronologically by created_at. The sequence_index
+            parameter allows disambiguation when the same request was made
+            multiple times (each returning a different response).
         """
         # Join to node_states to filter by run_id
         # NOTE: Use node_states.run_id directly (denormalized column) instead of
@@ -2352,6 +2359,7 @@ class LandscapeRecorder:
             .where(calls_table.c.request_hash == request_hash)
             .order_by(calls_table.c.created_at)
             .limit(1)
+            .offset(sequence_index)
         )
         row = self._ops.execute_fetchone(query)
         if row is None:

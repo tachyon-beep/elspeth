@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, RunStatus
+from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -218,6 +218,7 @@ class TestCheckpointRecoveryIntegration:
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
 
@@ -260,6 +261,7 @@ class TestCheckpointRecoveryIntegration:
             # Create multiple rows
             for i in range(5):
                 row_id = f"row-{run_suffix}-{i:03d}"
+                token_id = f"tok-{run_suffix}-{i:03d}"
                 conn.execute(
                     rows_table.insert().values(
                         row_id=row_id,
@@ -272,11 +274,25 @@ class TestCheckpointRecoveryIntegration:
                 )
                 conn.execute(
                     tokens_table.insert().values(
-                        token_id=f"tok-{run_suffix}-{i:03d}",
+                        token_id=token_id,
                         row_id=row_id,
                         created_at=now,
                     )
                 )
+                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
+                # Rows 3, 4 have no terminal outcomes and will be returned as unprocessed
+                if i < 3:
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-{run_suffix}-{i:03d}",
+                            run_id=run_id,
+                            token_id=token_id,
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="default",
+                        )
+                    )
 
             conn.commit()
 
@@ -300,6 +316,7 @@ class TestCheckpointRecoveryIntegration:
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -430,6 +447,20 @@ class TestCheckpointRecoveryIntegration:
                         created_at=now,
                     )
                 )
+                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
+                # Rows 3, 4 have no terminal outcomes and will be returned as unprocessed
+                if i < 3:
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-resume-{i}",
+                            run_id=run_id,
+                            token_id=f"t{i}",
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="default",
+                        )
+                    )
             conn.commit()
 
         # Simulate partial output (rows 0-2 already written)

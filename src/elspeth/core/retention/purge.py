@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, or_, select, union
 
 from elspeth.contracts.payload_store import PayloadStore
+from elspeth.core.landscape.reproducibility import update_grade_after_purge
 from elspeth.core.landscape.schema import (
     calls_table,
     node_states_table,
@@ -255,11 +256,72 @@ class PurgeManager:
         safe_to_delete = expired_refs - active_refs
         return list(safe_to_delete)
 
+    def _find_affected_run_ids(self, refs: list[str]) -> set[str]:
+        """Find run IDs that have payloads in the given refs list.
+
+        Queries all payload reference columns to find which runs are affected
+        by purging the specified refs. Used to update reproducibility grades
+        after purge completes.
+
+        Args:
+            refs: List of payload references (content hashes) being purged
+
+        Returns:
+            Set of run_ids that have at least one payload in the refs list
+        """
+        if not refs:
+            return set()
+
+        refs_set = set(refs)
+
+        # Query all run_ids that have any of these refs
+        # 1. From rows.source_data_ref
+        row_runs_query = select(rows_table.c.run_id).distinct().where(rows_table.c.source_data_ref.in_(refs_set))
+
+        # 2. From calls.request_ref and calls.response_ref
+        # Use node_states.run_id directly (denormalized column)
+        call_join = calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+
+        call_request_runs_query = (
+            select(node_states_table.c.run_id).distinct().select_from(call_join).where(calls_table.c.request_ref.in_(refs_set))
+        )
+
+        call_response_runs_query = (
+            select(node_states_table.c.run_id).distinct().select_from(call_join).where(calls_table.c.response_ref.in_(refs_set))
+        )
+
+        # 3. From routing_events.reason_ref
+        routing_join = routing_events_table.join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+
+        routing_runs_query = (
+            select(node_states_table.c.run_id).distinct().select_from(routing_join).where(routing_events_table.c.reason_ref.in_(refs_set))
+        )
+
+        # Union all run_id queries
+        all_runs_query = union(
+            row_runs_query,
+            call_request_runs_query,
+            call_response_runs_query,
+            routing_runs_query,
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(all_runs_query)
+            return {row[0] for row in result}
+
     def purge_payloads(self, refs: list[str]) -> PurgeResult:
         """Purge payloads from the PayloadStore.
 
         Deletes each payload by reference, tracking successes and failures.
         Hashes in Landscape rows are preserved - only blobs are deleted.
+
+        After deletion, updates reproducibility_grade for affected runs:
+        - REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY (payloads needed for replay are gone)
+        - FULL_REPRODUCIBLE -> unchanged (doesn't depend on payloads)
+        - ATTRIBUTABLE_ONLY -> unchanged (already at lowest grade)
+
+        Grade updates only occur for runs whose payloads were actually deleted.
+        Runs that only had failed deletions retain their grade (payloads still exist).
 
         Args:
             refs: List of payload references (content hashes) to delete
@@ -271,22 +333,35 @@ class PurgeManager:
         """
         start_time = perf_counter()
 
+        # Step 1: Delete the payloads, tracking which refs were actually deleted
         deleted_count = 0
         skipped_count = 0
         bytes_freed = 0  # Not tracked by current PayloadStore protocol
         failed_refs: list[str] = []
+        deleted_refs: list[str] = []
 
         for ref in refs:
             if self._payload_store.exists(ref):
                 deleted = self._payload_store.delete(ref)
                 if deleted:
                     deleted_count += 1
+                    deleted_refs.append(ref)
                 else:
                     failed_refs.append(ref)
             else:
                 # Ref doesn't exist - already purged or never stored
                 # This is not a failure, just skip it
                 skipped_count += 1
+
+        # Step 2: Find runs affected by ONLY the successfully deleted refs
+        # Runs with only failed refs still have their payloads and should not be downgraded
+        affected_run_ids = self._find_affected_run_ids(deleted_refs)
+
+        # Step 3: Update reproducibility grades for affected runs
+        # This degrades REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY since
+        # nondeterministic runs can no longer be replayed without payloads
+        for run_id in affected_run_ids:
+            update_grade_after_purge(self._db, run_id)
 
         duration_seconds = perf_counter() - start_time
 

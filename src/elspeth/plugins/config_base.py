@@ -152,11 +152,29 @@ class TransformDataConfig(DataPluginConfig):
     Extends DataPluginConfig to add optional on_error field.
     Transforms that can return TransformResult.error() should configure
     where those rows go.
+
+    Input Field Requirements:
+        Transforms can declare which fields they require in their input using
+        `required_input_fields`. This enables DAG validation to catch missing
+        field errors at configuration time rather than runtime.
+
+        For template-based transforms (like LLM transforms), use
+        `elspeth.core.templates.extract_jinja2_fields()` to discover which
+        fields your template references, then declare them explicitly.
     """
 
     on_error: str | None = Field(
         default=None,
         description="Sink name for rows that cannot be processed, or 'discard'. Required if transform can return errors.",
+    )
+
+    required_input_fields: list[str] | None = Field(
+        default=None,
+        description=(
+            "Fields this transform requires in input. Used for DAG validation "
+            "to catch missing field errors at config time. For templates, use "
+            "elspeth.core.templates.extract_jinja2_fields() to discover fields."
+        ),
     )
 
     @field_validator("on_error")
@@ -166,3 +184,39 @@ class TransformDataConfig(DataPluginConfig):
         if v is not None and not v.strip():
             raise ValueError("on_error must be a sink name, 'discard', or omitted entirely")
         return v.strip() if v else None
+
+    @field_validator("required_input_fields")
+    @classmethod
+    def validate_required_input_fields(cls, v: list[str] | None) -> list[str] | None:
+        """Validate required_input_fields contains valid identifiers.
+
+        Important distinction for LLM transforms:
+        - None = not specified (triggers error if template has row references)
+        - [] = explicit opt-out (accepts runtime risk, no error)
+        - [fields...] = explicit declaration (DAG validates these)
+        """
+        if v is None:
+            return None
+
+        # Empty list is INTENTIONALLY preserved - it's an explicit opt-out
+        # for LLM templates that accept runtime risk of missing fields
+        if len(v) == 0:
+            return []
+
+        result: list[str] = []
+        for i, name in enumerate(v):
+            if not isinstance(name, str):
+                raise ValueError(f"required_input_fields[{i}] must be a string, got {type(name).__name__}")
+            name = name.strip()
+            if not name:
+                raise ValueError(f"required_input_fields[{i}] cannot be empty")
+            if not name.isidentifier():
+                raise ValueError(f"required_input_fields[{i}] must be a valid Python identifier, got '{name}'")
+            result.append(name)
+
+        # Check for duplicates
+        if len(result) != len(set(result)):
+            duplicates = sorted({n for n in result if result.count(n) > 1})
+            raise ValueError(f"Duplicate field names in required_input_fields: {', '.join(duplicates)}")
+
+        return result

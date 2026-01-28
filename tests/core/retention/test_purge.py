@@ -157,6 +157,7 @@ def _create_run(
     *,
     completed_at: datetime | None = None,
     status: RunStatus = RunStatus.COMPLETED,
+    reproducibility_grade: str = "full_reproducible",
 ) -> None:
     """Helper to create a run record."""
     conn.execute(
@@ -168,6 +169,7 @@ def _create_run(
             settings_json="{}",
             canonical_version="1.0.0",
             status=status,
+            reproducibility_grade=reproducibility_grade,
         )
     )
 
@@ -1464,3 +1466,542 @@ class TestRoutingJoinRunIsolation:
 
         # routing-ref-B should NOT be returned (Run B is recent)
         assert "routing-ref-B-keep" not in expired, f"routing-ref-B from recent Run B should NOT be returned for purge. Got: {expired}"
+
+
+class TestPurgeUpdatesReproducibilityGrade:
+    """Tests for BUG P1-2026-01-22-reproducibility-grade-not-updated-after-purge.
+
+    After purging payloads, nondeterministic runs can no longer be replayed
+    (we don't have the recorded responses). The reproducibility_grade must
+    degrade from REPLAY_REPRODUCIBLE to ATTRIBUTABLE_ONLY.
+    """
+
+    def test_purge_degrades_replay_reproducible_to_attributable_only(self, landscape_db: LandscapeDB) -> None:
+        """Purge of REPLAY_REPRODUCIBLE run's payloads degrades grade to ATTRIBUTABLE_ONLY.
+
+        This is the core bug fix test: when a run with nondeterministic calls
+        (REPLAY_REPRODUCIBLE) has its payloads purged, it can no longer be
+        replayed, so the grade must degrade to ATTRIBUTABLE_ONLY.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Create a run completed 60 days ago (expired with 30-day retention)
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Store a payload and get ref
+        payload_ref = store.store(b"source row content for replay")
+
+        with db.connection() as conn:
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=payload_ref,
+                source_data_hash="hash_for_grade_test",
+            )
+
+        # Set reproducibility grade to REPLAY_REPRODUCIBLE
+        # (simulating a run with nondeterministic calls like LLM)
+        set_run_grade(db, run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Verify initial grade
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            initial_grade = result.scalar()
+        assert initial_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value
+
+        # Purge the payload
+        result = manager.purge_payloads([payload_ref])
+        assert result.deleted_count == 1
+
+        # Verify grade was degraded to ATTRIBUTABLE_ONLY
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            updated_grade = result.scalar()
+
+        assert updated_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, (
+            f"Expected grade to degrade from REPLAY_REPRODUCIBLE to ATTRIBUTABLE_ONLY after purge, but got {updated_grade}"
+        )
+
+    def test_purge_keeps_full_reproducible_unchanged(self, landscape_db: LandscapeDB) -> None:
+        """Purge of FULL_REPRODUCIBLE run's payloads does not degrade grade.
+
+        FULL_REPRODUCIBLE runs are fully deterministic and don't depend on
+        payloads for replay - they can be re-executed from scratch.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        payload_ref = store.store(b"deterministic row content")
+
+        with db.connection() as conn:
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=payload_ref,
+            )
+
+        # Set grade to FULL_REPRODUCIBLE (deterministic run)
+        set_run_grade(db, run_id, ReproducibilityGrade.FULL_REPRODUCIBLE)
+
+        # Purge the payload
+        manager.purge_payloads([payload_ref])
+
+        # Verify grade remains FULL_REPRODUCIBLE
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            updated_grade = result.scalar()
+
+        assert updated_grade == ReproducibilityGrade.FULL_REPRODUCIBLE.value
+
+    def test_purge_keeps_attributable_only_unchanged(self, landscape_db: LandscapeDB) -> None:
+        """Purge of ATTRIBUTABLE_ONLY run's payloads does not degrade grade further.
+
+        ATTRIBUTABLE_ONLY is already the lowest grade.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        payload_ref = store.store(b"already degraded content")
+
+        with db.connection() as conn:
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=payload_ref,
+            )
+
+        # Set grade to ATTRIBUTABLE_ONLY (already degraded)
+        set_run_grade(db, run_id, ReproducibilityGrade.ATTRIBUTABLE_ONLY)
+
+        # Purge the payload
+        manager.purge_payloads([payload_ref])
+
+        # Verify grade remains ATTRIBUTABLE_ONLY
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            updated_grade = result.scalar()
+
+        assert updated_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+
+    def test_purge_updates_multiple_affected_runs(self, landscape_db: LandscapeDB) -> None:
+        """Purge updates grades for ALL runs affected by the refs.
+
+        When a payload is shared across multiple expired runs (content-addressable
+        storage), purging it should update grades for all affected runs.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Shared payload ref (content-addressable: same content = same hash)
+        shared_payload_ref = store.store(b"shared content across runs")
+
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Create two runs that share the same payload ref
+        run_a_id = str(uuid4())
+        run_b_id = str(uuid4())
+        node_a_id = str(uuid4())
+        node_b_id = str(uuid4())
+
+        with db.connection() as conn:
+            # Run A
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_a_id, run_a_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_a_id,
+                node_id=node_a_id,
+                row_index=0,
+                source_data_ref=shared_payload_ref,
+            )
+
+            # Run B
+            _create_run(conn, runs_table, run_b_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_b_id, run_b_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_b_id,
+                node_id=node_b_id,
+                row_index=0,
+                source_data_ref=shared_payload_ref,
+            )
+
+        # Set both runs to REPLAY_REPRODUCIBLE
+        set_run_grade(db, run_a_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        set_run_grade(db, run_b_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Purge the shared payload
+        manager.purge_payloads([shared_payload_ref])
+
+        # Verify BOTH runs had their grades degraded
+        with db.connection() as conn:
+            result_a = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_a_id))
+            grade_a = result_a.scalar()
+
+            result_b = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_b_id))
+            grade_b = result_b.scalar()
+
+        assert grade_a == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, f"Run A grade not degraded: {grade_a}"
+        assert grade_b == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, f"Run B grade not degraded: {grade_b}"
+
+    def test_purge_empty_refs_does_not_update_any_grades(self, landscape_db: LandscapeDB) -> None:
+        """Purge with empty refs list does not modify any run grades."""
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        payload_ref = store.store(b"content that won't be purged")
+
+        with db.connection() as conn:
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=payload_ref,
+            )
+
+        set_run_grade(db, run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Purge with empty list
+        manager.purge_payloads([])
+
+        # Verify grade unchanged
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            grade = result.scalar()
+
+        assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value
+
+    def test_purge_call_payloads_also_degrades_grade(self, landscape_db: LandscapeDB) -> None:
+        """Purging call payloads (LLM responses) also degrades reproducibility grade.
+
+        This verifies that the grade degradation works for all payload types,
+        not just row payloads.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import (
+            calls_table,
+            node_states_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        row_id = str(uuid4())
+        token_id = str(uuid4())
+        state_id = str(uuid4())
+        call_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Store call response payload (simulating LLM response)
+        call_response_ref = store.store(b"LLM response content")
+
+        with db.connection() as conn:
+            _create_run(conn, runs_table, run_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(conn, rows_table, row_id, run_id, node_id, row_index=0)
+            _create_token(conn, tokens_table, token_id, row_id)
+            _create_state(conn, node_states_table, state_id, token_id, node_id, run_id)
+            _create_call(conn, calls_table, call_id, state_id, response_ref=call_response_ref)
+
+        # Set to REPLAY_REPRODUCIBLE (has nondeterministic LLM calls)
+        set_run_grade(db, run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Purge the call response payload
+        manager.purge_payloads([call_response_ref])
+
+        # Verify grade degraded
+        with db.connection() as conn:
+            result = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id))
+            updated_grade = result.scalar()
+
+        assert updated_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value
+
+    def test_purge_does_not_degrade_grade_when_deletion_fails(self, landscape_db: LandscapeDB) -> None:
+        """Grade should NOT degrade when payload deletion fails.
+
+        BUG P2-2026-01-28-grade-update-on-failed-deletion:
+        If payload_store.delete(ref) returns False, the run still has its
+        payloads and IS replayable. The grade should NOT be downgraded.
+
+        This tests the scenario where:
+        1. Run A has payload ref-A
+        2. ref-A deletion FAILS (store returns False)
+        3. Run A's payloads still exist
+        4. Run A's grade should remain REPLAY_REPRODUCIBLE (not ATTRIBUTABLE_ONLY)
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+
+        # Create a store that fails to delete specific refs
+        class FailingPayloadStore:
+            """Mock that fails to delete all refs."""
+
+            def __init__(self) -> None:
+                self._storage: dict[str, bytes] = {}
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                # Always fail - simulates I/O error or permission issue
+                return False
+
+        store = FailingPayloadStore()
+
+        # Create a run completed 60 days ago (eligible for purge)
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        row_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Store payload and get ref
+        payload_ref = store.store(b"source row content")
+
+        with db.connection() as conn:
+            _create_run(
+                conn,
+                runs_table,
+                run_id,
+                completed_at=old_completed_at,
+                status=RunStatus.COMPLETED,
+            )
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=row_id,
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=payload_ref,
+                source_data_hash="hash_for_run",
+            )
+
+        # Set to REPLAY_REPRODUCIBLE (has nondeterministic calls)
+        set_run_grade(db, run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Attempt purge - deletion will FAIL
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([payload_ref])
+
+        # Verify deletion failed
+        assert result.deleted_count == 0
+        assert result.failed_refs == [payload_ref]
+        assert store.exists(payload_ref), "Payload should still exist after failed deletion"
+
+        # CRITICAL: Grade should NOT be downgraded because payloads still exist
+        with db.connection() as conn:
+            query = select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id)
+            result_row = conn.execute(query)
+            updated_grade = result_row.scalar()
+
+        assert updated_grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value, (
+            f"Grade should remain REPLAY_REPRODUCIBLE when deletion fails (payloads still exist), but got {updated_grade}"
+        )
+
+    def test_purge_degrades_grade_when_some_deletions_succeed(self, landscape_db: LandscapeDB) -> None:
+        """Grade should degrade if ANY payload for the run is deleted, even if others fail.
+
+        This tests the scenario where a run has multiple payloads and some
+        deletions succeed while others fail. The run is affected by the
+        successful deletions, so its grade should be downgraded.
+
+        This is the correct behavior because:
+        - Payloads can include source data, LLM responses, routing reasons
+        - If ANY required payload for replay is deleted, replay is incomplete
+        - Conservative downgrade ensures we don't claim replayability we can't deliver
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+
+        # Create a store that fails to delete specific refs
+        class PartialFailingPayloadStore:
+            """Mock that fails to delete specific refs but succeeds for others."""
+
+            def __init__(self, fail_refs: set[str]) -> None:
+                self._storage: dict[str, bytes] = {}
+                self._fail_refs = fail_refs
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                if content_hash in self._fail_refs:
+                    return False
+                if content_hash in self._storage:
+                    del self._storage[content_hash]
+                    return True
+                return False
+
+        store = PartialFailingPayloadStore(fail_refs=set())
+
+        # Create a run completed 60 days ago (eligible for purge)
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Store two payloads - one will succeed, one will fail
+        success_ref = store.store(b"will be deleted")
+        fail_ref = store.store(b"will fail to delete")
+        store._fail_refs.add(fail_ref)
+
+        with db.connection() as conn:
+            _create_run(
+                conn,
+                runs_table,
+                run_id,
+                completed_at=old_completed_at,
+                status=RunStatus.COMPLETED,
+            )
+            _create_node(conn, nodes_table, node_id, run_id)
+            # Create two rows with different payload refs
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=success_ref,
+                source_data_hash="hash_success",
+            )
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=1,
+                source_data_ref=fail_ref,
+                source_data_hash="hash_fail",
+            )
+
+        # Set to REPLAY_REPRODUCIBLE
+        set_run_grade(db, run_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Attempt purge - one succeeds, one fails
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([success_ref, fail_ref])
+
+        # Verify partial success
+        assert result.deleted_count == 1
+        assert result.failed_refs == [fail_ref]
+
+        # Grade SHOULD be downgraded because SOME payloads were deleted
+        # The run can no longer be fully replayed
+        with db.connection() as conn:
+            query = select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id)
+            result_row = conn.execute(query)
+            updated_grade = result_row.scalar()
+
+        assert updated_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, (
+            f"Grade should degrade to ATTRIBUTABLE_ONLY when some payloads are deleted, but got {updated_grade}"
+        )

@@ -218,6 +218,7 @@ class LandscapeExporter:
                     "branch_name": token.branch_name,
                     "fork_group_id": token.fork_group_id,
                     "join_group_id": token.join_group_id,
+                    "expand_group_id": token.expand_group_id,
                 }
 
                 # Token parents (for fork/join lineage)

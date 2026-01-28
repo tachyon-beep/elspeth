@@ -820,3 +820,57 @@ class TestAggregationFlushAuditTrail:
             assert final_state.status == NodeStateStatus.COMPLETED.value
             assert final_state.output_hash is not None
             assert final_state.duration_ms == 150.0
+
+    def test_flush_result_hash_matches_node_state_hash(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        aggregation_node_id: NodeID,
+        aggregation_executor: AggregationExecutor,
+        ctx: PluginContext,
+    ) -> None:
+        """Regression test: result.input_hash must equal node_state.input_hash.
+
+        Bug: P2-2026-01-21-aggregation-input-hash-mismatch
+
+        Previously, execute_flush() computed:
+        - result.input_hash from raw buffered_rows list
+        - node_state.input_hash from wrapped {"batch_rows": buffered_rows}
+
+        These MUST match for audit trail integrity - cannot verify results
+        against recorded inputs if hashes differ.
+        """
+        # Create and buffer tokens
+        token1 = create_token(recorder, run_id, source_node_id, 0, {"x": 10})
+        token2 = create_token(recorder, run_id, source_node_id, 1, {"x": 20})
+
+        aggregation_executor.buffer_row(aggregation_node_id, token1)
+        aggregation_executor.buffer_row(aggregation_node_id, token2)
+
+        # Create transform with node_id set
+        transform = MockBatchTransform()
+        transform.node_id = aggregation_node_id
+
+        # Execute flush
+        result, _consumed_tokens, _batch_id = aggregation_executor.execute_flush(
+            node_id=aggregation_node_id,
+            transform=as_transform(transform),
+            ctx=ctx,
+            step_in_pipeline=1,
+            trigger_type=TriggerType.COUNT,
+        )
+
+        # CRITICAL ASSERTION: result hash must match node_state hash
+        # Get the node_state that was created
+        states = recorder.get_node_states_for_token(token1.token_id)
+        agg_state = next(s for s in states if s.node_id == aggregation_node_id)
+
+        assert result.input_hash is not None, "result.input_hash must be set"
+        assert agg_state.input_hash is not None, "node_state.input_hash must be set"
+        assert result.input_hash == agg_state.input_hash, (
+            f"Hash mismatch breaks audit integrity!\n"
+            f"  result.input_hash:     {result.input_hash}\n"
+            f"  node_state.input_hash: {agg_state.input_hash}\n"
+            f"Cannot verify result came from recorded input if hashes differ."
+        )

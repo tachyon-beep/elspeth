@@ -217,3 +217,151 @@ class TestCSVSinkAppendMode:
         content = output_path.read_text()
         lines = content.strip().split("\n")
         assert len(lines) == 4  # header + 3 rows
+
+
+class TestCSVSinkAppendExplicitSchema:
+    """Tests for CSVSink append mode with explicit schema.
+
+    Bug: P1-2026-01-21-csvsink-append-schema-mismatch
+    In append mode, CSVSink reads existing CSV headers and uses them
+    without validating against the configured explicit schema.
+    """
+
+    def test_append_explicit_schema_rejects_missing_fields(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode should fail fast when file headers are missing schema fields.
+
+        When schema is explicit (not dynamic), append mode must validate that
+        existing file headers contain all required schema fields. Missing fields
+        should raise a clear error at file open time, not during write.
+        """
+        import csv
+
+        output_path = tmp_path / "output.csv"
+
+        # Create file with ONLY 'id' column (missing 'score' from schema)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["id"])
+            writer.writeheader()
+            writer.writerow({"id": 1})
+
+        # Explicit schema requires both 'id' and 'score'
+        explicit_schema = {
+            "mode": "free",
+            "fields": ["id: int", "score: float?"],
+        }
+
+        sink = CSVSink(
+            {
+                "path": str(output_path),
+                "schema": explicit_schema,
+                "mode": "append",
+            }
+        )
+
+        # Should fail fast at write time (when _open_file is called)
+        # with a clear error about schema mismatch
+        with pytest.raises(ValueError, match=r"schema.*mismatch|missing.*field"):
+            sink.write([{"id": 2, "score": 1.5}], ctx)
+
+    def test_append_explicit_schema_rejects_wrong_order_strict(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode with strict schema should reject headers in wrong order.
+
+        Strict mode requires exact field order match, not just presence.
+        """
+        import csv
+
+        output_path = tmp_path / "output.csv"
+
+        # Create file with fields in different order than schema
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["score", "id"])  # Wrong order
+            writer.writeheader()
+            writer.writerow({"score": 1.0, "id": 1})
+
+        # Strict schema requires exact order: id, score
+        strict_schema = {
+            "mode": "strict",
+            "fields": ["id: int", "score: float"],
+        }
+
+        sink = CSVSink(
+            {
+                "path": str(output_path),
+                "schema": strict_schema,
+                "mode": "append",
+            }
+        )
+
+        # Should fail because order doesn't match
+        with pytest.raises(ValueError, match=r"schema.*mismatch|order"):
+            sink.write([{"id": 2, "score": 2.0}], ctx)
+
+    def test_append_explicit_schema_accepts_matching_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode should succeed when file headers match explicit schema."""
+        import csv
+
+        output_path = tmp_path / "output.csv"
+
+        # Create file with headers matching schema
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "score"])
+            writer.writeheader()
+            writer.writerow({"id": 1, "score": 1.0})
+
+        # Explicit schema matches file headers
+        explicit_schema = {
+            "mode": "free",
+            "fields": ["id: int", "score: float"],
+        }
+
+        sink = CSVSink(
+            {
+                "path": str(output_path),
+                "schema": explicit_schema,
+                "mode": "append",
+            }
+        )
+
+        # Should succeed - headers match schema
+        artifact = sink.write([{"id": 2, "score": 2.0}], ctx)
+        sink.close()
+
+        assert artifact.size_bytes > 0
+
+        # Verify both rows present
+        content = output_path.read_text()
+        lines = content.strip().split("\n")
+        assert len(lines) == 3  # header + 2 rows
+
+    def test_append_dynamic_schema_still_uses_file_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode with dynamic schema should continue to use file headers.
+
+        Dynamic schema = no validation. File headers are authoritative.
+        This is existing behavior and should remain unchanged.
+        """
+        import csv
+
+        output_path = tmp_path / "output.csv"
+
+        # Create file with 'id' column only
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["id"])
+            writer.writeheader()
+            writer.writerow({"id": 1})
+
+        sink = CSVSink(
+            {
+                "path": str(output_path),
+                "schema": DYNAMIC_SCHEMA,
+                "mode": "append",
+            }
+        )
+
+        # Dynamic schema: no validation, uses file headers
+        # Extra fields in row are ignored by DictWriter
+        sink.write([{"id": 2}], ctx)
+        sink.close()
+
+        content = output_path.read_text()
+        lines = content.strip().split("\n")
+        assert len(lines) == 3  # header + 2 rows

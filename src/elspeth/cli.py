@@ -576,12 +576,21 @@ def _execute_pipeline(
                     "failed": "✗",
                 }
                 symbol = status_symbols.get(event.status.value, "?")
+                # Build routed summary with destination breakdown
+                routed_summary = ""
+                if event.routed > 0:
+                    dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
+                    dest_str = ", ".join(dest_parts) if dest_parts else ""
+                    routed_summary = f" | →{event.routed:,} routed"
+                    if dest_str:
+                        routed_summary += f" ({dest_str})"
                 typer.echo(
                     f"\n{symbol} Run {event.status.value.upper()}: "
                     f"{event.total_rows:,} rows processed | "
                     f"✓{event.succeeded:,} succeeded | "
                     f"✗{event.failed:,} failed | "
-                    f"⚠{event.quarantined:,} quarantined | "
+                    f"⚠{event.quarantined:,} quarantined"
+                    f"{routed_summary} | "
                     f"{event.duration_seconds:.2f}s total"
                 )
 
@@ -788,12 +797,21 @@ def _execute_pipeline_with_instances(
                     "failed": "✗",
                 }
                 symbol = status_symbols.get(event.status.value, "?")
+                # Build routed summary with destination breakdown
+                routed_summary = ""
+                if event.routed > 0:
+                    dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
+                    dest_str = ", ".join(dest_parts) if dest_parts else ""
+                    routed_summary = f" | →{event.routed:,} routed"
+                    if dest_str:
+                        routed_summary += f" ({dest_str})"
                 typer.echo(
                     f"\n{symbol} Run {event.status.value.upper()}: "
                     f"{event.total_rows:,} rows processed | "
                     f"✓{event.succeeded:,} succeeded | "
                     f"✗{event.failed:,} failed | "
-                    f"⚠{event.quarantined:,} quarantined | "
+                    f"⚠{event.quarantined:,} quarantined"
+                    f"{routed_summary} | "
                     f"{event.duration_seconds:.2f}s total"
                 )
 
@@ -1218,12 +1236,21 @@ def _execute_resume_with_instances(
             "failed": "✗",
         }
         symbol = status_symbols.get(event.status.value, "?")
+        # Build routed summary with destination breakdown
+        routed_summary = ""
+        if event.routed > 0:
+            dest_parts = [f"{name}:{count}" for name, count in event.routed_destinations]
+            dest_str = ", ".join(dest_parts) if dest_parts else ""
+            routed_summary = f" | →{event.routed:,} routed"
+            if dest_str:
+                routed_summary += f" ({dest_str})"
         typer.echo(
             f"\n{symbol} Resume {event.status.value.upper()}: "
             f"{event.total_rows:,} rows processed | "
             f"✓{event.succeeded:,} succeeded | "
             f"✗{event.failed:,} failed | "
-            f"⚠{event.quarantined:,} quarantined | "
+            f"⚠{event.quarantined:,} quarantined"
+            f"{routed_summary} | "
             f"{event.duration_seconds:.2f}s total"
         )
 

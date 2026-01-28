@@ -519,21 +519,15 @@ class TestCoalesceExecutorQuorum:
         self,
         recorder: LandscapeRecorder,
         run: Run,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """QUORUM should NOT merge on timeout if quorum not met."""
-        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
 
-        # Deterministic clock for timeout testing (use list for mutable closure)
-        fake_time = [100.0]
-
-        def fake_monotonic() -> float:
-            return fake_time[0]
-
-        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
+        # Deterministic clock for timeout testing
+        clock = MockClock(start=100.0)
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -571,6 +565,7 @@ class TestCoalesceExecutorQuorum:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id=run.run_id,
+            clock=clock,
         )
         executor.register_coalesce(settings, coalesce_node.node_id)
 
@@ -598,7 +593,7 @@ class TestCoalesceExecutorQuorum:
         assert outcome.held is True
 
         # Advance clock past timeout (0.1s + 0.05s margin)
-        fake_time[0] = 100.15
+        clock.advance(0.15)  # Now at 100.15
 
         # check_timeouts should return empty list (quorum not met)
         timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
@@ -892,21 +887,15 @@ class TestCoalesceExecutorBestEffort:
         self,
         recorder: LandscapeRecorder,
         run: Run,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """BEST_EFFORT should merge whatever arrived when timeout expires."""
-        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
 
-        # Deterministic clock for timeout testing (use list for mutable closure)
-        fake_time = [100.0]
-
-        def fake_monotonic() -> float:
-            return fake_time[0]
-
-        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
+        # Deterministic clock for timeout testing
+        clock = MockClock(start=100.0)
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -943,6 +932,7 @@ class TestCoalesceExecutorBestEffort:
             span_factory=span_factory,
             token_manager=token_manager,
             run_id=run.run_id,
+            clock=clock,
         )
         executor.register_coalesce(settings, coalesce_node.node_id)
 
@@ -970,7 +960,7 @@ class TestCoalesceExecutorBestEffort:
         assert outcome1.held is True
 
         # Advance clock past timeout (0.1s + 0.05s margin)
-        fake_time[0] = 100.15
+        clock.advance(0.15)  # Now at 100.15
 
         # Check timeout and force merge
         timed_out = executor.check_timeouts("best_effort_merge", step_in_pipeline=2)

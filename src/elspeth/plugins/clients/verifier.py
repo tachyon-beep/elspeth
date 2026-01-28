@@ -14,6 +14,7 @@ The verifier uses DeepDiff for flexible comparison with configurable exclusions.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -32,10 +33,11 @@ class VerificationResult:
     Attributes:
         request_hash: Hash of the request data (for identification)
         live_response: The response from the live call
-        recorded_response: The previously recorded response (None if missing)
+        recorded_response: The previously recorded response (None if missing or purged)
         is_match: Whether live and recorded responses match
         differences: DeepDiff results as dict (empty if match)
         recorded_call_missing: True if no recorded call was found
+        payload_missing: True if call exists but response payload is missing/purged
     """
 
     request_hash: str
@@ -44,15 +46,16 @@ class VerificationResult:
     is_match: bool
     differences: dict[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
+    payload_missing: bool = False
 
     @property
     def has_differences(self) -> bool:
         """Check if there are meaningful differences.
 
         Returns True only when there are actual differences between
-        responses (not when the recording is simply missing).
+        responses (not when the recording is simply missing or payload is purged).
         """
-        return not self.is_match and not self.recorded_call_missing
+        return not self.is_match and not self.recorded_call_missing and not self.payload_missing
 
 
 @dataclass
@@ -67,6 +70,7 @@ class VerificationReport:
         matches: Number of calls that matched recorded baseline
         mismatches: Number of calls with differences from baseline
         missing_recordings: Number of calls with no recorded baseline
+        missing_payloads: Number of calls where response payload is missing/purged
         results: Individual verification results for inspection
     """
 
@@ -74,6 +78,7 @@ class VerificationReport:
     matches: int = 0
     mismatches: int = 0
     missing_recordings: int = 0
+    missing_payloads: int = 0
     results: list[VerificationResult] = field(default_factory=list)
 
     @property
@@ -131,6 +136,10 @@ class CallVerifier:
         self._source_run_id = source_run_id
         self._ignore_paths = ignore_paths or []
         self._report = VerificationReport()
+        # Sequence counter: (call_type, request_hash) -> next_index
+        # Tracks how many times we've seen each unique request
+        # Uses defaultdict to avoid .get() which can hide key bugs
+        self._sequence_counters: defaultdict[tuple[str, str], int] = defaultdict(int)
 
     @property
     def source_run_id(self) -> str:
@@ -148,6 +157,11 @@ class CallVerifier:
         Looks up the previously recorded call by computing the canonical
         hash of the request data and compares responses using DeepDiff.
 
+        When the same request is verified multiple times (same call_type and
+        request_data), each verification compares against the next recorded
+        response in chronological order. This supports scenarios where the
+        original run made the same request multiple times.
+
         Args:
             call_type: Type of call (llm, http, etc.)
             request_data: The request data (used to find recorded call)
@@ -157,12 +171,19 @@ class CallVerifier:
             VerificationResult with comparison details
         """
         request_hash = stable_hash(request_data)
+        sequence_key = (call_type, request_hash)
 
-        # Look up recorded call
+        # Get the current sequence index for this request and increment it
+        # Using defaultdict(int) ensures missing keys default to 0
+        sequence_index = self._sequence_counters[sequence_key]
+        self._sequence_counters[sequence_key] = sequence_index + 1
+
+        # Look up recorded call with sequence index to get Nth occurrence
         call = self._recorder.find_call_by_request_hash(
             run_id=self._source_run_id,
             call_type=call_type,
             request_hash=request_hash,
+            sequence_index=sequence_index,
         )
 
         self._report.total_calls += 1
@@ -180,7 +201,20 @@ class CallVerifier:
             return result
 
         # Get recorded response
-        recorded_response = self._recorder.get_call_response_data(call.call_id) or {}
+        recorded_response = self._recorder.get_call_response_data(call.call_id)
+
+        # Handle missing/purged payload explicitly
+        if recorded_response is None:
+            result = VerificationResult(
+                request_hash=request_hash,
+                live_response=live_response,
+                recorded_response=None,
+                is_match=False,
+                payload_missing=True,
+            )
+            self._report.missing_payloads += 1
+            self._report.results.append(result)
+            return result
 
         # Compare using DeepDiff
         diff = DeepDiff(
@@ -215,9 +249,13 @@ class CallVerifier:
         return self._report
 
     def reset_report(self) -> None:
-        """Reset the verification report.
+        """Reset the verification report and sequence counters.
 
-        Clears all accumulated statistics and results.
+        Clears all accumulated statistics, results, and sequence counters.
         Use this when starting a new verification session.
+
+        Note: This also resets sequence counters, so the next verification
+        of any request will compare against the first recorded occurrence.
         """
         self._report = VerificationReport()
+        self._sequence_counters = defaultdict(int)

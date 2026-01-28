@@ -311,11 +311,20 @@ class TestGetUnprocessedRows:
         *,
         create_checkpoint: bool = True,
     ) -> str:
-        """Helper to create a run with multiple rows and optionally a checkpoint."""
+        """Helper to create a run with multiple rows and optionally a checkpoint.
+
+        When create_checkpoint=True:
+        - Creates 5 rows (indices 0-4)
+        - Records terminal outcomes for rows 0, 1, 2 (completed)
+        - Checkpoint at row 2
+        - Expected unprocessed: rows 3, 4
+        """
+        from elspeth.contracts import RowOutcome
         from elspeth.core.landscape.schema import (
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
 
@@ -369,6 +378,23 @@ class TestGetUnprocessedRows:
             conn.commit()
 
         if create_checkpoint:
+            # Record terminal outcomes for rows 0, 1, 2 (completed before checkpoint)
+            # This matches production behavior where outcomes are recorded on sink write
+            with landscape_db.engine.connect() as conn:
+                for i in range(3):
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-unproc-{i:03d}",
+                            run_id=run_id,
+                            token_id=f"tok-unproc-{i:03d}",
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="output",
+                        )
+                    )
+                conn.commit()
+
             # Checkpoint at row index 2 (rows 0, 1, 2 are processed)
             from tests.core.checkpoint.conftest import _create_test_graph
 
@@ -412,8 +438,28 @@ class TestGetUnprocessedRows:
         checkpoint_manager: CheckpointManager,
         recovery_manager: RecoveryManager,
     ) -> None:
-        """Returns empty list when checkpoint is at or beyond all rows."""
+        """Returns empty list when all rows have terminal outcomes."""
+        from elspeth.contracts import RowOutcome
+        from elspeth.core.landscape.schema import token_outcomes_table
+
         run_id = self._setup_run_with_rows(landscape_db, checkpoint_manager, create_checkpoint=False)
+        now = datetime.now(UTC)
+
+        # Record terminal outcomes for ALL 5 rows
+        with landscape_db.engine.connect() as conn:
+            for i in range(5):
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=f"outcome-all-{i:03d}",
+                        run_id=run_id,
+                        token_id=f"tok-unproc-{i:03d}",
+                        outcome=RowOutcome.COMPLETED.value,
+                        is_terminal=1,
+                        recorded_at=now,
+                        sink_name="output",
+                    )
+                )
+            conn.commit()
 
         # Create checkpoint at sequence 4 (the last row)
         from tests.core.checkpoint.conftest import _create_test_graph
@@ -498,11 +544,19 @@ class TestGetUnprocessedRowsForkScenarios:
         landscape_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
     ) -> str:
-        """Create scenario where row 0 forks to 3 tokens, sequence_number=3 but row_index=0."""
+        """Create scenario where row 0 forks to 3 tokens, all complete.
+
+        Row 0: forks to 3 tokens (tok-0-a, tok-0-b, tok-0-c) - all have terminal outcomes
+        Rows 1-4: No tokens created yet (not started)
+
+        Expected unprocessed: rows 1, 2, 3, 4
+        """
+        from elspeth.contracts import RowOutcome
         from elspeth.core.landscape.schema import (
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
 
@@ -551,6 +605,21 @@ class TestGetUnprocessedRowsForkScenarios:
             conn.execute(tokens_table.insert().values(token_id="tok-0-a", row_id="row-000", created_at=now))
             conn.execute(tokens_table.insert().values(token_id="tok-0-b", row_id="row-000", created_at=now))
             conn.execute(tokens_table.insert().values(token_id="tok-0-c", row_id="row-000", created_at=now))
+
+            # Record terminal outcomes for all 3 forked tokens
+            for suffix in ["a", "b", "c"]:
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=f"outcome-0-{suffix}",
+                        run_id=run_id,
+                        token_id=f"tok-0-{suffix}",
+                        outcome=RowOutcome.COMPLETED.value,
+                        is_terminal=1,
+                        recorded_at=now,
+                        sink_name=f"sink_{suffix}",
+                    )
+                )
+
             conn.commit()
 
         # Checkpoint at token tok-0-c with sequence_number=3
@@ -604,11 +673,21 @@ class TestGetUnprocessedRowsFailureScenarios:
         landscape_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
     ) -> str:
-        """Create scenario: rows 0,1 processed, row 2 failed (no checkpoint), rows 3,4 pending."""
+        """Create scenario: rows 0,1 processed, row 2 failed, rows 3,4 pending.
+
+        Row 0: completed (terminal outcome)
+        Row 1: completed (terminal outcome)
+        Row 2: failed - token exists but NO outcome (crashed before sink)
+        Rows 3, 4: not started (no tokens)
+
+        Expected unprocessed: rows 2, 3, 4
+        """
+        from elspeth.contracts import RowOutcome
         from elspeth.core.landscape.schema import (
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
 
@@ -660,6 +739,22 @@ class TestGetUnprocessedRowsFailureScenarios:
                         created_at=now,
                     )
                 )
+
+            # Record terminal outcomes for rows 0 and 1 ONLY
+            # Row 2 failed before reaching sink - no outcome recorded
+            for i in range(2):
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=f"outcome-fail-{i:03d}",
+                        run_id=run_id,
+                        token_id=f"tok-{i:03d}",
+                        outcome=RowOutcome.COMPLETED.value,
+                        is_terminal=1,
+                        recorded_at=now,
+                        sink_name="output",
+                    )
+                )
+
             conn.commit()
 
         # Checkpoint at row 1 (row 2 failed before it could checkpoint)

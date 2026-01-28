@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any, cast
 import networkx as nx
 from networkx import MultiDiGraph
 
-from elspeth.contracts import EdgeInfo, RoutingMode
+from elspeth.contracts import EdgeInfo, RoutingMode, check_compatibility
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -45,6 +46,13 @@ class NodeInfo:
     Schemas are immutable after graph construction. Even dynamic schemas
     (determined by data inspection) are locked at launch and never change
     during the run. This guarantees audit trail consistency.
+
+    Schema Contracts:
+        input_schema_config and output_schema_config store the original
+        SchemaConfig from plugin configuration. These contain contract
+        declarations (guaranteed_fields, required_fields) used for DAG
+        validation. The input_schema and output_schema are the generated
+        Pydantic model types used for runtime validation.
     """
 
     node_id: NodeID
@@ -53,6 +61,9 @@ class NodeInfo:
     config: dict[str, Any] = field(default_factory=dict)
     input_schema: type[PluginSchema] | None = None  # Immutable after graph construction
     output_schema: type[PluginSchema] | None = None  # Immutable after graph construction
+    # Schema configs for contract validation (guaranteed/required fields)
+    input_schema_config: SchemaConfig | None = None
+    output_schema_config: SchemaConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +135,8 @@ class ExecutionGraph:
         config: dict[str, Any] | None = None,
         input_schema: type[PluginSchema] | None = None,
         output_schema: type[PluginSchema] | None = None,
+        input_schema_config: SchemaConfig | None = None,
+        output_schema_config: SchemaConfig | None = None,
     ) -> None:
         """Add a node to the execution graph.
 
@@ -132,8 +145,10 @@ class ExecutionGraph:
             node_type: One of: source, transform, gate, aggregation, coalesce, sink
             plugin_name: Plugin identifier
             config: Node configuration
-            input_schema: Input schema (None for dynamic or N/A like sources)
-            output_schema: Output schema (None for dynamic or N/A like sinks)
+            input_schema: Input schema Pydantic type (None for dynamic or N/A like sources)
+            output_schema: Output schema Pydantic type (None for dynamic or N/A like sinks)
+            input_schema_config: Input schema config for contract validation
+            output_schema_config: Output schema config for contract validation
         """
         info = NodeInfo(
             node_id=NodeID(node_id),
@@ -142,6 +157,8 @@ class ExecutionGraph:
             config=config or {},
             input_schema=input_schema,
             output_schema=output_schema,
+            input_schema_config=input_schema_config,
+            output_schema_config=output_schema_config,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -885,12 +902,20 @@ class ExecutionGraph:
     def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
         """Validate schema compatibility for a single edge.
 
+        Validation is performed in two phases:
+        1. CONTRACT VALIDATION: Check required/guaranteed field names
+        2. TYPE VALIDATION: Check field type compatibility
+
+        Contract validation catches missing fields even for dynamic schemas,
+        which is critical for template-based transforms (e.g., LLM) that
+        reference specific row fields.
+
         Args:
             from_node_id: Source node ID
             to_node_id: Destination node ID
 
         Raises:
-            ValueError: If schemas are incompatible
+            ValueError: If schemas are incompatible or contracts violated
         """
         to_info = self.get_node_info(to_node_id)
 
@@ -912,21 +937,53 @@ class ExecutionGraph:
                 f"output_schema={to_info.output_schema.__name__}"
             )
 
+        # ===== PHASE 1: CONTRACT VALIDATION (field name requirements) =====
+        # This catches missing fields even for dynamic schemas
+        consumer_required = self._get_required_fields(to_node_id)
+
+        if consumer_required:
+            # Get effective guaranteed fields (walks through pass-through nodes)
+            producer_guaranteed = self._get_effective_guaranteed_fields(from_node_id)
+
+            missing = consumer_required - producer_guaranteed
+            if missing:
+                # Build actionable error message
+                from_info = self.get_node_info(from_node_id)
+                raise ValueError(
+                    f"Schema contract violation: edge '{from_node_id}' → '{to_node_id}'\n"
+                    f"  Consumer ({to_info.plugin_name}) requires fields: {sorted(consumer_required)}\n"
+                    f"  Producer ({from_info.plugin_name}) guarantees: "
+                    f"{sorted(producer_guaranteed) if producer_guaranteed else '(none - dynamic schema)'}\n"
+                    f"  Missing fields: {sorted(missing)}\n"
+                    f"\n"
+                    f"Fix: Either:\n"
+                    f"  1. Add missing fields to producer's schema or guaranteed_fields, or\n"
+                    f"  2. Remove from consumer's required_input_fields if truly optional"
+                )
+
+        # ===== PHASE 2: TYPE VALIDATION (schema compatibility) =====
         # Get EFFECTIVE producer schema (walks through gates if needed)
         producer_schema = self._get_effective_producer_schema(from_node_id)
         consumer_schema = to_info.input_schema
 
-        # Rule 1: Dynamic schemas (None) bypass validation
+        # Rule 1: Dynamic schemas (None) bypass type validation
         if producer_schema is None or consumer_schema is None:
             return  # Dynamic schema - compatible with anything
 
-        # Rule 2: Check field compatibility
-        missing_fields = self._get_missing_required_fields(producer_schema, consumer_schema)
-        if missing_fields:
+        # Handle dynamic schemas (no explicit fields + extra='allow')
+        # These are created by _create_dynamic_schema and accept anything
+        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
+        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+        if producer_is_dynamic or consumer_is_dynamic:
+            return  # Dynamic schemas bypass static type validation
+
+        # Rule 2: Full compatibility check (missing fields, type mismatches, extra fields)
+        result = check_compatibility(producer_schema, consumer_schema)
+        if not result.compatible:
             raise ValueError(
                 f"Edge from '{from_node_id}' to '{to_node_id}' invalid: "
-                f"producer schema '{producer_schema.__name__}' missing required fields "
-                f"for consumer schema '{consumer_schema.__name__}': {missing_fields}"
+                f"producer schema '{producer_schema.__name__}' incompatible with "
+                f"consumer schema '{consumer_schema.__name__}': {result.error_message}"
             )
 
     def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
@@ -1014,32 +1071,154 @@ class ExecutionGraph:
                     f"branch from '{from_id}' has {other_schema.__name__ if other_schema else 'dynamic'}"
                 )
 
-    def _get_missing_required_fields(
-        self,
-        producer_schema: type[PluginSchema] | None,
-        consumer_schema: type[PluginSchema] | None,
-    ) -> list[str]:
-        """Get required fields that producer doesn't provide.
+    # ===== CONTRACT VALIDATION HELPERS =====
+
+    def _get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
+        """Extract SchemaConfig from node's config dict.
+
+        The config dict contains the raw "schema" key from plugin configuration.
+        This method parses it into a SchemaConfig for contract validation.
 
         Args:
-            producer_schema: Schema of data producer
-            consumer_schema: Schema of data consumer
+            node_id: Node ID to get schema config from
 
         Returns:
-            List of field names missing from producer
+            SchemaConfig if available, None if schema not in config
         """
-        if producer_schema is None or consumer_schema is None:
-            return []  # Dynamic schema
+        node_info = self.get_node_info(node_id)
 
-        # Check if either schema is dynamic (no fields + extra='allow')
-        # Dynamic schemas created by _create_dynamic_schema have no fields and extra='allow'
-        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
-        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+        # First check if we have the parsed schema config in NodeInfo
+        # (output for producers, input for consumers)
+        # These are populated by add_node when available
 
-        if producer_is_dynamic or consumer_is_dynamic:
-            return []  # Dynamic schema - compatible with anything
+        # Check raw config dict for schema
+        schema_dict = node_info.config.get("schema")
+        if schema_dict is None:
+            return None
 
-        producer_fields = set(producer_schema.model_fields.keys())
-        consumer_required = {name for name, field in consumer_schema.model_fields.items() if field.is_required()}
+        # Parse the schema dict into SchemaConfig
+        # Handle both raw dict form and serialized form
+        if isinstance(schema_dict, dict):
+            return SchemaConfig.from_dict(schema_dict)
 
-        return sorted(consumer_required - producer_fields)
+        # Dynamic schema stored as string
+        if schema_dict == "dynamic":
+            return SchemaConfig.from_dict({"fields": "dynamic"})
+
+        return None
+
+    def _get_guaranteed_fields(self, node_id: str) -> frozenset[str]:
+        """Get fields that a node guarantees in its output.
+
+        Priority:
+        1. Explicit guaranteed_fields in schema config
+        2. Declared fields in free/strict mode schemas
+        3. Empty set for pure dynamic schemas
+
+        Args:
+            node_id: Node ID to get guarantees from
+
+        Returns:
+            Frozenset of field names the node guarantees to output
+        """
+        schema_config = self._get_schema_config_from_node(node_id)
+
+        if schema_config is None:
+            return frozenset()
+
+        return schema_config.get_effective_guaranteed_fields()
+
+    def _get_required_fields(self, node_id: str) -> frozenset[str]:
+        """Get fields that a node EXPLICITLY requires in its input.
+
+        This returns only explicit contract declarations, not implicit
+        requirements from typed schemas. The existing type validation
+        handles typed schema compatibility separately.
+
+        Priority:
+        1. Explicit required_input_fields from plugin config (TransformDataConfig)
+        2. Explicit required_fields in schema config
+
+        Note: This deliberately does NOT include implicit requirements from
+        strict/free mode schemas. Those are handled by type validation, which
+        correctly skips validation when either side is dynamic.
+
+        Args:
+            node_id: Node ID to get requirements from
+
+        Returns:
+            Frozenset of field names explicitly required
+        """
+        node_info = self.get_node_info(node_id)
+
+        # Check plugin config for required_input_fields (highest priority)
+        # This is the explicit declaration from TransformDataConfig
+        required_input = node_info.config.get("required_input_fields")
+        if required_input is not None and len(required_input) > 0:
+            return frozenset(required_input)
+
+        # For aggregation nodes, also check inside "options" where transform config is nested
+        if node_info.node_type == "aggregation":
+            options = node_info.config.get("options", {})
+            if isinstance(options, dict):
+                required_input = options.get("required_input_fields")
+                if required_input is not None and len(required_input) > 0:
+                    return frozenset(required_input)
+
+        # Check for explicit required_fields in schema config
+        schema_config = self._get_schema_config_from_node(node_id)
+
+        if schema_config is None:
+            return frozenset()
+
+        # Only return explicit required_fields declaration, NOT implicit from typed schemas
+        if schema_config.required_fields is not None:
+            return frozenset(schema_config.required_fields)
+
+        return frozenset()
+
+    def _get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
+        """Get effective output guarantees, walking through pass-through nodes.
+
+        Gates and coalesce nodes don't transform data - they inherit guarantees
+        from their upstream producers. This method walks backwards through the
+        graph to find actual guarantees.
+
+        For coalesce nodes, returns the intersection of all branch guarantees
+        (only fields guaranteed by ALL branches are guaranteed after merge).
+
+        Args:
+            node_id: Node to get effective guarantees for
+
+        Returns:
+            Frozenset of field names effectively guaranteed at this point
+        """
+        node_info = self.get_node_info(node_id)
+
+        # If node has its own guarantees, return them
+        own_guarantees = self._get_guaranteed_fields(node_id)
+        if own_guarantees:
+            return own_guarantees
+
+        # For pass-through nodes, inherit from upstream
+        if node_info.node_type in ("gate", "coalesce"):
+            incoming = list(self._graph.in_edges(node_id, data=True))
+
+            if not incoming:
+                return frozenset()
+
+            if node_info.node_type == "coalesce":
+                # Coalesce guarantees the INTERSECTION of branch guarantees
+                branch_guarantees = [self._get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
+                if not branch_guarantees:
+                    return frozenset()
+                # Start with first, intersect with rest
+                result = branch_guarantees[0]
+                for guarantees in branch_guarantees[1:]:
+                    result = result & guarantees
+                return result
+            else:
+                # Gates pass through - inherit from single upstream
+                return self._get_effective_guaranteed_fields(incoming[0][0])
+
+        return own_guarantees

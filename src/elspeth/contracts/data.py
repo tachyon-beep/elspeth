@@ -111,6 +111,7 @@ class CompatibilityResult:
     compatible: bool
     missing_fields: list[str] = dataclass_field(default_factory=list)
     type_mismatches: list[tuple[str, str, str]] = dataclass_field(default_factory=list)
+    extra_fields: list[str] = dataclass_field(default_factory=list)
 
     @property
     def error_message(self) -> str | None:
@@ -124,6 +125,8 @@ class CompatibilityResult:
         if self.type_mismatches:
             mismatches = [f"{name} (expected {expected}, got {actual})" for name, expected, actual in self.type_mismatches]
             parts.append(f"Type mismatches: {', '.join(mismatches)}")
+        if self.extra_fields:
+            parts.append(f"Extra fields forbidden by consumer: {', '.join(self.extra_fields)}")
 
         return "; ".join(parts)
 
@@ -141,6 +144,7 @@ def check_compatibility(
     - All REQUIRED fields in consumer are provided by producer
     - Fields with defaults in consumer are optional
     - Field types are compatible (exact match or coercible)
+    - If consumer has extra="forbid", producer must not have extra fields
 
     Args:
         producer_schema: Output schema of upstream plugin
@@ -175,12 +179,21 @@ def check_compatibility(
                     )
                 )
 
-    compatible = len(missing) == 0 and len(mismatches) == 0
+    # Check for extra fields when consumer forbids them
+    extra: list[str] = []
+    consumer_forbids_extras = consumer_schema.model_config.get("extra") == "forbid"
+    if consumer_forbids_extras:
+        producer_field_names = set(producer_fields.keys())
+        consumer_field_names = set(consumer_fields.keys())
+        extra = sorted(producer_field_names - consumer_field_names)
+
+    compatible = len(missing) == 0 and len(mismatches) == 0 and len(extra) == 0
 
     return CompatibilityResult(
         compatible=compatible,
         missing_fields=missing,
         type_mismatches=mismatches,
+        extra_fields=extra,
     )
 
 

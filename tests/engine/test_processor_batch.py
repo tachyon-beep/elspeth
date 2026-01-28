@@ -476,3 +476,198 @@ class TestProcessorDeaggregation:
                 transforms=[transform],
                 ctx=ctx,
             )
+
+    def test_aggregation_transform_returns_none_raises_contract_error(self) -> None:
+        """Aggregation transform returning None for result.row raises RuntimeError.
+
+        This tests the contract enforcement added in P3-2026-01-28 bug fix.
+        Batch-aware transforms MUST return a row via TransformResult.success(row).
+        Defensive {} substitution is forbidden per CLAUDE.md's no-bug-hiding policy.
+        """
+        import pytest
+
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        class NoneReturningTransform(BaseTransform):
+            """Transform that violates contract by returning success with None row."""
+
+            name = "bad_transform"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+                # Bug in plugin: creates TransformResult with row=None (contract violation)
+                # This should NOT be masked by defensive {} substitution
+                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                return result
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="bad_transform",
+            node_type=NodeType.AGGREGATION,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Test with single output_mode (default)
+        aggregation_settings = {
+            NodeID(agg_node.node_id): AggregationSettings(
+                name="bad_agg",
+                plugin="bad_transform",
+                trigger=TriggerConfig(count=2),
+                output_mode="single",
+            ),
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            aggregation_settings=aggregation_settings,
+        )
+
+        transform = NoneReturningTransform(agg_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process first row - buffered (not flushed yet)
+        results = processor.process_row(
+            row_index=0,
+            row_data={"value": 1},
+            transforms=[transform],
+            ctx=ctx,
+        )
+        assert results[0].outcome == RowOutcome.CONSUMED_IN_BATCH
+
+        # Process second row - triggers flush, should raise contract error
+        # The error message comes from execute_flush() in executors.py
+        with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
+            processor.process_row(
+                row_index=1,
+                row_data={"value": 2},
+                transforms=[transform],
+                ctx=ctx,
+            )
+
+    def test_aggregation_transform_mode_returns_none_raises_contract_error(self) -> None:
+        """Aggregation transform returning None in 'transform' mode raises RuntimeError.
+
+        This tests the contract enforcement for output_mode="transform" (vs "single" above).
+        Both modes require output data - this verifies the transform mode path.
+        """
+        import pytest
+
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        class NoneReturningTransform(BaseTransform):
+            """Transform that violates contract by returning success with None row."""
+
+            name = "bad_transform_multi"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+                # Bug in plugin: creates TransformResult with row=None (contract violation)
+                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                return result
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="bad_transform_multi",
+            node_type=NodeType.AGGREGATION,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Test with transform output_mode (creates new tokens)
+        aggregation_settings = {
+            NodeID(agg_node.node_id): AggregationSettings(
+                name="bad_agg_transform",
+                plugin="bad_transform_multi",
+                trigger=TriggerConfig(count=2),
+                output_mode="transform",  # Different from "single" test above
+            ),
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            aggregation_settings=aggregation_settings,
+        )
+
+        transform = NoneReturningTransform(agg_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process first row - buffered
+        results = processor.process_row(
+            row_index=0,
+            row_data={"value": 1},
+            transforms=[transform],
+            ctx=ctx,
+        )
+        assert results[0].outcome == RowOutcome.CONSUMED_IN_BATCH
+
+        # Process second row - triggers flush, should raise contract error
+        with pytest.raises(RuntimeError, match="neither row nor rows contains data"):
+            processor.process_row(
+                row_index=1,
+                row_data={"value": 2},
+                transforms=[transform],
+                ctx=ctx,
+            )

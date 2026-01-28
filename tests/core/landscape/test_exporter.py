@@ -219,6 +219,56 @@ class TestLandscapeExporterComplexRun:
         assert token_records[0]["token_id"] == token.token_id
         assert token_records[0]["row_id"] == row.row_id
 
+    def test_exporter_includes_expand_group_id(self) -> None:
+        """Token export includes expand_group_id for deaggregation lineage."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="source",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="source",
+            row_index=0,
+            data={"x": 1},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Use expand_token() to create tokens with expand_group_id set
+        expanded_tokens = recorder.expand_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            count=2,
+            step_in_pipeline=1,
+        )
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        token_records = [r for r in records if r["record_type"] == "token"]
+        # 1 parent + 2 expanded = 3 tokens
+        assert len(token_records) == 3
+
+        # Find expanded tokens (they have expand_group_id set)
+        expanded_records = [r for r in token_records if r["expand_group_id"] is not None]
+        assert len(expanded_records) == 2
+
+        # All expanded tokens should share the same expand_group_id
+        expand_group_ids = {r["expand_group_id"] for r in expanded_records}
+        assert len(expand_group_ids) == 1
+
+        # Verify the expand_group_id matches what was created
+        assert expanded_records[0]["expand_group_id"] == expanded_tokens[0].expand_group_id
+
     def test_exporter_extracts_node_states(self) -> None:
         """Exporter should yield node_state records."""
         db = LandscapeDB.in_memory()
