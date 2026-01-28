@@ -17,7 +17,7 @@ input.csv → [threshold gate] → normal.csv (amount ≤ 1000)
             high_values.csv (amount > 1000)
 ```
 
-By the end, you'll be able to run `elspeth explain --run latest --row 2` and explore why Bob's $1500 transaction was flagged as high-value.
+By the end, you'll have a complete audit trail showing why Bob's $1500 transaction was routed to `high_values.csv`.
 
 ---
 

@@ -125,6 +125,29 @@ on_validation_failure: quarantine  # quarantine or discard
 | `strict` | Require exactly the specified fields |
 | `dynamic` | Infer schema from first row |
 
+### Schema Contracts (DAG Validation)
+
+For dynamic schemas that still have field requirements, use contract fields:
+
+```yaml
+# Producer guarantees these fields will exist in output
+schema:
+  fields: dynamic
+  guaranteed_fields: [customer_id, timestamp, amount]
+
+# Consumer requires these fields in input
+schema:
+  fields: dynamic
+  required_fields: [customer_id, amount]
+```
+
+| Field | Purpose |
+|-------|---------|
+| `guaranteed_fields` | Fields the producer guarantees will exist (for dynamic schemas) |
+| `required_fields` | Fields the consumer requires in input (for dynamic schemas) |
+
+The DAG validates at construction time that upstream `guaranteed_fields` satisfy downstream `required_fields`. For explicit schemas (`mode: strict` or `free`), declared fields are implicitly guaranteed.
+
 ---
 
 ## Sink Settings
@@ -186,6 +209,7 @@ transforms:
         old_field: new_field
       computed:
         full_name: "row['first_name'] + ' ' + row['last_name']"
+      required_input_fields: [first_name, last_name]  # Validated at DAG construction
 
   - plugin: passthrough
     options: {}
@@ -195,6 +219,30 @@ transforms:
 |-------|------|----------|-------------|
 | `plugin` | string | **Yes** | Plugin name |
 | `options` | object | No | Plugin-specific configuration |
+| `options.required_input_fields` | list | No | Fields this transform requires in input (enables DAG validation) |
+| `options.on_error` | string | No | Sink for rows that fail processing, or `discard` |
+
+### Required Input Fields
+
+Transforms can declare which fields they require, enabling the DAG to catch missing field errors at configuration time:
+
+```yaml
+transforms:
+  - plugin: llm_classifier
+    options:
+      required_input_fields: [customer_id, message_text]
+      # ... other options
+```
+
+For template-based transforms (like LLM transforms), use `elspeth.core.templates.extract_jinja2_fields()` to discover which fields your template references:
+
+```python
+from elspeth.core.templates import extract_jinja2_fields
+
+template = "Customer {{ row.customer_id }}: {{ row.message_text }}"
+fields = extract_jinja2_fields(template)  # frozenset({'customer_id', 'message_text'})
+# Add these to required_input_fields in your config
+```
 
 ### Available Transform Plugins
 

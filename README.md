@@ -33,10 +33,10 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 ## Features
 
 - **Complete Audit Trail** - Every transform, every routing decision, every external call recorded with payload storage
-- **Explain Any Decision** - `elspeth explain --row 42` shows exactly why any row reached its destination
+- **Explain Any Decision** - `elspeth explain --row 42` launches TUI to explore why any row reached its destination
 - **Plugin Architecture** - Extensible sources, transforms, gates, and sinks via pluggy with dynamic discovery
 - **Conditional Routing** - Gates route rows to different sinks based on config-driven expressions (AST-parsed, no eval)
-- **Production Ready** - Checkpointing, retry logic with backoff, rate limiting, payload retention policies
+- **Resilient Execution** - Checkpointing for crash recovery, retry logic with backoff, rate limiting, payload retention policies
 - **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification with manifest hash chains
 - **LLM Integration** - Azure OpenAI and OpenRouter support with pooled execution, batch processing, and multi-query
 
@@ -50,11 +50,14 @@ git clone https://github.com/johnm-dta/elspeth.git && cd elspeth
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 
+# Validate configuration
+elspeth validate --settings examples/threshold_gate/settings.yaml
+
 # Run a pipeline
 elspeth run --settings examples/threshold_gate/settings.yaml --execute
 
-# Explore lineage (launches TUI)
-elspeth explain --run latest --row 2
+# Resume an interrupted run
+elspeth resume <run_id>
 ```
 
 See [Your First Pipeline](docs/guides/your-first-pipeline.md) for a complete walkthrough.
@@ -122,21 +125,19 @@ elspeth plugins list
 
 ### Explaining Decisions
 
-ELSPETH records complete lineage for every row. The `explain` command launches an interactive TUI to explore lineage:
+ELSPETH records complete lineage for every row. The audit database captures:
 
-```bash
-# Launch lineage explorer TUI
-elspeth explain --run latest --row 2
-
-# Text output (coming soon - TUI is currently the only interface)
-# elspeth explain --run latest --row 2 --no-tui
-```
-
-The audit database records:
 - Source row with content hash
 - Every transform applied (input/output hashes)
 - Every gate evaluation with condition result
 - Final destination and artifact hash
+
+```bash
+# Launch lineage explorer TUI
+elspeth explain --run <run_id> --row <row_id>
+```
+
+For programmatic access, query the Landscape database directly using the `LandscapeRecorder` API.
 
 ### Audit Trail Export
 
@@ -324,12 +325,16 @@ See [Docker Guide](docs/guides/docker.md) for complete deployment documentation.
 ```
 elspeth-rapid/
 ├── src/elspeth/
-│   ├── core/           # Config, canonical JSON, DAG, checkpoint
-│   │   └── landscape/  # Audit trail (the backbone)
-│   ├── engine/         # Orchestrator, row processor, executors
-│   ├── plugins/        # Sources, transforms, sinks
+│   ├── core/           # Config, canonical JSON, DAG, rate limiting, retention
+│   │   └── landscape/  # Audit trail (recorder, exporter, schema)
+│   ├── contracts/      # Type contracts, schemas, protocol definitions
+│   ├── engine/         # Orchestrator, processor, executors, retry
+│   ├── plugins/        # Sources, transforms, sinks, LLM integrations
+│   ├── tui/            # Terminal UI (Textual)
 │   └── cli.py          # Typer CLI
 └── tests/
+    ├── unit/           # Unit tests
+    ├── integration/    # Integration tests
     └── contracts/      # Protocol contract tests
 ```
 
