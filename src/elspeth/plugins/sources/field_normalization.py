@@ -18,6 +18,7 @@ from __future__ import annotations
 import keyword
 import re
 import unicodedata
+from dataclasses import dataclass
 
 # Algorithm version for audit trail - frozen per major version
 # Increment when algorithm changes affect output
@@ -149,3 +150,88 @@ def check_mapping_collisions(
         if collisions:
             details = [f"  '{target}' <- {', '.join(repr(s) for s in sources)}" for target, sources in sorted(collisions.items())]
             raise ValueError("field_mapping creates collision:\n" + "\n".join(details))
+
+
+@dataclass
+class FieldResolution:
+    """Result of field name resolution.
+
+    Attributes:
+        final_headers: List of final field names to use
+        resolution_mapping: Mapping from original -> final names (for audit trail)
+        normalization_version: Algorithm version used, or None if no normalization
+    """
+
+    final_headers: list[str]
+    resolution_mapping: dict[str, str]
+    normalization_version: str | None
+
+
+def resolve_field_names(
+    *,
+    raw_headers: list[str] | None,
+    normalize_fields: bool,
+    field_mapping: dict[str, str] | None,
+    columns: list[str] | None,
+) -> FieldResolution:
+    """Resolve final field names from raw headers and config.
+
+    Args:
+        raw_headers: Headers from file, or None if using columns config
+        normalize_fields: Whether to apply normalization algorithm
+        field_mapping: Optional mapping overrides (keys are effective names)
+        columns: Explicit column names for headerless mode
+
+    Returns:
+        FieldResolution with final headers, audit mapping, and algorithm version
+
+    Raises:
+        ValueError: On collision, invalid mapping key, or configuration error
+    """
+    # Track whether normalization was used
+    used_normalization = False
+
+    # Determine source of headers
+    if columns is not None:
+        # Headerless mode - use explicit columns
+        original_names = columns
+        effective_headers = list(columns)
+    elif raw_headers is not None:
+        original_names = raw_headers
+        if normalize_fields:
+            effective_headers = [normalize_field_name(h) for h in raw_headers]
+            check_normalization_collisions(raw_headers, effective_headers)
+            used_normalization = True
+        else:
+            effective_headers = list(raw_headers)
+    else:
+        raise ValueError("Either raw_headers or columns must be provided")
+
+    # Apply field mapping if provided
+    if field_mapping:
+        # Validate all mapping keys exist
+        available = set(effective_headers)
+        missing = set(field_mapping.keys()) - available
+        if missing:
+            raise ValueError(f"field_mapping keys not found in headers: {sorted(missing)}. Available: {sorted(available)}")
+
+        # Apply mapping: mapped headers use new name, unmapped pass through
+        # Explicit 'if in' check preferred over .get() per no-bug-hiding policy
+        final_headers = [
+            field_mapping[h] if h in field_mapping else h  # noqa: SIM401
+            for h in effective_headers
+        ]
+
+        # Check for collisions after mapping
+        check_mapping_collisions(effective_headers, final_headers, field_mapping)
+    else:
+        final_headers = effective_headers
+
+    # Build resolution mapping for audit trail
+    resolution_mapping = dict(zip(original_names, final_headers, strict=True))
+
+    return FieldResolution(
+        final_headers=final_headers,
+        resolution_mapping=resolution_mapping,
+        normalization_version=get_normalization_version() if used_normalization else None,
+    )

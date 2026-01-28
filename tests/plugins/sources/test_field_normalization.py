@@ -252,3 +252,114 @@ class TestMappingCollisionDetection:
 
         with pytest.raises(ValueError, match="collision"):
             check_mapping_collisions(headers, final, mapping)
+
+
+class TestResolveFieldNames:
+    """Tests for the complete field resolution flow."""
+
+    def test_normalize_only(self) -> None:
+        """Resolution with normalize_fields=True, no mapping."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        raw_headers = ["User ID", "Amount $"]
+        result = resolve_field_names(
+            raw_headers=raw_headers,
+            normalize_fields=True,
+            field_mapping=None,
+            columns=None,
+        )
+
+        assert result.final_headers == ["user_id", "amount"]
+        assert result.resolution_mapping == {
+            "User ID": "user_id",
+            "Amount $": "amount",
+        }
+        assert result.normalization_version == "1.0.0"
+
+    def test_normalize_with_mapping(self) -> None:
+        """Resolution with normalize + mapping override."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        raw_headers = ["User ID", "Amount $"]
+        result = resolve_field_names(
+            raw_headers=raw_headers,
+            normalize_fields=True,
+            field_mapping={"user_id": "uid"},
+            columns=None,
+        )
+
+        assert result.final_headers == ["uid", "amount"]
+        assert result.resolution_mapping == {
+            "User ID": "uid",
+            "Amount $": "amount",
+        }
+
+    def test_columns_mode(self) -> None:
+        """Resolution with explicit columns (headerless mode)."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        result = resolve_field_names(
+            raw_headers=None,
+            normalize_fields=False,
+            field_mapping=None,
+            columns=["id", "name", "amount"],
+        )
+
+        assert result.final_headers == ["id", "name", "amount"]
+        assert result.resolution_mapping == {
+            "id": "id",
+            "name": "name",
+            "amount": "amount",
+        }
+        assert result.normalization_version is None  # No normalization
+
+    def test_columns_with_mapping(self) -> None:
+        """Resolution with columns + mapping override."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        result = resolve_field_names(
+            raw_headers=None,
+            normalize_fields=False,
+            field_mapping={"id": "customer_id"},
+            columns=["id", "name"],
+        )
+
+        assert result.final_headers == ["customer_id", "name"]
+        assert result.resolution_mapping == {
+            "id": "customer_id",
+            "name": "name",
+        }
+
+    def test_no_normalization_passthrough(self) -> None:
+        """Without normalize_fields, headers pass through unchanged."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        raw_headers = ["User ID", "Amount $"]
+        result = resolve_field_names(
+            raw_headers=raw_headers,
+            normalize_fields=False,
+            field_mapping=None,
+            columns=None,
+        )
+
+        assert result.final_headers == ["User ID", "Amount $"]
+        assert result.resolution_mapping == {
+            "User ID": "User ID",
+            "Amount $": "Amount $",
+        }
+
+    def test_mapping_key_not_found_raises(self) -> None:
+        """Mapping key not in headers raises helpful error."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        with pytest.raises(ValueError, match="not found") as exc_info:
+            resolve_field_names(
+                raw_headers=["user_id", "amount"],
+                normalize_fields=True,
+                field_mapping={"nonexistent": "x"},
+                columns=None,
+            )
+
+        error = str(exc_info.value)
+        assert "nonexistent" in error
+        assert "user_id" in error  # Shows available headers
