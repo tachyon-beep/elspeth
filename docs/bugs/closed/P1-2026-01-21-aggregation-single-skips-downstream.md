@@ -1,3 +1,12 @@
+## ✅ RESOLVED
+
+**Status:** Fixed
+**Resolution:** Added `more_transforms` check to single output mode, matching passthrough and transform modes
+**Commit:** 064e277 fix(engine): aggregation single mode now continues to downstream transforms
+**Date:** 2026-01-28
+
+---
+
 # Bug Report: Aggregation output_mode=single terminates pipeline early
 
 ## Summary
@@ -81,7 +90,7 @@
 
 ## Tests
 
-- Suggested tests to run: `pytest tests/engine/test_processor.py -k aggregation_single`
+- Suggested tests to run: `pytest tests/engine/test_processor_modes.py::TestProcessorSingleMode -v`
 - New tests required: Yes (single output continuation).
 
 ## Notes / Links
@@ -193,3 +202,44 @@ Per the plugin protocol spec (line 1231), single mode should "continue" processi
 ### Verification Verdict
 
 **BUG IS STILL VALID** - The single output mode path has never checked for downstream transforms. The aggregated token is marked COMPLETED and returned immediately, skipping any transforms or config gates that should process it afterward. This is a P1 bug affecting pipeline correctness.
+
+---
+
+## Resolution (2026-01-28)
+
+### Fix Applied
+
+Two issues were fixed in `src/elspeth/engine/processor.py`:
+
+1. **Line 955 (call site)**: Changed `total_steps=len(transforms)` to `total_steps=total_steps` to include config gates in the count.
+
+2. **Lines 229-263 (single mode)**: Added the `more_transforms` check matching passthrough and transform modes:
+
+```python
+if output_mode == "single":
+    # Single output: one aggregated result row
+    # The triggering token continues with aggregated data
+    final_data = result.row if result.row is not None else {}
+    updated_token = TokenInfo(...)
+
+    # Check if there are more transforms after this one
+    more_transforms = step < total_steps
+
+    if more_transforms:
+        # Queue aggregated token as work item for remaining transforms
+        child_items.append(_WorkItem(token=updated_token, start_step=step))
+        return ([], child_items)
+    else:
+        # No more transforms - return COMPLETED
+        return (RowResult(..., outcome=RowOutcome.COMPLETED), child_items)
+```
+
+### Tests Added
+
+- `TestProcessorSingleMode::test_aggregation_single_mode_continues_to_next_transform`
+- `TestProcessorSingleMode::test_aggregation_single_mode_no_downstream_completes_immediately`
+
+### Verification
+
+- All 604 engine tests pass
+- Manual reproduction confirms fix works correctly
