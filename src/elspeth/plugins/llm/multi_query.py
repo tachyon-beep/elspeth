@@ -175,7 +175,7 @@ class CriterionConfig(PluginConfig):
     code: str | None = Field(None, description="Short code for lookups")
     description: str | None = Field(None, description="Human-readable description")
     subcriteria: list[str] = Field(default_factory=list, description="Subcriteria list")
-    max_tokens: int | None = Field(None, description="Per-criterion max_tokens override")
+    max_tokens: int | None = Field(None, gt=0, description="Per-criterion max_tokens override")
 
     def to_template_data(self) -> dict[str, Any]:
         """Convert to dict for template injection."""
