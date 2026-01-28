@@ -293,12 +293,12 @@ allow_hits:
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical
   expires: null
-- key: plugins/discovery.py:R2:_discover_in_file:line=125
+- key: plugins/discovery.py:R2:_discover_in_file:line=135
   owner: architecture
   reason: 'Trust boundary: scanning arbitrary classes that may or may not have ''name'' attribute'
   safety: Classes without valid name are skipped with warning log - discovery continues
   expires: null
-- key: plugins/discovery.py:R2:get_plugin_description:line=232
+- key: plugins/discovery.py:R2:get_plugin_description:line=242
   owner: architecture
   reason: 'UI display fallback: generating human-readable description for classes without ''name'' attr'
   safety: Falls back to class __name__ for display - no control flow or audit impact

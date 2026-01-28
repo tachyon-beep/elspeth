@@ -152,7 +152,7 @@ def check_mapping_collisions(
             raise ValueError("field_mapping creates collision:\n" + "\n".join(details))
 
 
-@dataclass
+@dataclass(frozen=True)
 class FieldResolution:
     """Result of field name resolution.
 

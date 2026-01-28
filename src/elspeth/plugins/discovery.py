@@ -9,6 +9,7 @@ Scans plugin directories for classes that:
 import importlib.util
 import inspect
 import logging
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,16 @@ def _discover_in_file(py_file: Path, base_class: type) -> list[type]:
         return []
 
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register module in sys.modules BEFORE exec_module
+    # Required for Python 3.13+ where dataclass decorator looks up
+    # cls.__module__ in sys.modules during field resolution
+    sys.modules[module.__name__] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        # Clean up on failure
+        sys.modules.pop(module.__name__, None)
+        raise
 
     # Find classes that inherit from base_class
     discovered: list[type] = []
