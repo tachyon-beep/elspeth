@@ -94,3 +94,58 @@ def normalize_field_name(raw: str) -> str:
         )
 
     return normalized
+
+
+def check_normalization_collisions(raw_headers: list[str], normalized_headers: list[str]) -> None:
+    """Check for collisions after normalization.
+
+    Args:
+        raw_headers: Original header names
+        normalized_headers: Normalized header names (same order)
+
+    Raises:
+        ValueError: If multiple raw headers normalize to same value,
+                   with ALL colliding headers and their positions listed
+    """
+    seen: dict[str, list[tuple[int, str]]] = {}
+
+    for i, (raw, norm) in enumerate(zip(raw_headers, normalized_headers, strict=True)):
+        seen.setdefault(norm, []).append((i, raw))
+
+    collisions = {norm: sources for norm, sources in seen.items() if len(sources) > 1}
+
+    if collisions:
+        details = []
+        for norm, sources in sorted(collisions.items()):
+            source_desc = ", ".join(f"column {i} ('{raw}')" for i, raw in sources)
+            details.append(f"  '{norm}' <- {source_desc}")
+
+        raise ValueError("Field name collision after normalization:\n" + "\n".join(details))
+
+
+def check_mapping_collisions(
+    pre_mapping: list[str],
+    post_mapping: list[str],
+    field_mapping: dict[str, str],
+) -> None:
+    """Check for collisions created by field_mapping.
+
+    Args:
+        pre_mapping: Headers before mapping applied
+        post_mapping: Headers after mapping applied
+        field_mapping: The mapping that was applied
+
+    Raises:
+        ValueError: If mapping causes multiple fields to have same final name
+    """
+    if len(post_mapping) != len(set(post_mapping)):
+        # Build mapping from target to all sources (both mapped and passthrough)
+        target_to_sources: dict[str, list[str]] = {}
+        for source, target in zip(pre_mapping, post_mapping, strict=True):
+            target_to_sources.setdefault(target, []).append(source)
+
+        collisions = {t: s for t, s in target_to_sources.items() if len(s) > 1}
+
+        if collisions:
+            details = [f"  '{target}' <- {', '.join(repr(s) for s in sources)}" for target, sources in sorted(collisions.items())]
+            raise ValueError("field_mapping creates collision:\n" + "\n".join(details))

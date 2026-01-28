@@ -168,3 +168,87 @@ class TestNormalizationThreadSafety:
         # All results should be identical
         for result in results:
             assert result == expected
+
+
+class TestCollisionDetection:
+    """Tests for collision detection functions."""
+
+    def test_no_collision_passes(self) -> None:
+        """No collision when all normalized names are unique."""
+        from elspeth.plugins.sources.field_normalization import check_normalization_collisions
+
+        raw = ["User ID", "Amount", "Date"]
+        normalized = ["user_id", "amount", "date"]
+        # Should not raise
+        check_normalization_collisions(raw, normalized)
+
+    def test_two_way_collision_raises(self) -> None:
+        """Two headers normalizing to same value raises error."""
+        from elspeth.plugins.sources.field_normalization import check_normalization_collisions
+
+        raw = ["Case Study 1", "case-study-1"]
+        normalized = ["case_study_1", "case_study_1"]
+
+        with pytest.raises(ValueError, match="collision") as exc_info:
+            check_normalization_collisions(raw, normalized)
+
+        # Error should mention both original headers
+        assert "Case Study 1" in str(exc_info.value)
+        assert "case-study-1" in str(exc_info.value)
+
+    def test_three_way_collision_lists_all(self) -> None:
+        """Three+ headers colliding lists all of them."""
+        from elspeth.plugins.sources.field_normalization import check_normalization_collisions
+
+        raw = ["A B", "a-b", "A  B"]
+        normalized = ["a_b", "a_b", "a_b"]
+
+        with pytest.raises(ValueError, match="collision") as exc_info:
+            check_normalization_collisions(raw, normalized)
+
+        error = str(exc_info.value)
+        assert "A B" in error
+        assert "a-b" in error
+        assert "A  B" in error
+
+
+class TestMappingCollisionDetection:
+    """Tests for field_mapping collision detection."""
+
+    def test_no_collision_passes(self) -> None:
+        """No collision when mapping targets are unique."""
+        from elspeth.plugins.sources.field_normalization import check_mapping_collisions
+
+        mapping = {"user_id": "uid", "amount": "amt"}
+        headers = ["user_id", "amount", "date"]
+        final = ["uid", "amt", "date"]
+        # Should not raise
+        check_mapping_collisions(headers, final, mapping)
+
+    def test_mapping_collision_raises(self) -> None:
+        """Mapping two fields to same target raises error."""
+        from elspeth.plugins.sources.field_normalization import check_mapping_collisions
+
+        mapping = {"a": "x", "b": "x"}
+        headers = ["a", "b", "c"]
+        final = ["x", "x", "c"]
+
+        with pytest.raises(ValueError, match="collision") as exc_info:
+            check_mapping_collisions(headers, final, mapping)
+
+        error = str(exc_info.value)
+        assert "'a'" in error
+        assert "'b'" in error
+        assert "'x'" in error
+
+    def test_mapping_to_existing_field_raises(self) -> None:
+        """Mapping to name that already exists as unmapped field raises error."""
+        from elspeth.plugins.sources.field_normalization import check_mapping_collisions
+
+        # "uid" exists naturally, and we try to map "user_id" to "uid"
+        mapping = {"user_id": "uid"}
+        headers = ["user_id", "uid", "date"]
+        final = ["uid", "uid", "date"]
+
+        with pytest.raises(ValueError, match="collision"):
+            check_mapping_collisions(headers, final, mapping)
