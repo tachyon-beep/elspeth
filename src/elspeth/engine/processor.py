@@ -18,12 +18,14 @@ from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
+    from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors import (
     AggregationExecutor,
     GateExecutor,
@@ -99,6 +101,7 @@ class RowProcessor:
         coalesce_step_map: dict[CoalesceName, int] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: Any = None,
+        clock: "Clock | None" = None,
     ) -> None:
         """Initialize processor.
 
@@ -119,6 +122,8 @@ class RowProcessor:
             coalesce_step_map: Map of coalesce_name -> step position in pipeline
             restored_aggregation_state: Map of node_id -> state dict for crash recovery
             payload_store: Optional PayloadStore for persisting source row payloads
+            clock: Optional clock for time access. Defaults to system clock.
+                   Inject MockClock for deterministic testing.
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -132,11 +137,14 @@ class RowProcessor:
         self._branch_to_coalesce: dict[BranchName, CoalesceName] = branch_to_coalesce or {}
         self._coalesce_step_map: dict[CoalesceName, int] = coalesce_step_map or {}
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
         self._transform_executor = TransformExecutor(recorder, span_factory)
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
-        self._aggregation_executor = AggregationExecutor(recorder, span_factory, run_id, aggregation_settings=aggregation_settings)
+        self._aggregation_executor = AggregationExecutor(
+            recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
+        )
 
         # Restore aggregation state if provided (crash recovery)
         if restored_aggregation_state:

@@ -5,7 +5,6 @@ Tokens are correlated by row_id (same source row that was forked).
 """
 
 import hashlib
-import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -14,9 +13,11 @@ from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.spans import SpanFactory
 
 if TYPE_CHECKING:
+    from elspeth.engine.clock import Clock
     from elspeth.engine.tokens import TokenManager
 
 
@@ -80,6 +81,7 @@ class CoalesceExecutor:
         span_factory: SpanFactory,
         token_manager: "TokenManager",
         run_id: str,
+        clock: "Clock | None" = None,
     ) -> None:
         """Initialize executor.
 
@@ -88,11 +90,14 @@ class CoalesceExecutor:
             span_factory: Span factory for tracing
             token_manager: TokenManager for creating merged tokens
             run_id: Run identifier for audit context
+            clock: Optional clock for time access. Defaults to system clock.
+                   Inject MockClock for deterministic testing.
         """
         self._recorder = recorder
         self._spans = span_factory
         self._token_manager = token_manager
         self._run_id = run_id
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         # Coalesce configuration: name -> settings
         self._settings: dict[str, CoalesceSettings] = {}
@@ -188,7 +193,7 @@ class CoalesceExecutor:
 
         # Get or create pending state for this row
         key = (coalesce_name, token.row_id)
-        now = time.monotonic()
+        now = self._clock.monotonic()
 
         # Check if this coalesce already completed (late arrival)
         if key in self._completed_keys:
@@ -292,7 +297,7 @@ class CoalesceExecutor:
         coalesce_name: str,
     ) -> CoalesceOutcome:
         """Execute the merge and create merged token."""
-        now = time.monotonic()
+        now = self._clock.monotonic()
 
         # Merge row data according to strategy
         merged_data = self._merge_data(settings, pending.arrived)
@@ -416,7 +421,7 @@ class CoalesceExecutor:
         if settings.timeout_seconds is None:
             return []
 
-        now = time.monotonic()
+        now = self._clock.monotonic()
         results: list[CoalesceOutcome] = []
         keys_to_process: list[tuple[str, str]] = []
 
@@ -523,7 +528,7 @@ class CoalesceExecutor:
                     error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
                     # Compute wait duration
-                    now = time.monotonic()
+                    now = self._clock.monotonic()
 
                     # Complete pending node states for consumed tokens (audit trail)
                     # (These states were created as "pending" when tokens were held in accept())
@@ -573,7 +578,7 @@ class CoalesceExecutor:
                 error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
                 # Compute wait duration
-                now = time.monotonic()
+                now = self._clock.monotonic()
 
                 # Complete pending node states for consumed tokens (audit trail)
                 # (These states were created as "pending" when tokens were held in accept())

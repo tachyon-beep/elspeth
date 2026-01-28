@@ -490,14 +490,16 @@ class TestRowProcessorCoalesce:
         to simulate the scenario where one branch is quarantined and never
         reaches the coalesce point.
         """
-        import time
-
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.engine.clock import MockClock
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.engine.tokens import TokenManager
+
+        # Deterministic clock for timeout testing
+        clock = MockClock(start=100.0)
 
         recorder = LandscapeRecorder(landscape_db)
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -534,6 +536,7 @@ class TestRowProcessorCoalesce:
             span_factory=SpanFactory(),
             token_manager=token_manager,
             run_id=run.run_id,
+            clock=clock,
         )
         coalesce_executor.register_coalesce(coalesce_settings, coalesce_node.node_id)
 
@@ -574,8 +577,8 @@ class TestRowProcessorCoalesce:
         # summary child is QUARANTINED - it never arrives at coalesce
         # (simulated by simply not calling accept for it)
 
-        # Wait for timeout
-        time.sleep(0.15)
+        # Advance clock past timeout
+        clock.advance(0.15)
 
         # Check timeouts - should trigger best_effort merge
         timed_out = coalesce_executor.check_timeouts("merger", step_in_pipeline=3)

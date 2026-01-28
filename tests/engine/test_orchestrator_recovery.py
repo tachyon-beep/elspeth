@@ -220,7 +220,7 @@ class TestOrchestratorResume:
         from elspeth.plugins.sources.null_source import NullSource
 
         source = NullSource({"schema": {"fields": "dynamic"}})
-        sink = CSVSink({"path": "/tmp/test_recovery.csv", "schema": {"fields": "dynamic"}, "mode": "overwrite"})
+        sink = CSVSink({"path": "/tmp/test_recovery.csv", "schema": {"fields": "dynamic"}, "mode": "write"})
 
         return PipelineConfig(
             source=source,

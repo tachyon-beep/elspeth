@@ -349,37 +349,37 @@ allow_hits:
   reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=154
+- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=156
   owner: architecture
   reason: 'Optional protocol extension: checking if transform supports batch adapter pattern'
   safety: Fallback to non-batch processing if attribute missing
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=160
+- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=162
   owner: architecture
   reason: 'Optional protocol extension: pool_size is optional on batch-aware transforms'
   safety: Default value 30 is safe - used for concurrency limiting
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=231
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=233
   owner: architecture
   reason: 'Optional protocol extension: checking if transform has accept() method'
   safety: Non-batch transforms use process() instead - documented fallback
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=231
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=233
   owner: architecture
   reason: 'Optional protocol extension: accept method check paired with hasattr'
   safety: Callable check ensures method is usable if present
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=272
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=274
   owner: architecture
   reason: 'Optional protocol extension: batch_wait_timeout is optional on transforms'
   safety: Default 3600.0 seconds is generous timeout for batch results
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=302
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=304
   owner: architecture
   reason: 'Optional protocol extension: evict_submission is optional on batch transforms'
   safety: None means transform doesn't support submission eviction - gracefully skipped
   expires: null
-- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=306
+- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=308
   owner: architecture
   reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
   safety: Logged with warning - original timeout error still raised
@@ -404,92 +404,92 @@ allow_hits:
   reason: 'Trust boundary: SQLAlchemy inspector FK dict structure from external library'
   safety: Graceful handling of missing fields in FK metadata
   expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:line=537
+- key: engine/executors.py:R1:GateExecutor:execute_gate:line=539
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=814
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=816
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=828
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=830
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=915
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=921
   owner: architecture
   reason: Checking if batch exists to decide whether to create one
   safety: None means create new batch - explicit conditional logic follows
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=940
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=946
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=953
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=959
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=964
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=970
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=979
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=985
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=980
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=986
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1014
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1020
   owner: architecture
   reason: 'Explicit existence check: raises RuntimeError if batch_id is None'
   safety: Raises immediately with node_id for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1019
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1025
   owner: architecture
   reason: Existence check paired with explicit RuntimeError if empty
   safety: Raises immediately if buffer is empty
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1020
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1026
   owner: architecture
   reason: Token buffer lookup matches row buffer lookup pattern
   safety: Empty list default paired with row buffer check
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1402
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1408
   owner: architecture
   reason: 'Intentional Optional API: returns None if no batch exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1413
+- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1419
   owner: architecture
   reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
   safety: False return is safe default - no flush needed
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1427
+- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1433
   owner: architecture
   reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1447
+- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1453
   owner: architecture
   reason: 'Intentional Optional API: returns (False, None) if no evaluator exists for node_id'
   safety: False return is safe default - no flush needed when no trigger config
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1479
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1485
   owner: architecture
   reason: 'Intentional Optional API: returns None if no state was restored for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1704
+- key: engine/executors.py:R4:SinkExecutor:write:line=1710
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -509,52 +509,52 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to requested model - audit still captures actual value
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1189
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1195
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have trigger config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1201
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1207
   owner: architecture
   reason: 'Idempotent cleanup: batch_id may not exist if already reset'
   safety: None means already cleaned up or never existed - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1216
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1222
   owner: architecture
   reason: 'Intentional Optional API: returns 0 for unknown node_id'
   safety: 0 is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1256
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1262
   owner: architecture
   reason: Optional trigger evaluator lookup for elapsed time - not all aggregations have trigger config
   safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1270
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1276
   owner: architecture
   reason: 'Intentional Optional API: batch_id lookup for node_id'
   safety: None is safe - means no batch exists yet, recorded as null in checkpoint
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1318
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1324
   owner: architecture
   reason: 'Optional field: _version in checkpoint state for migration compatibility'
   safety: None check with explicit fallback to legacy format
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1367
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1373
   owner: architecture
   reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
   safety: None default handled by dataclass
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1376
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1382
   owner: architecture
   reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
   safety: None check with explicit handling
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1382
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1388
   owner: architecture
   reason: Optional trigger evaluator lookup - node may not have trigger config
   safety: None check with conditional elapsed time restoration
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1392
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1398
   owner: architecture
   reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward compat)'
   safety: Default 0.0 if missing - safe for fresh checkpoints
@@ -612,71 +612,71 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
   expires: null
 # Orchestrator cleanup and routed_destinations counting
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=234
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=238
   owner: architecture
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
 # _execute_run: routed_destinations counter accumulation (6 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1067
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1075
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1100
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1108
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1167
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1175
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1231
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1239
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1269
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1277
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _process_resumed_rows: routed_destinations counter accumulation (5 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2008
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2020
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2033
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2045
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2089
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2101
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2128
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2140
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2164
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2176
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _check_aggregation_timeouts: routed_destinations counter for timeout-triggered downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2433
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2445
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _flush_remaining_aggregation_buffers: routed_destinations counter for end-of-source flush downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2574
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2591
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter

@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import CheckpointSettings, ElspethSettings
+    from elspeth.engine.clock import Clock
 
 
 @dataclass
@@ -144,8 +145,10 @@ class Orchestrator:
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
         checkpoint_settings: "CheckpointSettings | None" = None,
+        clock: "Clock | None" = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
+        from elspeth.engine.clock import DEFAULT_CLOCK
 
         self._db = db
         self._events = event_bus if event_bus is not None else NullEventBus()
@@ -153,6 +156,7 @@ class Orchestrator:
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
         self._checkpoint_settings = checkpoint_settings
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
@@ -874,6 +878,7 @@ class Orchestrator:
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
+                clock=self._clock,
             )
 
             # Register each coalesce point
@@ -906,6 +911,7 @@ class Orchestrator:
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
             payload_store=payload_store,
+            clock=self._clock,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -929,11 +935,13 @@ class Orchestrator:
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
         # Maps node_id_str -> (transform, step_in_pipeline)
+        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
+        # for audit recording (to avoid node_state step_index collisions)
         agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
         if config.aggregation_settings:
             for i, t in enumerate(config.transforms):
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)
+                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
 
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
@@ -1906,6 +1914,7 @@ class Orchestrator:
                 span_factory=self._span_factory,
                 token_manager=token_manager,
                 run_id=run_id,
+                clock=self._clock,
             )
 
             for coalesce_settings in settings.coalesce:
@@ -1939,6 +1948,7 @@ class Orchestrator:
             coalesce_step_map=coalesce_step_map,
             restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
+            clock=self._clock,
         )
 
         # Process rows - Buffer TOKENS
@@ -1961,11 +1971,13 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
+        # for audit recording (to avoid node_state step_index collisions)
         agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
         if config.aggregation_settings:
             for i, t in enumerate(config.transforms):
                 if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
-                    agg_transform_lookup[t.node_id] = (t, i)
+                    agg_transform_lookup[t.node_id] = (t, i)  # 0-indexed, converted in handle_timeout_flush
 
         try:
             # Process each unprocessed row using process_existing_row
@@ -2435,7 +2447,12 @@ class Orchestrator:
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
                         rows_quarantined += 1
-                    # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
+                    elif result.outcome == RowOutcome.COALESCED:
+                        # Merged token from terminal coalesce - route to output sink
+                        # This handles the case where coalesce is the last step
+                        rows_succeeded += 1
+                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                    # FORKED/CONSUMED_IN_BATCH are intermediate states
                     # handled within process_token - final outcomes will
                     # appear as separate results
 
@@ -2584,8 +2601,21 @@ class Orchestrator:
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
                         rows_quarantined += 1
-                    # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
-                    # handled within process_token_from_step - final outcomes will
+                    elif result.outcome == RowOutcome.COALESCED:
+                        # Merged token from terminal coalesce - route to output sink
+                        # This handles the case where coalesce is the last step
+                        rows_succeeded += 1
+                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+
+                        # Checkpoint if enabled
+                        if checkpoint and last_node_id is not None:
+                            self._maybe_checkpoint(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                node_id=last_node_id,
+                            )
+                    # FORKED/CONSUMED_IN_BATCH are intermediate states
+                    # handled within process_token - final outcomes will
                     # appear as separate results
 
         return rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations

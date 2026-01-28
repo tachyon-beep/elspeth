@@ -35,6 +35,7 @@ from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
@@ -51,6 +52,7 @@ from elspeth.plugins.results import (
 
 if TYPE_CHECKING:
     from elspeth.engine.batch_adapter import SharedBatchAdapter
+    from elspeth.engine.clock import Clock
     from elspeth.engine.tokens import TokenManager
 
 __all__ = [
@@ -864,6 +866,7 @@ class AggregationExecutor:
         run_id: str,
         *,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
+        clock: "Clock | None" = None,
     ) -> None:
         """Initialize executor.
 
@@ -872,10 +875,13 @@ class AggregationExecutor:
             span_factory: Span factory for tracing
             run_id: Run identifier for batch creation
             aggregation_settings: Map of node_id -> AggregationSettings for trigger evaluation
+            clock: Optional clock for time access. Defaults to system clock.
+                   Inject MockClock for deterministic testing.
         """
         self._recorder = recorder
         self._spans = span_factory
         self._run_id = run_id
+        self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
         self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
         self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
@@ -889,7 +895,7 @@ class AggregationExecutor:
 
         # Create trigger evaluators for each configured aggregation
         for node_id, settings in self._aggregation_settings.items():
-            self._trigger_evaluators[node_id] = TriggerEvaluator(settings.trigger)
+            self._trigger_evaluators[node_id] = TriggerEvaluator(settings.trigger, clock=self._clock)
             self._buffers[node_id] = []
             self._buffer_tokens[node_id] = []
 
@@ -1392,7 +1398,7 @@ class AggregationExecutor:
                 elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
                 if elapsed_seconds > 0.0:
                     # Adjust timer: make it think first accept was N seconds ago
-                    evaluator._first_accept_time = time.monotonic() - elapsed_seconds
+                    evaluator._first_accept_time = self._clock.monotonic() - elapsed_seconds
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
