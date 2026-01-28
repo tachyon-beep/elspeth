@@ -2,13 +2,43 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement field name normalization at source boundary to handle messy external CSV/JSON headers.
+**Goal:** Implement field name normalization at source boundary to handle messy external CSV headers.
 
 **Architecture:** New `field_normalization.py` utility module contains the algorithm. `TabularSourceDataConfig` extends `SourceDataConfig` with normalization options. Sources call resolution at start of `load()`.
 
 **Tech Stack:** Python 3.11+, Pydantic v2, pytest, unicodedata, keyword module
 
 **Design Doc:** `docs/plans/2026-01-29-field-normalization-design.md`
+
+---
+
+## Deployment Order Warning
+
+⚠️ **CRITICAL**: Tasks 1-6 must be deployed together as an atomic unit. Partial deployment creates silent failures:
+- Templates written against normalized names (e.g., `{{ row.user_id }}`) will fail at runtime if normalization isn't enabled
+- The "Fixes that Fail" archetype - normalization creates new problems if templates reference old names
+
+## Dependency Graph
+
+```
+Task 1 (normalize_field_name)
+    ↓
+Task 2 (Unicode/keyword tests) ─────────────────────────────────────────┐
+    ↓                                                                   │
+Task 3 (collision detection)                                            │
+    ↓                                                                   │
+Task 4 (resolve_field_names) ← Task 5 (TabularSourceDataConfig) uses    │
+    ↓                              ↓                                    │
+Task 6 (CSVSource) ← ─ ─ ─ ─ ─ ─ ─ ┘                                    │
+    ↓                                                                   │
+Task 7 (Template Validation) ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+    ↓
+Task 8 (Full Test Suite)
+    ↓
+Task 9 (Azure Blob Source) [optional MVP+1]
+    ↓
+Task 10 (JSONSource) [MVP+1 - deferred]
+```
 
 ---
 
@@ -789,28 +819,9 @@ Expected: FAIL with "cannot import name 'TabularSourceDataConfig'"
 Add to `config_base.py` after `SourceDataConfig`:
 
 ```python
-import keyword as _keyword
+from typing import Self  # Add to existing imports at top of file
 
-
-def _validate_field_names(names: list[str], context: str) -> None:
-    """Validate field names are valid identifiers and not keywords.
-
-    Args:
-        names: List of field names to validate
-        context: Description for error messages (e.g., "columns", "field_mapping values")
-
-    Raises:
-        ValueError: If any name is invalid
-    """
-    seen: set[str] = set()
-    for i, name in enumerate(names):
-        if not name.isidentifier():
-            raise ValueError(f"{context}[{i}] '{name}' is not a valid Python identifier")
-        if _keyword.iskeyword(name):
-            raise ValueError(f"{context}[{i}] '{name}' is a Python keyword")
-        if name in seen:
-            raise ValueError(f"Duplicate field name '{name}' in {context}")
-        seen.add(name)
+from elspeth.plugins.sources.field_normalization import validate_field_names  # Import helper
 
 
 class TabularSourceDataConfig(SourceDataConfig):
@@ -846,13 +857,37 @@ class TabularSourceDataConfig(SourceDataConfig):
 
         # Validate columns entries are valid identifiers and not keywords
         if self.columns is not None:
-            _validate_field_names(self.columns, "columns")
+            validate_field_names(self.columns, "columns")
 
         # Validate field_mapping values are valid identifiers and not keywords
         if self.field_mapping is not None:
-            _validate_field_names(list(self.field_mapping.values()), "field_mapping values")
+            validate_field_names(list(self.field_mapping.values()), "field_mapping values")
 
         return self
+```
+
+**Also add validate_field_names to field_normalization.py:**
+
+```python
+def validate_field_names(names: list[str], context: str) -> None:
+    """Validate field names are valid identifiers and not keywords.
+
+    Args:
+        names: List of field names to validate
+        context: Description for error messages (e.g., "columns", "field_mapping values")
+
+    Raises:
+        ValueError: If any name is invalid
+    """
+    seen: set[str] = set()
+    for i, name in enumerate(names):
+        if not name.isidentifier():
+            raise ValueError(f"{context}[{i}] '{name}' is not a valid Python identifier")
+        if keyword.iskeyword(name):
+            raise ValueError(f"{context}[{i}] '{name}' is a Python keyword")
+        if name in seen:
+            raise ValueError(f"Duplicate field name '{name}' in {context}")
+        seen.add(name)
 ```
 
 ### Step 5.4: Run tests to verify they pass
@@ -863,12 +898,12 @@ Expected: PASS (all tests)
 ### Step 5.5: Commit
 
 ```bash
-git add src/elspeth/plugins/config_base.py tests/plugins/config/test_tabular_source_config.py
+git add src/elspeth/plugins/config_base.py src/elspeth/plugins/sources/field_normalization.py tests/plugins/config/test_tabular_source_config.py
 git commit -m "feat(config): add TabularSourceDataConfig with normalization options
 
 Adds columns, normalize_fields, and field_mapping config options with
 Pydantic validation for option interactions, Python keyword detection,
-and duplicate checking."
+and duplicate checking. Validation helper imported from field_normalization."
 ```
 
 ---
@@ -879,7 +914,7 @@ and duplicate checking."
 - Modify: `src/elspeth/plugins/sources/csv_source.py`
 - Modify: `tests/plugins/sources/test_csv_source.py`
 
-### Step 6.1: Write failing integration test
+### Step 6.1: Write failing integration tests
 
 Add new test class to `test_csv_source.py`:
 
@@ -989,6 +1024,98 @@ class TestCSVSourceFieldNormalization:
             "User ID": "uid",
             "Amount": "amount",
         }
+
+    # P0 Tests - Added per review board requirements
+
+    def test_empty_csv_file_returns_no_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Empty CSV file returns no rows without error."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "empty.csv"
+        csv_file.write_text("")
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "normalize_fields": True,
+        })
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 0
+
+    def test_header_only_csv_returns_no_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """CSV with only headers returns no rows."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "header_only.csv"
+        csv_file.write_text("User ID,Amount\n")
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "normalize_fields": True,
+        })
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 0
+
+    def test_columns_fewer_than_data_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """columns config with fewer columns than data raises clear error."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "wide.csv"
+        csv_file.write_text("1,alice,100,extra\n")  # 4 values
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "columns": ["id", "name", "amount"],  # Only 3 columns
+        })
+
+        with pytest.raises(ValueError, match="column.*count.*mismatch|expected.*3.*got.*4"):
+            list(source.load(ctx))
+
+    def test_columns_more_than_data_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """columns config with more columns than data raises clear error."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "narrow.csv"
+        csv_file.write_text("1,alice\n")  # 2 values
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "columns": ["id", "name", "amount"],  # 3 columns
+        })
+
+        with pytest.raises(ValueError, match="column.*count.*mismatch|expected.*3.*got.*2"):
+            list(source.load(ctx))
+
+    def test_audit_trail_contains_resolution_mapping(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Audit trail includes complete field resolution mapping."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "audit.csv"
+        csv_file.write_text("CaSE Study1 !!!! xx!,Amount $\nfoo,100\n")
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "normalize_fields": True,
+        })
+
+        list(source.load(ctx))
+
+        # Verify the resolution mapping is available for audit
+        assert source._field_resolution is not None
+        assert "CaSE Study1 !!!! xx!" in source._field_resolution
+        assert source._field_resolution["CaSE Study1 !!!! xx!"] == "case_study1_xx"
+        assert source._field_resolution["Amount $"] == "amount"
 ```
 
 ### Step 6.2: Run tests to verify they fail
@@ -1062,7 +1189,6 @@ def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         if self._columns is not None:
             # Headerless mode - use explicit columns
             raw_headers = None
-            headers = self._columns
         else:
             # Read header row from file
             try:
@@ -1080,7 +1206,17 @@ def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         headers = resolution.final_headers
         self._field_resolution = resolution.resolution_mapping
 
-        # ... rest of existing load() using 'headers' ...
+        # Yield rows with resolved headers
+        expected_count = len(headers)
+        for row_num, values in enumerate(reader, start=1):
+            # Validate column count in headerless mode
+            if self._columns is not None and len(values) != expected_count:
+                raise ValueError(
+                    f"Row {row_num}: column count mismatch - "
+                    f"expected {expected_count}, got {len(values)}"
+                )
+            row = dict(zip(headers, values, strict=False))
+            yield SourceRow(row=row, source_meta={"row_number": row_num})
 ```
 
 ### Step 6.4: Run tests to verify they pass
@@ -1095,122 +1231,204 @@ git add src/elspeth/plugins/sources/csv_source.py tests/plugins/sources/test_csv
 git commit -m "feat(csv): integrate field normalization into CSVSource
 
 CSVSourceConfig now inherits TabularSourceDataConfig. Field resolution
-happens at start of load(), storing resolution_mapping for audit trail."
+happens at start of load(), storing resolution_mapping for audit trail.
+Column count validation added for headerless mode."
 ```
 
 ---
 
-## Task 7: Update JSONSource to Use Field Normalization
+## Task 7: Add Template Field Validation to LLM Transforms
+
+**CRITICAL**: This task prevents the "Fixes that Fail" archetype where normalization silently breaks templates.
 
 **Files:**
-- Modify: `src/elspeth/plugins/sources/json_source.py`
-- Modify: `tests/plugins/sources/test_json_source.py`
+- Modify: `src/elspeth/plugins/llm/base.py`
+- Create: `tests/plugins/llm/test_template_field_validation.py`
 
-### Step 7.1: Write failing integration test
-
-Add to `test_json_source.py`:
+### Step 7.1: Write failing test for template validation
 
 ```python
-class TestJSONSourceFieldNormalization:
-    """Integration tests for JSON source with field normalization."""
+# tests/plugins/llm/test_template_field_validation.py
+"""Tests for template field validation against schema."""
 
-    @pytest.fixture
-    def ctx(self) -> PluginContext:
-        """Create a minimal plugin context."""
-        return PluginContext(run_id="test-run", config={})
+import pytest
 
-    def test_normalize_fields_transforms_keys(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """normalize_fields=True transforms messy JSON keys to identifiers."""
-        from elspeth.plugins.sources.json_source import JSONSource
+from elspeth.plugins.config_base import PluginConfigError
 
-        json_file = tmp_path / "messy.json"
-        json_file.write_text('[{"User ID": 1, "Amount $": 100}]')
 
-        source = JSONSource({
-            "path": str(json_file),
-            "schema": {"fields": "dynamic"},
-            "on_validation_failure": "quarantine",
-            "normalize_fields": True,
+class TestTemplateFieldValidation:
+    """Tests that template field references are validated against schema."""
+
+    def test_template_references_guaranteed_field_passes(self) -> None:
+        """Template referencing a guaranteed field passes validation."""
+        from elspeth.plugins.llm.base import LLMConfig
+
+        # This should not raise - template references 'user_id' which is guaranteed
+        config = LLMConfig.from_dict({
+            "model": "gpt-4",
+            "template": "Hello {{ row.user_id }}",
+            "required_input_fields": ["user_id"],
+            "schema": {
+                "fields": {
+                    "user_id": {"type": "string"},
+                },
+                "guaranteed_fields": ["user_id"],
+            },
         })
+        assert config.template == "Hello {{ row.user_id }}"
 
-        rows = list(source.load(ctx))
-        assert len(rows) == 1
-        assert rows[0].row == {"user_id": 1, "amount": 100}
+    def test_template_references_non_guaranteed_field_raises(self) -> None:
+        """Template referencing field not in guaranteed_fields raises error."""
+        from elspeth.plugins.llm.base import LLMConfig
 
-    def test_normalize_jsonl_format(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """normalize_fields works with JSONL format."""
-        from elspeth.plugins.sources.json_source import JSONSource
+        # Template references 'customer_name' but it's not in guaranteed_fields
+        with pytest.raises(ValueError, match="customer_name.*not guaranteed"):
+            LLMConfig.from_dict({
+                "model": "gpt-4",
+                "template": "Hello {{ row.customer_name }}",
+                "required_input_fields": ["customer_name"],
+                "schema": {
+                    "fields": {
+                        "customer_id": {"type": "string"},
+                    },
+                    "guaranteed_fields": ["customer_id"],
+                },
+            })
 
-        json_file = tmp_path / "messy.jsonl"
-        json_file.write_text('{"User ID": 1}\n{"User ID": 2}\n')
+    def test_template_references_unnormalized_name_suggests_fix(self) -> None:
+        """Error message suggests normalized name when template uses old name."""
+        from elspeth.plugins.llm.base import LLMConfig
 
-        source = JSONSource({
-            "path": str(json_file),
+        # Template uses "User ID" (unnormalized) but schema has "user_id" (normalized)
+        with pytest.raises(ValueError) as exc_info:
+            LLMConfig.from_dict({
+                "model": "gpt-4",
+                "template": "Hello {{ row['User ID'] }}",
+                "required_input_fields": ["User ID"],  # User incorrectly declared old name
+                "schema": {
+                    "fields": {
+                        "user_id": {"type": "string"},  # Normalized name
+                    },
+                    "guaranteed_fields": ["user_id"],
+                },
+            })
+
+        error = str(exc_info.value)
+        # Should suggest the normalized name
+        assert "user_id" in error.lower() or "normalized" in error.lower()
+
+    def test_dynamic_schema_skips_validation(self) -> None:
+        """Templates with dynamic schema skip field validation."""
+        from elspeth.plugins.llm.base import LLMConfig
+
+        # Dynamic schema = accept any fields, no validation
+        config = LLMConfig.from_dict({
+            "model": "gpt-4",
+            "template": "Hello {{ row.anything_goes }}",
+            "required_input_fields": ["anything_goes"],
             "schema": {"fields": "dynamic"},
-            "on_validation_failure": "quarantine",
-            "normalize_fields": True,
         })
+        assert config.template == "Hello {{ row.anything_goes }}"
 
-        rows = list(source.load(ctx))
-        assert len(rows) == 2
-        assert rows[0].row == {"user_id": 1}
-        assert rows[1].row == {"user_id": 2}
+    def test_template_with_multiple_fields_validates_all(self) -> None:
+        """All template field references are validated."""
+        from elspeth.plugins.llm.base import LLMConfig
+
+        # Template references both 'name' (guaranteed) and 'missing' (not guaranteed)
+        with pytest.raises(ValueError, match="missing.*not guaranteed"):
+            LLMConfig.from_dict({
+                "model": "gpt-4",
+                "template": "Hello {{ row.name }}, your ID is {{ row.missing }}",
+                "required_input_fields": ["name", "missing"],
+                "schema": {
+                    "fields": {
+                        "name": {"type": "string"},
+                        "id": {"type": "string"},
+                    },
+                    "guaranteed_fields": ["name", "id"],
+                },
+            })
 ```
 
 ### Step 7.2: Run tests to verify they fail
 
-Run: `.venv/bin/python -m pytest tests/plugins/sources/test_json_source.py::TestJSONSourceFieldNormalization -v`
-Expected: FAIL
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_template_field_validation.py -v`
+Expected: FAIL with assertion errors (validation doesn't exist yet)
 
-### Step 7.3: Update JSONSourceConfig and JSONSource
+### Step 7.3: Add template validation to LLMConfig
 
-Similar changes to `json_source.py` as CSV:
-
-```python
-from elspeth.plugins.config_base import TabularSourceDataConfig
-from elspeth.plugins.sources.field_normalization import normalize_field_name
-
-
-class JSONSourceConfig(TabularSourceDataConfig):
-    """Configuration for JSON source plugin."""
-    format: Literal["json", "jsonl"] | None = None
-    data_key: str | None = None
-    encoding: str = "utf-8"
-```
-
-For JSON, normalization applies to each row's keys (since JSON doesn't have a header row like CSV). Add helper method:
+Modify `src/elspeth/plugins/llm/base.py` - add a new model validator:
 
 ```python
-def _normalize_row_keys(self, row: dict[str, Any]) -> dict[str, Any]:
-    """Normalize row keys if normalize_fields is enabled."""
-    if not self._normalize_fields:
-        return row
-    return {normalize_field_name(k): v for k, v in row.items()}
-```
+@model_validator(mode="after")
+def _validate_template_fields_against_schema(self) -> LLMConfig:
+    """Validate template field references exist in schema's guaranteed_fields.
 
-Apply in `_validate_and_yield` after parsing:
+    This prevents the "Fixes that Fail" archetype where:
+    1. Source normalizes headers (e.g., "User ID" → "user_id")
+    2. Template still references old name (e.g., {{ row['User ID'] }})
+    3. Runtime fails silently or with confusing KeyError
 
-```python
-def _validate_and_yield(self, row: dict[str, Any], ctx: PluginContext) -> Iterator[SourceRow]:
-    # Normalize keys if enabled
-    if self._normalize_fields:
-        row = {normalize_field_name(k): v for k, v in row.items()}
-    # ... rest of validation ...
+    By validating at config time, we catch template/schema mismatches early.
+    """
+    # Skip validation for dynamic schema
+    if self.schema_config is None:
+        return self
+    if self.schema_config.fields == "dynamic":
+        return self
+
+    # Get guaranteed fields from schema
+    guaranteed = set(self.schema_config.guaranteed_fields or [])
+    if not guaranteed:
+        # No guaranteed fields declared - can't validate
+        return self
+
+    # Get fields referenced in template
+    from elspeth.core.templates import extract_jinja2_fields
+    template_fields = extract_jinja2_fields(self.template)
+
+    # Check each template field is guaranteed
+    missing = template_fields - guaranteed
+    if missing:
+        # Try to provide helpful suggestions for normalized names
+        suggestions = []
+        for field in sorted(missing):
+            # Check if a normalized version exists in guaranteed
+            from elspeth.plugins.sources.field_normalization import normalize_field_name
+            try:
+                normalized = normalize_field_name(field)
+                if normalized in guaranteed:
+                    suggestions.append(f"  '{field}' → did you mean '{normalized}'?")
+                else:
+                    suggestions.append(f"  '{field}' - not in guaranteed_fields")
+            except ValueError:
+                suggestions.append(f"  '{field}' - not in guaranteed_fields")
+
+        raise ValueError(
+            f"Template references fields not guaranteed by schema:\n"
+            + "\n".join(suggestions)
+            + f"\n\nGuaranteed fields: {sorted(guaranteed)}"
+        )
+
+    return self
 ```
 
 ### Step 7.4: Run tests to verify they pass
 
-Run: `.venv/bin/python -m pytest tests/plugins/sources/test_json_source.py -v`
-Expected: PASS
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_template_field_validation.py -v`
+Expected: PASS (all tests)
 
 ### Step 7.5: Commit
 
 ```bash
-git add src/elspeth/plugins/sources/json_source.py tests/plugins/sources/test_json_source.py
-git commit -m "feat(json): integrate field normalization into JSONSource
+git add src/elspeth/plugins/llm/base.py tests/plugins/llm/test_template_field_validation.py
+git commit -m "feat(llm): add template field validation against schema
 
-JSONSourceConfig inherits TabularSourceDataConfig. Normalization applied
-to each row's keys during validation."
+Validates at config time that template field references ({{ row.field }})
+exist in schema's guaranteed_fields. Prevents 'Fixes that Fail' archetype
+where normalization breaks templates referencing old field names.
+
+Provides helpful suggestions when normalized name is available."
 ```
 
 ---
@@ -1226,12 +1444,12 @@ Expected: PASS (all tests)
 
 ### Step 8.2: Run type checker
 
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py`
+Run: `.venv/bin/python -m mypy src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/plugins/llm/base.py`
 Expected: PASS (no type errors)
 
 ### Step 8.3: Run linter
 
-Run: `.venv/bin/python -m ruff check src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py`
+Run: `.venv/bin/python -m ruff check src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/plugins/llm/base.py`
 Expected: PASS (no lint errors)
 
 ### Step 8.4: Commit any fixes if needed
@@ -1249,7 +1467,7 @@ git commit -m "fix: address type/lint issues from full test run"
 - Modify: `src/elspeth/plugins/azure/blob_source.py`
 - Test: `tests/plugins/azure/test_blob_source.py`
 
-This task follows the same pattern as Tasks 6-7. The Azure blob source reads CSV data from Azure Blob Storage and should support the same normalization options.
+This task follows the same pattern as Task 6. The Azure blob source reads CSV data from Azure Blob Storage and should support the same normalization options.
 
 ### Step 9.1: Update config class to inherit TabularSourceDataConfig
 
@@ -1261,28 +1479,46 @@ This task follows the same pattern as Tasks 6-7. The Azure blob source reads CSV
 
 ---
 
+## Task 10: Update JSONSource (MVP+1 - DEFERRED)
+
+**Status:** DEFERRED to MVP+1
+
+**Rationale:** JSON normalization has design gaps that need resolution:
+- CSV has a header row processed once; JSON normalizes per-row (performance)
+- JSON objects can have inconsistent keys across rows (validation complexity)
+- Need to decide: validate key consistency, or normalize opportunistically?
+
+**When to implement:** After CSV normalization is proven in production and we have real-world JSON requirements.
+
+**Files (when ready):**
+- Modify: `src/elspeth/plugins/sources/json_source.py`
+- Modify: `tests/plugins/sources/test_json_source.py`
+
+---
+
 ## Summary
 
-| Task | Description | Estimated Commits |
-|------|-------------|-------------------|
-| 1 | Create field_normalization.py with core algorithm | 1 |
-| 2 | Add P0 Unicode and keyword tests | 1 |
-| 3 | Add collision detection functions | 1 |
-| 4 | Add resolve_field_names function | 1 |
-| 5 | Create TabularSourceDataConfig | 1 |
-| 6 | Update CSVSource | 1 |
-| 7 | Update JSONSource | 1 |
-| 8 | Full test suite verification | 0-1 |
-| 9 | Update Azure Blob Source | 1 |
+| Task | Description | Commits | Status |
+|------|-------------|---------|--------|
+| 1 | Create field_normalization.py with core algorithm | 1 | MVP |
+| 2 | Add P0 Unicode and keyword tests | 1 | MVP |
+| 3 | Add collision detection functions | 1 | MVP |
+| 4 | Add resolve_field_names function | 1 | MVP |
+| 5 | Create TabularSourceDataConfig | 1 | MVP |
+| 6 | Update CSVSource with P0 tests | 1 | MVP |
+| 7 | Add template field validation (CRITICAL) | 1 | MVP |
+| 8 | Full test suite verification | 0-1 | MVP |
+| 9 | Update Azure Blob Source | 1 | Optional |
+| 10 | Update JSONSource | 1 | **DEFERRED** |
 
-**Total: ~8-9 commits**
+**Total MVP: ~7-8 commits**
 
 ---
 
 ## Post-Implementation
 
-After completing all tasks:
+After completing all MVP tasks:
 
 1. Update the design doc status to "Implemented"
 2. Close any related bug tracking issues
-3. Consider adding template field validation (documented in design but deferred)
+3. Document JSON normalization requirements for MVP+1 planning
