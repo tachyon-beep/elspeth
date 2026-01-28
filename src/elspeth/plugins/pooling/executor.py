@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from threading import Semaphore
+from threading import Lock, Semaphore
 from typing import Any
 
 from elspeth.contracts import TransformResult
@@ -99,6 +99,10 @@ class PooledExecutor:
         # Reorder buffer for strict output ordering
         self._buffer: ReorderBuffer[TransformResult] = ReorderBuffer()
 
+        # Lock to serialize execute_batch calls (single-flight)
+        # This prevents concurrent batches from mixing results in the shared buffer
+        self._batch_lock = Lock()
+
         self._shutdown = False
 
     @property
@@ -154,6 +158,9 @@ class PooledExecutor:
 
         Each row is processed with its own state_id for audit trail.
 
+        Note: This method is serialized - only one batch can execute at a time.
+        Concurrent calls will block until the previous batch completes.
+
         Args:
             contexts: List of RowContext with row data and state_ids
             process_fn: Function that processes a single row with state_id
@@ -164,6 +171,26 @@ class PooledExecutor:
         if not contexts:
             return []
 
+        # Serialize batch execution to prevent result mixing
+        # The ReorderBuffer uses sequential indices, so concurrent batches
+        # would interleave indices and cause results to be returned to the wrong caller
+        with self._batch_lock:
+            return self._execute_batch_locked(contexts, process_fn)
+
+    def _execute_batch_locked(
+        self,
+        contexts: list[RowContext],
+        process_fn: Callable[[dict[str, Any], str], TransformResult],
+    ) -> list[TransformResult]:
+        """Internal batch execution (must be called while holding _batch_lock).
+
+        Args:
+            contexts: List of RowContext with row data and state_ids
+            process_fn: Function that processes a single row with state_id
+
+        Returns:
+            List of TransformResults in same order as input contexts
+        """
         # Track futures by their buffer index
         futures: dict[Future[tuple[int, TransformResult]], int] = {}
 

@@ -443,3 +443,74 @@ class TestPooledExecutorCapacityHandling:
         assert stats["pool_stats"]["capacity_retries"] == 6  # One retry per row
 
         executor.shutdown()
+
+
+class TestPooledExecutorConcurrentBatches:
+    """Test that concurrent execute_batch() calls are properly isolated."""
+
+    def test_concurrent_execute_batch_calls_are_serialized(self) -> None:
+        """Concurrent execute_batch() calls must not mix results.
+
+        This test verifies that if two threads call execute_batch() on the
+        same executor, results are not interleaved between batches.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        config = PoolConfig(pool_size=4)
+        executor = PooledExecutor(config)
+
+        batch_a_results: list[TransformResult] = []
+        batch_b_results: list[TransformResult] = []
+        errors: list[Exception] = []
+
+        def process_a(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.02)  # Simulate work
+            return TransformResult.success({"batch": "A", "idx": row["idx"]})
+
+        def process_b(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.02)  # Simulate work
+            return TransformResult.success({"batch": "B", "idx": row["idx"]})
+
+        def run_batch_a() -> None:
+            try:
+                contexts = [RowContext(row={"idx": i}, state_id=f"a_state_{i}", row_index=i) for i in range(5)]
+                nonlocal batch_a_results
+                batch_a_results = executor.execute_batch(contexts, process_a)
+            except Exception as e:
+                errors.append(e)
+
+        def run_batch_b() -> None:
+            try:
+                contexts = [RowContext(row={"idx": i}, state_id=f"b_state_{i}", row_index=i) for i in range(5)]
+                nonlocal batch_b_results
+                batch_b_results = executor.execute_batch(contexts, process_b)
+            except Exception as e:
+                errors.append(e)
+
+        # Run both batches concurrently
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future_a = pool.submit(run_batch_a)
+            future_b = pool.submit(run_batch_b)
+            future_a.result(timeout=10)
+            future_b.result(timeout=10)
+
+        # Check for errors
+        assert not errors, f"Batch execution raised errors: {errors}"
+
+        # Both batches should have exactly 5 results
+        assert len(batch_a_results) == 5, f"Batch A has {len(batch_a_results)} results, expected 5"
+        assert len(batch_b_results) == 5, f"Batch B has {len(batch_b_results)} results, expected 5"
+
+        # All batch A results must be from batch A (no mixing)
+        for i, result in enumerate(batch_a_results):
+            assert result.row is not None
+            assert result.row["batch"] == "A", f"Batch A result {i} contains batch {result.row['batch']}"
+            assert result.row["idx"] == i, f"Batch A result {i} has wrong index {result.row['idx']}"
+
+        # All batch B results must be from batch B (no mixing)
+        for i, result in enumerate(batch_b_results):
+            assert result.row is not None
+            assert result.row["batch"] == "B", f"Batch B result {i} contains batch {result.row['batch']}"
+            assert result.row["idx"] == i, f"Batch B result {i} has wrong index {result.row['idx']}"
+
+        executor.shutdown()
