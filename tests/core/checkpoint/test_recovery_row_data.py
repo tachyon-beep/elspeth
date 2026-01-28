@@ -5,13 +5,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RunStatus
+from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
     runs_table,
+    token_outcomes_table,
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -97,6 +98,21 @@ class TestRecoveryManagerRowData:
                 )
             )
 
+            # Create sink node (needed for token outcomes)
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink",
+                    run_id=run_id,
+                    plugin_name="csv_sink",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
             # Single row
             payload_ref = payload_store.store(json.dumps({"id": 0}).encode())
             conn.execute(
@@ -117,6 +133,21 @@ class TestRecoveryManagerRowData:
                     created_at=now,
                 )
             )
+
+            # Record terminal outcome for the row (all rows processed)
+            # P1-2026-01-22 fix: get_unprocessed_rows uses token_outcomes, not row_index
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id="outcome-0",
+                    run_id=run_id,
+                    token_id="tok-0",
+                    outcome=RowOutcome.COMPLETED.value,
+                    is_terminal=1,
+                    recorded_at=now,
+                    sink_name="sink",
+                )
+            )
+
             conn.commit()
 
         # Checkpoint at last row
@@ -175,7 +206,22 @@ class TestRecoveryManagerRowData:
                 )
             )
 
-            # Row with invalid payload ref (not stored)
+            # Create sink node (needed for token outcomes)
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="sink",
+                    run_id=run_id,
+                    plugin_name="csv_sink",
+                    node_type=NodeType.SINK,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="x",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+            # Row 0 (will be marked as processed via outcome)
             conn.execute(
                 rows_table.insert().values(
                     row_id="row-0",
@@ -195,7 +241,21 @@ class TestRecoveryManagerRowData:
                 )
             )
 
-            # Second row (will be unprocessed)
+            # Record terminal outcome for row-0 (processed)
+            # P1-2026-01-22 fix: get_unprocessed_rows uses token_outcomes, not row_index
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id="outcome-0",
+                    run_id=run_id,
+                    token_id="tok-0",
+                    outcome=RowOutcome.COMPLETED.value,
+                    is_terminal=1,
+                    recorded_at=now,
+                    sink_name="sink",
+                )
+            )
+
+            # Row 1 (unprocessed - no outcome, will have missing payload)
             conn.execute(
                 rows_table.insert().values(
                     row_id="row-1",
