@@ -2253,9 +2253,16 @@ class Orchestrator:
                 with suppress(Exception):
                     sink.on_complete(ctx)
 
+            # Close all transforms (release resources - file handles, connections, etc.)
+            # Mirrors _cleanup_transforms() pattern from _execute_run()
+            for transform in config.transforms:
+                with suppress(Exception):
+                    transform.close()
+
             # Close all sinks (NOT source - wasn't opened)
             for sink in config.sinks.values():
-                sink.close()
+                with suppress(Exception):
+                    sink.close()
 
         # Clear graph after execution completes
         self._current_graph = None

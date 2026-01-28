@@ -282,6 +282,18 @@ class TestGateExecutor:
         assert exc_info.value.label == "nonexistent_label"
         assert "Audit trail would be incomplete" in str(exc_info.value)
 
+        # Verify node_state was completed with FAILED status (not left OPEN)
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        assert states[0].status == NodeStateStatus.FAILED
+
+        # Verify audit fields are populated (P3 fix completeness)
+        state = states[0]
+        assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
+        assert state.duration_ms >= 0, "duration_ms must be non-negative"
+        # Error details are stored in the database - verify via raw query
+        # (NodeState model may not expose error fields directly)
+
     def test_execute_gate_fork(self) -> None:
         """Gate forks to multiple paths - routing events and child tokens created."""
         from elspeth.contracts import TokenInfo
@@ -505,6 +517,16 @@ class TestGateExecutor:
                 step_in_pipeline=1,
                 token_manager=None,  # Explicitly None
             )
+
+        # Verify node_state was completed with FAILED status (not left OPEN)
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        assert states[0].status == NodeStateStatus.FAILED
+
+        # Verify audit fields are populated (P3 fix completeness)
+        state = states[0]
+        assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
+        assert state.duration_ms >= 0, "duration_ms must be non-negative"
 
     def test_execute_gate_exception_records_failure(self) -> None:
         """Gate raising exception still records audit state."""

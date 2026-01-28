@@ -540,6 +540,17 @@ class GateExecutor:
 
             if destination is None:
                 # Label not in routes config - this is a configuration error
+                # Record failure before raising (per execute_config_gate pattern)
+                route_error: ExecutionError = {
+                    "exception": f"Route label '{route_label}' not found in routes config",
+                    "type": "MissingEdgeError",
+                }
+                self._recorder.complete_node_state(
+                    state_id=state.state_id,
+                    status=NodeStateStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=route_error,
+                )
                 raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
 
             if destination == "continue":
@@ -562,6 +573,17 @@ class GateExecutor:
 
         elif action.kind == RoutingKind.FORK_TO_PATHS:
             if token_manager is None:
+                # Record failure before raising (per execute_config_gate pattern)
+                fork_error: ExecutionError = {
+                    "exception": "fork_to_paths requires TokenManager",
+                    "type": "RuntimeError",
+                }
+                self._recorder.complete_node_state(
+                    state_id=state.state_id,
+                    status=NodeStateStatus.FAILED,
+                    duration_ms=duration_ms,
+                    error=fork_error,
+                )
                 raise RuntimeError(
                     f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
                     "Cannot create child tokens - audit integrity would be compromised."
@@ -1144,9 +1166,16 @@ class AggregationExecutor:
             output_data: dict[str, Any] | list[dict[str, Any]]
             if result.row is not None:
                 output_data = result.row
-            else:
-                assert result.rows is not None
+            elif result.rows is not None:
                 output_data = result.rows
+            else:
+                # Contract violation: success status requires output data
+                raise RuntimeError(
+                    f"Aggregation transform '{transform.name}' returned success status but "
+                    f"neither row nor rows contains data. Batch-aware transforms must return "
+                    f"output via TransformResult.success(row) or TransformResult.success_multi(rows). "
+                    f"This is a plugin bug."
+                )
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,

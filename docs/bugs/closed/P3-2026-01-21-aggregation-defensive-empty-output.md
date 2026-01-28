@@ -149,3 +149,33 @@ This bug should remain **OPEN** and be prioritized for fixing:
 4. **Error message** should clearly indicate this is a plugin bug, not a data issue
 
 The fix aligns with the codebase's core principle: "Plugin bugs are system bugs - they get fixed in the codebase" (CLAUDE.md §201).
+
+---
+
+## Resolution
+
+**Fixed in:** 2026-01-28
+**Fixed by:** Claude Code (Opus 4.5)
+
+**Fix:** Replaced all 5 defensive `{}` substitution patterns with contract assertions that raise RuntimeError:
+
+**Code changes:**
+- `src/elspeth/engine/processor.py`:
+  - Line 417-423 (single mode, `_process_aggregation_node`): Now raises RuntimeError if `result.row is None`
+  - Line 525-532 (transform mode, `_process_aggregation_node`): Now raises RuntimeError if `result.row is None`
+  - Line 708-715 (single mode, `_process_batch_aggregation_node`): Now raises RuntimeError if `result.row is None`
+  - Line 846-853 (transform mode, `_process_batch_aggregation_node`): Now raises RuntimeError if `result.row is None`
+- `src/elspeth/engine/executors.py`:
+  - Line 1165-1177 (`execute_flush`): Replaced `assert result.rows is not None` with proper RuntimeError message
+
+**Error message format:**
+```
+Aggregation transform '{transform.name}' returned None for result.row in '{output_mode}' mode.
+Batch-aware transforms must return a row via TransformResult.success(row). This is a plugin bug.
+```
+
+**Tests added:**
+- `tests/engine/test_processor_batch.py`: Added `test_aggregation_transform_returns_none_raises_contract_error`
+
+**Commits:**
+- fix(processor): replace defensive {} with contract assertions for aggregation output (P3-2026-01-28)

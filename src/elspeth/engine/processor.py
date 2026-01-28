@@ -411,7 +411,14 @@ class RowProcessor:
 
         if output_mode == "single":
             # Single output: one aggregated result row
-            final_data = result.row if result.row is not None else {}
+            # Contract: batch-aware transforms in single mode MUST return a row
+            if result.row is None:
+                raise RuntimeError(
+                    f"Aggregation transform '{transform.name}' returned None for result.row "
+                    f"in 'single' mode. Batch-aware transforms must return a row via "
+                    f"TransformResult.success(row). This is a plugin bug."
+                )
+            final_data = result.row
 
             # Use first buffered token as parent for audit trail
             # Create NEW token via expand_token (buffered tokens are CONSUMED_IN_BATCH)
@@ -509,7 +516,15 @@ class RowProcessor:
                 assert result.rows is not None
                 output_rows = result.rows
             else:
-                output_rows = [result.row] if result.row is not None else [{}]
+                # Contract: batch-aware transforms in transform mode MUST return output data
+                if result.row is None:
+                    raise RuntimeError(
+                        f"Aggregation transform '{transform.name}' returned None for result.row "
+                        f"in 'transform' mode. Batch-aware transforms must return a row via "
+                        f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
+                        f"This is a plugin bug."
+                    )
+                output_rows = [result.row]
 
             # Create new tokens via expand_token using first buffered token as parent
             if buffered_tokens:
@@ -684,7 +699,14 @@ class RowProcessor:
             if output_mode == "single":
                 # Single output: one aggregated result row
                 # The triggering token continues with aggregated data
-                final_data = result.row if result.row is not None else {}
+                # Contract: batch-aware transforms in single mode MUST return a row
+                if result.row is None:
+                    raise RuntimeError(
+                        f"Aggregation transform '{transform.name}' returned None for result.row "
+                        f"in 'single' mode. Batch-aware transforms must return a row via "
+                        f"TransformResult.success(row). This is a plugin bug."
+                    )
+                final_data = result.row
                 updated_token = TokenInfo(
                     row_id=current_token.row_id,
                     token_id=current_token.token_id,
@@ -813,8 +835,15 @@ class RowProcessor:
                     assert result.rows is not None  # Guaranteed by is_multi_row
                     output_rows = result.rows
                 else:
-                    # Single row output is valid for transform mode
-                    output_rows = [result.row] if result.row is not None else [{}]
+                    # Contract: batch-aware transforms in transform mode MUST return output data
+                    if result.row is None:
+                        raise RuntimeError(
+                            f"Aggregation transform '{transform.name}' returned None for result.row "
+                            f"in 'transform' mode. Batch-aware transforms must return a row via "
+                            f"TransformResult.success(row) or rows via TransformResult.success_multi(rows). "
+                            f"This is a plugin bug."
+                        )
+                    output_rows = [result.row]
 
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage

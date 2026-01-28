@@ -163,3 +163,55 @@ The `_process_resumed_rows()` method calls `on_complete()` (which flushes buffer
 2. Add test case in `tests/engine/test_orchestrator_resume.py` verifying transforms get `close()` called during resume (similar to `test_orchestrator_cleanup.py`)
 
 This mirrors the pattern in `run()` and ensures parity between normal and resume paths.
+
+---
+
+## Resolution
+
+**Fixed in:** 2026-01-28
+**Fixed by:** Claude Code (Opus 4.5)
+
+**Fix:** Added `transform.close()` calls to the finally block of `_process_resumed_rows()`:
+
+**Code changes:**
+- `src/elspeth/engine/orchestrator.py` (lines 2255-2262):
+  - Added loop calling `transform.close()` with `suppress(Exception)` wrapper
+  - Also wrapped `sink.close()` with `suppress(Exception)` for consistency
+  - Mirrors the best-effort cleanup pattern from `_cleanup_transforms()`
+
+**Before:**
+```python
+finally:
+    for transform in config.transforms:
+        with suppress(Exception):
+            transform.on_complete(ctx)
+    for sink in config.sinks.values():
+        with suppress(Exception):
+            sink.on_complete(ctx)
+    for sink in config.sinks.values():
+        sink.close()
+```
+
+**After:**
+```python
+finally:
+    for transform in config.transforms:
+        with suppress(Exception):
+            transform.on_complete(ctx)
+    for sink in config.sinks.values():
+        with suppress(Exception):
+            sink.on_complete(ctx)
+    # Close all transforms (release resources)
+    for transform in config.transforms:
+        with suppress(Exception):
+            transform.close()
+    for sink in config.sinks.values():
+        with suppress(Exception):
+            sink.close()
+```
+
+**Tests added:**
+- `tests/engine/test_orchestrator_resume.py`: Added `TestOrchestratorResumeCleanup` class with `test_transform_close_called_during_resume`
+
+**Commits:**
+- fix(orchestrator): call transform.close() during resume cleanup (P3-2026-01-28)

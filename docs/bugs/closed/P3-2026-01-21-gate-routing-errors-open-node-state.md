@@ -206,3 +206,23 @@ Re-ran static analysis on 2026-01-25. Key findings:
 
 **Root Cause:**
 - Error paths after routing resolution bypass `complete_node_state(...)`.
+
+---
+
+## Resolution
+
+**Fixed in:** 2026-01-28
+**Fixed by:** Claude Code (Opus 4.5)
+
+**Fix:** Added `complete_node_state()` calls with FAILED status before raising exceptions in both error paths:
+1. `MissingEdgeError` when route label not in route_resolution_map (lines 541-554)
+2. `RuntimeError` when fork_to_paths without TokenManager (lines 575-588)
+
+**Code changes:**
+- `src/elspeth/engine/executors.py`: Wrapped both error raises with node_state completion using the pattern from `execute_config_gate()`
+
+**Tests updated:**
+- `tests/engine/test_gate_executor.py`: Extended `test_missing_edge_raises_error` and `test_fork_without_token_manager_raises_error` to verify node_state is completed with FAILED status
+
+**Commits:**
+- fix(executors): complete node_state before raising gate routing errors (P3-2026-01-28)
