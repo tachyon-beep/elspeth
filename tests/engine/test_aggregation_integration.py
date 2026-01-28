@@ -1623,6 +1623,340 @@ class TestTimeoutFlushErrorHandling:
             "Got empty dict. Bug: _check_aggregation_timeouts doesn't update routed_destinations."
         )
 
+    def test_passthrough_flush_failure_marks_all_buffered_tokens_failed(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Passthrough flush failure must mark ALL buffered tokens as FAILED.
+
+        Bug: P1-2026-01-21-aggregation-passthrough-failure-buffered
+
+        In passthrough mode, tokens get BUFFERED outcome (non-terminal) when buffered.
+        When flush fails, only the triggering token gets FAILED outcome.
+        The previously buffered tokens remain BUFFERED forever - violating the
+        invariant that every token must reach a terminal state.
+
+        Expected behavior:
+        - ALL buffered tokens (including triggering token) get FAILED outcome
+        - No tokens should remain with BUFFERED outcome after flush failure
+        - rows_failed count should match total buffer size
+
+        Test setup:
+        - 3 rows emitted, count trigger = 3 (flush on 3rd row)
+        - Passthrough mode (tokens get BUFFERED when buffered)
+        - Transform returns error on flush
+        """
+
+        from elspeth.contracts.enums import RowOutcome
+
+        flush_calls: list[str] = []
+
+        class FailingPassthroughTransform(BaseTransform):
+            """Batch transform that fails on flush in passthrough mode."""
+
+            name = "failing_passthrough"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch flush - FAIL with error result
+                    flush_calls.append("flush_failed")
+                    return TransformResult.error({"reason": "deliberate_passthrough_failure"})
+                return TransformResult.success(dict(row))
+
+        class CountTriggerSource(_TestSourceBase):
+            """Source that emits exactly 3 rows to trigger count-based flush."""
+
+            name = "count_trigger_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row 1: Gets buffered, marked BUFFERED
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Row 2: Gets buffered, marked BUFFERED
+                yield SourceRow.valid({"id": 2, "value": 200})
+                # Row 3: Triggers count flush (count=3) → flush fails
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects results."""
+
+            name = "collector_passthrough_err"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://test",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(CountTriggerSource())
+        transform = as_transform(FailingPassthroughTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="failing_passthrough_agg",
+            plugin="failing_passthrough",
+            trigger=TriggerConfig(
+                count=3,  # Flush after 3 rows
+            ),
+            output_mode="passthrough",  # Tokens get BUFFERED when buffered
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={transform_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="count_trigger_source", options={}),
+            sinks={"output": SinkSettings(plugin="collector_passthrough_err", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Verify flush was called and failed
+        assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
+        assert flush_calls[0] == "flush_failed"
+
+        # BUG ASSERTION: All 3 tokens should be marked FAILED
+        # Currently only the triggering token (row 3) gets FAILED
+        assert result.rows_failed == 3, (
+            f"All 3 buffered tokens should be marked FAILED when passthrough flush fails. "
+            f"Got rows_failed={result.rows_failed}. "
+            f"Bug: Only triggering token marked FAILED, buffered tokens left in BUFFERED state."
+        )
+
+        # Verify all tokens have a terminal outcome
+        # Note: BUFFERED records remain in DB as audit trail, but tokens should ALSO
+        # have a terminal outcome (FAILED in this case). Check for tokens that have
+        # BUFFERED but no terminal outcome.
+        with landscape_db.connection() as conn:
+            from sqlalchemy import func, select
+
+            from elspeth.core.landscape.schema import token_outcomes_table
+
+            # Count FAILED outcomes (should be 3 - one per buffered token)
+            failed_count = conn.execute(
+                select(func.count())
+                .select_from(token_outcomes_table)
+                .where(token_outcomes_table.c.outcome == RowOutcome.FAILED.value)
+                .where(token_outcomes_table.c.run_id == result.run_id)
+            ).scalar()
+
+            assert failed_count == 3, (
+                f"All 3 buffered tokens should have FAILED outcome recorded. "
+                f"Found {failed_count} FAILED outcomes. "
+                f"Bug: Not all buffered tokens received terminal outcome."
+            )
+
+    def test_passthrough_end_of_source_flush_failure_marks_all_failed(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE passthrough flush failure must mark ALL buffered tokens FAILED.
+
+        Bug: P1-2026-01-21-aggregation-passthrough-failure-buffered
+
+        This tests the most dangerous scenario: source completes with buffered rows,
+        triggering END_OF_SOURCE flush. If flush fails, tokens would be stuck
+        forever (no more rows will arrive to trigger recovery).
+
+        Expected behavior:
+        - ALL buffered tokens get FAILED outcome
+        - Pipeline completes (doesn't hang)
+        - No tokens left in BUFFERED state
+        """
+        from elspeth.contracts.enums import RowOutcome
+
+        flush_calls: list[str] = []
+
+        class FailingPassthroughTransform(BaseTransform):
+            """Batch transform that fails on END_OF_SOURCE flush."""
+
+            name = "failing_passthrough_eos"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    flush_calls.append("flush_failed")
+                    return TransformResult.error({"reason": "eos_failure"})
+                return TransformResult.success(dict(row))
+
+        class ShortSource(_TestSourceBase):
+            """Source that emits 2 rows (won't trigger count=10)."""
+
+            name = "short_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                # Source completes → END_OF_SOURCE flush
+
+            def close(self) -> None:
+                pass
+
+        class CollectorSink(_TestSinkBase):
+            """Sink for collecting output."""
+
+            name = "collector_eos"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://test",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(ShortSource())
+        transform = as_transform(FailingPassthroughTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="failing_passthrough_eos_agg",
+            plugin="failing_passthrough_eos",
+            trigger=TriggerConfig(
+                count=10,  # High count - won't trigger by count
+            ),
+            output_mode="passthrough",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={transform_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="short_source", options={}),
+            sinks={"output": SinkSettings(plugin="collector_eos", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Verify END_OF_SOURCE flush was triggered and failed
+        assert len(flush_calls) == 1, f"Expected 1 END_OF_SOURCE flush, got {len(flush_calls)}"
+
+        # BUG ASSERTION: Both tokens should be marked FAILED
+        assert result.rows_failed == 2, (
+            f"Both buffered tokens should be marked FAILED on END_OF_SOURCE flush failure. "
+            f"Got rows_failed={result.rows_failed}. "
+            f"Bug: Tokens stuck in BUFFERED state forever."
+        )
+
+        # Verify all tokens have a terminal FAILED outcome
+        # Note: BUFFERED records remain in DB as audit trail, but tokens should ALSO
+        # have a terminal outcome (FAILED in this case).
+        with landscape_db.connection() as conn:
+            from sqlalchemy import func, select
+
+            from elspeth.core.landscape.schema import token_outcomes_table
+
+            # Count FAILED outcomes for this run (should be 2 - one per buffered token)
+            failed_count = conn.execute(
+                select(func.count())
+                .select_from(token_outcomes_table)
+                .where(token_outcomes_table.c.outcome == RowOutcome.FAILED.value)
+                .where(token_outcomes_table.c.run_id == result.run_id)
+            ).scalar()
+
+            assert failed_count == 2, f"Both buffered tokens should have FAILED outcome recorded. Found {failed_count} FAILED outcomes."
+
 
 class TestTimeoutFlushStepIndexing:
     """Test that timeout/end-of-source flushes record correct 1-indexed step.

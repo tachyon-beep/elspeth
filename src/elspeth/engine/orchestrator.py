@@ -1059,6 +1059,9 @@ class Orchestrator:
                         pre_agg_routed,
                         pre_agg_quarantined,
                         pre_agg_coalesced,
+                        pre_agg_forked,
+                        pre_agg_expanded,
+                        pre_agg_buffered,
                         pre_agg_routed_dests,
                     ) = self._check_aggregation_timeouts(
                         config=config,
@@ -1073,6 +1076,9 @@ class Orchestrator:
                     rows_routed += pre_agg_routed
                     rows_quarantined += pre_agg_quarantined
                     rows_coalesced += pre_agg_coalesced
+                    rows_forked += pre_agg_forked
+                    rows_expanded += pre_agg_expanded
+                    rows_buffered += pre_agg_buffered
                     for dest, count in pre_agg_routed_dests.items():
                         routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
@@ -1222,6 +1228,9 @@ class Orchestrator:
                         agg_routed,
                         agg_quarantined,
                         agg_coalesced,
+                        agg_forked,
+                        agg_expanded,
+                        agg_buffered,
                         agg_routed_dests,
                     ) = self._flush_remaining_aggregation_buffers(
                         config=config,
@@ -1239,6 +1248,9 @@ class Orchestrator:
                     rows_routed += agg_routed
                     rows_quarantined += agg_quarantined
                     rows_coalesced += agg_coalesced
+                    rows_forked += agg_forked
+                    rows_expanded += agg_expanded
+                    rows_buffered += agg_buffered
                     for dest, count in agg_routed_dests.items():
                         routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
@@ -2008,6 +2020,9 @@ class Orchestrator:
                     pre_agg_routed,
                     pre_agg_quarantined,
                     pre_agg_coalesced,
+                    pre_agg_forked,
+                    pre_agg_expanded,
+                    pre_agg_buffered,
                     pre_agg_routed_dests,
                 ) = self._check_aggregation_timeouts(
                     config=config,
@@ -2022,6 +2037,9 @@ class Orchestrator:
                 rows_routed += pre_agg_routed
                 rows_quarantined += pre_agg_quarantined
                 rows_coalesced += pre_agg_coalesced
+                rows_forked += pre_agg_forked
+                rows_expanded += pre_agg_expanded
+                rows_buffered += pre_agg_buffered
                 for dest, count in pre_agg_routed_dests.items():
                     routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
@@ -2128,6 +2146,9 @@ class Orchestrator:
                     agg_routed,
                     agg_quarantined,
                     agg_coalesced,
+                    agg_forked,
+                    agg_expanded,
+                    agg_buffered,
                     agg_routed_dests,
                 ) = self._flush_remaining_aggregation_buffers(
                     config=config,
@@ -2144,6 +2165,9 @@ class Orchestrator:
                 rows_routed += agg_routed
                 rows_quarantined += agg_quarantined
                 rows_coalesced += agg_coalesced
+                rows_forked += agg_forked
+                rows_expanded += agg_expanded
+                rows_buffered += agg_buffered
                 for dest, count in agg_routed_dests.items():
                     routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
@@ -2328,7 +2352,7 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
         default_sink_name: str,
         agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
-    ) -> tuple[int, int, int, int, int, dict[str, int]]:
+    ) -> tuple[int, int, int, int, int, int, int, int, dict[str, int]]:
         """Check and flush any aggregations whose timeout has expired.
 
         Called BEFORE processing each row to ensure timeouts fire during active
@@ -2360,13 +2384,17 @@ class Orchestrator:
                 If None, lookup is computed on each call (less efficient).
 
         Returns:
-            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced, routed_destinations)
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced,
+                      rows_forked, rows_expanded, rows_buffered, routed_destinations)
         """
         rows_succeeded = 0
         rows_failed = 0
         rows_routed = 0
         rows_quarantined = 0
         rows_coalesced = 0
+        rows_forked = 0
+        rows_expanded = 0
+        rows_buffered = 0
         routed_destinations: dict[str, int] = {}
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
@@ -2462,11 +2490,28 @@ class Orchestrator:
                         rows_coalesced += 1
                         rows_succeeded += 1
                         pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
-                    # FORKED/CONSUMED_IN_BATCH are intermediate states
-                    # handled within process_token - final outcomes will
-                    # appear as separate results
+                    elif result.outcome == RowOutcome.FORKED:
+                        # Parent token split into multiple paths - children counted separately
+                        rows_forked += 1
+                    elif result.outcome == RowOutcome.EXPANDED:
+                        # Deaggregation parent token - children counted separately
+                        rows_expanded += 1
+                    elif result.outcome == RowOutcome.BUFFERED:
+                        # Passthrough mode buffered token (into downstream aggregation)
+                        rows_buffered += 1
+                    # CONSUMED_IN_BATCH is handled within process_token
 
-        return rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced, routed_destinations
+        return (
+            rows_succeeded,
+            rows_failed,
+            rows_routed,
+            rows_quarantined,
+            rows_coalesced,
+            rows_forked,
+            rows_expanded,
+            rows_buffered,
+            routed_destinations,
+        )
 
     def _flush_remaining_aggregation_buffers(
         self,
@@ -2479,7 +2524,7 @@ class Orchestrator:
         recorder: LandscapeRecorder,
         checkpoint: bool = True,
         last_node_id: str | None = None,
-    ) -> tuple[int, int, int, int, int, dict[str, int]]:
+    ) -> tuple[int, int, int, int, int, int, int, int, dict[str, int]]:
         """Flush remaining aggregation buffers at end-of-source.
 
         Without this, rows buffered but not yet flushed (e.g., 50 rows
@@ -2502,7 +2547,8 @@ class Orchestrator:
             last_node_id: Node ID to use for checkpointing (required if checkpoint=True)
 
         Returns:
-            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced, routed_destinations)
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced,
+                      rows_forked, rows_expanded, rows_buffered, routed_destinations)
 
         Raises:
             RuntimeError: If no batch-aware transform found for an aggregation
@@ -2513,6 +2559,9 @@ class Orchestrator:
         rows_routed = 0
         rows_quarantined = 0
         rows_coalesced = 0
+        rows_forked = 0
+        rows_expanded = 0
+        rows_buffered = 0
         routed_destinations: dict[str, int] = {}
         total_steps = len(config.transforms)
 
@@ -2626,8 +2675,25 @@ class Orchestrator:
                                 token_id=result.token.token_id,
                                 node_id=last_node_id,
                             )
-                    # FORKED/CONSUMED_IN_BATCH are intermediate states
-                    # handled within process_token - final outcomes will
-                    # appear as separate results
+                    elif result.outcome == RowOutcome.FORKED:
+                        # Parent token split into multiple paths - children counted separately
+                        rows_forked += 1
+                    elif result.outcome == RowOutcome.EXPANDED:
+                        # Deaggregation parent token - children counted separately
+                        rows_expanded += 1
+                    elif result.outcome == RowOutcome.BUFFERED:
+                        # Passthrough mode buffered token (into downstream aggregation)
+                        rows_buffered += 1
+                    # CONSUMED_IN_BATCH is handled within process_token
 
-        return rows_succeeded, rows_failed, rows_routed, rows_quarantined, rows_coalesced, routed_destinations
+        return (
+            rows_succeeded,
+            rows_failed,
+            rows_routed,
+            rows_quarantined,
+            rows_coalesced,
+            rows_forked,
+            rows_expanded,
+            rows_buffered,
+            routed_destinations,
+        )

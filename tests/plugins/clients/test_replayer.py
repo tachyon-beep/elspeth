@@ -131,11 +131,12 @@ class TestCallReplayer:
         assert result.request_hash == request_hash
         assert result.was_error is False
 
-        # Verify correct lookup parameters
+        # Verify correct lookup parameters (now includes sequence_index)
         recorder.find_call_by_request_hash.assert_called_once_with(
             run_id="run_abc123",
             call_type="llm",
             request_hash=request_hash,
+            sequence_index=0,
         )
 
     def test_replay_miss_raises_error(self) -> None:
@@ -152,8 +153,17 @@ class TestCallReplayer:
         assert exc_info.value.request_data == request_data
         assert exc_info.value.request_hash == stable_hash(request_data)
 
-    def test_replay_caches_results(self) -> None:
-        """Second lookup uses cache, not database."""
+    def test_replay_caches_results_per_sequence_index(self) -> None:
+        """Cache stores results keyed by (call_type, request_hash, sequence_index).
+
+        With the fix for P1-2026-01-21-replay-request-hash-collisions, each
+        replay of the same request increments a sequence counter and looks
+        for the Nth recorded call. The cache still works, but it's keyed by
+        the full (call_type, request_hash, sequence_index) tuple.
+
+        This test verifies that after clearing the cache and sequence counters,
+        replaying the same request again uses the cached first response.
+        """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
@@ -164,19 +174,28 @@ class TestCallReplayer:
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
-        # First call - hits database
+        # First call - hits database (sequence_index=0)
         result1 = replayer.replay(call_type="llm", request_data=request_data)
-
-        # Second call - should use cache
-        result2 = replayer.replay(call_type="llm", request_data=request_data)
-
-        # Only one database lookup should have occurred
         assert recorder.find_call_by_request_hash.call_count == 1
-        assert recorder.get_call_response_data.call_count == 1
 
-        # Both results should be the same
+        # Second call - hits database again (sequence_index=1, different from cache key)
+        # This is the correct behavior: same request should return different response
+        result2 = replayer.replay(call_type="llm", request_data=request_data)
+        assert recorder.find_call_by_request_hash.call_count == 2
+
+        # Both results have same content (mock returns same response for any sequence)
         assert result1.response_data == result2.response_data
-        assert replayer.cache_size() == 1
+        # Cache now has 2 entries (one for each sequence_index)
+        assert replayer.cache_size() == 2
+
+        # Clear cache and sequence counters - next replay starts from sequence_index=0
+        replayer.clear_cache()
+        assert replayer.cache_size() == 0
+
+        # Third call after clear - hits database again (sequence_index=0 again)
+        result3 = replayer.replay(call_type="llm", request_data=request_data)
+        assert recorder.find_call_by_request_hash.call_count == 3
+        assert result3.response_data == {"content": "cached"}
 
     def test_replay_handles_error_calls(self) -> None:
         """Replays error status correctly."""
@@ -305,6 +324,7 @@ class TestCallReplayer:
             run_id="run_abc123",
             call_type="http",
             request_hash=request_hash,
+            sequence_index=0,
         )
 
     def test_different_call_types_same_hash_are_cached_separately(self) -> None:
@@ -314,7 +334,7 @@ class TestCallReplayer:
         request_data = {"data": "same"}
 
         # Set up mock to return different responses based on call_type
-        def find_call_side_effect(run_id: str, call_type: str, request_hash: str) -> Call:
+        def find_call_side_effect(run_id: str, call_type: str, request_hash: str, *, sequence_index: int = 0) -> Call:
             if call_type == "llm":
                 return Call(
                     call_id="call_llm",
@@ -357,14 +377,91 @@ class TestCallReplayer:
         http_result = replayer.replay(call_type="http", request_data=request_data)
         assert http_result.response_data["type"] == "http_response"
 
-        # Both should be cached separately
+        # Both should be cached separately (different call_type, same sequence_index=0)
         assert replayer.cache_size() == 2
 
         # Verify both database lookups happened (not returned from cache incorrectly)
         assert recorder.find_call_by_request_hash.call_count == 2
 
-        # Replay LLM again - should use cache
+        # Replay LLM again - now this is treated as the 2nd LLM call (sequence_index=1)
+        # Since the same request can legitimately return different responses,
+        # the replayer now looks for the 2nd recorded call (which doesn't exist in this mock)
+        # This matches the fix for P1-2026-01-21-replay-request-hash-collisions
         llm_result2 = replayer.replay(call_type="llm", request_data=request_data)
+        # Mock returns the same response regardless of sequence_index, so still llm_response
         assert llm_result2.response_data["type"] == "llm_response"
-        # No additional database lookup
-        assert recorder.find_call_by_request_hash.call_count == 2
+        # Now makes a 3rd DB lookup because sequence_index is different (0 vs 1)
+        assert recorder.find_call_by_request_hash.call_count == 3
+
+    def test_duplicate_requests_return_different_responses_in_order(self) -> None:
+        """Duplicate identical requests should return different responses in sequence.
+
+        This tests the scenario where the same request is made multiple times
+        (e.g., retries, loops over identical data) and each call returns a
+        different response (e.g., non-deterministic LLM output with temperature > 0).
+
+        Bug: P1-2026-01-21-replay-request-hash-collisions
+        """
+        recorder = self._create_mock_recorder()
+        # Same request data made multiple times
+        request_data = {"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}
+
+        # Track which call index we're returning
+        call_sequence = [
+            {
+                "call_id": "call_1",
+                "response": {"content": "Response 1 - first call"},
+            },
+            {
+                "call_id": "call_2",
+                "response": {"content": "Response 2 - second call"},
+            },
+            {
+                "call_id": "call_3",
+                "response": {"content": "Response 3 - third call"},
+            },
+        ]
+
+        def find_call_side_effect(run_id: str, call_type: str, request_hash: str, *, sequence_index: int = 0) -> Call | None:
+            """Return the Nth call for duplicate request hashes."""
+            idx = sequence_index if sequence_index < len(call_sequence) else len(call_sequence) - 1
+            return Call(
+                call_id=call_sequence[idx]["call_id"],
+                state_id="state_123",
+                call_index=idx,
+                call_type=CallType.LLM,
+                status=CallStatus.SUCCESS,
+                request_hash=request_hash,
+                created_at=datetime.now(UTC),
+                latency_ms=100.0,
+            )
+
+        def get_response_side_effect(call_id: str) -> dict[str, Any]:
+            """Return response data based on call_id."""
+            for call_info in call_sequence:
+                if call_info["call_id"] == call_id:
+                    return call_info["response"]
+            return {}
+
+        recorder.find_call_by_request_hash.side_effect = find_call_side_effect
+        recorder.get_call_response_data.side_effect = get_response_side_effect
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        # First replay - should get Response 1
+        result1 = replayer.replay(call_type="llm", request_data=request_data)
+        assert result1.response_data["content"] == "Response 1 - first call", (
+            f"First replay should return first response, got: {result1.response_data}"
+        )
+
+        # Second replay of SAME request - should get Response 2 (not cached Response 1!)
+        result2 = replayer.replay(call_type="llm", request_data=request_data)
+        assert result2.response_data["content"] == "Response 2 - second call", (
+            f"Second replay should return second response, got: {result2.response_data}"
+        )
+
+        # Third replay - should get Response 3
+        result3 = replayer.replay(call_type="llm", request_data=request_data)
+        assert result3.response_data["content"] == "Response 3 - third call", (
+            f"Third replay should return third response, got: {result3.response_data}"
+        )

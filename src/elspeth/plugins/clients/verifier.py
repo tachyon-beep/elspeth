@@ -14,6 +14,7 @@ The verifier uses DeepDiff for flexible comparison with configurable exclusions.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -131,6 +132,10 @@ class CallVerifier:
         self._source_run_id = source_run_id
         self._ignore_paths = ignore_paths or []
         self._report = VerificationReport()
+        # Sequence counter: (call_type, request_hash) -> next_index
+        # Tracks how many times we've seen each unique request
+        # Uses defaultdict to avoid .get() which can hide key bugs
+        self._sequence_counters: defaultdict[tuple[str, str], int] = defaultdict(int)
 
     @property
     def source_run_id(self) -> str:
@@ -148,6 +153,11 @@ class CallVerifier:
         Looks up the previously recorded call by computing the canonical
         hash of the request data and compares responses using DeepDiff.
 
+        When the same request is verified multiple times (same call_type and
+        request_data), each verification compares against the next recorded
+        response in chronological order. This supports scenarios where the
+        original run made the same request multiple times.
+
         Args:
             call_type: Type of call (llm, http, etc.)
             request_data: The request data (used to find recorded call)
@@ -157,12 +167,19 @@ class CallVerifier:
             VerificationResult with comparison details
         """
         request_hash = stable_hash(request_data)
+        sequence_key = (call_type, request_hash)
 
-        # Look up recorded call
+        # Get the current sequence index for this request and increment it
+        # Using defaultdict(int) ensures missing keys default to 0
+        sequence_index = self._sequence_counters[sequence_key]
+        self._sequence_counters[sequence_key] = sequence_index + 1
+
+        # Look up recorded call with sequence index to get Nth occurrence
         call = self._recorder.find_call_by_request_hash(
             run_id=self._source_run_id,
             call_type=call_type,
             request_hash=request_hash,
+            sequence_index=sequence_index,
         )
 
         self._report.total_calls += 1
@@ -215,9 +232,13 @@ class CallVerifier:
         return self._report
 
     def reset_report(self) -> None:
-        """Reset the verification report.
+        """Reset the verification report and sequence counters.
 
-        Clears all accumulated statistics and results.
+        Clears all accumulated statistics, results, and sequence counters.
         Use this when starting a new verification session.
+
+        Note: This also resets sequence counters, so the next verification
+        of any request will compare against the first recorded occurrence.
         """
         self._report = VerificationReport()
+        self._sequence_counters = defaultdict(int)

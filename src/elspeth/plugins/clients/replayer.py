@@ -15,6 +15,7 @@ so the same request always returns the same recorded response.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -121,11 +122,16 @@ class CallReplayer:
         """
         self._recorder = recorder
         self._source_run_id = source_run_id
-        # Cache: (call_type, request_hash) -> (response_data, latency_ms, was_error, error_data, call_id)
+        # Cache: (call_type, request_hash, sequence_index) -> cached data
+        # The sequence_index allows multiple calls with same hash to be cached separately
         self._cache: dict[
-            tuple[str, str],
+            tuple[str, str, int],
             tuple[dict[str, Any], float | None, bool, dict[str, Any] | None, str],
         ] = {}
+        # Sequence counter: (call_type, request_hash) -> next_index
+        # Tracks how many times we've seen each unique request
+        # Uses defaultdict to avoid .get() which can hide key bugs
+        self._sequence_counters: defaultdict[tuple[str, str], int] = defaultdict(int)
 
     @property
     def source_run_id(self) -> str:
@@ -142,6 +148,12 @@ class CallReplayer:
         Looks up a previously recorded call by computing the canonical
         hash of the request data and searching the source run's audit trail.
 
+        When the same request is replayed multiple times (same call_type and
+        request_data), each replay returns the next recorded response in
+        chronological order. This supports scenarios where the original run
+        made the same request multiple times (e.g., retries, loops over
+        identical data, non-deterministic LLM responses).
+
         Args:
             call_type: Type of call (llm, http, etc.)
             request_data: The request data (used to compute hash for lookup)
@@ -154,11 +166,17 @@ class CallReplayer:
             ReplayPayloadMissingError: If call exists but payload is missing/purged
         """
         request_hash = stable_hash(request_data)
-        cache_key = (call_type, request_hash)
+        sequence_key = (call_type, request_hash)
+
+        # Get the current sequence index for this request and increment it
+        # Using defaultdict(int) ensures missing keys default to 0
+        sequence_index = self._sequence_counters[sequence_key]
+        self._sequence_counters[sequence_key] = sequence_index + 1
+
+        # Cache key includes sequence index to store multiple responses separately
+        cache_key = (call_type, request_hash, sequence_index)
 
         # Check cache first
-        # Note: cache stores actual response_data (could be None if error call had no response)
-        # but we validated it wasn't None when caching, so this is safe
         if cache_key in self._cache:
             resp, latency, was_error, error, _call_id = self._cache[cache_key]
             return ReplayedCall(
@@ -169,11 +187,12 @@ class CallReplayer:
                 error_data=error,
             )
 
-        # Look up in database
+        # Look up in database with sequence index to get Nth occurrence
         call = self._recorder.find_call_by_request_hash(
             run_id=self._source_run_id,
             call_type=call_type,
             request_hash=request_hash,
+            sequence_index=sequence_index,
         )
 
         if call is None:
@@ -218,12 +237,16 @@ class CallReplayer:
         )
 
     def clear_cache(self) -> None:
-        """Clear the replay cache.
+        """Clear the replay cache and reset sequence counters.
 
         Use this if you need to force re-lookup from the database,
         for example after the source run has been modified.
+
+        Note: This also resets sequence counters, so the next replay
+        of any request will start from the first recorded occurrence.
         """
         self._cache.clear()
+        self._sequence_counters = defaultdict(int)
 
     def cache_size(self) -> int:
         """Return the number of cached replayed calls."""

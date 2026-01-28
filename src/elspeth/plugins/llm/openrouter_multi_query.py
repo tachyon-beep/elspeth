@@ -560,7 +560,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 retryable=False,
             )
 
-        usage = data.get("usage", {})
+        # OpenRouter can return {"usage": null} or omit usage entirely.
+        # dict.get("usage", {}) only returns {} when key is MISSING, not when value is null.
+        # The `or {}` ensures we get an empty dict for both missing AND null cases.
+        usage = data.get("usage") or {}
 
         # 8b. Check for response truncation BEFORE parsing
         # If completion_tokens equals max_tokens, the response was likely truncated
