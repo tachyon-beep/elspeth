@@ -148,6 +148,72 @@ class RowProcessor:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Public facade for aggregation timeout checking
+    # (Bug fix: P1-2026-01-22 - provides clean API for orchestrator timeout checks)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def check_aggregation_timeout(self, node_id: NodeID) -> tuple[bool, TriggerType | None]:
+        """Check if an aggregation should flush due to timeout.
+
+        This is a public facade for orchestrator to check timeout conditions
+        without directly accessing private _aggregation_executor.
+
+        Args:
+            node_id: The aggregation node ID to check
+
+        Returns:
+            Tuple of (should_flush, trigger_type):
+            - should_flush: True if trigger condition is met
+            - trigger_type: The type of trigger that fired (TIMEOUT, COUNT, etc.) or None
+        """
+        should_flush = self._aggregation_executor.should_flush(node_id)
+        trigger_type = self._aggregation_executor.get_trigger_type(node_id) if should_flush else None
+        return (should_flush, trigger_type)
+
+    def get_aggregation_buffer_count(self, node_id: NodeID) -> int:
+        """Get the number of rows buffered in an aggregation.
+
+        Args:
+            node_id: The aggregation node ID
+
+        Returns:
+            Number of rows currently buffered
+        """
+        return self._aggregation_executor.get_buffer_count(node_id)
+
+    def flush_aggregation_timeout(
+        self,
+        node_id: NodeID,
+        transform: TransformProtocol,
+        ctx: PluginContext,
+        step_in_pipeline: int,
+    ) -> tuple[TransformResult, list[TokenInfo], str | None]:
+        """Execute a timeout-triggered flush for an aggregation.
+
+        This is a public facade for orchestrator to flush timed-out aggregations
+        without directly accessing private _aggregation_executor.
+
+        Args:
+            node_id: The aggregation node ID
+            transform: The batch-aware transform to execute
+            ctx: Plugin context
+            step_in_pipeline: Position of this aggregation in the pipeline
+
+        Returns:
+            Tuple of (result, buffered_tokens, batch_id):
+            - result: TransformResult from batch processing
+            - buffered_tokens: List of tokens that were in the batch
+            - batch_id: The batch ID (for audit trail)
+        """
+        return self._aggregation_executor.execute_flush(
+            node_id=node_id,
+            transform=transform,
+            ctx=ctx,
+            step_in_pipeline=step_in_pipeline,
+            trigger_type=TriggerType.TIMEOUT,
+        )
+
     def _process_batch_aggregation_node(
         self,
         transform: TransformProtocol,

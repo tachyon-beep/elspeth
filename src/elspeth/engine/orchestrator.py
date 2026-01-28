@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
+from elspeth.contracts.enums import TriggerType
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -926,6 +927,14 @@ class Orchestrator:
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
 
+        # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        # Maps node_id_str -> (transform, step_in_pipeline)
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        if config.aggregation_settings:
+            for i, t in enumerate(config.transforms):
+                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                    agg_transform_lookup[t.node_id] = (t, i)
+
         # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
         progress_time_interval = 5.0  # seconds
@@ -1027,6 +1036,25 @@ class Orchestrator:
 
                     # Extract row data from SourceRow (all source items are SourceRow)
                     row_data: dict[str, Any] = source_item.row
+
+                    # ─────────────────────────────────────────────────────────────────
+                    # Check for timed-out aggregations BEFORE processing this row
+                    # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+                    #
+                    # This is the critical fix: checking timeout BEFORE buffering the
+                    # new row ensures the timed-out batch contains only previously
+                    # buffered rows, not the row that just arrived.
+                    # ─────────────────────────────────────────────────────────────────
+                    pre_agg_succ, pre_agg_fail = self._check_aggregation_timeouts(
+                        config=config,
+                        processor=processor,
+                        ctx=ctx,
+                        pending_tokens=pending_tokens,
+                        default_sink_name=default_sink_name,
+                        agg_transform_lookup=agg_transform_lookup,
+                    )
+                    rows_succeeded += pre_agg_succ
+                    rows_failed += pre_agg_fail
 
                     results = processor.process_row(
                         row_index=row_index,
@@ -1912,6 +1940,13 @@ class Orchestrator:
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
 
+        # Pre-compute aggregation transform lookup for O(1) access per timeout check
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] = {}
+        if config.aggregation_settings:
+            for i, t in enumerate(config.transforms):
+                if isinstance(t, TransformProtocol) and t.is_batch_aware and t.node_id in config.aggregation_settings:
+                    agg_transform_lookup[t.node_id] = (t, i)
+
         try:
             # Process each unprocessed row using process_existing_row
             # (rows already exist in DB, only tokens need to be created)
@@ -1926,6 +1961,21 @@ class Orchestrator:
             #    optimization
             for row_id, _row_index, row_data in unprocessed_rows:
                 rows_processed += 1
+
+                # ─────────────────────────────────────────────────────────────────
+                # Check for timed-out aggregations BEFORE processing this row
+                # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+                # ─────────────────────────────────────────────────────────────────
+                pre_agg_succ, pre_agg_fail = self._check_aggregation_timeouts(
+                    config=config,
+                    processor=processor,
+                    ctx=ctx,
+                    pending_tokens=pending_tokens,
+                    default_sink_name=default_sink_name,
+                    agg_transform_lookup=agg_transform_lookup,
+                )
+                rows_succeeded += pre_agg_succ
+                rows_failed += pre_agg_fail
 
                 results = processor.process_existing_row(
                     row_id=row_id,
@@ -2171,6 +2221,117 @@ class Orchestrator:
                 recorder.retry_batch(batch.batch_id)
             # DRAFT batches continue normally (collection resumes)
 
+    def _check_aggregation_timeouts(
+        self,
+        config: PipelineConfig,
+        processor: RowProcessor,
+        ctx: PluginContext,
+        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
+        default_sink_name: str,
+        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
+    ) -> tuple[int, int]:
+        """Check and flush any aggregations whose timeout has expired.
+
+        Called BEFORE processing each row to ensure timeouts fire during active
+        processing, not just at end-of-source. Checking BEFORE buffering ensures
+        timed-out batches don't include the newly arriving row.
+
+        Bug fix: P1-2026-01-22-aggregation-timeout-idle-never-fires
+        Before this fix, should_flush() was only called from buffer_row(),
+        meaning timeouts never fired during idle periods between rows.
+
+        Args:
+            config: Pipeline configuration with aggregation_settings
+            processor: RowProcessor with public aggregation timeout API
+            ctx: Plugin context for transform execution
+            pending_tokens: Dict of sink_name -> tokens to append results to
+            default_sink_name: Default sink for aggregation output
+            agg_transform_lookup: Pre-computed dict mapping node_id_str -> (transform, step).
+                If None, lookup is computed on each call (less efficient).
+
+        Returns:
+            Tuple of (rows_succeeded, rows_failed) from timeout flushes
+        """
+        rows_succeeded = 0
+        rows_failed = 0
+
+        for agg_node_id_str, agg_settings in config.aggregation_settings.items():
+            agg_node_id = NodeID(agg_node_id_str)
+
+            # Use public facade method to check timeout (no private member access)
+            should_flush, trigger_type = processor.check_aggregation_timeout(agg_node_id)
+
+            if not should_flush:
+                continue
+
+            # Skip if not a timeout trigger - count triggers are handled in buffer_row
+            if trigger_type != TriggerType.TIMEOUT:
+                continue
+
+            # Check if there are buffered rows
+            buffered_count = processor.get_aggregation_buffer_count(agg_node_id)
+            if buffered_count == 0:
+                continue
+
+            # Get transform and step from pre-computed lookup (O(1)) or compute (O(n))
+            if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
+                agg_transform, agg_step = agg_transform_lookup[agg_node_id_str]
+            else:
+                # Fallback: linear search if lookup not provided
+                agg_transform = None
+                agg_step = len(config.transforms)
+                for i, t in enumerate(config.transforms):
+                    if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
+                        agg_transform = t
+                        agg_step = i
+                        break
+
+            if agg_transform is None:
+                agg_name = agg_settings.name
+                raise RuntimeError(
+                    f"No batch-aware transform found for aggregation '{agg_name}' "
+                    f"(node_id={agg_node_id}). This indicates a bug in graph construction "
+                    f"or pipeline configuration. "
+                    f"Available transforms: {[t.node_id for t in config.transforms]}"
+                )
+
+            # Execute flush using public facade method (no private member access)
+            flush_result, buffered_tokens, _batch_id = processor.flush_aggregation_timeout(
+                node_id=agg_node_id,
+                transform=agg_transform,
+                ctx=ctx,
+                step_in_pipeline=agg_step,
+            )
+
+            # Handle the flushed batch result
+            if flush_result.status == "success":
+                if flush_result.row is not None and buffered_tokens:
+                    # Single row output - create NEW token via expand_token
+                    # CRITICAL: Do NOT reuse buffered token IDs, as they already have
+                    # CONSUMED_IN_BATCH outcome recorded. Must create new token for output.
+                    expanded = processor.token_manager.expand_token(
+                        parent_token=buffered_tokens[0],
+                        expanded_rows=[flush_result.row],
+                        step_in_pipeline=agg_step,
+                    )
+                    pending_tokens[default_sink_name].append((expanded[0], RowOutcome.COMPLETED))
+                    rows_succeeded += 1
+                elif flush_result.rows is not None and buffered_tokens:
+                    # Multiple row output - use expand_token for proper audit
+                    expanded = processor.token_manager.expand_token(
+                        parent_token=buffered_tokens[0],
+                        expanded_rows=flush_result.rows,
+                        step_in_pipeline=agg_step,
+                    )
+                    for exp_token in expanded:
+                        pending_tokens[default_sink_name].append((exp_token, RowOutcome.COMPLETED))
+                        rows_succeeded += 1
+            else:
+                # Flush failed
+                rows_failed += len(buffered_tokens)
+
+        return rows_succeeded, rows_failed
+
     def _flush_remaining_aggregation_buffers(
         self,
         config: PipelineConfig,
@@ -2207,8 +2368,7 @@ class Orchestrator:
             RuntimeError: If no batch-aware transform found for an aggregation
                          (indicates bug in graph construction or pipeline config)
         """
-        from elspeth.contracts import TokenInfo
-        from elspeth.contracts.enums import TriggerType
+        # Note: TriggerType imported at module level
 
         rows_succeeded = 0
         rows_failed = 0
@@ -2257,13 +2417,15 @@ class Orchestrator:
             # Handle the flushed batch result
             if flush_result.status == "success":
                 if flush_result.row is not None and buffered_tokens:
-                    # Single row output - reuse first buffered token's metadata
-                    output_token = TokenInfo(
-                        token_id=buffered_tokens[0].token_id,
-                        row_id=buffered_tokens[0].row_id,
-                        row_data=flush_result.row,
-                        branch_name=buffered_tokens[0].branch_name,
+                    # Single row output - create NEW token via expand_token
+                    # CRITICAL: Do NOT reuse buffered token IDs, as they already have
+                    # CONSUMED_IN_BATCH outcome recorded. Must create new token for output.
+                    expanded = processor.token_manager.expand_token(
+                        parent_token=buffered_tokens[0],
+                        expanded_rows=[flush_result.row],
+                        step_in_pipeline=agg_step,
                     )
+                    output_token = expanded[0]
 
                     # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
                     # sink durability is achieved. Do NOT record here.

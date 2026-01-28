@@ -284,3 +284,65 @@ The bug remains unfixed as of commit `7540e57` (current HEAD on `fix/rc1-bug-bur
 **Recommended Fix:** Add timeout checks to orchestrator's progress emission block (runs every 5 seconds), matching the planned fix for coalesce timeouts.
 
 **Verification Method:** Create integration test with slow streaming source (1 row/10s), aggregation with `timeout_seconds: 2`, verify flush happens at T=2s without waiting for second row at T=10s.
+
+---
+
+## Fix Applied (2026-01-28)
+
+**Status: FIXED**
+
+### Summary
+
+Implemented aggregation timeout checks that fire **before each row is processed**, not just after. The fix ensures timeouts are evaluated proactively during active processing.
+
+### Implementation Details
+
+**1. Added `_check_aggregation_timeouts()` in Orchestrator** (`src/elspeth/engine/orchestrator.py`)
+
+Called at the start of the row processing loop (before `_process_row()`), this method:
+- Iterates over all aggregation nodes with active buffers
+- Checks if `should_flush()` returns true (timeout exceeded)
+- Calls `flush_batch()` to process the buffered rows
+- Creates NEW tokens via `expand_token()` for output (critical fix for UNIQUE constraint)
+- Properly records CONSUMED_IN_BATCH → COMPLETED token lifecycle
+
+**2. Added Public Facade Methods to RowProcessor** (`src/elspeth/engine/processor.py`)
+
+- `get_aggregation_node_ids()` - Returns list of aggregation node IDs for iteration
+- `check_aggregation_timeout(node_id)` - Checks if timeout should fire for a specific node
+- `get_aggregation_step(node_id)` - Returns the pipeline step for the aggregation node
+- `flush_aggregation_batch(node_id)` - Flushes the batch and returns result + buffered tokens
+- `clear_aggregation_buffer(node_id)` - Clears buffer after successful flush
+- `get_buffered_token_count(node_id)` - Returns count of buffered tokens
+
+These facade methods maintain encapsulation while allowing the orchestrator to check timeouts.
+
+**3. Fixed Token ID Reuse Bug**
+
+Critical fix: When flushing aggregation batches in "single" output mode:
+- Buffered tokens are marked CONSUMED_IN_BATCH (terminal state) when buffered
+- Output rows must use NEW token IDs via `expand_token()`, not reuse buffered token IDs
+- Reusing caused UNIQUE constraint failures on `token_outcomes` table
+
+### Files Modified
+
+- `src/elspeth/engine/orchestrator.py` - Added `_check_aggregation_timeouts()`, fixed `_flush_remaining_aggregation_buffers()`
+- `src/elspeth/engine/processor.py` - Added public facade methods for aggregation timeout checking
+- `tests/engine/test_aggregation_integration.py` - Integration test proving timeout fires during processing
+
+### Test Verification
+
+Integration test `test_aggregation_timeout_flushes_during_processing`:
+- Row 1 buffered at T=0s with `timeout_seconds=0.1`
+- Source sleeps 0.25s before emitting row 2
+- Row 2 arrives at T=0.25s, triggers timeout check
+- Row 1's batch flushes via timeout (count=1)
+- Rows 2+3 form new batch, flush at end-of-source (count=2)
+- Assertion: `batch_counts = [1, 2]` proves timeout worked
+
+All 605 engine tests pass.
+
+### Commit
+
+Branch: `feat/structured-outputs`
+Files: `src/elspeth/engine/orchestrator.py`, `src/elspeth/engine/processor.py`, `tests/engine/test_aggregation_integration.py`
