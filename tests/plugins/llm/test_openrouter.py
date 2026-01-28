@@ -80,6 +80,7 @@ class TestOpenRouterConfig:
                     "model": "anthropic/claude-3-opus",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'api_key'
 
@@ -91,6 +92,7 @@ class TestOpenRouterConfig:
                     "api_key": "sk-test-key",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )  # Missing 'model'
 
@@ -124,6 +126,7 @@ class TestOpenRouterConfig:
                 "model": "anthropic/claude-3-opus",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.api_key == "sk-test-key"
@@ -138,6 +141,7 @@ class TestOpenRouterConfig:
                 "model": "anthropic/claude-3-opus",
                 "template": "Hello, {{ row.name }}!",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert config.base_url == "https://openrouter.ai/api/v1"
@@ -156,6 +160,7 @@ class TestOpenRouterConfig:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "base_url": "https://custom.proxy.com/api/v1",
             }
         )
@@ -169,6 +174,7 @@ class TestOpenRouterConfig:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "timeout_seconds": 120.0,
             }
         )
@@ -183,6 +189,7 @@ class TestOpenRouterConfig:
                     "model": "openai/gpt-4",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "timeout_seconds": 0.0,  # Must be > 0
                 }
             )
@@ -199,6 +206,7 @@ class TestOpenRouterLLMTransformInit:
                 "model": "anthropic/claude-3-opus",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "base_url": "https://custom.example.com/api/v1",
                 "timeout_seconds": 90.0,
             }
@@ -217,6 +225,7 @@ class TestOpenRouterLLMTransformInit:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert transform.determinism == Determinism.NON_DETERMINISTIC
@@ -229,6 +238,7 @@ class TestOpenRouterLLMTransformInit:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         ctx = PluginContext(run_id="test-run", config={})
@@ -277,6 +287,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "anthropic/claude-3-opus",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         # Initialize with recorder reference
@@ -485,6 +496,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "system_prompt": "You are a helpful assistant.",
             }
         )
@@ -544,6 +556,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "response_field": "analysis",
             }
         )
@@ -623,6 +636,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -645,6 +659,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -665,6 +680,7 @@ class TestOpenRouterLLMTransformPipelining:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         transform.close()  # Should not raise
@@ -700,6 +716,7 @@ class TestOpenRouterLLMTransformIntegration:
                     Provide a summary.
                 """,
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -746,6 +763,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -795,6 +813,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -834,6 +853,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "timeout_seconds": 120.0,  # Custom timeout
             }
         )
@@ -875,6 +895,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -924,6 +945,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -973,6 +995,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -1022,6 +1045,7 @@ class TestOpenRouterLLMTransformIntegration:
                 "model": "openai/gpt-4",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -1088,6 +1112,7 @@ class TestOpenRouterTemplateFeatures:
                 "model": "openai/gpt-4",
                 "template": "Classify as {{ lookup.categories[0] }} or {{ lookup.categories[1] }}: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "lookup": {"categories": ["positive", "negative"]},
             }
         )
@@ -1131,6 +1156,7 @@ class TestOpenRouterTemplateFeatures:
                 "model": "openai/gpt-4",
                 "template": "Use tone: {{ lookup.tones[row.tone_id] }}. Message: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "lookup": {"tones": {"formal": "professional", "casual": "friendly"}},
             }
         )
@@ -1172,6 +1198,7 @@ class TestOpenRouterTemplateFeatures:
                 "model": "openai/gpt-4",
                 "template": "Categories: {{ lookup.cats }}. Input: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "lookup": {"cats": ["A", "B", "C"]},
             }
         )
@@ -1216,6 +1243,7 @@ class TestOpenRouterTemplateFeatures:
                 "template": "Analyze: {{ row.text }}",
                 "template_source": "prompts/analysis.j2",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -1255,6 +1283,7 @@ class TestOpenRouterTemplateFeatures:
                 "template": "{{ lookup.prompt_prefix }} {{ row.text }}",
                 "template_source": "prompts/prefixed.j2",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "lookup": {"prompt_prefix": "Please analyze:"},
                 "lookup_source": "prompts/lookups.yaml",
             }
@@ -1307,6 +1336,7 @@ class TestOpenRouterTemplateFeatures:
                 "model": "openai/gpt-4",
                 "template": "Simple: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 # No lookup configured
             }
         )
@@ -1354,6 +1384,7 @@ class TestOpenRouterTemplateFeatures:
 {% endfor %}
 Text: {{ row.text }}""",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "lookup": {
                     "categories": [
                         {"name": "spam", "description": "unwanted messages"},
@@ -1402,6 +1433,7 @@ Text: {{ row.text }}""",
                 "template": "Missing: {{ row.required_field }}",
                 "template_source": "prompts/requires_field.j2",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -1456,6 +1488,7 @@ class TestOpenRouterConcurrency:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -1502,6 +1535,7 @@ class TestOpenRouterConcurrency:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -1527,6 +1561,7 @@ class TestOpenRouterConcurrency:
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)

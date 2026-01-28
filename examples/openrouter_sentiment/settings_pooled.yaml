@@ -40,6 +40,7 @@ transforms:
         {"sentiment": "positive" or "negative" or "neutral", "confidence": 0.0-1.0, "summary": "brief explanation"}
       temperature: 0.0  # Deterministic for consistent results
       response_field: sentiment_analysis
+      required_input_fields: [text]  # Template uses row.text
       schema:
         fields: dynamic
 

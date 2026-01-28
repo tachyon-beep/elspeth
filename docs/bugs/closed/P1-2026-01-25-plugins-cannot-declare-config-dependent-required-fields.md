@@ -293,11 +293,11 @@ def test_pipeline_validation_catches_missing_llm_fields():
 
 ## Acceptance Criteria
 
-- [ ] LLM sinks extract field references from templates (or accept manual declaration)
-- [ ] LLM sinks declare hybrid schema: `["field_a", "field_b", "dynamic"]`
-- [ ] DAG validation catches missing required fields at config-time
-- [ ] Runtime errors clearly indicate which fields are missing from template
-- [ ] Tests verify template field extraction and validation
+- [x] LLM sinks extract field references from templates (or accept manual declaration)
+- [x] LLM sinks declare hybrid schema: `["field_a", "field_b", "dynamic"]`
+- [x] DAG validation catches missing required fields at config-time
+- [x] Runtime errors clearly indicate which fields are missing from template
+- [x] Tests verify template field extraction and validation
 
 ## Notes
 
@@ -307,6 +307,40 @@ def test_pipeline_validation_catches_missing_llm_fields():
 
 ## Verification Status
 
-**Status:** NEW BUG (not yet verified against codebase)
+**Status:** CLOSED - FIXED (2026-01-29)
 
-This bug was identified during systematic bug triage on 2026-01-25. Verification pending.
+### Implementation Summary
+
+Implemented Option 3 (Hybrid) with **explicit contracts** approach:
+
+1. **Schema contracts** (`src/elspeth/contracts/schema.py`):
+   - Added `guaranteed_fields` and `required_fields` to `SchemaConfig`
+   - `get_effective_guaranteed_fields()` returns producer guarantees
+   - `get_effective_required_fields()` returns consumer requirements
+
+2. **Template field extraction** (`src/elspeth/core/templates.py`):
+   - Dev-time utility `extract_jinja2_fields()` using Jinja2 AST parsing
+   - Handles both `row.field` and `row["field"]` syntax
+   - Documents limitations (conditionals, dynamic keys)
+
+3. **Explicit declaration requirement** (`src/elspeth/plugins/llm/base.py`):
+   - LLMConfig requires `required_input_fields` when template references row fields
+   - Error-with-opt-out pattern: `None` = error, `[]` = explicit opt-out
+   - Uses AST parser for accurate row field detection
+
+4. **DAG validation** (`src/elspeth/core/dag.py`):
+   - `_get_guaranteed_fields()` and `_get_required_fields()` helpers
+   - `_validate_single_edge()` checks contracts before type validation
+   - Clear error messages with actionable fix suggestions
+   - Aggregation nodes properly checked via nested `options` dict
+
+5. **Tests**:
+   - `tests/core/test_templates.py`: Field extraction tests
+   - `tests/core/test_dag_contract_validation.py`: Contract validation tests
+   - `tests/integration/test_llm_contract_validation.py`: End-to-end tests
+   - `tests/integration/test_aggregation_contracts.py`: Aggregation tests
+
+### Additional Fixes (P2 bugs from Codex):
+- Row field detection now uses AST parser (not substring matching)
+- Aggregation nodes properly read `required_input_fields` from nested `options`
+- Optional fields (marked with `?`) are NOT included in guaranteed fields

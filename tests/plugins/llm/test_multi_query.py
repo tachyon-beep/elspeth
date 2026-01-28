@@ -239,6 +239,7 @@ class TestMultiQueryConfig:
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -257,6 +258,7 @@ class TestMultiQueryConfig:
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -275,6 +277,7 @@ class TestMultiQueryConfig:
                     "criteria": [{"name": "diagnosis"}],
                     "response_format": "standard",
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -303,6 +306,7 @@ class TestMultiQueryConfig:
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
         assert len(config.case_studies) == 2
@@ -327,6 +331,7 @@ class TestMultiQueryConfig:
                     "criteria": [{"name": "diagnosis"}],
                     "output_mapping": {},  # Empty!
                     "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -351,6 +356,7 @@ class TestMultiQueryConfig:
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -467,6 +473,7 @@ class TestResponseFormatBuilding:
                 "response_format": "structured",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -498,6 +505,7 @@ class TestResponseFormatBuilding:
                     "confidence": {"suffix": "confidence", "type": "enum", "values": ["low", "medium", "high"]},
                 },
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -525,6 +533,7 @@ class TestResponseFormatBuilding:
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -550,6 +559,7 @@ class TestResponseFormatBuilding:
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -577,6 +587,7 @@ class TestResponseFormatBuilding:
                 # No response_format specified
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 

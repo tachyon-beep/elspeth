@@ -118,10 +118,20 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict may not have ''input'' key'
   safety: Graceful handling - validation error message still produced
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=199
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=275
   owner: architecture
   reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict() must accept it'
   safety: Explicit check for serialized form before standard parsing - enables audit trail storage
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=271
+  owner: architecture
+  reason: 'Optional field: guaranteed_fields is not present in all schema configs'
+  safety: _parse_field_names_list handles None correctly - returns None
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=272
+  owner: architecture
+  reason: 'Optional field: required_fields is not present in all schema configs'
+  safety: _parse_field_names_list handles None correctly - returns None
   expires: null
 - key: contracts/data.py:R3:_type_name:line=212
   owner: architecture
@@ -344,15 +354,35 @@ allow_hits:
   reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed data, etc.)'
   safety: Logged and row quarantined with full error details
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=925
+- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=975
   owner: architecture
   reason: 'Framework boundary: Pydantic model_config may not have ''extra'' key (uses default)'
   safety: Missing key returns None, which != "allow", correctly treated as not-dynamic
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=926
+- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=976
   owner: architecture
   reason: 'Framework boundary: Pydantic model_config may not have ''extra'' key (uses default)'
   safety: Missing key returns None, which != "allow", correctly treated as not-dynamic
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:line=1095
+  owner: architecture
+  reason: 'Trust boundary: not all node configs have schema field (depends on node type)'
+  safety: Returns None when schema not present - calling code handles None appropriately
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1156
+  owner: architecture
+  reason: 'Optional field: required_input_fields is not present in all transform configs'
+  safety: Returns None when not present, then checks options dict for aggregations
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1162
+  owner: architecture
+  reason: 'Aggregation config structure: options is nested dict for aggregation nodes'
+  safety: Default {} when options missing - then checks for required_input_fields inside
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1164
+  owner: architecture
+  reason: 'Optional field: required_input_fields may not be in aggregation options'
+  safety: Returns frozenset of fields if present, falls through to schema check if not
   expires: null
 - key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=156
   owner: architecture

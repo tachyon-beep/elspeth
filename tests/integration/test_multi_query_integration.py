@@ -63,6 +63,7 @@ Assess this case against the criterion.
             "rationale": {"suffix": "rationale", "type": "string"},
         },
         "schema": {"fields": "dynamic"},
+        "required_input_fields": [],  # Explicit opt-out for this test
         "pool_size": 10,  # All 10 queries in parallel
         "temperature": 0.0,
     }
@@ -275,6 +276,7 @@ class TestMultiQueryIntegration:
             "response_format": "standard",
             "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
             "schema": {"fields": "dynamic"},
+            "required_input_fields": [],  # Explicit opt-out for this test
             "pool_size": 5,
         }
 

@@ -46,6 +46,7 @@ def make_config(**overrides: Any) -> dict[str, Any]:
             "rationale": {"suffix": "rationale", "type": "string"},
         },
         "schema": {"fields": "dynamic"},
+        "required_input_fields": [],  # Explicit opt-out for this test
         "pool_size": 4,
         "max_capacity_retry_seconds": 10,  # 10 second retry timeout
     }

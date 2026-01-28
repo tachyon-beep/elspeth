@@ -166,6 +166,7 @@ class TestExecutorBatchIntegration:
                     "api_key": "test-key",
                     "template": "Classify: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                 }
             )
@@ -233,6 +234,7 @@ class TestExecutorBatchIntegration:
                     "api_key": "test-key",
                     "template": "Classify: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                 }
             )
@@ -308,6 +310,7 @@ class TestExecutorBatchIntegration:
                     "api_key": "test-key",
                     "template": "Classify: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                     "on_error": "error_sink",  # Configure error routing
                 }
@@ -363,6 +366,7 @@ class TestExecutorBatchIntegration:
                     "api_key": "test-key",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                 }
             )
@@ -426,6 +430,7 @@ class TestExecutorBatchIntegration:
                     "api_key": "test-key",
                     "template": "{{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                 }
             )

@@ -57,6 +57,7 @@ class TestAzureBatchConfig:
                     "api_key": "azure-api-key",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -69,6 +70,7 @@ class TestAzureBatchConfig:
                     "api_key": "azure-api-key",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -81,6 +83,7 @@ class TestAzureBatchConfig:
                     "endpoint": "https://my-resource.openai.azure.com",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
 
@@ -117,6 +120,7 @@ class TestAzureBatchConfig:
                 "api_key": "azure-api-key",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -134,6 +138,7 @@ class TestAzureBatchConfig:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -155,6 +160,7 @@ class TestAzureBatchConfig:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2024-06-01",
                 "temperature": 0.7,
                 "max_tokens": 500,
@@ -185,6 +191,7 @@ class TestAzureBatchConfig:
                 "api_key": "key",
                 "template": "{{ row.x }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 0.0,
             }
         )
@@ -198,6 +205,7 @@ class TestAzureBatchConfig:
                 "api_key": "key",
                 "template": "{{ row.x }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "temperature": 2.0,
             }
         )
@@ -212,6 +220,7 @@ class TestAzureBatchConfig:
                     "api_key": "key",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "temperature": -0.1,
                 }
             )
@@ -225,6 +234,7 @@ class TestAzureBatchConfig:
                     "api_key": "key",
                     "template": "{{ row.x }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "temperature": 2.1,
                 }
             )
@@ -242,6 +252,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -256,6 +267,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -270,6 +282,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -284,6 +297,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2024-06-01",
                 "temperature": 0.5,
                 "max_tokens": 100,
@@ -314,6 +328,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "api_version": "2024-06-01",
             }
         )
@@ -333,6 +348,7 @@ class TestAzureBatchLLMTransformInit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -360,6 +376,7 @@ class TestAzureBatchLLMTransformEmptyBatch:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -395,6 +412,7 @@ class TestAzureBatchLLMTransformSubmit:
                 "api_key": "azure-api-key",
                 "template": "Analyze: {{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -457,6 +475,7 @@ class TestAzureBatchLLMTransformSubmit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "system_prompt": "You are helpful.",
             }
         )
@@ -498,6 +517,7 @@ class TestAzureBatchLLMTransformSubmit:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "max_tokens": 100,
             }
         )
@@ -547,6 +567,7 @@ class TestAzureBatchLLMTransformTemplateErrors:
                 "api_key": "azure-api-key",
                 "template": "{{ row.required_field }}",  # Requires specific field
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -569,6 +590,7 @@ class TestAzureBatchLLMTransformTemplateErrors:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -632,6 +654,7 @@ class TestAzureBatchLLMTransformResume:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -793,6 +816,7 @@ class TestAzureBatchLLMTransformTimeout:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
                 "max_wait_hours": 1,  # Short timeout for testing
             }
         )
@@ -851,6 +875,7 @@ class TestAzureBatchLLMTransformSingleRow:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -889,6 +914,7 @@ class TestAzureBatchLLMTransformResultAssembly:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -1049,6 +1075,7 @@ class TestAzureBatchLLMTransformClose:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 
@@ -1068,6 +1095,7 @@ class TestAzureBatchLLMTransformClose:
                 "api_key": "azure-api-key",
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
 

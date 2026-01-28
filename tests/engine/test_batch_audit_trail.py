@@ -224,6 +224,7 @@ class TestAuditTrailSuccessPath:
                     "api_key": "test-key",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                 }
             )
@@ -324,6 +325,7 @@ class TestAuditTrailErrorPath:
                     "api_key": "test-key",
                     "template": "Analyze: {{ row.text }}",
                     "schema": DYNAMIC_SCHEMA,
+                    "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 5,
                     "on_error": "error_sink",  # Configure error routing
                 }

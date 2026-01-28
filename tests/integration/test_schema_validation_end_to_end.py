@@ -389,7 +389,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     plugins = instantiate_plugins_from_config(config)
 
     # Graph construction should fail (PHASE 2 - schemas incompatible)
-    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+    with pytest.raises(ValueError, match=r"Missing fields.*email"):
         ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
             transforms=plugins["transforms"],

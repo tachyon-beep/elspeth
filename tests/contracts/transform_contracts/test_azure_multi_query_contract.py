@@ -67,6 +67,7 @@ class TestAzureMultiQueryLLMContract(TransformContractPropertyTestBase):
                 },
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
+                "required_input_fields": [],
             }
         )
         mock_ctx = _make_mock_context()
@@ -103,6 +104,7 @@ class TestAzureMultiQueryLLMSpecific:
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
+                "required_input_fields": [],
             }
         )
 
@@ -131,6 +133,7 @@ class TestAzureMultiQueryLLMSpecific:
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
+                "required_input_fields": [],
             }
         )
 
@@ -155,6 +158,7 @@ class TestAzureMultiQueryLLMAuditTrail:
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
+                "required_input_fields": [],
             }
         )
 
@@ -186,6 +190,7 @@ class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
                 },
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
+                "required_input_fields": [],
             }
         )
 

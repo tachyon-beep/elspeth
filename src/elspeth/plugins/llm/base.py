@@ -13,7 +13,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
@@ -34,6 +34,24 @@ class LLMConfig(TransformDataConfig):
     Extends TransformDataConfig to get:
     - schema: Input/output schema configuration (REQUIRED)
     - on_error: Sink for failed rows (optional)
+    - required_input_fields: Fields this transform requires (optional but recommended)
+
+    IMPORTANT: Template Field Requirements
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    If your template references row fields (e.g., {{ row.customer_id }}),
+    you SHOULD declare them in `required_input_fields`. This enables DAG
+    validation to catch missing fields at config time rather than runtime.
+
+    Use the helper utility to discover fields:
+
+        from elspeth.core.templates import extract_jinja2_fields
+
+        fields = extract_jinja2_fields(your_template)
+        # Returns: frozenset({'customer_id', 'amount'})
+        # Then add to config: required_input_fields: [customer_id, amount]
+
+    For templates with conditional logic ({% if row.x %}...{% endif %}),
+    only declare the fields that are TRULY required (always accessed).
 
     LLM-specific fields:
     - model: Model identifier (required)
@@ -106,6 +124,42 @@ class LLMConfig(TransformDataConfig):
         except TemplateError as e:
             raise ValueError(f"Invalid Jinja2 template: {e}") from e
         return v
+
+    @model_validator(mode="after")
+    def _validate_required_input_fields_declared(self) -> LLMConfig:
+        """Require explicit field declaration when template references row fields.
+
+        This enforces the "explicit contracts" pattern from ELSPETH's audit philosophy.
+        If a template accesses row.field, the user MUST declare what fields are required.
+
+        Opt-out mechanism:
+        - required_input_fields: [field_a, field_b]  # Declare specific requirements
+        - required_input_fields: []                   # Explicit opt-out (accept runtime risk)
+
+        Omitting required_input_fields entirely when template has row references is an error.
+        This prevents "Drifting Goals" pattern where teams deploy without thinking about contracts.
+        """
+        # None means "not specified" - this triggers the check
+        # Empty list [] means "explicit opt-out" - this is allowed
+        fields_not_declared = self.required_input_fields is None
+
+        if fields_not_declared:
+            # Use AST parser to detect row references - catches ALL Jinja2 patterns
+            # including {% if row.x %}, {{ filter(row.y) }}, row['field'], etc.
+            from elspeth.core.templates import extract_jinja2_fields
+
+            extracted = extract_jinja2_fields(self.template)
+            if extracted:
+                raise ValueError(
+                    f"LLM template references row fields {sorted(extracted)} but "
+                    f"required_input_fields is not declared.\n\n"
+                    f"You must explicitly declare field requirements:\n"
+                    f"  required_input_fields: {sorted(extracted)}  # Require these fields\n"
+                    f"  required_input_fields: []                    # Accept runtime risk (opt-out)\n\n"
+                    f"Use extract_jinja2_fields() from elspeth.core.templates to discover fields.\n"
+                    f"This explicit declaration enables DAG validation to catch missing fields at config time."
+                )
+        return self
 
 
 class BaseLLMTransform(BaseTransform):
