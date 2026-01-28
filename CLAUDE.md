@@ -367,6 +367,18 @@ Pipelines compile to DAGs. Linear pipelines are degenerate DAGs (single `continu
 | **Aggregation** | Collect N rows until trigger → emit result (stateful) |
 | **Coalesce** | Merge results from parallel paths |
 
+#### Aggregation Timeout Behavior
+
+Aggregation triggers fire in two ways:
+- **Count trigger**: Fires immediately when row count threshold is reached
+- **Timeout trigger**: Checked **before** each row is processed
+
+**Known Limitation (True Idle):** Timeout triggers fire when the next row arrives, not during completely idle periods. If no rows arrive, buffered data won't flush until either:
+1. A new row arrives (triggering the timeout check)
+2. The source completes (triggering end-of-source flush)
+
+For streaming sources that may never end, combine timeout with count triggers, or implement periodic heartbeat rows at the source level.
+
 ## Package Management: uv Required
 
 **STRICT REQUIREMENT:** Use `uv` for ALL package management. Never use `pip` directly.

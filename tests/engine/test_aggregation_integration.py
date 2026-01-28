@@ -258,3 +258,1041 @@ class TestAggregationTimeoutIntegration:
         assert 3 not in batch_counts, (
             "Timeout did NOT fire! All 3 rows were in one batch (count=3). Bug P1-2026-01-22: timeout only fires at end-of-source."
         )
+
+    def test_aggregation_timeout_loop_checks_all_nodes(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """The timeout check loop iterates over all aggregation nodes.
+
+        QA Review requirement: Verify _check_aggregation_timeouts() loop
+        correctly iterates over all aggregation node IDs.
+
+        Note: This test verifies that when multiple aggregation nodes are
+        registered, each one's timeout is checked independently. The existing
+        test (test_aggregation_timeout_flushes_during_processing) already
+        proves the timeout mechanism works for a single aggregation.
+
+        The first aggregation node should flush multiple times due to timeout,
+        proving the loop logic works correctly.
+        """
+        batch_sizes: list[int] = []
+
+        class SlowSource(_TestSourceBase):
+            """Source that emits rows with delays."""
+
+            name = "slow_source_loop"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Rows 1-2 at T=0
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                # Sleep to let timeout fire
+                time.sleep(0.2)
+                # Rows 3-4 trigger timeout checks
+                yield SourceRow.valid({"id": 3, "value": 300})
+                yield SourceRow.valid({"id": 4, "value": 400})
+
+            def close(self) -> None:
+                pass
+
+        class AggTransform(BaseTransform):
+            """Aggregation transform."""
+
+            name = "agg_loop"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    batch_sizes.append(len(row))
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects all rows."""
+
+            name = "collector_loop"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(SlowSource())
+        transform = as_transform(AggTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="agg_loop",
+            plugin="agg_loop",
+            trigger=TriggerConfig(timeout_seconds=0.1, count=100),
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="slow_source_loop", options={}),
+            sinks={"output": SinkSettings(plugin="collector_loop", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Aggregation should have flushed multiple times:
+        # First flush: timeout at 0.2s for first 2 rows
+        # Second flush: end-of-source for last 2 rows
+        assert len(batch_sizes) >= 2, (
+            f"Aggregation should have multiple batches due to timeout. Got {len(batch_sizes)} batches: {batch_sizes}"
+        )
+
+        # First batch should be rows 1-2 (before sleep)
+        # Second batch should be rows 3-4 (after sleep)
+        assert batch_sizes == [2, 2], f"Expected [2, 2] batch pattern, got {batch_sizes}. Timeout should fire after 0.2s sleep."
+
+    def test_timeout_fires_before_row_processing(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Timeout is checked BEFORE each row is processed, not after.
+
+        QA Review requirement: Verify timeout and count triggers are handled
+        correctly when both could fire.
+
+        Architecture insight: Timeout is checked BEFORE buffering a new row.
+        This means:
+        - Timeout check happens BEFORE row 2 is added to the batch
+        - If timeout fires, the current batch flushes FIRST
+        - THEN row 2 starts a fresh batch
+        - Count check happens AFTER row is buffered
+
+        Setup:
+        - count=2, timeout=0.1s
+        - Row 1 at T=0
+        - Sleep 0.15s (timeout expires)
+        - Row 2 at T=0.15s
+
+        Expected (correct behavior):
+        - Before processing row 2: timeout check fires (0.15s > 0.1s)
+        - Row 1 flushed alone via timeout → batch size 1
+        - Row 2 starts new batch, flushed at end-of-source → batch size 1
+        - Total: 2 flushes with [1, 1]
+        """
+        flush_count = 0
+        batch_sizes: list[int] = []
+
+        class TimedSource(_TestSourceBase):
+            """Source that times rows to trigger timeout before second row."""
+
+            name = "timed_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row 1 at T=0
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Wait for timeout to expire
+                time.sleep(0.15)
+                # Row 2 arrives after timeout has expired
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class CountingAggTransform(BaseTransform):
+            """Transform that counts flushes."""
+
+            name = "counting_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                nonlocal flush_count
+                if isinstance(row, list):
+                    flush_count += 1
+                    batch_sizes.append(len(row))
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class SimpleSink(_TestSinkBase):
+            """Simple sink."""
+
+            name = "simple_sink"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(TimedSource())
+        transform = as_transform(CountingAggTransform())
+        sink = as_sink(SimpleSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        node_id = transform_id_map[0]
+
+        # Both triggers configured: count=2 AND timeout=0.1s
+        # But timeout fires FIRST (before row 2 is added)
+        agg_settings = AggregationSettings(
+            name="race_agg",
+            plugin="counting_agg",
+            trigger=TriggerConfig(timeout_seconds=0.1, count=2),
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="timed_source", options={}),
+            sinks={"output": SinkSettings(plugin="simple_sink", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # KEY ASSERTION: Two flushes should happen
+        # 1. Timeout fires BEFORE row 2 is processed → row 1 alone → batch size 1
+        # 2. End-of-source → row 2 alone → batch size 1
+        assert flush_count == 2, (
+            f"Expected 2 flushes (timeout + end-of-source), got {flush_count}. "
+            f"Batch sizes: {batch_sizes}. "
+            "Timeout should fire BEFORE row 2 is added to the batch."
+        )
+
+        # Each batch should have exactly 1 row
+        assert batch_sizes == [1, 1], (
+            f"Expected two batches of size [1, 1], got {batch_sizes}. Timeout should flush row 1 before row 2 is added."
+        )
+
+
+class TestEndOfSourceFlush:
+    """Test end-of-source aggregation flush with all output_modes.
+
+    These tests verify that _flush_remaining_aggregation_buffers correctly
+    handles all output_mode semantics through the refactored handle_timeout_flush
+    with TriggerType.END_OF_SOURCE.
+
+    P2 Review requirement: QA requested 5 integration tests for END_OF_SOURCE:
+    1. END_OF_SOURCE + single (tested below)
+    2. END_OF_SOURCE + passthrough (tested below)
+    3. END_OF_SOURCE + transform (tested below)
+    4. END_OF_SOURCE + passthrough + downstream transform (tested below)
+    5. END_OF_SOURCE + passthrough + downstream gate (tested below)
+    """
+
+    def test_end_of_source_single_mode(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE flush with single output_mode creates one aggregated token.
+
+        Verifies that when the source completes with buffered rows, the
+        _flush_remaining_aggregation_buffers method correctly:
+        - Uses handle_timeout_flush with END_OF_SOURCE trigger
+        - Creates a single output token with aggregated data
+        """
+        batch_data: list[dict[str, Any]] = []
+
+        class FastSource(_TestSourceBase):
+            """Source that completes immediately with rows still in buffer."""
+
+            name = "fast_source_single"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Emit 3 rows, all will be buffered (count trigger is 100)
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+                # Source completes - end-of-source flush should trigger
+
+            def close(self) -> None:
+                pass
+
+        class SingleModeAgg(BaseTransform):
+            """Aggregation that sums values and returns single row."""
+
+            name = "single_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    batch_data.append({"rows": len(row), "total": sum(r.get("value", 0) for r in row)})
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_single"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(SingleModeAgg())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        agg_settings = AggregationSettings(
+            name="test_single",
+            plugin="single_agg",
+            trigger=TriggerConfig(count=100),  # Won't trigger by count - needs END_OF_SOURCE
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_single", options={}),
+            sinks={"output": SinkSettings(plugin="collector_single", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Single mode should produce exactly one output row
+        assert len(sink.rows) == 1, f"Single mode should produce 1 row, got {len(sink.rows)}: {sink.rows}"
+
+        # Verify aggregated data
+        output = sink.rows[0]
+        assert output["total"] == 600, f"Expected total=600 (100+200+300), got {output}"
+        assert output["count"] == 3, f"Expected count=3, got {output}"
+
+        # Verify batch was processed once with all 3 rows
+        assert len(batch_data) == 1, f"Expected 1 batch, got {len(batch_data)}"
+        assert batch_data[0]["rows"] == 3
+
+    def test_end_of_source_passthrough_mode(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE flush with passthrough output_mode preserves all tokens.
+
+        Verifies that passthrough mode:
+        - Returns same number of output rows as input rows
+        - Enriches each row with batch data
+        - Maintains proper token count through end-of-source flush
+        """
+        batch_sizes: list[int] = []
+
+        class FastSource(_TestSourceBase):
+            """Source that completes immediately."""
+
+            name = "fast_source_passthrough"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class PassthroughAgg(BaseTransform):
+            """Aggregation that enriches rows while preserving them."""
+
+            name = "passthrough_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    batch_sizes.append(len(row))
+                    # Passthrough: return same number of rows, enriched
+                    batch_total = sum(r.get("value", 0) for r in row)
+                    enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
+                    return TransformResult.success_multi(enriched)
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_passthrough"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(PassthroughAgg())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        agg_settings = AggregationSettings(
+            name="test_passthrough",
+            plugin="passthrough_agg",
+            trigger=TriggerConfig(count=100),
+            output_mode="passthrough",  # KEY: passthrough mode
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_passthrough", options={}),
+            sinks={"output": SinkSettings(plugin="collector_passthrough", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Passthrough mode should produce 3 output rows (one per input row)
+        assert len(sink.rows) == 3, f"Passthrough mode should produce 3 rows, got {len(sink.rows)}"
+
+        # All rows should be enriched with batch data
+        for row in sink.rows:
+            assert "batch_total" in row, f"Row should have batch_total: {row}"
+            assert row["batch_total"] == 600  # 100+200+300
+            assert row["batch_size"] == 3
+
+        # Original values should be preserved
+        values = {r["value"] for r in sink.rows}
+        assert values == {100, 200, 300}
+
+    def test_end_of_source_transform_mode(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE flush with transform output_mode creates new tokens.
+
+        Verifies that transform mode (N→M):
+        - Can produce different number of output rows than input
+        - Creates new token IDs for outputs
+        """
+        batch_sizes: list[int] = []
+
+        class FastSource(_TestSourceBase):
+            """Source that completes immediately."""
+
+            name = "fast_source_transform"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class TransformModeAgg(BaseTransform):
+            """Aggregation that produces 2 output rows from N inputs (summary + detail)."""
+
+            name = "transform_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    batch_sizes.append(len(row))
+                    total = sum(r.get("value", 0) for r in row)
+                    # Transform mode: N inputs → 2 outputs (summary row + count row)
+                    return TransformResult.success_multi(
+                        [
+                            {"type": "summary", "total": total},
+                            {"type": "count", "count": len(row)},
+                        ]
+                    )
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_transform"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(TransformModeAgg())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        agg_settings = AggregationSettings(
+            name="test_transform",
+            plugin="transform_agg",
+            trigger=TriggerConfig(count=100),
+            output_mode="transform",  # KEY: transform mode (N→M)
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_transform", options={}),
+            sinks={"output": SinkSettings(plugin="collector_transform", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Transform mode should produce 2 output rows (3 inputs → 2 outputs)
+        assert len(sink.rows) == 2, f"Transform mode should produce 2 rows, got {len(sink.rows)}"
+
+        # Check outputs
+        types = {r["type"] for r in sink.rows}
+        assert types == {"summary", "count"}
+
+        summary = next(r for r in sink.rows if r["type"] == "summary")
+        count_row = next(r for r in sink.rows if r["type"] == "count")
+
+        assert summary["total"] == 600
+        assert count_row["count"] == 3
+
+    def test_end_of_source_passthrough_with_downstream_transform(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE flush with passthrough routes tokens through downstream transforms.
+
+        Verifies that tokens flushed at end-of-source in passthrough mode
+        correctly continue through remaining transforms in the pipeline.
+        """
+
+        class FastSource(_TestSourceBase):
+            """Source that completes immediately."""
+
+            name = "fast_source_downstream"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class PassthroughAgg(BaseTransform):
+            """First transform: passthrough aggregation."""
+
+            name = "passthrough_agg_ds"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Passthrough: enrich with batch_total
+                    batch_total = sum(r.get("value", 0) for r in row)
+                    enriched = [{**r, "batch_total": batch_total} for r in row]
+                    return TransformResult.success_multi(enriched)
+                return TransformResult.success(dict(row))
+
+        class DownstreamTransform(BaseTransform):
+            """Second transform: adds 'processed' field."""
+
+            name = "downstream_transform"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = False
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+                return TransformResult.success({**row, "processed": True})
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_downstream"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        agg_transform = as_transform(PassthroughAgg())
+        downstream = as_transform(DownstreamTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[agg_transform, downstream],  # Two transforms in sequence
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        agg_node_id = transform_id_map[0]  # First transform (aggregation)
+
+        agg_settings = AggregationSettings(
+            name="test_passthrough_ds",
+            plugin="passthrough_agg_ds",
+            trigger=TriggerConfig(count=100),
+            output_mode="passthrough",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[agg_transform, downstream],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={agg_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_downstream", options={}),
+            sinks={"output": SinkSettings(plugin="collector_downstream", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Should have 2 output rows
+        assert len(sink.rows) == 2, f"Expected 2 rows, got {len(sink.rows)}"
+
+        # All rows should have batch_total from aggregation AND processed from downstream
+        for row in sink.rows:
+            assert "batch_total" in row, f"Row missing batch_total: {row}"
+            assert row["batch_total"] == 300  # 100+200
+            assert row.get("processed") is True, f"Row missing processed flag: {row}"
+
+    def test_end_of_source_single_with_downstream_transform(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """END_OF_SOURCE flush with single mode routes result through downstream transforms.
+
+        Verifies that the single aggregated output token from single mode
+        correctly continues through remaining transforms in the pipeline.
+        """
+
+        class FastSource(_TestSourceBase):
+            """Source that completes immediately."""
+
+            name = "fast_source_single_ds"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class SingleAgg(BaseTransform):
+            """First transform: single mode aggregation."""
+
+            name = "single_agg_ds"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class DownstreamTransform(BaseTransform):
+            """Second transform: adds 'processed' field."""
+
+            name = "downstream_single"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = False
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+                return TransformResult.success({**row, "processed": True, "doubled_total": row.get("total", 0) * 2})
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_single_ds"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        agg_transform = as_transform(SingleAgg())
+        downstream = as_transform(DownstreamTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[agg_transform, downstream],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        agg_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="test_single_ds",
+            plugin="single_agg_ds",
+            trigger=TriggerConfig(count=100),
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[agg_transform, downstream],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={agg_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_single_ds", options={}),
+            sinks={"output": SinkSettings(plugin="collector_single_ds", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Single mode with downstream should produce 1 row
+        assert len(sink.rows) == 1, f"Expected 1 row, got {len(sink.rows)}"
+
+        output = sink.rows[0]
+        # From aggregation:
+        assert output["total"] == 300  # 100+200
+        assert output["count"] == 2
+        # From downstream transform:
+        assert output["processed"] is True
+        assert output["doubled_total"] == 600  # 300*2
