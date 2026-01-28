@@ -169,3 +169,33 @@ else:
 ```
 
 This is a straightforward fix with no architectural implications.
+
+---
+
+## CLOSURE: 2026-01-29
+
+**Status:** FIXED
+
+**Fixed By:** Commit `8bd4086` - "Commit all working tree changes" (2026-01-27)
+
+**Resolution:**
+
+The fix was applied in `src/elspeth/core/dag.py` by adding the schema at the top level of the aggregation node config, aligning it with other node types:
+
+```python
+agg_node_config = {
+    "trigger": agg_config.trigger.model_dump(),
+    "output_mode": agg_config.output_mode,
+    "options": dict(agg_config.options),
+    "schema": transform_config["schema"],  # Added - now at top level
+}
+```
+
+This approach is cleaner than special-casing in the orchestrator because:
+1. All node types now have consistent config structure with schema at top level
+2. No conditional logic needed in orchestrator's schema extraction
+3. The aggregation transform's schema is the authoritative source
+
+**Verified By:** Claude Opus 4.5 (2026-01-29)
+- Confirmed `agg_node_config` now includes `"schema": transform_config["schema"]` at line 512
+- Orchestrator can now find schema via `node_info.config["schema"]` for all node types
