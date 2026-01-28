@@ -294,6 +294,10 @@ class AuditedLLMClient(AuditedClientBase):
                 "completion_tokens": response.usage.completion_tokens,
             }
 
+            # Capture full raw response for audit completeness
+            # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
+            raw_response = response.model_dump() if hasattr(response, "model_dump") else None
+
             self._recorder.record_call(
                 state_id=self._state_id,
                 call_index=call_index,
@@ -301,9 +305,12 @@ class AuditedLLMClient(AuditedClientBase):
                 status=CallStatus.SUCCESS,
                 request_data=request_data,
                 response_data={
+                    # Summary fields for convenience
                     "content": content,
                     "model": response.model,
                     "usage": usage,
+                    # Full response for audit completeness (tool_calls, multiple choices, etc.)
+                    "raw_response": raw_response,
                 },
                 latency_ms=latency_ms,
             )
@@ -313,7 +320,7 @@ class AuditedLLMClient(AuditedClientBase):
                 model=response.model,
                 usage=usage,
                 latency_ms=latency_ms,
-                raw_response=response.model_dump() if hasattr(response, "model_dump") else None,
+                raw_response=raw_response,  # Reuse captured response from audit recording
             )
 
         except Exception as e:

@@ -401,3 +401,269 @@ class TestAuditedLLMClient:
 
         # None content should become empty string
         assert result.content == ""
+
+    def test_full_raw_response_recorded_in_audit_trail(self) -> None:
+        """Full raw_response from model_dump() is recorded in audit trail.
+
+        This ensures audit completeness per CLAUDE.md:
+        "External calls - Full request AND response recorded"
+        """
+        recorder = self._create_mock_recorder()
+
+        # Create a realistic OpenAI response with all fields
+        full_response = {
+            "id": "chatcmpl-abc123",
+            "object": "chat.completion",
+            "created": 1699500000,
+            "model": "gpt-4-0613",
+            "system_fingerprint": "fp_44709d6fcb",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello!",
+                        "tool_calls": None,
+                    },
+                    "logprobs": None,
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        }
+
+        message = Mock()
+        message.content = "Hello!"
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4-0613"
+        response.usage = usage
+        response.model_dump = Mock(return_value=full_response)
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            underlying_client=openai_client,
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Verify raw_response is recorded in audit trail
+        call_kwargs = recorder.record_call.call_args[1]
+        response_data = call_kwargs["response_data"]
+
+        # Summary fields still present for convenience
+        assert response_data["content"] == "Hello!"
+        assert response_data["model"] == "gpt-4-0613"
+        assert response_data["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+
+        # Full raw_response now also recorded
+        assert response_data["raw_response"] == full_response
+        assert response_data["raw_response"]["id"] == "chatcmpl-abc123"
+        assert response_data["raw_response"]["system_fingerprint"] == "fp_44709d6fcb"
+        assert response_data["raw_response"]["choices"][0]["finish_reason"] == "stop"
+
+    def test_multiple_choices_preserved_in_raw_response(self) -> None:
+        """Multiple choices (n>1) are preserved in raw_response."""
+        recorder = self._create_mock_recorder()
+
+        # Response with multiple choices
+        full_response = {
+            "id": "chatcmpl-multi",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Option A"},
+                    "finish_reason": "stop",
+                },
+                {
+                    "index": 1,
+                    "message": {"role": "assistant", "content": "Option B"},
+                    "finish_reason": "stop",
+                },
+                {
+                    "index": 2,
+                    "message": {"role": "assistant", "content": "Option C"},
+                    "finish_reason": "length",
+                },
+            ],
+            "model": "gpt-4",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30, "total_tokens": 40},
+        }
+
+        message = Mock()
+        message.content = "Option A"  # First choice extracted
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 30
+
+        response = Mock()
+        response.choices = [choice]  # Only first choice for content extraction
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value=full_response)
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            underlying_client=openai_client,
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Give me options"}],
+        )
+
+        # Verify all choices are preserved in raw_response
+        call_kwargs = recorder.record_call.call_args[1]
+        raw_response = call_kwargs["response_data"]["raw_response"]
+
+        assert len(raw_response["choices"]) == 3
+        assert raw_response["choices"][0]["message"]["content"] == "Option A"
+        assert raw_response["choices"][1]["message"]["content"] == "Option B"
+        assert raw_response["choices"][2]["message"]["content"] == "Option C"
+        assert raw_response["choices"][2]["finish_reason"] == "length"
+
+    def test_tool_calls_preserved_in_raw_response(self) -> None:
+        """Tool calls are preserved in raw_response for function calling."""
+        recorder = self._create_mock_recorder()
+
+        # Response with tool calls
+        full_response = {
+            "id": "chatcmpl-tools",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,  # No text content when tool calls
+                        "tool_calls": [
+                            {
+                                "id": "call_abc123",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"location": "London"}',
+                                },
+                            },
+                            {
+                                "id": "call_def456",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_time",
+                                    "arguments": '{"timezone": "UTC"}',
+                                },
+                            },
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "model": "gpt-4",
+            "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        }
+
+        message = Mock()
+        message.content = None  # Tool call responses have no text content
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 50
+        usage.completion_tokens = 20
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value=full_response)
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            underlying_client=openai_client,
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "What's the weather?"}],
+        )
+
+        # Verify tool calls are preserved in raw_response
+        call_kwargs = recorder.record_call.call_args[1]
+        raw_response = call_kwargs["response_data"]["raw_response"]
+
+        assert raw_response["choices"][0]["finish_reason"] == "tool_calls"
+        tool_calls = raw_response["choices"][0]["message"]["tool_calls"]
+        assert len(tool_calls) == 2
+        assert tool_calls[0]["function"]["name"] == "get_weather"
+        assert tool_calls[1]["function"]["name"] == "get_time"
+
+    def test_raw_response_none_when_model_dump_unavailable(self) -> None:
+        """raw_response is None when response lacks model_dump method."""
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Hello!"
+
+        choice = Mock()
+        choice.message = message
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        # Response without model_dump method
+        response = Mock(spec=["choices", "model", "usage"])
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            underlying_client=openai_client,
+        )
+
+        client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # raw_response should be None, not crash
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["response_data"]["raw_response"] is None
+        # Summary fields still present
+        assert call_kwargs["response_data"]["content"] == "Hello!"

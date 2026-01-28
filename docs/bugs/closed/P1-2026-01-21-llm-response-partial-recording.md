@@ -176,3 +176,73 @@ Tests in `/home/john/elspeth-rapid/tests/plugins/clients/test_audited_llm_client
 ### Recommendation
 
 Bug should remain **P1** priority. While not currently causing failures, it represents a fundamental architectural gap that blocks important future capabilities and violates the auditability contract.
+
+---
+
+## Resolution (2026-01-28)
+
+**Status: FIXED**
+
+### Fix Summary
+
+Added `raw_response` field to the `response_data` dict passed to `recorder.record_call()`. The full response from `response.model_dump()` is now recorded in the audit trail alongside the summary fields.
+
+### Code Changes
+
+**File:** `src/elspeth/plugins/clients/llm.py`
+
+Changed `record_call()` invocation (lines 297-316) to include full raw response:
+
+```python
+# Capture full raw response for audit completeness
+# raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
+raw_response = response.model_dump() if hasattr(response, "model_dump") else None
+
+self._recorder.record_call(
+    state_id=self._state_id,
+    call_index=call_index,
+    call_type=CallType.LLM,
+    status=CallStatus.SUCCESS,
+    request_data=request_data,
+    response_data={
+        # Summary fields for convenience
+        "content": content,
+        "model": response.model,
+        "usage": usage,
+        # Full response for audit completeness (tool_calls, multiple choices, etc.)
+        "raw_response": raw_response,
+    },
+    latency_ms=latency_ms,
+)
+```
+
+### Tests Added
+
+**File:** `tests/plugins/clients/test_audited_llm_client.py`
+
+Added 4 new tests:
+1. `test_full_raw_response_recorded_in_audit_trail` - Verifies complete response structure preserved
+2. `test_multiple_choices_preserved_in_raw_response` - Verifies n>1 choices captured
+3. `test_tool_calls_preserved_in_raw_response` - Verifies function calling data captured
+4. `test_raw_response_none_when_model_dump_unavailable` - Handles edge case gracefully
+
+### Verification
+
+- All 21 tests in `test_audited_llm_client.py` pass
+- All 449 tests in `tests/plugins/clients/` and `tests/plugins/llm/` pass
+- mypy type checking passes
+- ruff linting passes
+
+### Architectural Compliance
+
+This fix restores compliance with CLAUDE.md:
+
+> **Data storage points** (non-negotiable):
+> 3. **External calls** - Full request AND response recorded
+
+The audit trail now contains the complete LLM provider response, enabling:
+- Replay/verify mode for full response reconstruction
+- Tool call auditing for function calling
+- Multi-choice analysis when n>1
+- Finish reason tracking (stop, length, content_filter, tool_calls)
+- Response metadata (id, system_fingerprint, created timestamp)
