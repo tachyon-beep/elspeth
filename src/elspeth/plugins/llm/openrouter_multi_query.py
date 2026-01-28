@@ -475,14 +475,17 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         messages.append({"role": "user", "content": rendered.prompt})
 
         # 4. Build HTTP request body
+        # Use per-query max_tokens if specified, otherwise fall back to transform default
+        effective_max_tokens = spec.max_tokens or self._max_tokens
+
         request_body: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
             "response_format": self._response_format_dict,
         }
-        if self._max_tokens:
-            request_body["max_tokens"] = self._max_tokens
+        if effective_max_tokens:
+            request_body["max_tokens"] = effective_max_tokens
 
         # 5. Get HTTP client
         http_client = self._get_http_client(state_id)
@@ -558,6 +561,27 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             )
 
         usage = data.get("usage", {})
+
+        # 8b. Check for response truncation BEFORE parsing
+        # If completion_tokens equals max_tokens, the response was likely truncated
+        # usage is Tier 3 external data - use .get() for optional fields
+        completion_tokens = usage.get("completion_tokens", 0)
+        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+            return TransformResult.error(
+                {
+                    "reason": "response_truncated",
+                    "error": (
+                        f"LLM response was truncated at {completion_tokens} tokens "
+                        f"(max_tokens={effective_max_tokens}). "
+                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                    ),
+                    "query": spec.output_prefix,
+                    "max_tokens": effective_max_tokens,
+                    "completion_tokens": completion_tokens,
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "raw_response_preview": content[:500] if content else None,
+                }
+            )
 
         # 9. Parse LLM response content as JSON (THEIR DATA - wrap)
         content_str = content.strip()

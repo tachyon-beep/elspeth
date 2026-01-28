@@ -643,17 +643,27 @@ allow_hits:
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # OpenRouter multi-query external API responses (Tier 3 trust boundary)
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=530
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=533
   owner: architecture
   reason: 'Trust boundary (Tier 3): HTTP response headers from external server may lack content-type'
   safety: Graceful default to 'unknown' - used for error reporting only
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=560
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=563
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=632
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=568
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API completion_tokens may be missing in usage dict'
+  safety: Default 0 skips truncation check - truncation detected later via JSON parse failure
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=581
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API prompt_tokens is informational in error response'
+  safety: Default 0 in error metadata - does not affect control flow
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=656
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit still captures actual value
