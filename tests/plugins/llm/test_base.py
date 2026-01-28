@@ -442,6 +442,7 @@ class TestBaseLLMTransformProcess:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response"] == "Analysis result"
+        assert result.row["llm_response_model"] == "gpt-4"
         assert result.row["llm_response_usage"] == {
             "prompt_tokens": 10,
             "completion_tokens": 20,
@@ -475,6 +476,7 @@ class TestBaseLLMTransformProcess:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["analysis"] == "Result"
+        assert result.row["analysis_model"] == "gpt-4"
         assert "analysis_usage" in result.row
         assert "analysis_template_hash" in result.row
         assert "analysis_variables_hash" in result.row

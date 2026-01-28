@@ -146,3 +146,12 @@ Bug remains valid and unaddressed. Priority P2 is appropriate given:
 - Misclassifies audit records (destroys audit integrity)
 - Blocks usage of legitimate provider configurations
 - Simple fix: guard `response.usage` access with None check
+
+## Resolution
+
+**Fixed in:** 2026-01-29
+**Fix:** Added None check before accessing `response.usage` fields. When usage is None (provider omits data), an empty dict is used instead, allowing the call to be recorded as SUCCESS.
+
+**Changes:**
+- `src/elspeth/plugins/clients/llm.py`: Added guard at lines 292-299
+- `tests/plugins/clients/test_audited_llm_client.py`: Added test for None usage scenario

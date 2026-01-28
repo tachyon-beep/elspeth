@@ -289,10 +289,14 @@ class AuditedLLMClient(AuditedClientBase):
             latency_ms = (time.perf_counter() - start) * 1000
 
             content = response.choices[0].message.content or ""
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-            }
+            # Guard against providers that omit usage data (streaming, certain configs)
+            if response.usage is not None:
+                usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                }
+            else:
+                usage = {}
 
             # Capture full raw response for audit completeness
             # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.

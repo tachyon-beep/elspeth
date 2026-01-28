@@ -321,6 +321,70 @@ class TestAuditedHTTPClient:
         actual_url = mock_client.post.call_args[0][0]
         assert actual_url == "https://api.example.com/v1/process"
 
+    def test_base_url_trailing_slash_url_leading_slash(self) -> None:
+        """Base URL with trailing slash + URL with leading slash produces single slash."""
+        recorder = self._create_mock_recorder()
+
+        # Both have slashes - would cause double slash with naive concat
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com/",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("/v1/process")
+
+        # Should have exactly one slash, not double
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
+
+        actual_url = mock_client.post.call_args[0][0]
+        assert actual_url == "https://api.example.com/v1/process"
+
+    def test_base_url_no_trailing_slash_url_no_leading_slash(self) -> None:
+        """Base URL without trailing slash + URL without leading slash produces correct URL."""
+        recorder = self._create_mock_recorder()
+
+        # Neither has slashes - would cause missing slash with naive concat
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com/v1",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b""
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("process")
+
+        # Should have slash separator inserted
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["request_data"]["url"] == "https://api.example.com/v1/process"
+
+        actual_url = mock_client.post.call_args[0][0]
+        assert actual_url == "https://api.example.com/v1/process"
+
     def test_response_body_size_recorded(self) -> None:
         """Response body size is recorded in bytes."""
         recorder = self._create_mock_recorder()

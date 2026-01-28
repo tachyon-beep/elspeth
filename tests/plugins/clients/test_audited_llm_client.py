@@ -667,3 +667,50 @@ class TestAuditedLLMClient:
         assert call_kwargs["response_data"]["raw_response"] is None
         # Summary fields still present
         assert call_kwargs["response_data"]["content"] == "Hello!"
+
+    def test_successful_call_with_missing_usage(self) -> None:
+        """LLM call succeeds when provider returns no usage data.
+
+        Some LLM providers/modes (streaming, certain Azure configs) omit
+        usage data entirely. The client should record this as SUCCESS
+        with an empty usage dict, not crash with AttributeError.
+        """
+        recorder = self._create_mock_recorder()
+
+        message = Mock()
+        message.content = "Hello, I'm working!"
+
+        choice = Mock()
+        choice.message = message
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = None  # Provider omits usage data
+        response.model_dump = Mock(return_value={"id": "resp_no_usage"})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            recorder=recorder,
+            state_id="state_123",
+            underlying_client=openai_client,
+        )
+
+        result = client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        # Call should succeed (not crash)
+        assert result.content == "Hello, I'm working!"
+        assert result.model == "gpt-4"
+        assert result.usage == {}  # Empty dict, not crash
+
+        # Audit trail should record SUCCESS with empty usage
+        recorder.record_call.assert_called_once()
+        call_kwargs = recorder.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+        assert call_kwargs["response_data"]["content"] == "Hello, I'm working!"
+        assert call_kwargs["response_data"]["usage"] == {}

@@ -310,6 +310,7 @@ class BaseLLMTransform(BaseTransform):
         # 5. Build output row (OUR CODE - let exceptions crash)
         output = dict(row)
         output[self._response_field] = response.content
+        output[f"{self._response_field}_model"] = response.model
         output[f"{self._response_field}_usage"] = response.usage
 
         # 6. Add audit metadata for template traceability

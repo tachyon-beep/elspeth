@@ -161,3 +161,12 @@ Keep open. This is a valid auditability gap that should be fixed to:
 ```python
 output[f"{self._response_field}_model"] = response.model
 ```
+
+## Resolution
+
+**Fixed in:** 2026-01-29
+**Fix:** Added `output[f"{self._response_field}_model"] = response.model` to BaseLLMTransform.process() at line 313 in base.py, aligning with Azure/OpenRouter transforms.
+
+**Changes:**
+- `src/elspeth/plugins/llm/base.py`: Added model field to output row
+- `tests/plugins/llm/test_base.py`: Updated tests to verify model field presence

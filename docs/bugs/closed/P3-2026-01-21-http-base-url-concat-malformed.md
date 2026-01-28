@@ -175,3 +175,12 @@ Bug remains valid and should be fixed. Recommend:
 1. Switch to `httpx.Client(base_url=...)` pattern
 2. Add comprehensive URL joining tests covering all slash combinations
 3. Document expected URL format in docstring (relative vs absolute paths)
+
+## Resolution
+
+**Fixed in:** 2026-01-29
+**Fix:** Replaced naive string concatenation with proper slash normalization. The new code strips trailing slashes from base URL and leading slashes from path, then joins with exactly one slash.
+
+**Changes:**
+- `src/elspeth/plugins/clients/http.py`: Updated URL joining logic at lines 192-200
+- `tests/plugins/clients/test_audited_http_client.py`: Added edge case tests for slash handling
