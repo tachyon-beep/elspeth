@@ -6,9 +6,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from elspeth.plugins.batching.mixin import BatchTransformMixin
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
+from .test_batch_transform_protocol import BatchTransformContractTestBase
 from .test_transform_protocol import TransformContractPropertyTestBase
 
 if TYPE_CHECKING:
@@ -157,3 +159,36 @@ class TestAzureMultiQueryLLMAuditTrail:
         )
 
         assert transform._on_error is not None
+
+
+class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
+    """Verify Azure multi-query transform honors BatchTransformMixin contract."""
+
+    @pytest.fixture
+    def batch_transform(self) -> BatchTransformMixin:
+        """Provide unconfigured transform (no connect_output yet)."""
+        return AzureMultiQueryLLMTransform(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "test-key",
+                "template": "{{ row.input_1 }} {{ row.criterion.name }}",
+                "case_studies": [
+                    {"name": "cs1", "input_fields": ["cs1_a", "cs1_b"]},
+                ],
+                "criteria": [
+                    {"name": "test_criterion", "code": "TEST"},
+                ],
+                "response_format": "standard",
+                "output_mapping": {
+                    "score": {"suffix": "score", "type": "integer"},
+                    "rationale": {"suffix": "rationale", "type": "string"},
+                },
+                "schema": {"fields": "dynamic"},
+                "on_error": "quarantine_sink",
+            }
+        )
+
+    @pytest.fixture
+    def valid_input(self) -> dict[str, Any]:
+        return {"cs1_a": "value_a", "cs1_b": "value_b"}
