@@ -136,3 +136,4 @@ real/
 examples/large_scale_test/input.csv
 landscape.db-shm
 landscape.db-wal
+.elspeth/
