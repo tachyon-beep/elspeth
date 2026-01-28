@@ -103,6 +103,11 @@ class PooledExecutor:
         # This prevents concurrent batches from mixing results in the shared buffer
         self._batch_lock = Lock()
 
+        # Global dispatch gate - ensures minimum time between dispatches
+        # This implements the design spec: "Dispatcher waits current_delay between dispatches"
+        self._last_dispatch_time: float = 0.0  # time.monotonic() of last dispatch
+        self._dispatch_gate_lock = Lock()  # Serializes dispatch timing coordination
+
         self._shutdown = False
 
     @property
@@ -239,6 +244,58 @@ class PooledExecutor:
 
         return results
 
+    def _wait_for_dispatch_gate(self) -> None:
+        """Wait until we're allowed to dispatch, ensuring global pacing.
+
+        Coordinates with other workers to ensure at least min_dispatch_delay_ms
+        between consecutive dispatches. This implements the design spec:
+        "Dispatcher waits current_delay between dispatches (AIMD-controlled)"
+
+        Uses max(current_delay_ms, min_dispatch_delay_ms) to ensure minimum
+        pacing is always enforced, even before any capacity errors trigger
+        AIMD backoff.
+
+        The lock is only held during check-and-update, not during sleep,
+        allowing other workers to make progress.
+        """
+        total_wait_ms = 0.0
+
+        while True:
+            with self._dispatch_gate_lock:
+                now = time.monotonic()
+
+                # Use max of current delay and configured minimum
+                # This ensures minimum pacing even when AIMD starts at 0
+                throttle_delay_ms = self._throttle.current_delay_ms
+                min_delay_ms = self._config.min_dispatch_delay_ms
+                delay_ms = max(throttle_delay_ms, min_delay_ms)
+                delay_s = delay_ms / 1000
+
+                # Handle first dispatch: let it through immediately
+                # _last_dispatch_time == 0 means no dispatch yet (since monotonic() > 0)
+                if self._last_dispatch_time == 0.0:
+                    self._last_dispatch_time = now
+                    break
+
+                time_since_last = now - self._last_dispatch_time
+
+                if time_since_last >= delay_s:
+                    # Gate is open - we can dispatch
+                    self._last_dispatch_time = now
+                    break
+
+                # Calculate remaining wait time
+                remaining_s = delay_s - time_since_last
+                remaining_ms = remaining_s * 1000
+
+            # Sleep OUTSIDE the lock to allow other workers to check
+            time.sleep(remaining_s)
+            total_wait_ms += remaining_ms
+
+        # Record accumulated wait time for audit trail
+        if total_wait_ms > 0:
+            self._throttle.record_throttle_wait(total_wait_ms)
+
     def _execute_single(
         self,
         buffer_idx: int,
@@ -283,13 +340,10 @@ class PooledExecutor:
 
         try:
             while True:
-                # Apply throttle delay INSIDE worker (after semaphore acquired)
+                # Wait for global dispatch gate (ensures pacing between ALL dispatches)
                 # Skip if we just retried - we already slept during retry backoff
                 if not just_retried:
-                    delay_ms = self._throttle.current_delay_ms
-                    if delay_ms > 0:
-                        time.sleep(delay_ms / 1000)
-                        self._throttle.record_throttle_wait(delay_ms)
+                    self._wait_for_dispatch_gate()
                 just_retried = False  # Reset for next iteration
 
                 try:

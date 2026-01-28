@@ -514,3 +514,83 @@ class TestPooledExecutorConcurrentBatches:
             assert result.row["idx"] == i, f"Batch B result {i} has wrong index {result.row['idx']}"
 
         executor.shutdown()
+
+
+class TestPooledExecutorDispatchPacing:
+    """Test that dispatch pacing is global, not per-worker."""
+
+    def test_dispatch_pacing_is_global_not_per_worker(self) -> None:
+        """Dispatches should be spaced globally, not per-worker.
+
+        With pool_size=4 and min_dispatch_delay_ms=100, dispatches should
+        be at least 100ms apart globally (not 4 simultaneous dispatches
+        every 100ms).
+        """
+        config = PoolConfig(
+            pool_size=4,
+            min_dispatch_delay_ms=100,
+        )
+        executor = PooledExecutor(config)
+
+        dispatch_times: list[float] = []
+        lock = Lock()
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            with lock:
+                dispatch_times.append(time.monotonic())
+            time.sleep(0.01)  # Minimal work
+            return TransformResult.success(row)
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(8)]
+
+        results = executor.execute_batch(contexts, mock_process)
+
+        assert len(results) == 8
+
+        # Sort dispatch times and check intervals
+        dispatch_times.sort()
+        for i in range(1, len(dispatch_times)):
+            interval_ms = (dispatch_times[i] - dispatch_times[i - 1]) * 1000
+            # Allow some tolerance (90ms instead of 100ms)
+            assert interval_ms >= 90, f"Dispatch {i} was only {interval_ms:.1f}ms after dispatch {i - 1}, expected >= 100ms"
+
+        executor.shutdown()
+
+    def test_no_burst_traffic_on_startup(self) -> None:
+        """All workers should not dispatch simultaneously at startup.
+
+        Regression test for burst bug: with pool_size=4, we should NOT
+        see 4 dispatches within a few milliseconds of each other.
+        """
+        config = PoolConfig(
+            pool_size=4,
+            min_dispatch_delay_ms=50,
+        )
+        executor = PooledExecutor(config)
+
+        dispatch_times: list[float] = []
+        lock = Lock()
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            with lock:
+                dispatch_times.append(time.monotonic())
+            time.sleep(0.2)  # Longer than total delay budget
+            return TransformResult.success(row)
+
+        # Exactly pool_size rows - all would dispatch together in buggy version
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
+
+        results = executor.execute_batch(contexts, mock_process)
+
+        assert len(results) == 4
+
+        # Check that dispatches are NOT bunched together
+        dispatch_times.sort()
+        first_dispatch = dispatch_times[0]
+        last_of_first_batch = dispatch_times[-1]
+
+        # With 50ms delay between each, 4 dispatches should span ~150ms minimum
+        span_ms = (last_of_first_batch - first_dispatch) * 1000
+        assert span_ms >= 120, f"All 4 dispatches completed within {span_ms:.1f}ms - indicates burst traffic (expected >= 150ms span)"
+
+        executor.shutdown()
