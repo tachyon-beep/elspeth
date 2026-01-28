@@ -37,8 +37,11 @@ def make_config(**overrides: Any) -> dict[str, Any]:
             {"name": "diagnosis", "code": "DIAG"},
             {"name": "treatment", "code": "TREAT"},
         ],
-        "response_format": "json",
-        "output_mapping": {"score": "score", "rationale": "rationale"},
+        "response_format": "standard",
+        "output_mapping": {
+            "score": {"suffix": "score", "type": "integer"},
+            "rationale": {"suffix": "rationale", "type": "string"},
+        },
         "schema": DYNAMIC_SCHEMA,
         "pool_size": 4,
     }

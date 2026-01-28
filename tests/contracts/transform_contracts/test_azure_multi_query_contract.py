@@ -58,8 +58,11 @@ class TestAzureMultiQueryLLMContract(TransformContractPropertyTestBase):
                 "criteria": [
                     {"name": "test_criterion", "code": "TEST"},
                 ],
-                "response_format": "json",
-                "output_mapping": {"score": "score", "rationale": "rationale"},
+                "response_format": "standard",
+                "output_mapping": {
+                    "score": {"suffix": "score", "type": "integer"},
+                    "rationale": {"suffix": "rationale", "type": "string"},
+                },
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
             }
@@ -94,8 +97,8 @@ class TestAzureMultiQueryLLMSpecific:
                     {"name": "crit2"},
                     {"name": "crit3"},
                 ],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
+                "response_format": "standard",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
             }
@@ -122,8 +125,8 @@ class TestAzureMultiQueryLLMSpecific:
                 "template": "{{ row.input_1 }}",
                 "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                 "criteria": [{"name": "crit1"}],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
+                "response_format": "standard",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
             }
@@ -146,8 +149,8 @@ class TestAzureMultiQueryLLMAuditTrail:
                 "template": "{{ row.input_1 }}",
                 "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                 "criteria": [{"name": "crit1"}],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
+                "response_format": "standard",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
                 "on_error": "quarantine_sink",
             }

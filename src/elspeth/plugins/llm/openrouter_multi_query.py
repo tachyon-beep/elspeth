@@ -26,7 +26,14 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.multi_query import CaseStudyConfig, CriterionConfig, QuerySpec
+from elspeth.plugins.llm.multi_query import (
+    CaseStudyConfig,
+    CriterionConfig,
+    OutputFieldConfig,
+    OutputFieldType,
+    QuerySpec,
+    ResponseFormat,
+)
 from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import CapacityError, PooledExecutor, is_capacity_error
@@ -42,8 +49,8 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
     Extends OpenRouterConfig with:
     - case_studies: List of case study definitions
     - criteria: List of criterion definitions
-    - output_mapping: JSON field -> row column suffix mapping
-    - response_format: Expected LLM output format (json)
+    - output_mapping: JSON field -> typed output field configuration
+    - response_format: Response format mode (standard or structured)
 
     The cross-product of case_studies x criteria defines all queries.
 
@@ -66,10 +73,14 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
                   code: DIAG
                 - name: treatment
                   code: TREAT
-              response_format: json
+              response_format: structured  # or "standard" for JSON mode without schema
               output_mapping:
-                score: score
-                rationale: rationale
+                score:
+                  suffix: score
+                  type: integer
+                rationale:
+                  suffix: rationale
+                  type: string
               pool_size: 4
               schema:
                 fields: dynamic
@@ -85,22 +96,64 @@ class OpenRouterMultiQueryConfig(OpenRouterConfig):
         description="Criterion definitions",
         min_length=1,
     )
-    output_mapping: dict[str, str] = Field(
+    output_mapping: dict[str, OutputFieldConfig] = Field(
         ...,
-        description="JSON field -> row column suffix mapping",
+        description="JSON field -> typed output field configuration",
     )
-    response_format: str = Field(
-        "json",
-        description="Expected response format",
+    response_format: ResponseFormat = Field(
+        ResponseFormat.STANDARD,
+        description="Response format: 'standard' (JSON mode) or 'structured' (schema-enforced)",
     )
 
-    @field_validator("output_mapping")
+    @field_validator("output_mapping", mode="before")
     @classmethod
-    def validate_output_mapping_not_empty(cls, v: dict[str, str]) -> dict[str, str]:
-        """Ensure at least one output mapping."""
+    def parse_output_mapping(cls, v: Any) -> dict[str, Any]:
+        """Parse output_mapping from config dict format."""
+        if not isinstance(v, dict):
+            raise ValueError("output_mapping must be a dict")
         if not v:
             raise ValueError("output_mapping cannot be empty")
+        # Pydantic will handle nested OutputFieldConfig parsing
         return v
+
+    def build_json_schema(self) -> dict[str, Any]:
+        """Build JSON Schema for structured outputs.
+
+        Returns:
+            Complete JSON Schema dict for the response format
+        """
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+
+        for json_field, field_config in self.output_mapping.items():
+            properties[json_field] = field_config.to_json_schema()
+            required.append(json_field)
+
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def build_response_format(self) -> dict[str, Any]:
+        """Build the response_format parameter for the LLM API.
+
+        Returns:
+            Dict to pass as response_format to the LLM API
+        """
+        if self.response_format == ResponseFormat.STRUCTURED:
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "query_response",
+                    "strict": True,
+                    "schema": self.build_json_schema(),
+                },
+            }
+        else:
+            # Standard JSON mode
+            return {"type": "json_object"}
 
     def expand_queries(self) -> list[QuerySpec]:
         """Expand config into QuerySpec list (case_studies x criteria).
@@ -185,10 +238,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                   code: DIAG
                 - name: treatment
                   code: TREAT
-              response_format: json
+              response_format: structured  # or "standard" for JSON mode without schema
               output_mapping:
-                score: score
-                rationale: rationale
+                score:
+                  suffix: score
+                  type: integer
+                rationale:
+                  suffix: rationale
+                  type: string
               pool_size: 4
               schema:
                 fields: dynamic
@@ -232,8 +289,9 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._on_error = cfg.on_error
 
         # Multi-query specific settings
-        self._output_mapping = cfg.output_mapping
-        self._response_format = cfg.response_format
+        self._output_mapping: dict[str, OutputFieldConfig] = cfg.output_mapping
+        self._response_format: ResponseFormat = cfg.response_format
+        self._response_format_dict: dict[str, Any] = cfg.build_response_format()
 
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
@@ -320,6 +378,57 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 )
             return self._http_clients[state_id]
 
+    def _validate_field_type(
+        self,
+        field_name: str,
+        value: Any,
+        field_config: OutputFieldConfig,
+    ) -> str | None:
+        """Validate that a parsed value matches the expected type.
+
+        Args:
+            field_name: Name of the field (for error messages)
+            value: The parsed JSON value
+            field_config: Expected type configuration
+
+        Returns:
+            Error message if validation fails, None if valid
+        """
+        expected_type = field_config.type
+
+        if expected_type == OutputFieldType.STRING:
+            if not isinstance(value, str):
+                return f"expected string, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.INTEGER:
+            # JSON integers come as int, but also accept float if it's a whole number
+            if isinstance(value, bool):  # bool is subclass of int in Python
+                return "expected integer, got boolean"
+            if isinstance(value, int):
+                pass  # Valid
+            elif isinstance(value, float) and value.is_integer():
+                pass  # Accept whole number floats (e.g., 42.0)
+            else:
+                return f"expected integer, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.NUMBER:
+            if isinstance(value, bool):
+                return "expected number, got boolean"
+            if not isinstance(value, (int, float)):
+                return f"expected number, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.BOOLEAN:
+            if not isinstance(value, bool):
+                return f"expected boolean, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.ENUM:
+            if not isinstance(value, str):
+                return f"expected string (enum), got {type(value).__name__}"
+            if field_config.values and value not in field_config.values:
+                return f"value '{value}' not in allowed values: {field_config.values}"
+
+        return None
+
     def _process_single_query(
         self,
         row: dict[str, Any],
@@ -370,6 +479,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
+            "response_format": self._response_format_dict,
         }
         if self._max_tokens:
             request_body["max_tokens"] = self._max_tokens
@@ -450,9 +560,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         usage = data.get("usage", {})
 
         # 9. Parse LLM response content as JSON (THEIR DATA - wrap)
-        # Strip markdown code blocks if present (common LLM behavior)
         content_str = content.strip()
-        if content_str.startswith("```"):
+
+        # Strip markdown code blocks if present (common in standard mode, not in structured mode)
+        if self._response_format == ResponseFormat.STANDARD and content_str.startswith("```"):
             # Remove opening fence (```json or ```)
             first_newline = content_str.find("\n")
             if first_newline != -1:
@@ -485,10 +596,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 }
             )
 
-        # 10. Map output fields
+        # 10. Map and validate output fields
         output: dict[str, Any] = {}
-        for json_field, suffix in self._output_mapping.items():
-            output_key = f"{spec.output_prefix}_{suffix}"
+        for json_field, field_config in self._output_mapping.items():
+            output_key = f"{spec.output_prefix}_{field_config.suffix}"
             if json_field not in parsed:
                 return TransformResult.error(
                     {
@@ -497,7 +608,24 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                         "query": spec.output_prefix,
                     }
                 )
-            output[output_key] = parsed[json_field]
+
+            value = parsed[json_field]
+
+            # Type validation (defense-in-depth for both modes)
+            type_error = self._validate_field_type(json_field, value, field_config)
+            if type_error is not None:
+                return TransformResult.error(
+                    {
+                        "reason": "type_mismatch",
+                        "field": json_field,
+                        "expected": field_config.type.value,
+                        "actual": type(value).__name__,
+                        "value": str(value)[:100],  # Truncate for audit
+                        "query": spec.output_prefix,
+                    }
+                )
+
+            output[output_key] = value
 
         # 11. Add metadata for audit trail
         output[f"{spec.output_prefix}_usage"] = usage

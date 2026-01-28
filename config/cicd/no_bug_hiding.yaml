@@ -625,3 +625,92 @@ allow_hits:
   reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
   safety: Default empty string when unset is intentional; enables dev mode without fingerprint key (consistent with config.py and database_sink.py)
   expires: null
+# CLI status_symbols lookups (shifted due to routed_destinations feature)
+- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=799
+  owner: architecture
+  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
+  safety: Default '?' symbol for unrecognized statuses - output still produced
+  expires: null
+- key: cli.py:R1:_execute_resume_with_instances:_format_run_completed:line=1238
+  owner: architecture
+  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
+  safety: Default '?' symbol for unrecognized statuses - output still produced
+  expires: null
+# CLI health command - environment variables and external system checks
+- key: cli.py:R1:health:line=1633
+  owner: architecture
+  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
+  safety: Empty string default is safe - commit SHA is informational only
+  expires: null
+- key: cli.py:R4:health:line=1645
+  owner: architecture
+  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
+  safety: Graceful fallback to 'unknown' - health check reports git as unavailable
+  expires: null
+- key: cli.py:R1:health:line=1661
+  owner: architecture
+  reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
+  safety: Empty string default triggers skip logic - database check only runs if configured
+  expires: null
+- key: cli.py:R4:health:line=1673
+  owner: architecture
+  reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
+  safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
+  expires: null
+- key: cli.py:R4:health:line=1737
+  owner: architecture
+  reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
+  safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
+  expires: null
+# Orchestrator cleanup and routed_destinations counting
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=233
+  owner: architecture
+  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
+  safety: Errors logged with full details, then raised after all cleanups attempted
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1062
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1129
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1221
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=1953
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2009
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2074
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+# OpenRouter multi-query external API responses (Tier 3 trust boundary)
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=530
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): HTTP response headers from external server may lack content-type'
+  safety: Graceful default to 'unknown' - used for error reporting only
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=560
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical for processing
+  expires: null
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=632
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  safety: Graceful fallback to configured model - audit still captures actual value
+  expires: null

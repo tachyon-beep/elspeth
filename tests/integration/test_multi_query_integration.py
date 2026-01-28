@@ -57,8 +57,11 @@ Assess this case against the criterion.
             {"name": "risk", "code": "RISK", "description": "Assess risk identification"},
             {"name": "followup", "code": "FOLLOW", "description": "Assess follow-up planning"},
         ],
-        "response_format": "json",
-        "output_mapping": {"score": "score", "rationale": "rationale"},
+        "response_format": "standard",
+        "output_mapping": {
+            "score": {"suffix": "score", "type": "integer"},
+            "rationale": {"suffix": "rationale", "type": "string"},
+        },
         "schema": {"fields": "dynamic"},
         "pool_size": 10,  # All 10 queries in parallel
         "temperature": 0.0,
@@ -269,8 +272,8 @@ class TestMultiQueryIntegration:
                 {"name": "quality", "code": "Q", "description": "Quality check"},
                 {"name": "safety", "code": "S", "description": "Safety check"},
             ],
-            "response_format": "json",
-            "output_mapping": {"score": "score"},
+            "response_format": "standard",
+            "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
             "schema": {"fields": "dynamic"},
             "pool_size": 5,
         }

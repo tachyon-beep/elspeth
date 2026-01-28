@@ -19,7 +19,13 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.multi_query import MultiQueryConfig, QuerySpec
+from elspeth.plugins.llm.multi_query import (
+    MultiQueryConfig,
+    OutputFieldConfig,
+    OutputFieldType,
+    QuerySpec,
+    ResponseFormat,
+)
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -84,10 +90,14 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                   code: DIAG
                 - name: treatment
                   code: TREAT
-              response_format: json
+              response_format: structured  # or "standard" for JSON mode without schema
               output_mapping:
-                score: score
-                rationale: rationale
+                score:
+                  suffix: score
+                  type: integer
+                rationale:
+                  suffix: rationale
+                  type: string
               pool_size: 4
               schema:
                 fields: dynamic
@@ -132,8 +142,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._on_error = cfg.on_error
 
         # Multi-query specific settings
-        self._output_mapping = cfg.output_mapping
-        self._response_format = cfg.response_format
+        self._output_mapping: dict[str, OutputFieldConfig] = cfg.output_mapping
+        self._response_format: ResponseFormat = cfg.response_format
+        self._response_format_dict: dict[str, Any] = cfg.build_response_format()
 
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
@@ -222,6 +233,57 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 )
             return self._llm_clients[state_id]
 
+    def _validate_field_type(
+        self,
+        field_name: str,
+        value: Any,
+        field_config: OutputFieldConfig,
+    ) -> str | None:
+        """Validate that a parsed value matches the expected type.
+
+        Args:
+            field_name: Name of the field (for error messages)
+            value: The parsed JSON value
+            field_config: Expected type configuration
+
+        Returns:
+            Error message if validation fails, None if valid
+        """
+        expected_type = field_config.type
+
+        if expected_type == OutputFieldType.STRING:
+            if not isinstance(value, str):
+                return f"expected string, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.INTEGER:
+            # JSON integers come as int, but also accept float if it's a whole number
+            if isinstance(value, bool):  # bool is subclass of int in Python
+                return "expected integer, got boolean"
+            if isinstance(value, int):
+                pass  # Valid
+            elif isinstance(value, float) and value.is_integer():
+                pass  # Accept whole number floats (e.g., 42.0)
+            else:
+                return f"expected integer, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.NUMBER:
+            if isinstance(value, bool):
+                return "expected number, got boolean"
+            if not isinstance(value, (int, float)):
+                return f"expected number, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.BOOLEAN:
+            if not isinstance(value, bool):
+                return f"expected boolean, got {type(value).__name__}"
+
+        elif expected_type == OutputFieldType.ENUM:
+            if not isinstance(value, str):
+                return f"expected string (enum), got {type(value).__name__}"
+            if field_config.values and value not in field_config.values:
+                return f"value '{value}' not in allowed values: {field_config.values}"
+
+        return None
+
     def _process_single_query(
         self,
         row: dict[str, Any],
@@ -271,17 +333,19 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         llm_client = self._get_llm_client(state_id)
 
         # 5. Call LLM (EXTERNAL - wrap, raise CapacityError for retry)
+        # Use per-query max_tokens if specified, otherwise fall back to transform default
+        effective_max_tokens = spec.max_tokens or self._max_tokens
+
         # Build kwargs for LLM call
         llm_kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": messages,
             "temperature": self._temperature,
-            "max_tokens": self._max_tokens,
+            "max_tokens": effective_max_tokens,
         }
 
-        # Add response_format if configured (OpenAI expects {"type": "json_object"})
-        if self._response_format == "json":
-            llm_kwargs["response_format"] = {"type": "json_object"}
+        # Add response_format (standard JSON mode or structured with schema)
+        llm_kwargs["response_format"] = self._response_format_dict
 
         try:
             response = llm_client.chat_completion(**llm_kwargs)
@@ -302,16 +366,32 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 retryable=False,
             )
 
-        # 6. Parse JSON response (THEIR DATA - wrap)
-        # Strip markdown code blocks if present (common LLM behavior)
+        # 6. Check for response truncation BEFORE parsing
+        # If completion_tokens equals max_tokens, the response was likely truncated
+        # usage dict is created by AuditedLLMClient - keys are always present (OUR data)
+        completion_tokens = response.usage["completion_tokens"]
+        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+            return TransformResult.error(
+                {
+                    "reason": "response_truncated",
+                    "error": (
+                        f"LLM response was truncated at {completion_tokens} tokens "
+                        f"(max_tokens={effective_max_tokens}). "
+                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                    ),
+                    "query": spec.output_prefix,
+                    "max_tokens": effective_max_tokens,
+                    "completion_tokens": completion_tokens,
+                    "prompt_tokens": response.usage["prompt_tokens"],
+                    "raw_response_preview": response.content[:500] if response.content else None,
+                }
+            )
+
+        # 7. Parse JSON response (THEIR DATA - wrap)
         content = response.content.strip()
 
-        # DEBUG: Capture pre-processing state for diagnosis
-        _debug_raw_content = response.content
-        _debug_raw_len = len(response.content)
-        _debug_usage = response.usage
-
-        if content.startswith("```"):
+        # Strip markdown code blocks if present (common in standard mode, not in structured mode)
+        if self._response_format == ResponseFormat.STANDARD and content.startswith("```"):
             # Remove opening fence (```json or ```)
             first_newline = content.find("\n")
             if first_newline != -1:
@@ -328,11 +408,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                     "reason": "json_parse_failed",
                     "error": str(e),
                     "query": spec.output_prefix,
-                    "raw_response": _debug_raw_content,  # FULL content for diagnosis
-                    "raw_response_len": _debug_raw_len,
-                    "content_after_strip": content,  # What we tried to parse
-                    "content_after_strip_len": len(content),
-                    "usage": _debug_usage,  # Token counts from API
+                    "raw_response": response.content,
+                    "content_after_fence_strip": content,
+                    "usage": response.usage,
                 }
             )
 
@@ -348,10 +426,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 }
             )
 
-        # 7. Map output fields
+        # 8. Map and validate output fields
         output: dict[str, Any] = {}
-        for json_field, suffix in self._output_mapping.items():
-            output_key = f"{spec.output_prefix}_{suffix}"
+        for json_field, field_config in self._output_mapping.items():
+            output_key = f"{spec.output_prefix}_{field_config.suffix}"
             if json_field not in parsed:
                 return TransformResult.error(
                     {
@@ -360,9 +438,26 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                         "query": spec.output_prefix,
                     }
                 )
-            output[output_key] = parsed[json_field]
 
-        # 8. Add metadata for audit trail
+            value = parsed[json_field]
+
+            # Type validation (defense-in-depth for both modes)
+            type_error = self._validate_field_type(json_field, value, field_config)
+            if type_error is not None:
+                return TransformResult.error(
+                    {
+                        "reason": "type_mismatch",
+                        "field": json_field,
+                        "expected": field_config.type.value,
+                        "actual": type(value).__name__,
+                        "value": str(value)[:100],  # Truncate for audit
+                        "query": spec.output_prefix,
+                    }
+                )
+
+            output[output_key] = value
+
+        # 9. Add metadata for audit trail
         output[f"{spec.output_prefix}_usage"] = response.usage
         output[f"{spec.output_prefix}_model"] = response.model
         # Template metadata for reproducibility

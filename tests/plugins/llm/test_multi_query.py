@@ -236,8 +236,8 @@ class TestMultiQueryConfig:
                     "api_key": "key",
                     "template": "{{ row.input_1 }}",
                     "criteria": [{"name": "diagnosis"}],
-                    "response_format": "json",
-                    "output_mapping": {"score": "score"},
+                    "response_format": "standard",
+                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                     "schema": {"fields": "dynamic"},
                 }
             )
@@ -254,8 +254,8 @@ class TestMultiQueryConfig:
                     "api_key": "key",
                     "template": "{{ row.input_1 }}",
                     "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
-                    "response_format": "json",
-                    "output_mapping": {"score": "score"},
+                    "response_format": "standard",
+                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                     "schema": {"fields": "dynamic"},
                 }
             )
@@ -273,7 +273,7 @@ class TestMultiQueryConfig:
                     "template": "{{ row.input_1 }}",
                     "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                     "criteria": [{"name": "diagnosis"}],
-                    "response_format": "json",
+                    "response_format": "standard",
                     "schema": {"fields": "dynamic"},
                 }
             )
@@ -297,14 +297,20 @@ class TestMultiQueryConfig:
                     {"name": "diagnosis", "code": "DIAG"},
                     {"name": "treatment", "code": "TREAT"},
                 ],
-                "response_format": "json",
-                "output_mapping": {"score": "score", "rationale": "rationale"},
+                "response_format": "standard",
+                "output_mapping": {
+                    "score": {"suffix": "score", "type": "integer"},
+                    "rationale": {"suffix": "rationale", "type": "string"},
+                },
                 "schema": {"fields": "dynamic"},
             }
         )
         assert len(config.case_studies) == 2
         assert len(config.criteria) == 2
-        assert config.output_mapping == {"score": "score", "rationale": "rationale"}
+        assert "score" in config.output_mapping
+        assert "rationale" in config.output_mapping
+        assert config.output_mapping["score"].suffix == "score"
+        assert config.output_mapping["rationale"].suffix == "rationale"
 
     def test_config_rejects_empty_output_mapping(self) -> None:
         """MultiQueryConfig rejects empty output_mapping dict."""
@@ -342,8 +348,8 @@ class TestMultiQueryConfig:
                     {"name": "diagnosis", "code": "DIAG"},
                     {"name": "treatment", "code": "TREAT"},
                 ],
-                "response_format": "json",
-                "output_mapping": {"score": "score"},
+                "response_format": "standard",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
                 "schema": {"fields": "dynamic"},
             }
         )
