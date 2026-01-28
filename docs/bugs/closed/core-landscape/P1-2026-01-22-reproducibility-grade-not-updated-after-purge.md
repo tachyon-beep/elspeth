@@ -174,3 +174,32 @@ Following the original design document approach:
    - Creates a run with nondeterministic calls (REPLAY_REPRODUCIBLE)
    - Purges its payloads
    - Asserts grade degrades to ATTRIBUTABLE_ONLY
+
+## Closure Report (2026-01-28)
+
+**Status:** FIXED
+
+**Fix Summary:**
+1. Added `_find_affected_run_ids()` helper method to `PurgeManager` that queries all payload reference columns (rows.source_data_ref, calls.request_ref, calls.response_ref, routing_events.reason_ref) to find runs affected by refs being purged.
+
+2. Modified `purge_payloads()` to:
+   - Find affected run_ids BEFORE deletion
+   - Delete the payloads (existing behavior)
+   - Call `update_grade_after_purge()` for each affected run AFTER deletion
+
+3. Added 6 integration tests in `TestPurgeUpdatesReproducibilityGrade`:
+   - `test_purge_degrades_replay_reproducible_to_attributable_only` - core bug fix test
+   - `test_purge_keeps_full_reproducible_unchanged`
+   - `test_purge_keeps_attributable_only_unchanged`
+   - `test_purge_updates_multiple_affected_runs` - shared payload scenario
+   - `test_purge_empty_refs_does_not_update_any_grades`
+   - `test_purge_call_payloads_also_degrades_grade`
+
+**Files Changed:**
+- `src/elspeth/core/retention/purge.py` - Added `_find_affected_run_ids()` helper, modified `purge_payloads()` to update grades
+- `tests/core/retention/test_purge.py` - Added `TestPurgeUpdatesReproducibilityGrade` test class, fixed `_create_run()` helper to include `reproducibility_grade`
+
+**Verification:**
+- All 31 purge tests pass
+- All 6 reproducibility tests pass
+- mypy and ruff pass with no errors
