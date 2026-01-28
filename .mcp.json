@@ -3,7 +3,7 @@
   "mcpServers": {
     "elspeth-landscape": {
       "command": "elspeth-mcp",
-      "args": ["--database", "sqlite:///./state/audit.db"],
+      "args": [],
       "description": "ELSPETH Landscape audit database analysis - query runs, trace lineage, debug failures"
     }
   }

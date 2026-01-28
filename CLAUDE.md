@@ -461,9 +461,14 @@ elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 **For debugging and investigation**, there's an MCP server that provides read-only access to the audit database. This is especially useful for Claude Code sessions investigating pipeline failures.
 
 ```bash
-# Run the MCP server
-elspeth-mcp --database sqlite:///./state/audit.db
+# Run the MCP server (auto-discovers databases in current directory)
+elspeth-mcp
+
+# Or specify a database explicitly
+elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db
 ```
+
+The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` directories (pipeline outputs) and sorting by most recently modified.
 
 **Key tools for emergencies:**
 - `diagnose()` - First tool when something is broken. Finds failed runs, stuck runs, high error rates

@@ -8,24 +8,54 @@ A lightweight MCP (Model Context Protocol) server for querying and analyzing the
 # Install with MCP support
 uv pip install -e ".[mcp]"
 
-# Run the server (stdio transport)
-elspeth-mcp --database sqlite:///./state/audit.db
+# Run the server with auto-discovery (recommended)
+# Finds .db files in current directory, prioritizes audit.db in runs/ directories
+elspeth-mcp
+
+# Or specify a database explicitly
+elspeth-mcp --database sqlite:///./examples/threshold_gate/runs/audit.db
 
 # Or use environment variable
 export ELSPETH_DATABASE_URL=sqlite:///./state/audit.db
 elspeth-mcp
 ```
 
+### Database Auto-Discovery
+
+When run without `--database`, the server automatically discovers SQLite databases:
+
+1. **Searches** the current directory (up to 5 levels deep)
+2. **Prioritizes** databases in `runs/` directories (pipeline outputs)
+3. **Prefers** files named `audit.db` over `landscape.db`
+4. **Sorts** by modification time (most recent first)
+
+**Interactive mode** (terminal): Prompts you to select from found databases
+**Non-interactive mode** (MCP): Auto-selects the best match and logs the choice
+
 ### Claude Code Configuration
 
-Add to `~/.claude/settings.json`:
+Add to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "elspeth-landscape": {
       "command": "elspeth-mcp",
-      "args": ["--database", "sqlite:///./state/audit.db"]
+      "args": [],
+      "description": "ELSPETH Landscape audit database analysis"
+    }
+  }
+}
+```
+
+Or specify a database path explicitly:
+
+```json
+{
+  "mcpServers": {
+    "elspeth-landscape": {
+      "command": "elspeth-mcp",
+      "args": ["--database", "sqlite:///./examples/my_pipeline/runs/audit.db"]
     }
   }
 }

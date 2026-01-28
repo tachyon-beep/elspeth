@@ -1724,6 +1724,116 @@ async def run_server(database_url: str) -> None:
         await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
+def _find_audit_databases(search_dir: str, max_depth: int = 5) -> list[str]:
+    """Find potential audit databases in the given directory.
+
+    Looks for .db files that might be ELSPETH audit databases,
+    prioritizing files named 'audit.db' or 'landscape.db'.
+
+    Args:
+        search_dir: Directory to search from
+        max_depth: Maximum directory depth to search
+
+    Returns:
+        List of absolute paths to found database files, sorted by relevance
+    """
+    from pathlib import Path
+
+    found: list[tuple[int, float, str]] = []  # (priority, neg_mtime, path)
+    search_path = Path(search_dir).resolve()
+
+    for db_file in search_path.rglob("*.db"):
+        # Skip hidden directories and common non-audit locations
+        parts = db_file.relative_to(search_path).parts
+        if any(p.startswith(".") for p in parts):
+            continue
+        if len(parts) > max_depth:
+            continue
+        if "node_modules" in parts or "__pycache__" in parts:
+            continue
+
+        # Prioritize by name and location
+        name = db_file.name.lower()
+        in_runs_dir = "runs" in parts
+
+        # Databases in runs/ directories are likely active pipeline outputs
+        if in_runs_dir and name == "audit.db":
+            priority = 0
+        elif in_runs_dir and "audit" in name:
+            priority = 1
+        elif name == "audit.db":
+            priority = 2
+        elif name == "landscape.db":
+            priority = 3
+        elif "audit" in name:
+            priority = 4
+        elif "landscape" in name:
+            priority = 5
+        else:
+            priority = 10
+
+        # Get modification time for sorting (most recent first)
+        try:
+            mtime = db_file.stat().st_mtime
+        except OSError:
+            mtime = 0
+
+        found.append((priority, -mtime, str(db_file)))
+
+    # Sort by priority, then by modification time (most recent first via negative mtime)
+    found.sort(key=lambda x: (x[0], x[1]))
+    return [path for _, _, path in found]
+
+
+def _prompt_for_database(databases: list[str], search_dir: str) -> str | None:
+    """Prompt user to select a database from the list.
+
+    Args:
+        databases: List of database paths
+        search_dir: Directory that was searched (for display)
+
+    Returns:
+        Selected database path, or None if user cancelled
+    """
+    from pathlib import Path
+
+    search_path = Path(search_dir).resolve()
+
+    sys.stderr.write(f"\nFound {len(databases)} database(s) in {search_path}:\n\n")
+
+    for i, db_path in enumerate(databases, 1):
+        # Show relative path if possible
+        try:
+            rel_path = Path(db_path).relative_to(search_path)
+            display = f"./{rel_path}"
+        except ValueError:
+            display = db_path
+        sys.stderr.write(f"  [{i}] {display}\n")
+
+    sys.stderr.write("\n")
+
+    while True:
+        sys.stderr.write("Select database [1]: ")
+        sys.stderr.flush()
+
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            sys.stderr.write("\nCancelled.\n")
+            return None
+
+        if not choice:
+            choice = "1"
+
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(databases):
+                return databases[idx]
+            sys.stderr.write(f"Please enter a number between 1 and {len(databases)}\n")
+        except ValueError:
+            sys.stderr.write("Please enter a number\n")
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -1737,6 +1847,9 @@ Examples:
     # Run with PostgreSQL
     elspeth-mcp --database postgresql://user:pass@host/dbname
 
+    # Interactive mode - finds and prompts for databases
+    elspeth-mcp
+
 Environment Variables:
     ELSPETH_DATABASE_URL: Default database URL if --database not specified
 """,
@@ -1747,17 +1860,51 @@ Environment Variables:
         default=None,
         help="Database connection URL (SQLAlchemy format)",
     )
+    parser.add_argument(
+        "--search-dir",
+        default=".",
+        help="Directory to search for databases (default: current directory)",
+    )
 
     args = parser.parse_args()
 
     # Get database URL from args or environment
     import os
 
-    database_url = args.database or os.environ.get("ELSPETH_DATABASE_URL")
+    database_url: str | None = args.database
+    if database_url is None and "ELSPETH_DATABASE_URL" in os.environ:
+        database_url = os.environ["ELSPETH_DATABASE_URL"]
 
-    if not database_url:
-        sys.stderr.write("Error: Database URL required. Use --database or set ELSPETH_DATABASE_URL\n")
-        sys.exit(1)
+    if database_url is None:
+        # Auto-discovery mode: find databases in search directory
+        databases = _find_audit_databases(args.search_dir)
+
+        if not databases:
+            sys.stderr.write(f"No .db files found in {os.path.abspath(args.search_dir)}\n")
+            sys.stderr.write("Use --database to specify a database URL directly.\n")
+            sys.exit(1)
+
+        # Check if we're running interactively (TTY) or as MCP server (stdio)
+        is_interactive = sys.stdin.isatty()
+
+        db_path: str
+        if len(databases) == 1:
+            # Only one database - use it directly
+            db_path = databases[0]
+            sys.stderr.write(f"Using database: {db_path}\n")
+        elif is_interactive:
+            # Multiple databases in interactive mode - prompt for selection
+            selected = _prompt_for_database(databases, args.search_dir)
+            if selected is None:
+                sys.exit(1)
+            db_path = selected
+        else:
+            # Multiple databases in non-interactive mode - use best match
+            db_path = databases[0]
+            sys.stderr.write(f"Auto-selected database: {db_path}\n")
+            sys.stderr.write("(Use --database to specify a different one)\n")
+
+        database_url = f"sqlite:///{db_path}"
 
     import asyncio
 

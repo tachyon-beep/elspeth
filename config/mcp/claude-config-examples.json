@@ -6,12 +6,23 @@
   ],
 
   "examples": {
-    "local-sqlite": {
-      "_description": "Local SQLite database (development)",
+    "auto-discovery": {
+      "_description": "Auto-discover databases in project (recommended)",
       "mcpServers": {
         "elspeth-landscape": {
           "command": "elspeth-mcp",
-          "args": ["--database", "sqlite:///./state/audit.db"]
+          "args": [],
+          "description": "ELSPETH Landscape audit database analysis"
+        }
+      }
+    },
+
+    "local-sqlite": {
+      "_description": "Explicit SQLite database path",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "elspeth-mcp",
+          "args": ["--database", "sqlite:///./examples/my_pipeline/runs/audit.db"]
         }
       }
     },
@@ -22,7 +33,7 @@
         "elspeth-landscape": {
           "command": "elspeth-mcp",
           "env": {
-            "ELSPETH_DATABASE_URL": "sqlite:///./state/audit.db"
+            "ELSPETH_DATABASE_URL": "sqlite:///./examples/my_pipeline/runs/audit.db"
           }
         }
       }
@@ -53,18 +64,18 @@
       "mcpServers": {
         "elspeth-landscape": {
           "command": "/home/user/elspeth/.venv/bin/elspeth-mcp",
-          "args": ["--database", "sqlite:///./state/audit.db"]
+          "args": []
         }
       }
     }
   },
 
   "recommended-for-project": {
-    "_description": "Copy this to .mcp.json in project root",
+    "_description": "Copy this to .mcp.json in project root. Auto-discovers databases, prioritizing audit.db in runs/ directories.",
     "mcpServers": {
       "elspeth-landscape": {
         "command": "elspeth-mcp",
-        "args": ["--database", "sqlite:///./state/audit.db"],
+        "args": [],
         "description": "ELSPETH Landscape audit database analysis"
       }
     }
