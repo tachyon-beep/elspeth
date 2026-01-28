@@ -723,3 +723,240 @@ class TestProcessorTransformMode:
         counts = {r.final_data["category"]: r.final_data["count"] for r in completed}
         assert counts["A"] == 4  # 2 * 2
         assert counts["B"] == 2  # 1 * 2
+
+
+class TestProcessorSingleMode:
+    """Tests for single output_mode in aggregation.
+
+    Single mode: N input rows -> 1 aggregated output row.
+    The triggering token continues with aggregated data (not CONSUMED_IN_BATCH).
+    """
+
+    def test_aggregation_single_mode_continues_to_next_transform(self) -> None:
+        """Single mode aggregated row continues through remaining transforms.
+
+        This is the critical bug test - single mode was previously returning
+        COMPLETED immediately without checking for downstream transforms.
+
+        Pipeline: [SumTransform (single mode)] -> [AddMarker]
+        Expected: Aggregated row should have both 'total' and 'marker' fields.
+        Bug: Aggregated row only had 'total', skipping AddMarker entirely.
+        """
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import RowOutcome, TransformResult
+
+        class SumTransform(BaseTransform):
+            """Sums values in a batch, outputs single aggregated row."""
+
+            name = "summer"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            creates_tokens = False  # Single mode: triggering token continues
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+                if isinstance(rows, list):
+                    total = sum(r.get("value", 0) for r in rows)
+                    return TransformResult.success({"total": total})
+                return TransformResult.success(rows)
+
+        class AddMarker(BaseTransform):
+            """Adds a marker field to prove it was executed."""
+
+            name = "marker"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row, "marker": "DOWNSTREAM_EXECUTED"})
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        summer_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="summer",
+            node_type=NodeType.AGGREGATION,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        marker_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="marker",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        aggregation_settings = {
+            NodeID(summer_node.node_id): AggregationSettings(
+                name="batch_sum",
+                plugin="summer",
+                trigger=TriggerConfig(count=2),
+                output_mode="single",  # KEY: single mode
+            ),
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            edge_map={},
+            route_resolution_map={},
+            aggregation_settings=aggregation_settings,
+        )
+
+        summer = SumTransform(summer_node.node_id)
+        marker = AddMarker(marker_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process 2 rows through summer (single mode) then marker
+        all_results = []
+        for i in range(2):
+            results = processor.process_row(
+                row_index=i,
+                row_data={"value": (i + 1) * 10},  # 10, 20
+                transforms=[summer, marker],
+                ctx=ctx,
+            )
+            all_results.extend(results)
+
+        # First row: CONSUMED_IN_BATCH (not triggering)
+        # Second row triggers flush:
+        #   - First row already CONSUMED_IN_BATCH
+        #   - Aggregated row continues through marker -> COMPLETED
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
+        assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
+
+        # CRITICAL: The aggregated row must have passed through AddMarker
+        assert completed[0].final_data["total"] == 30, "Sum should be 10 + 20 = 30"
+        assert "marker" in completed[0].final_data, (
+            f"BUG: Aggregated row did not pass through downstream transform! Expected 'marker' field, got: {completed[0].final_data}"
+        )
+        assert completed[0].final_data["marker"] == "DOWNSTREAM_EXECUTED"
+
+    def test_aggregation_single_mode_no_downstream_completes_immediately(self) -> None:
+        """Single mode with no downstream transforms returns COMPLETED correctly."""
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import RowOutcome, TransformResult
+
+        class SumTransform(BaseTransform):
+            """Sums values in a batch."""
+
+            name = "summer"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            creates_tokens = False
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
+                if isinstance(rows, list):
+                    total = sum(r.get("value", 0) for r in rows)
+                    return TransformResult.success({"total": total})
+                return TransformResult.success(rows)
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        summer_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="summer",
+            node_type=NodeType.AGGREGATION,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        aggregation_settings = {
+            NodeID(summer_node.node_id): AggregationSettings(
+                name="batch_sum",
+                plugin="summer",
+                trigger=TriggerConfig(count=2),
+                output_mode="single",
+            ),
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            edge_map={},
+            route_resolution_map={},
+            aggregation_settings=aggregation_settings,
+        )
+
+        summer = SumTransform(summer_node.node_id)
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process 2 rows through summer only (no downstream transforms)
+        all_results = []
+        for i in range(2):
+            results = processor.process_row(
+                row_index=i,
+                row_data={"value": (i + 1) * 10},
+                transforms=[summer],  # Only the aggregation, no downstream
+                ctx=ctx,
+            )
+            all_results.extend(results)
+
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 1
+        assert len(completed) == 1
+        assert completed[0].final_data["total"] == 30

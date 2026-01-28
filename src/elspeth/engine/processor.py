@@ -228,6 +228,7 @@ class RowProcessor:
             # Handle output modes
             if output_mode == "single":
                 # Single output: one aggregated result row
+                # The triggering token continues with aggregated data
                 final_data = result.row if result.row is not None else {}
                 updated_token = TokenInfo(
                     row_id=current_token.row_id,
@@ -235,15 +236,31 @@ class RowProcessor:
                     row_data=final_data,
                     branch_name=current_token.branch_name,
                 )
-                # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
-                return (
-                    RowResult(
-                        token=updated_token,
-                        final_data=final_data,
-                        outcome=RowOutcome.COMPLETED,
-                    ),
-                    child_items,
-                )
+
+                # Check if there are more transforms after this one
+                more_transforms = step < total_steps
+
+                if more_transforms:
+                    # Queue aggregated token as work item for remaining transforms
+                    child_items.append(
+                        _WorkItem(
+                            token=updated_token,
+                            start_step=step,  # Continue from current step (0-indexed next)
+                        )
+                    )
+                    # Return empty list - result will come from child item
+                    return ([], child_items)
+                else:
+                    # No more transforms - return COMPLETED
+                    # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
+                    return (
+                        RowResult(
+                            token=updated_token,
+                            final_data=final_data,
+                            outcome=RowOutcome.COMPLETED,
+                        ),
+                        child_items,
+                    )
 
             elif output_mode == "passthrough":
                 # Passthrough: original tokens continue with enriched data
@@ -952,7 +969,7 @@ class RowProcessor:
                         ctx=ctx,
                         step=step,
                         child_items=child_items,
-                        total_steps=len(transforms),
+                        total_steps=total_steps,
                     )
 
                 # Regular transform (with optional retry)
