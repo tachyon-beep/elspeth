@@ -1957,6 +1957,332 @@ class TestTimeoutFlushErrorHandling:
 
             assert failed_count == 2, f"Both buffered tokens should have FAILED outcome recorded. Found {failed_count} FAILED outcomes."
 
+    def test_single_mode_count_flush_failure_triggering_token_has_outcome(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Count-triggered flush failure in single mode must record CONSUMED_IN_BATCH for triggering token.
+
+        Bug: P2-2026-01-28-aggregation-triggering-token-no-outcome
+
+        In single/transform modes, when a count-triggered flush FAILS:
+        - Previously buffered tokens have CONSUMED_IN_BATCH (recorded when buffered via non-flushing path)
+        - The triggering token (the one that caused count threshold to be reached) has NO outcome
+
+        This happens because:
+        1. Triggering token is buffered (line 598)
+        2. should_flush() returns True (count threshold reached)
+        3. Non-flushing path (lines 893-899 which records CONSUMED_IN_BATCH) is SKIPPED
+        4. execute_flush() fails
+        5. Failure path (lines 652-667) doesn't record any outcome for triggering token
+
+        The triggering token ends up with no terminal outcome, violating the invariant
+        that every token must reach exactly one terminal state.
+
+        Expected behavior:
+        - ALL tokens (including triggering token) have CONSUMED_IN_BATCH outcome
+        - Batch failure is recorded in batches table (semantic: "consumed into failed batch")
+
+        Test setup:
+        - 3 rows emitted, count trigger = 3 (flush on 3rd row)
+        - Single mode (tokens get CONSUMED_IN_BATCH when buffered)
+        - Transform returns error on flush
+        """
+        from elspeth.contracts.enums import RowOutcome
+
+        flush_calls: list[str] = []
+
+        class FailingSingleTransform(BaseTransform):
+            """Batch transform that fails on flush in single mode."""
+
+            name = "failing_single"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch flush - FAIL with error result
+                    flush_calls.append("flush_failed")
+                    return TransformResult.error({"reason": "deliberate_single_mode_failure"})
+                return TransformResult.success(dict(row))
+
+        class CountTriggerSource(_TestSourceBase):
+            """Source that emits exactly 3 rows to trigger count-based flush."""
+
+            name = "count_trigger_source_single"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row 1: Gets buffered, marked CONSUMED_IN_BATCH (non-flushing path)
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Row 2: Gets buffered, marked CONSUMED_IN_BATCH (non-flushing path)
+                yield SourceRow.valid({"id": 2, "value": 200})
+                # Row 3: Triggers count flush (count=3) → flush fails
+                # BUG: This token has NO outcome recorded!
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects results."""
+
+            name = "collector_single_err"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://test",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(CountTriggerSource())
+        transform = as_transform(FailingSingleTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="failing_single_agg",
+            plugin="failing_single",
+            trigger=TriggerConfig(
+                count=3,  # Flush after 3 rows
+            ),
+            output_mode="single",  # Tokens get CONSUMED_IN_BATCH when buffered
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={transform_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="count_trigger_source_single", options={}),
+            sinks={"output": SinkSettings(plugin="collector_single_err", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Verify flush was called and failed
+        assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
+        assert flush_calls[0] == "flush_failed"
+
+        # BUG ASSERTION: All 3 tokens should have CONSUMED_IN_BATCH outcome
+        # Currently only rows 1 and 2 have it (from non-flushing path when buffered)
+        # Row 3 (triggering token) has NO outcome!
+        with landscape_db.connection() as conn:
+            from sqlalchemy import func, select
+
+            from elspeth.core.landscape.schema import token_outcomes_table
+
+            # Count CONSUMED_IN_BATCH outcomes (should be 3 - one per token)
+            consumed_count = conn.execute(
+                select(func.count())
+                .select_from(token_outcomes_table)
+                .where(token_outcomes_table.c.outcome == RowOutcome.CONSUMED_IN_BATCH.value)
+                .where(token_outcomes_table.c.run_id == result.run_id)
+            ).scalar()
+
+            assert consumed_count == 3, (
+                f"All 3 tokens should have CONSUMED_IN_BATCH outcome recorded. "
+                f"Found {consumed_count} CONSUMED_IN_BATCH outcomes. "
+                f"Bug: Triggering token (row 3) has no terminal outcome - "
+                f"it went straight from buffer to failed flush, skipping outcome recording."
+            )
+
+    def test_transform_mode_count_flush_failure_triggering_token_has_outcome(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Count-triggered flush failure in transform mode must record CONSUMED_IN_BATCH for triggering token.
+
+        Same bug as single mode, but tests transform mode specifically since it has
+        slightly different semantics (triggering token is replaced by expanded tokens on success).
+
+        Expected behavior:
+        - ALL tokens have CONSUMED_IN_BATCH outcome
+        - Transform mode success path records CONSUMED_IN_BATCH at line 816-821
+        - Transform mode failure path should also record CONSUMED_IN_BATCH for triggering token
+        """
+        from elspeth.contracts.enums import RowOutcome
+
+        flush_calls: list[str] = []
+
+        class FailingTransformModeTransform(BaseTransform):
+            """Batch transform that fails on flush in transform mode."""
+
+            name = "failing_transform_mode"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch flush - FAIL
+                    flush_calls.append("flush_failed")
+                    return TransformResult.error({"reason": "deliberate_transform_mode_failure"})
+                return TransformResult.success(dict(row))
+
+        class CountTriggerSource(_TestSourceBase):
+            """Source that emits exactly 3 rows to trigger count-based flush."""
+
+            name = "count_trigger_source_transform"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects results."""
+
+            name = "collector_transform_err"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://test",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(CountTriggerSource())
+        transform = as_transform(FailingTransformModeTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="failing_transform_mode_agg",
+            plugin="failing_transform_mode",
+            trigger=TriggerConfig(
+                count=3,
+            ),
+            output_mode="transform",  # Transform mode
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={transform_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="count_trigger_source_transform", options={}),
+            sinks={"output": SinkSettings(plugin="collector_transform_err", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Verify flush was called and failed
+        assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
+
+        # All 3 tokens should have CONSUMED_IN_BATCH outcome
+        with landscape_db.connection() as conn:
+            from sqlalchemy import func, select
+
+            from elspeth.core.landscape.schema import token_outcomes_table
+
+            consumed_count = conn.execute(
+                select(func.count())
+                .select_from(token_outcomes_table)
+                .where(token_outcomes_table.c.outcome == RowOutcome.CONSUMED_IN_BATCH.value)
+                .where(token_outcomes_table.c.run_id == result.run_id)
+            ).scalar()
+
+            assert consumed_count == 3, (
+                f"All 3 tokens should have CONSUMED_IN_BATCH outcome. "
+                f"Found {consumed_count}. "
+                f"Bug: Triggering token has no terminal outcome in transform mode."
+            )
+
 
 class TestTimeoutFlushStepIndexing:
     """Test that timeout/end-of-source flushes record correct 1-indexed step.

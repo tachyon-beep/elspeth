@@ -650,9 +650,21 @@ class RowProcessor:
                             )
                         )
                 else:
-                    # Single/transform mode: tokens already have CONSUMED_IN_BATCH (terminal)
-                    # DO NOT record FAILED - would violate unique terminal outcome constraint
-                    # Return FAILED results for count tracking, but no DB recording needed
+                    # Single/transform mode: PREVIOUSLY buffered tokens have CONSUMED_IN_BATCH
+                    # (recorded when they were buffered via non-flushing path at lines 893-899).
+                    # However, the TRIGGERING token (current_token) went straight from buffer_row()
+                    # to execute_flush(), skipping the non-flushing path. It needs CONSUMED_IN_BATCH.
+                    #
+                    # Record CONSUMED_IN_BATCH for triggering token only.
+                    # DO NOT record FAILED - would violate unique terminal outcome constraint.
+                    # Return FAILED results for count tracking, but no additional DB recording
+                    # needed for previously buffered tokens.
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=current_token.token_id,
+                        outcome=RowOutcome.CONSUMED_IN_BATCH,
+                        batch_id=batch_id,
+                    )
                     for token in buffered_tokens:
                         results.append(
                             RowResult(
