@@ -293,16 +293,6 @@ allow_hits:
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=790
-  owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
-  safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
-- key: cli.py:R1:_execute_resume_with_instances:_format_run_completed:line=1220
-  owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
-  safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
 - key: core/events.py:R1:EventBus:emit:line=83
   owner: architecture
   reason: 'Intentional Optional API: checking subscription presence, not hiding missing keys'
@@ -344,41 +334,10 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
   safety: Graceful default to '<unknown>' - error message still produced with field and message
   expires: null
-- key: cli.py:R1:health:line=1606
-  owner: architecture
-  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
-  safety: Empty string default is safe - commit SHA is informational only
-  expires: null
-- key: cli.py:R4:health:line=1618
-  owner: architecture
-  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
-  safety: Graceful fallback to 'unknown' - health check reports git as unavailable
-  expires: null
-- key: cli.py:R1:health:line=1634
-  owner: architecture
-  reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
-  safety: Empty string default triggers skip logic - database check only runs if configured
-  expires: null
-- key: cli.py:R4:health:line=1646
-  owner: architecture
-  reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
-  safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
-  expires: null
-- key: cli.py:R4:health:line=1710
-  owner: architecture
-  reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
-  safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
-  expires: null
 - key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:line=383
   owner: architecture
   reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed data, etc.)'
   safety: Logged and row quarantined with full error details
-  expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=232
-  owner: architecture
-  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other
-    plugins from cleanup'
-  safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
 - key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1036
   owner: architecture
@@ -424,21 +383,6 @@ allow_hits:
   owner: architecture
   reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
   safety: Logged with warning - original timeout error still raised
-  expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=420
-  owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
-  safety: Graceful fallback to requested model - audit captures actual
-  expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=450
-  owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API model field is optional'
-  safety: Graceful fallback to configured model - audit captures actual
-  expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=504
-  owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
-  safety: Graceful fallback to configured model - audit captures actual
   expires: null
 - key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=231
   owner: architecture
