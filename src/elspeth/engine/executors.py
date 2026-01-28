@@ -1429,6 +1429,29 @@ class AggregationExecutor:
             return None
         return evaluator.get_trigger_type()
 
+    def check_flush_status(self, node_id: NodeID) -> tuple[bool, "TriggerType | None"]:
+        """Check flush status and get trigger type in a single operation.
+
+        This is an optimized method that combines should_flush() and get_trigger_type()
+        with a single dict lookup instead of two. Used in the hot path where
+        timeout checks happen before every row is processed.
+
+        Args:
+            node_id: Aggregation node ID
+
+        Returns:
+            Tuple of (should_flush, trigger_type):
+            - should_flush: True if trigger condition is met
+            - trigger_type: The type of trigger that fired, or None
+        """
+        evaluator = self._trigger_evaluators.get(node_id)
+        if evaluator is None:
+            return (False, None)
+
+        should_flush = evaluator.should_trigger()
+        trigger_type = evaluator.get_trigger_type() if should_flush else None
+        return (should_flush, trigger_type)
+
     def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
         """Restore aggregation state from checkpoint.
 

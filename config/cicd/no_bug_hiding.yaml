@@ -479,12 +479,17 @@ allow_hits:
   reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1456
+- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1447
+  owner: architecture
+  reason: 'Intentional Optional API: returns (False, None) if no evaluator exists for node_id'
+  safety: False return is safe default - no flush needed when no trigger config
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1479
   owner: architecture
   reason: 'Intentional Optional API: returns None if no state was restored for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1681
+- key: engine/executors.py:R4:SinkExecutor:write:line=1704
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay

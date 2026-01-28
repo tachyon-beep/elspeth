@@ -159,6 +159,10 @@ class RowProcessor:
         This is a public facade for orchestrator to check timeout conditions
         without directly accessing private _aggregation_executor.
 
+        Note: This method is called in the hot path (before every row is processed),
+        so it uses the optimized check_flush_status() which does a single dict
+        lookup instead of two separate calls.
+
         Args:
             node_id: The aggregation node ID to check
 
@@ -167,9 +171,7 @@ class RowProcessor:
             - should_flush: True if trigger condition is met
             - trigger_type: The type of trigger that fired (TIMEOUT, COUNT, etc.) or None
         """
-        should_flush = self._aggregation_executor.should_flush(node_id)
-        trigger_type = self._aggregation_executor.get_trigger_type(node_id) if should_flush else None
-        return (should_flush, trigger_type)
+        return self._aggregation_executor.check_flush_status(node_id)
 
     def get_aggregation_buffer_count(self, node_id: NodeID) -> int:
         """Get the number of rows buffered in an aggregation.
@@ -181,6 +183,64 @@ class RowProcessor:
             Number of rows currently buffered
         """
         return self._aggregation_executor.get_buffer_count(node_id)
+
+    def process_token_from_step(
+        self,
+        token: TokenInfo,
+        transforms: list[Any],
+        ctx: PluginContext,
+        start_step: int,
+    ) -> list[RowResult]:
+        """Process a token starting from a specific pipeline step.
+
+        Used for continuing processing after timeout-triggered aggregation flushes.
+        The token will be processed through remaining transforms starting at start_step.
+
+        Args:
+            token: The token to process
+            transforms: List of transforms in the pipeline
+            ctx: Plugin context
+            start_step: The step index to start processing from
+
+        Returns:
+            List of RowResults from processing
+        """
+        work_queue: deque[_WorkItem] = deque(
+            [
+                _WorkItem(
+                    token=token,
+                    start_step=start_step,
+                )
+            ]
+        )
+        results: list[RowResult] = []
+        iterations = 0
+
+        with self._spans.row_span(token.row_id, token.token_id):
+            while work_queue:
+                iterations += 1
+                if iterations > MAX_WORK_QUEUE_ITERATIONS:
+                    raise RuntimeError(f"Work queue exceeded {MAX_WORK_QUEUE_ITERATIONS} iterations. Possible infinite loop in pipeline.")
+
+                item = work_queue.popleft()
+                result, child_items = self._process_single_token(
+                    token=item.token,
+                    transforms=transforms,
+                    ctx=ctx,
+                    start_step=item.start_step,
+                    coalesce_at_step=item.coalesce_at_step,
+                    coalesce_name=item.coalesce_name,
+                )
+
+                if result is not None:
+                    if isinstance(result, list):
+                        results.extend(result)
+                    else:
+                        results.append(result)
+
+                work_queue.extend(child_items)
+
+        return results
 
     def flush_aggregation_timeout(
         self,
@@ -213,6 +273,201 @@ class RowProcessor:
             step_in_pipeline=step_in_pipeline,
             trigger_type=TriggerType.TIMEOUT,
         )
+
+    def handle_timeout_flush(
+        self,
+        node_id: NodeID,
+        transform: TransformProtocol,
+        ctx: PluginContext,
+        step: int,
+        total_steps: int,
+        trigger_type: TriggerType,
+    ) -> tuple[list[RowResult], list["_WorkItem"]]:
+        """Handle an aggregation flush with proper output_mode semantics.
+
+        This method mirrors the flush handling in _process_batch_aggregation_node but
+        is designed for flushes that occur outside normal row processing:
+        - TIMEOUT: Triggered between row arrivals when timeout expires
+        - END_OF_SOURCE: Triggered at end of source to flush remaining buffers
+
+        Handles all output_modes correctly:
+        - single: Creates one output token from first buffered token
+        - passthrough: Routes all buffered tokens through remaining transforms
+        - transform: Creates new tokens via expand_token
+
+        Args:
+            node_id: The aggregation node ID
+            transform: The batch-aware transform to execute
+            ctx: Plugin context
+            step: Position of this aggregation in the pipeline (0-indexed)
+            total_steps: Total number of transform steps in pipeline
+            trigger_type: The trigger type (TIMEOUT or END_OF_SOURCE)
+
+        Returns:
+            Tuple of (results, work_items):
+            - results: RowResults for completed tokens (terminal state)
+            - work_items: _WorkItem list for tokens needing further processing
+        """
+        # Get aggregation settings for output_mode
+        settings = self._aggregation_settings[node_id]
+        output_mode = settings.output_mode
+
+        # Execute flush with the specified trigger type
+        result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
+            node_id=node_id,
+            transform=transform,
+            ctx=ctx,
+            step_in_pipeline=step,
+            trigger_type=trigger_type,
+        )
+
+        child_items: list[_WorkItem] = []
+        results: list[RowResult] = []
+
+        if result.status != "success":
+            # Flush failed - mark all buffered tokens as FAILED
+            error_msg = "Batch transform failed during timeout flush"
+            error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+            for token in buffered_tokens:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
+                results.append(
+                    RowResult(
+                        token=token,
+                        final_data=token.row_data,
+                        outcome=RowOutcome.FAILED,
+                        error=FailureInfo(
+                            exception_type="TransformError",
+                            message=error_msg,
+                        ),
+                    )
+                )
+            return (results, child_items)
+
+        # Calculate if there are more transforms after this aggregation
+        more_transforms = step < total_steps
+
+        if output_mode == "single":
+            # Single output: one aggregated result row
+            final_data = result.row if result.row is not None else {}
+
+            # Use first buffered token as parent for audit trail
+            # Create NEW token via expand_token (buffered tokens are CONSUMED_IN_BATCH)
+            if buffered_tokens:
+                expanded = self._token_manager.expand_token(
+                    parent_token=buffered_tokens[0],
+                    expanded_rows=[final_data],
+                    step_in_pipeline=step,
+                )
+                output_token = expanded[0]
+
+                if more_transforms:
+                    # Queue for remaining transforms
+                    child_items.append(
+                        _WorkItem(
+                            token=output_token,
+                            start_step=step,  # Continue from current step
+                        )
+                    )
+                else:
+                    # No more transforms - return COMPLETED
+                    results.append(
+                        RowResult(
+                            token=output_token,
+                            final_data=final_data,
+                            outcome=RowOutcome.COMPLETED,
+                        )
+                    )
+
+        elif output_mode == "passthrough":
+            # Passthrough: original tokens continue with enriched data
+            if not result.is_multi_row:
+                raise ValueError(
+                    f"Passthrough mode requires multi-row result, "
+                    f"but transform '{transform.name}' returned single row. "
+                    f"Use TransformResult.success_multi() for passthrough."
+                )
+
+            assert result.rows is not None
+            if len(result.rows) != len(buffered_tokens):
+                raise ValueError(
+                    f"Passthrough mode requires same number of output rows "
+                    f"as input rows. Transform '{transform.name}' returned "
+                    f"{len(result.rows)} rows but received {len(buffered_tokens)} input rows."
+                )
+
+            for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+                # Update token with enriched data (same token_id, new row_data)
+                updated_token = TokenInfo(
+                    row_id=token.row_id,
+                    token_id=token.token_id,
+                    row_data=enriched_data,
+                    branch_name=token.branch_name,
+                )
+
+                if more_transforms:
+                    # Queue for remaining transforms
+                    child_items.append(
+                        _WorkItem(
+                            token=updated_token,
+                            start_step=step,
+                        )
+                    )
+                else:
+                    # No more transforms - return COMPLETED
+                    results.append(
+                        RowResult(
+                            token=updated_token,
+                            final_data=enriched_data,
+                            outcome=RowOutcome.COMPLETED,
+                        )
+                    )
+
+        elif output_mode == "transform":
+            # Transform mode: N input rows -> M output rows with NEW tokens
+            # Get output rows
+            if result.is_multi_row:
+                assert result.rows is not None
+                output_rows = result.rows
+            else:
+                output_rows = [result.row] if result.row is not None else [{}]
+
+            # Create new tokens via expand_token using first buffered token as parent
+            if buffered_tokens:
+                expanded_tokens = self._token_manager.expand_token(
+                    parent_token=buffered_tokens[0],
+                    expanded_rows=output_rows,
+                    step_in_pipeline=step,
+                )
+
+                if more_transforms:
+                    # Queue expanded tokens for remaining transforms
+                    for token in expanded_tokens:
+                        child_items.append(
+                            _WorkItem(
+                                token=token,
+                                start_step=step,
+                            )
+                        )
+                else:
+                    # No more transforms - return COMPLETED
+                    for token in expanded_tokens:
+                        results.append(
+                            RowResult(
+                                token=token,
+                                final_data=token.row_data,
+                                outcome=RowOutcome.COMPLETED,
+                            )
+                        )
+
+        else:
+            raise ValueError(f"Unknown output_mode: {output_mode}")
+
+        return (results, child_items)
 
     def _process_batch_aggregation_node(
         self,

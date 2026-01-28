@@ -2221,6 +2221,45 @@ class Orchestrator:
                 recorder.retry_batch(batch.batch_id)
             # DRAFT batches continue normally (collection resumes)
 
+    def _find_aggregation_transform(
+        self,
+        config: PipelineConfig,
+        agg_node_id_str: str,
+        agg_name: str,
+    ) -> tuple[TransformProtocol, int]:
+        """Find the batch-aware transform for an aggregation node.
+
+        Args:
+            config: Pipeline configuration with transforms
+            agg_node_id_str: The aggregation node ID as string
+            agg_name: Human-readable aggregation name (for error messages)
+
+        Returns:
+            Tuple of (transform, step_index) where step_index is the 0-indexed
+            position in the pipeline
+
+        Raises:
+            RuntimeError: If no batch-aware transform found for the aggregation
+        """
+        agg_transform: TransformProtocol | None = None
+        agg_step = len(config.transforms)
+
+        for i, t in enumerate(config.transforms):
+            if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
+                agg_transform = t
+                agg_step = i
+                break
+
+        if agg_transform is None:
+            raise RuntimeError(
+                f"No batch-aware transform found for aggregation '{agg_name}' "
+                f"(node_id={agg_node_id_str}). This indicates a bug in graph construction "
+                f"or pipeline configuration. "
+                f"Available transforms: {[t.node_id for t in config.transforms]}"
+            )
+
+        return agg_transform, agg_step
+
     def _check_aggregation_timeouts(
         self,
         config: PipelineConfig,
@@ -2239,6 +2278,17 @@ class Orchestrator:
         Bug fix: P1-2026-01-22-aggregation-timeout-idle-never-fires
         Before this fix, should_flush() was only called from buffer_row(),
         meaning timeouts never fired during idle periods between rows.
+
+        KNOWN LIMITATION (True Idle):
+        Timeouts fire when the next row arrives, not during "true idle" periods.
+        If no rows arrive, buffered data will not flush until either:
+        1. A new row arrives (triggering this timeout check), or
+        2. The source completes (triggering _flush_remaining_aggregation_buffers)
+
+        Example: If timeout_seconds=5 and rows stop arriving at T=10, the batch
+        won't flush until either a new row arrives or the source ends. For
+        streaming sources that may never end, consider using count triggers or
+        implementing periodic polling at the source level.
 
         Args:
             config: Pipeline configuration with aggregation_settings
@@ -2277,58 +2327,67 @@ class Orchestrator:
             if agg_transform_lookup and agg_node_id_str in agg_transform_lookup:
                 agg_transform, agg_step = agg_transform_lookup[agg_node_id_str]
             else:
-                # Fallback: linear search if lookup not provided
-                agg_transform = None
-                agg_step = len(config.transforms)
-                for i, t in enumerate(config.transforms):
-                    if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
-                        agg_transform = t
-                        agg_step = i
-                        break
+                # Fallback: use helper method if lookup not provided
+                agg_transform, agg_step = self._find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
 
-            if agg_transform is None:
-                agg_name = agg_settings.name
-                raise RuntimeError(
-                    f"No batch-aware transform found for aggregation '{agg_name}' "
-                    f"(node_id={agg_node_id}). This indicates a bug in graph construction "
-                    f"or pipeline configuration. "
-                    f"Available transforms: {[t.node_id for t in config.transforms]}"
-                )
-
-            # Execute flush using public facade method (no private member access)
-            flush_result, buffered_tokens, _batch_id = processor.flush_aggregation_timeout(
+            # Use handle_timeout_flush for proper output_mode handling
+            # This correctly routes through remaining transforms and gates
+            total_steps = len(config.transforms)
+            completed_results, work_items = processor.handle_timeout_flush(
                 node_id=agg_node_id,
                 transform=agg_transform,
                 ctx=ctx,
-                step_in_pipeline=agg_step,
+                step=agg_step,
+                total_steps=total_steps,
+                trigger_type=TriggerType.TIMEOUT,
             )
 
-            # Handle the flushed batch result
-            if flush_result.status == "success":
-                if flush_result.row is not None and buffered_tokens:
-                    # Single row output - create NEW token via expand_token
-                    # CRITICAL: Do NOT reuse buffered token IDs, as they already have
-                    # CONSUMED_IN_BATCH outcome recorded. Must create new token for output.
-                    expanded = processor.token_manager.expand_token(
-                        parent_token=buffered_tokens[0],
-                        expanded_rows=[flush_result.row],
-                        step_in_pipeline=agg_step,
-                    )
-                    pending_tokens[default_sink_name].append((expanded[0], RowOutcome.COMPLETED))
+            # Handle completed results (no more transforms - go to sink)
+            for result in completed_results:
+                if result.outcome == RowOutcome.FAILED:
+                    rows_failed += 1
+                else:
+                    # Route to appropriate sink based on branch_name if set
+                    sink_name = result.token.branch_name or default_sink_name
+                    if sink_name not in pending_tokens:
+                        sink_name = default_sink_name
+                    pending_tokens[sink_name].append((result.token, result.outcome))
                     rows_succeeded += 1
-                elif flush_result.rows is not None and buffered_tokens:
-                    # Multiple row output - use expand_token for proper audit
-                    expanded = processor.token_manager.expand_token(
-                        parent_token=buffered_tokens[0],
-                        expanded_rows=flush_result.rows,
-                        step_in_pipeline=agg_step,
-                    )
-                    for exp_token in expanded:
-                        pending_tokens[default_sink_name].append((exp_token, RowOutcome.COMPLETED))
+
+            # Process work items through remaining transforms
+            # These tokens need to continue through the pipeline
+            for work_item in work_items:
+                # Process token starting from the step AFTER the aggregation
+                # (start_step is 0-indexed, so start_step+1 is the next transform)
+                downstream_results = processor.process_token_from_step(
+                    token=work_item.token,
+                    transforms=config.transforms,
+                    ctx=ctx,
+                    start_step=work_item.start_step + 1,
+                )
+
+                for result in downstream_results:
+                    if result.outcome == RowOutcome.FAILED:
+                        rows_failed += 1
+                    elif result.outcome == RowOutcome.COMPLETED:
+                        # Route to appropriate sink
+                        sink_name = result.token.branch_name or default_sink_name
+                        if sink_name not in pending_tokens:
+                            sink_name = default_sink_name
+                        pending_tokens[sink_name].append((result.token, result.outcome))
                         rows_succeeded += 1
-            else:
-                # Flush failed
-                rows_failed += len(buffered_tokens)
+                    elif result.outcome == RowOutcome.ROUTED:
+                        # Gate routed to named sink - MUST enqueue or row is lost
+                        # GateExecutor contract: ROUTED outcome always has sink_name set
+                        routed_sink = result.sink_name or default_sink_name
+                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
+                        rows_succeeded += 1
+                    elif result.outcome == RowOutcome.QUARANTINED:
+                        # Row quarantined by downstream transform - already recorded
+                        rows_failed += 1
+                    # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
+                    # handled within process_token_from_step - final outcomes will
+                    # appear as separate results
 
         return rows_succeeded, rows_failed
 
@@ -2349,9 +2408,13 @@ class Orchestrator:
         Without this, rows buffered but not yet flushed (e.g., 50 rows
         when trigger is count=100) would be silently lost.
 
+        Uses handle_timeout_flush with END_OF_SOURCE trigger to properly handle
+        all output_mode semantics (single, passthrough, transform) and route
+        tokens through remaining transforms if any exist after the aggregation.
+
         Args:
             config: Pipeline configuration with aggregation_settings
-            processor: RowProcessor with aggregation executor
+            processor: RowProcessor with public aggregation facades
             ctx: Plugin context for transform execution
             pending_tokens: Dict of sink_name -> tokens to append results to
             default_sink_name: Default sink for aggregation output
@@ -2368,101 +2431,99 @@ class Orchestrator:
             RuntimeError: If no batch-aware transform found for an aggregation
                          (indicates bug in graph construction or pipeline config)
         """
-        # Note: TriggerType imported at module level
-
         rows_succeeded = 0
         rows_failed = 0
+        total_steps = len(config.transforms)
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
-            # aggregation_settings is keyed by node_id (set in cli.py)
-            # The aggregation name is available via agg_settings.name
-            agg_name = agg_settings.name
             agg_node_id = NodeID(agg_node_id_str)
 
-            # Check if there are buffered rows
-            buffered_count = processor._aggregation_executor.get_buffer_count(agg_node_id)
+            # Use public facade (not private member)
+            buffered_count = processor.get_aggregation_buffer_count(agg_node_id)
             if buffered_count == 0:
                 continue
 
-            # Find the batch-aware transform for this aggregation
-            # Only TransformProtocol can have is_batch_aware (gates cannot)
-            agg_transform: TransformProtocol | None = None
-            for t in config.transforms:
-                if isinstance(t, TransformProtocol) and t.node_id == agg_node_id_str and t.is_batch_aware:
-                    agg_transform = t
-                    break
+            # Use helper method for transform lookup
+            agg_transform, agg_step = self._find_aggregation_transform(config, agg_node_id_str, agg_settings.name)
 
-            if agg_transform is None:
-                raise RuntimeError(
-                    f"No batch-aware transform found for aggregation '{agg_name}' "
-                    f"(node_id={agg_node_id}). This indicates a bug in graph construction "
-                    f"or pipeline configuration."
-                )
-
-            # Compute step_in_pipeline for this aggregation
-            agg_step = next(
-                (i for i, t in enumerate(config.transforms) if t.node_id == agg_node_id_str),
-                len(config.transforms),
-            )
-
-            # Execute flush with END_OF_SOURCE trigger
-            flush_result, buffered_tokens, _batch_id = processor._aggregation_executor.execute_flush(
+            # Use handle_timeout_flush with END_OF_SOURCE trigger
+            # This properly handles output_mode and routes through remaining transforms
+            completed_results, work_items = processor.handle_timeout_flush(
                 node_id=agg_node_id,
                 transform=agg_transform,
                 ctx=ctx,
-                step_in_pipeline=agg_step,
+                step=agg_step,
+                total_steps=total_steps,
                 trigger_type=TriggerType.END_OF_SOURCE,
             )
 
-            # Handle the flushed batch result
-            if flush_result.status == "success":
-                if flush_result.row is not None and buffered_tokens:
-                    # Single row output - create NEW token via expand_token
-                    # CRITICAL: Do NOT reuse buffered token IDs, as they already have
-                    # CONSUMED_IN_BATCH outcome recorded. Must create new token for output.
-                    expanded = processor.token_manager.expand_token(
-                        parent_token=buffered_tokens[0],
-                        expanded_rows=[flush_result.row],
-                        step_in_pipeline=agg_step,
-                    )
-                    output_token = expanded[0]
-
-                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                    # sink durability is achieved. Do NOT record here.
-
-                    pending_tokens[default_sink_name].append((output_token, RowOutcome.COMPLETED))
+            # Handle completed results (terminal tokens - go to sink)
+            for result in completed_results:
+                if result.outcome == RowOutcome.FAILED:
+                    rows_failed += 1
+                else:
+                    # Route to appropriate sink based on branch_name if set
+                    sink_name = result.token.branch_name or default_sink_name
+                    if sink_name not in pending_tokens:
+                        sink_name = default_sink_name
+                    pending_tokens[sink_name].append((result.token, result.outcome))
                     rows_succeeded += 1
 
-                    # Checkpoint the flushed aggregation token
+                    # Checkpoint if enabled
                     if checkpoint and last_node_id is not None:
                         self._maybe_checkpoint(
                             run_id=run_id,
-                            token_id=output_token.token_id,
+                            token_id=result.token.token_id,
                             node_id=last_node_id,
                         )
-                elif flush_result.rows is not None and buffered_tokens:
-                    # Multiple row output - use expand_token for proper audit
-                    expanded = processor.token_manager.expand_token(
-                        parent_token=buffered_tokens[0],
-                        expanded_rows=flush_result.rows,
-                        step_in_pipeline=agg_step,
-                    )
-                    for exp_token in expanded:
-                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                        # sink durability is achieved. Do NOT record here.
 
-                        pending_tokens[default_sink_name].append((exp_token, RowOutcome.COMPLETED))
+            # Process work items through remaining transforms
+            # These tokens need to continue through the pipeline
+            for work_item in work_items:
+                downstream_results = processor.process_token_from_step(
+                    token=work_item.token,
+                    transforms=config.transforms,
+                    ctx=ctx,
+                    start_step=work_item.start_step + 1,
+                )
+
+                for result in downstream_results:
+                    if result.outcome == RowOutcome.FAILED:
+                        rows_failed += 1
+                    elif result.outcome == RowOutcome.COMPLETED:
+                        # Route to appropriate sink
+                        sink_name = result.token.branch_name or default_sink_name
+                        if sink_name not in pending_tokens:
+                            sink_name = default_sink_name
+                        pending_tokens[sink_name].append((result.token, result.outcome))
                         rows_succeeded += 1
 
-                        # Checkpoint each expanded token
+                        # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
                             self._maybe_checkpoint(
                                 run_id=run_id,
-                                token_id=exp_token.token_id,
+                                token_id=result.token.token_id,
                                 node_id=last_node_id,
                             )
-            else:
-                # Flush failed
-                rows_failed += len(buffered_tokens)
+                    elif result.outcome == RowOutcome.ROUTED:
+                        # Gate routed to named sink - MUST enqueue or row is lost
+                        # GateExecutor contract: ROUTED outcome always has sink_name set
+                        routed_sink = result.sink_name or default_sink_name
+                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
+                        rows_succeeded += 1
+
+                        # Checkpoint if enabled
+                        if checkpoint and last_node_id is not None:
+                            self._maybe_checkpoint(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                node_id=last_node_id,
+                            )
+                    elif result.outcome == RowOutcome.QUARANTINED:
+                        # Row quarantined by downstream transform - already recorded
+                        rows_failed += 1
+                    # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
+                    # handled within process_token_from_step - final outcomes will
+                    # appear as separate results
 
         return rows_succeeded, rows_failed
