@@ -320,6 +320,9 @@ class PurgeManager:
         - FULL_REPRODUCIBLE -> unchanged (doesn't depend on payloads)
         - ATTRIBUTABLE_ONLY -> unchanged (already at lowest grade)
 
+        Grade updates only occur for runs whose payloads were actually deleted.
+        Runs that only had failed deletions retain their grade (payloads still exist).
+
         Args:
             refs: List of payload references (content hashes) to delete
 
@@ -330,27 +333,29 @@ class PurgeManager:
         """
         start_time = perf_counter()
 
-        # Step 1: Find runs affected by these refs BEFORE deletion
-        # We need this information before deleting because the refs link runs to payloads
-        affected_run_ids = self._find_affected_run_ids(refs)
-
-        # Step 2: Delete the payloads
+        # Step 1: Delete the payloads, tracking which refs were actually deleted
         deleted_count = 0
         skipped_count = 0
         bytes_freed = 0  # Not tracked by current PayloadStore protocol
         failed_refs: list[str] = []
+        deleted_refs: list[str] = []
 
         for ref in refs:
             if self._payload_store.exists(ref):
                 deleted = self._payload_store.delete(ref)
                 if deleted:
                     deleted_count += 1
+                    deleted_refs.append(ref)
                 else:
                     failed_refs.append(ref)
             else:
                 # Ref doesn't exist - already purged or never stored
                 # This is not a failure, just skip it
                 skipped_count += 1
+
+        # Step 2: Find runs affected by ONLY the successfully deleted refs
+        # Runs with only failed refs still have their payloads and should not be downgraded
+        affected_run_ids = self._find_affected_run_ids(deleted_refs)
 
         # Step 3: Update reproducibility grades for affected runs
         # This degrades REPLAY_REPRODUCIBLE -> ATTRIBUTABLE_ONLY since
