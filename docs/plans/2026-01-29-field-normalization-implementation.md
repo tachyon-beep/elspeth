@@ -6,7 +6,7 @@
 
 **Architecture:** New `field_normalization.py` utility module contains the algorithm. `TabularSourceDataConfig` extends `SourceDataConfig` with normalization options. Sources call resolution at start of `load()`.
 
-**Tech Stack:** Python 3.11+, Pydantic v2, pytest, unicodedata, keyword module
+**Tech Stack:** Python 3.11+, Pydantic v2, pytest, hypothesis, unicodedata, keyword module
 
 **Design Doc:** `docs/plans/2026-01-29-field-normalization-design.md`
 
@@ -14,35 +14,51 @@
 
 ## Deployment Order Warning
 
-⚠️ **CRITICAL**: Tasks 1-6 must be deployed together as an atomic unit. Partial deployment creates silent failures:
+⚠️ **CRITICAL**: Tasks 1-8 must be deployed together as an atomic unit. Partial deployment creates **audit trail corruption**:
 - Templates written against normalized names (e.g., `{{ row.user_id }}`) will fail at runtime if normalization isn't enabled
 - The "Fixes that Fail" archetype - normalization creates new problems if templates reference old names
+- **Task 9 (Deployment Guard)** enforces this atomicity via pre-deployment validation
+
+## Cross-Run Stability Guarantee
+
+The normalization algorithm is **versioned and frozen per major version**:
+- **`NORMALIZATION_ALGORITHM_VERSION`** stored in audit trail
+- Algorithm changes require new version; old pipelines continue using old version
+- Enables debugging cross-run field name drift
 
 ## Dependency Graph
 
 ```
-Task 1 (normalize_field_name)
+Task 1 (normalize_field_name + version)
     ↓
-Task 2 (Unicode/keyword tests) ─────────────────────────────────────────┐
-    ↓                                                                   │
-Task 3 (collision detection)                                            │
-    ↓                                                                   │
-Task 4 (resolve_field_names) ← Task 5 (TabularSourceDataConfig) uses    │
-    ↓                              ↓                                    │
-Task 6 (CSVSource) ← ─ ─ ─ ─ ─ ─ ─ ┘                                    │
-    ↓                                                                   │
-Task 7 (Template Validation) ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+Task 2 (Unicode/keyword tests)
     ↓
-Task 8 (Full Test Suite)
+Task 3 (Property-based tests + thread safety)  ← NEW
     ↓
-Task 9 (Azure Blob Source) [optional MVP+1]
+Task 4 (collision detection)
     ↓
-Task 10 (JSONSource) [MVP+1 - deferred]
+Task 5 (resolve_field_names)
+    ↓
+Task 6 (validate_field_names in core/)  ← NEW (moved from sources/)
+    ↓
+Task 7 (TabularSourceDataConfig)
+    ↓
+Task 8 (CSVSource + P0 tests)
+    ↓
+Task 9 (Deployment Guard)  ← NEW
+    ↓
+Task 10 (Full Test Suite)
+    ↓
+Task 11 (Azure Blob Source) [optional MVP+1]
+    ↓
+Task 12 (JSONSource) [MVP+1 - deferred]
 ```
+
+**Note:** Template validation is NOT a separate task. The existing `_validate_required_input_fields_declared` validator in `LLMConfig` already enforces that templates must declare `required_input_fields`. This works with the DAG validation system that checks upstream `guaranteed_fields` satisfy downstream `required_input_fields`.
 
 ---
 
-## Task 1: Create Field Normalization Utility Module
+## Task 1: Create Field Normalization Utility Module with Versioning
 
 **Files:**
 - Create: `src/elspeth/plugins/sources/field_normalization.py`
@@ -97,6 +113,16 @@ class TestNormalizeFieldName:
 
         with pytest.raises(ValueError, match="normalizes to empty"):
             normalize_field_name("!!!")
+
+    def test_algorithm_version_available(self) -> None:
+        """Algorithm version is accessible for audit trail."""
+        from elspeth.plugins.sources.field_normalization import (
+            NORMALIZATION_ALGORITHM_VERSION,
+            get_normalization_version,
+        )
+
+        assert NORMALIZATION_ALGORITHM_VERSION == "1.0.0"
+        assert get_normalization_version() == "1.0.0"
 ```
 
 ### Step 1.2: Run test to verify it fails
@@ -104,7 +130,7 @@ class TestNormalizeFieldName:
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
 Expected: FAIL with "No module named 'elspeth.plugins.sources.field_normalization'"
 
-### Step 1.3: Write minimal implementation
+### Step 1.3: Write minimal implementation with versioning
 
 ```python
 # src/elspeth/plugins/sources/field_normalization.py
@@ -116,6 +142,11 @@ to valid Python identifiers (e.g., "case_study1_xx") at the source boundary.
 Per ELSPETH's Three-Tier Trust Model, this is Tier 3 (external data) handling:
 - Sources ARE allowed to normalize/coerce external data
 - Transforms expect normalized names (no coercion downstream)
+
+Algorithm Stability:
+    The normalization algorithm is versioned and frozen per major version.
+    NORMALIZATION_ALGORITHM_VERSION is stored in the audit trail to enable
+    debugging cross-run field name drift when algorithm evolves.
 """
 
 from __future__ import annotations
@@ -123,6 +154,16 @@ from __future__ import annotations
 import keyword
 import re
 import unicodedata
+
+# Algorithm version for audit trail - frozen per major version
+# Increment when algorithm changes affect output
+NORMALIZATION_ALGORITHM_VERSION = "1.0.0"
+
+
+def get_normalization_version() -> str:
+    """Return current algorithm version for audit trail storage."""
+    return NORMALIZATION_ALGORITHM_VERSION
+
 
 # Pre-compiled regex patterns (module level for efficiency)
 _NON_IDENTIFIER_CHARS = re.compile(r"[^\w]+")
@@ -195,16 +236,19 @@ def normalize_field_name(raw: str) -> str:
 ### Step 1.4: Run test to verify it passes
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
-Expected: PASS (6 tests)
+Expected: PASS (7 tests)
 
 ### Step 1.5: Commit
 
 ```bash
 git add src/elspeth/plugins/sources/field_normalization.py tests/plugins/sources/test_field_normalization.py
-git commit -m "feat(sources): add field normalization algorithm
+git commit -m "feat(sources): add field normalization algorithm with versioning
 
 Normalizes messy external headers to valid Python identifiers at source
-boundary. Handles Unicode, special chars, leading digits, and keywords."
+boundary. Handles Unicode, special chars, leading digits, and keywords.
+
+Includes NORMALIZATION_ALGORITHM_VERSION for audit trail - enables
+debugging cross-run field name drift when algorithm evolves."
 ```
 
 ---
@@ -214,7 +258,7 @@ boundary. Handles Unicode, special chars, leading digits, and keywords."
 **Files:**
 - Modify: `tests/plugins/sources/test_field_normalization.py`
 
-### Step 2.1: Write failing tests for Unicode edge cases
+### Step 2.1: Write tests for Unicode edge cases
 
 Add to `TestNormalizeFieldName` class:
 
@@ -258,12 +302,23 @@ Add to `TestNormalizeFieldName` class:
 
         assert normalize_field_name("café") == "café"
         assert normalize_field_name("naïve") == "naïve"
+
+    def test_unicode_nfc_normalization_consistent(self) -> None:
+        """Unicode characters in different forms normalize to same result."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        # "é" can be: precomposed U+00E9, or decomposed U+0065 U+0301
+        precomposed = "café"
+        decomposed = "caf\u0065\u0301"
+
+        assert precomposed != decomposed  # Different byte representations
+        assert normalize_field_name(precomposed) == normalize_field_name(decomposed)
 ```
 
 ### Step 2.2: Run tests to verify they pass
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
-Expected: PASS (all tests - algorithm already handles these)
+Expected: PASS (all tests)
 
 ### Step 2.3: Commit
 
@@ -271,20 +326,110 @@ Expected: PASS (all tests - algorithm already handles these)
 git add tests/plugins/sources/test_field_normalization.py
 git commit -m "test(sources): add P0 Unicode and keyword normalization tests
 
-Covers BOM, zero-width chars, emoji, Python keywords, and accented chars."
+Covers BOM, zero-width chars, emoji, Python keywords, accented chars,
+and Unicode NFC normalization consistency."
 ```
 
 ---
 
-## Task 3: Add Collision Detection Functions
+## Task 3: Add Property-Based Tests and Thread Safety
+
+**CRITICAL:** Per review board - property tests catch edge cases example tests miss.
+
+**Files:**
+- Modify: `tests/plugins/sources/test_field_normalization.py`
+
+### Step 3.1: Add property-based tests
+
+```python
+from hypothesis import given, strategies as st
+
+
+class TestNormalizationProperties:
+    """Property-based tests for normalization invariants."""
+
+    @given(raw=st.text(min_size=1, max_size=100))
+    def test_property_normalized_result_is_identifier(self, raw: str) -> None:
+        """Property: All normalized results are valid Python identifiers."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        try:
+            result = normalize_field_name(raw)
+            # If it didn't raise, result must be valid identifier
+            assert result.isidentifier(), f"'{result}' is not a valid identifier"
+            # And not a keyword (keywords get suffix)
+            import keyword
+            assert not keyword.iskeyword(result), f"'{result}' is a keyword without suffix"
+        except ValueError as e:
+            # Only accept "normalizes to empty" errors
+            assert "normalizes to empty" in str(e), f"Unexpected error: {e}"
+
+    @given(raw=st.text(min_size=1, max_size=100))
+    def test_property_normalization_is_idempotent(self, raw: str) -> None:
+        """Property: Normalizing twice gives same result as normalizing once."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        try:
+            once = normalize_field_name(raw)
+            twice = normalize_field_name(once)
+            assert once == twice, f"Not idempotent: '{once}' != '{twice}'"
+        except ValueError:
+            pass  # Empty result expected for some inputs
+
+
+class TestNormalizationThreadSafety:
+    """Thread safety tests - module-level regex patterns are immutable but verify."""
+
+    def test_concurrent_normalization_no_interference(self) -> None:
+        """Multiple threads normalizing fields doesn't cause interference."""
+        import concurrent.futures
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        headers = ["User ID", "Amount $", "CaSE Study1", "data.field"]
+        expected = ["user_id", "amount", "case_study1", "data_field"]
+
+        def normalize_batch(batch: list[str]) -> list[str]:
+            return [normalize_field_name(h) for h in batch]
+
+        # Run 100 iterations in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(normalize_batch, headers) for _ in range(100)]
+            results = [f.result() for f in futures]
+
+        # All results should be identical
+        for result in results:
+            assert result == expected
+```
+
+### Step 3.2: Run tests
+
+Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
+Expected: PASS (all tests)
+
+### Step 3.3: Commit
+
+```bash
+git add tests/plugins/sources/test_field_normalization.py
+git commit -m "test(sources): add property-based and thread safety tests
+
+Property tests verify:
+- All normalized results are valid identifiers
+- Normalization is idempotent (normalize(normalize(x)) == normalize(x))
+
+Thread safety test verifies concurrent normalization is safe."
+```
+
+---
+
+## Task 4: Add Collision Detection Functions
 
 **Files:**
 - Modify: `src/elspeth/plugins/sources/field_normalization.py`
 - Modify: `tests/plugins/sources/test_field_normalization.py`
 
-### Step 3.1: Write failing tests for collision detection
+### Step 4.1: Write failing tests for collision detection
 
-Add new test class:
+Add new test classes:
 
 ```python
 class TestCollisionDetection:
@@ -357,14 +502,42 @@ class TestMappingCollisionDetection:
         assert "'a'" in error
         assert "'b'" in error
         assert "'x'" in error
+
+
+class TestCollisionDetectionProperties:
+    """Property-based tests for collision detection."""
+
+    @given(
+        raw_headers=st.lists(
+            st.text(min_size=1, max_size=20),
+            min_size=2,
+            max_size=10,
+        )
+    )
+    def test_property_no_duplicates_in_final_headers(self, raw_headers: list[str]) -> None:
+        """Property: If resolve_field_names succeeds, final_headers has no duplicates."""
+        from elspeth.plugins.sources.field_normalization import resolve_field_names
+
+        try:
+            result = resolve_field_names(
+                raw_headers=raw_headers,
+                normalize_fields=True,
+                field_mapping=None,
+                columns=None,
+            )
+            # If it didn't raise, final_headers must be unique
+            assert len(result.final_headers) == len(set(result.final_headers))
+        except ValueError:
+            # Collision detected or empty normalization - expected for some inputs
+            pass
 ```
 
-### Step 3.2: Run tests to verify they fail
+### Step 4.2: Run tests to verify they fail
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py::TestCollisionDetection -v`
 Expected: FAIL with "cannot import name 'check_normalization_collisions'"
 
-### Step 3.3: Implement collision detection functions
+### Step 4.3: Implement collision detection functions
 
 Add to `field_normalization.py`:
 
@@ -427,12 +600,12 @@ def check_mapping_collisions(
             raise ValueError(f"field_mapping creates collision:\n" + "\n".join(details))
 ```
 
-### Step 3.4: Run tests to verify they pass
+### Step 4.4: Run tests to verify they pass
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
 Expected: PASS (all tests)
 
-### Step 3.5: Commit
+### Step 4.5: Commit
 
 ```bash
 git add src/elspeth/plugins/sources/field_normalization.py tests/plugins/sources/test_field_normalization.py
@@ -440,18 +613,20 @@ git commit -m "feat(sources): add collision detection for field normalization
 
 Detects both normalization collisions (multiple headers → same name) and
 mapping collisions (field_mapping creates duplicates). Error messages
-list ALL colliding fields with positions."
+list ALL colliding fields with positions.
+
+Includes property-based test verifying no duplicates in output."
 ```
 
 ---
 
-## Task 4: Add FieldResolution Dataclass and resolve_field_names Function
+## Task 5: Add FieldResolution Dataclass and resolve_field_names Function
 
 **Files:**
 - Modify: `src/elspeth/plugins/sources/field_normalization.py`
 - Modify: `tests/plugins/sources/test_field_normalization.py`
 
-### Step 4.1: Write failing tests for field resolution
+### Step 5.1: Write failing tests for field resolution
 
 Add new test class:
 
@@ -476,6 +651,7 @@ class TestResolveFieldNames:
             "User ID": "user_id",
             "Amount $": "amount",
         }
+        assert result.normalization_version == "1.0.0"
 
     def test_normalize_with_mapping(self) -> None:
         """Resolution with normalize + mapping override."""
@@ -512,6 +688,7 @@ class TestResolveFieldNames:
             "name": "name",
             "amount": "amount",
         }
+        assert result.normalization_version is None  # No normalization
 
     def test_columns_with_mapping(self) -> None:
         """Resolution with columns + mapping override."""
@@ -565,12 +742,12 @@ class TestResolveFieldNames:
         assert "user_id" in error  # Shows available headers
 ```
 
-### Step 4.2: Run tests to verify they fail
+### Step 5.2: Run tests to verify they fail
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py::TestResolveFieldNames -v`
 Expected: FAIL with "cannot import name 'resolve_field_names'"
 
-### Step 4.3: Implement resolve_field_names
+### Step 5.3: Implement resolve_field_names
 
 Add to `field_normalization.py`:
 
@@ -585,10 +762,12 @@ class FieldResolution:
     Attributes:
         final_headers: List of final field names to use
         resolution_mapping: Mapping from original → final names (for audit trail)
+        normalization_version: Algorithm version used, or None if no normalization
     """
 
     final_headers: list[str]
     resolution_mapping: dict[str, str]
+    normalization_version: str | None
 
 
 def resolve_field_names(
@@ -607,11 +786,14 @@ def resolve_field_names(
         columns: Explicit column names for headerless mode
 
     Returns:
-        FieldResolution with final headers and audit mapping
+        FieldResolution with final headers, audit mapping, and algorithm version
 
     Raises:
         ValueError: On collision, invalid mapping key, or configuration error
     """
+    # Track whether normalization was used
+    used_normalization = False
+
     # Determine source of headers
     if columns is not None:
         # Headerless mode - use explicit columns
@@ -622,6 +804,7 @@ def resolve_field_names(
         if normalize_fields:
             effective_headers = [normalize_field_name(h) for h in raw_headers]
             check_normalization_collisions(raw_headers, effective_headers)
+            used_normalization = True
         else:
             effective_headers = list(raw_headers)
     else:
@@ -652,42 +835,164 @@ def resolve_field_names(
     return FieldResolution(
         final_headers=final_headers,
         resolution_mapping=resolution_mapping,
+        normalization_version=get_normalization_version() if used_normalization else None,
     )
 ```
 
-### Step 4.4: Run tests to verify they pass
+### Step 5.4: Run tests to verify they pass
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_field_normalization.py -v`
 Expected: PASS (all tests)
 
-### Step 4.5: Commit
+### Step 5.5: Commit
 
 ```bash
 git add src/elspeth/plugins/sources/field_normalization.py tests/plugins/sources/test_field_normalization.py
 git commit -m "feat(sources): add resolve_field_names for complete field resolution
 
 Combines normalization, collision detection, and mapping into single
-entry point. Returns FieldResolution with final_headers and
-resolution_mapping for audit trail."
+entry point. Returns FieldResolution with final_headers,
+resolution_mapping, and normalization_version for audit trail."
 ```
 
 ---
 
-## Task 5: Create TabularSourceDataConfig
+## Task 6: Create validate_field_names in Core Module
+
+**IMPORTANT:** Per architecture review - validation helper belongs in `elspeth/core/` to avoid cross-subsystem imports (LLM → sources).
+
+**Files:**
+- Create: `src/elspeth/core/identifiers.py`
+- Test: `tests/core/test_identifiers.py`
+
+### Step 6.1: Write failing tests
+
+```python
+# tests/core/test_identifiers.py
+"""Tests for identifier validation utilities."""
+
+import pytest
+
+
+class TestValidateFieldNames:
+    """Tests for validate_field_names function."""
+
+    def test_valid_identifiers_pass(self) -> None:
+        """Valid identifiers pass validation."""
+        from elspeth.core.identifiers import validate_field_names
+
+        # Should not raise
+        validate_field_names(["user_id", "amount", "date"], "test_context")
+
+    def test_invalid_identifier_raises(self) -> None:
+        """Invalid identifier raises with context."""
+        from elspeth.core.identifiers import validate_field_names
+
+        with pytest.raises(ValueError, match="valid.*identifier") as exc_info:
+            validate_field_names(["valid", "123_invalid"], "columns")
+
+        assert "columns[1]" in str(exc_info.value)
+        assert "123_invalid" in str(exc_info.value)
+
+    def test_python_keyword_raises(self) -> None:
+        """Python keyword raises with context."""
+        from elspeth.core.identifiers import validate_field_names
+
+        with pytest.raises(ValueError, match="Python keyword") as exc_info:
+            validate_field_names(["id", "class", "name"], "field_mapping values")
+
+        assert "field_mapping values[1]" in str(exc_info.value)
+        assert "class" in str(exc_info.value)
+
+    def test_duplicate_raises(self) -> None:
+        """Duplicate field name raises."""
+        from elspeth.core.identifiers import validate_field_names
+
+        with pytest.raises(ValueError, match="[Dd]uplicate") as exc_info:
+            validate_field_names(["id", "name", "id"], "columns")
+
+        assert "id" in str(exc_info.value)
+
+    def test_empty_list_passes(self) -> None:
+        """Empty list passes validation."""
+        from elspeth.core.identifiers import validate_field_names
+
+        # Should not raise
+        validate_field_names([], "test")
+```
+
+### Step 6.2: Run tests to verify they fail
+
+Run: `.venv/bin/python -m pytest tests/core/test_identifiers.py -v`
+Expected: FAIL with "No module named 'elspeth.core.identifiers'"
+
+### Step 6.3: Implement validate_field_names
+
+```python
+# src/elspeth/core/identifiers.py
+"""Identifier validation utilities.
+
+This module provides validation for field names and other Python identifiers
+used throughout ELSPETH. It's in core/ to be accessible from any subsystem
+without creating cross-subsystem imports.
+"""
+
+from __future__ import annotations
+
+import keyword
+
+
+def validate_field_names(names: list[str], context: str) -> None:
+    """Validate field names are valid identifiers and not keywords.
+
+    Args:
+        names: List of field names to validate
+        context: Description for error messages (e.g., "columns", "field_mapping values")
+
+    Raises:
+        ValueError: If any name is invalid identifier, is Python keyword, or is duplicate
+    """
+    seen: set[str] = set()
+    for i, name in enumerate(names):
+        if not name.isidentifier():
+            raise ValueError(f"{context}[{i}] '{name}' is not a valid Python identifier")
+        if keyword.iskeyword(name):
+            raise ValueError(f"{context}[{i}] '{name}' is a Python keyword")
+        if name in seen:
+            raise ValueError(f"Duplicate field name '{name}' in {context}")
+        seen.add(name)
+```
+
+### Step 6.4: Run tests to verify they pass
+
+Run: `.venv/bin/python -m pytest tests/core/test_identifiers.py -v`
+Expected: PASS (all tests)
+
+### Step 6.5: Commit
+
+```bash
+git add src/elspeth/core/identifiers.py tests/core/test_identifiers.py
+git commit -m "feat(core): add validate_field_names identifier utility
+
+Validates field names are valid Python identifiers, not keywords, and
+not duplicates. Located in core/ to avoid cross-subsystem imports."
+```
+
+---
+
+## Task 7: Create TabularSourceDataConfig
 
 **Files:**
 - Modify: `src/elspeth/plugins/config_base.py`
 - Create: `tests/plugins/config/test_tabular_source_config.py`
 
-### Step 5.1: Write failing tests for config validation
+### Step 7.1: Write failing tests for config validation
 
 ```python
 # tests/plugins/config/test_tabular_source_config.py
 """Tests for TabularSourceDataConfig validation."""
 
 import pytest
-
-from elspeth.plugins.config_base import PluginConfigError
 
 
 class TestTabularSourceDataConfigValidation:
@@ -807,21 +1112,47 @@ class TestTabularSourceDataConfigValidation:
         })
         assert cfg.normalize_fields is True
         assert cfg.field_mapping == {"user_id": "uid"}
+
+    def test_empty_field_mapping_treated_as_none(self) -> None:
+        """Empty field_mapping dict should behave same as None."""
+        from elspeth.plugins.config_base import TabularSourceDataConfig
+
+        cfg = TabularSourceDataConfig.from_dict({
+            "path": "/tmp/test.csv",
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "normalize_fields": True,
+            "field_mapping": {},
+        })
+        # Empty dict should be allowed (treated as no mapping)
+        assert cfg.field_mapping == {}
+
+    def test_single_column_headerless_mode(self) -> None:
+        """Columns with single entry should work."""
+        from elspeth.plugins.config_base import TabularSourceDataConfig
+
+        cfg = TabularSourceDataConfig.from_dict({
+            "path": "/tmp/test.csv",
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            "columns": ["id"],
+        })
+        assert cfg.columns == ["id"]
 ```
 
-### Step 5.2: Run tests to verify they fail
+### Step 7.2: Run tests to verify they fail
 
 Run: `.venv/bin/python -m pytest tests/plugins/config/test_tabular_source_config.py -v`
 Expected: FAIL with "cannot import name 'TabularSourceDataConfig'"
 
-### Step 5.3: Implement TabularSourceDataConfig
+### Step 7.3: Implement TabularSourceDataConfig
 
 Add to `config_base.py` after `SourceDataConfig`:
 
 ```python
 from typing import Self  # Add to existing imports at top of file
 
-from elspeth.plugins.sources.field_normalization import validate_field_names  # Import helper
+from elspeth.core.identifiers import validate_field_names  # Import from core
 
 
 class TabularSourceDataConfig(SourceDataConfig):
@@ -860,61 +1191,37 @@ class TabularSourceDataConfig(SourceDataConfig):
             validate_field_names(self.columns, "columns")
 
         # Validate field_mapping values are valid identifiers and not keywords
-        if self.field_mapping is not None:
+        if self.field_mapping is not None and self.field_mapping:
             validate_field_names(list(self.field_mapping.values()), "field_mapping values")
 
         return self
 ```
 
-**Also add validate_field_names to field_normalization.py:**
-
-```python
-def validate_field_names(names: list[str], context: str) -> None:
-    """Validate field names are valid identifiers and not keywords.
-
-    Args:
-        names: List of field names to validate
-        context: Description for error messages (e.g., "columns", "field_mapping values")
-
-    Raises:
-        ValueError: If any name is invalid
-    """
-    seen: set[str] = set()
-    for i, name in enumerate(names):
-        if not name.isidentifier():
-            raise ValueError(f"{context}[{i}] '{name}' is not a valid Python identifier")
-        if keyword.iskeyword(name):
-            raise ValueError(f"{context}[{i}] '{name}' is a Python keyword")
-        if name in seen:
-            raise ValueError(f"Duplicate field name '{name}' in {context}")
-        seen.add(name)
-```
-
-### Step 5.4: Run tests to verify they pass
+### Step 7.4: Run tests to verify they pass
 
 Run: `.venv/bin/python -m pytest tests/plugins/config/test_tabular_source_config.py -v`
 Expected: PASS (all tests)
 
-### Step 5.5: Commit
+### Step 7.5: Commit
 
 ```bash
-git add src/elspeth/plugins/config_base.py src/elspeth/plugins/sources/field_normalization.py tests/plugins/config/test_tabular_source_config.py
+git add src/elspeth/plugins/config_base.py tests/plugins/config/test_tabular_source_config.py
 git commit -m "feat(config): add TabularSourceDataConfig with normalization options
 
 Adds columns, normalize_fields, and field_mapping config options with
 Pydantic validation for option interactions, Python keyword detection,
-and duplicate checking. Validation helper imported from field_normalization."
+and duplicate checking. Validation imported from elspeth.core.identifiers."
 ```
 
 ---
 
-## Task 6: Update CSVSource to Use Field Normalization
+## Task 8: Update CSVSource to Use Field Normalization
 
 **Files:**
 - Modify: `src/elspeth/plugins/sources/csv_source.py`
 - Modify: `tests/plugins/sources/test_csv_source.py`
 
-### Step 6.1: Write failing integration tests
+### Step 8.1: Write failing integration tests
 
 Add new test class to `test_csv_source.py`:
 
@@ -1016,14 +1323,14 @@ class TestCSVSourceFieldNormalization:
             "field_mapping": {"user_id": "uid"},
         })
 
-        # Must call load() to trigger resolution
         list(source.load(ctx))
 
-        assert hasattr(source, "_field_resolution")
-        assert source._field_resolution == {
+        assert source._field_resolution is not None
+        assert source._field_resolution.resolution_mapping == {
             "User ID": "uid",
             "Amount": "amount",
         }
+        assert source._field_resolution.normalization_version == "1.0.0"
 
     # P0 Tests - Added per review board requirements
 
@@ -1066,13 +1373,13 @@ class TestCSVSourceFieldNormalization:
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "wide.csv"
-        csv_file.write_text("1,alice,100,extra\n")  # 4 values
+        csv_file.write_text("1,alice,100,extra\n")
 
         source = CSVSource({
             "path": str(csv_file),
             "schema": {"fields": "dynamic"},
             "on_validation_failure": "quarantine",
-            "columns": ["id", "name", "amount"],  # Only 3 columns
+            "columns": ["id", "name", "amount"],
         })
 
         with pytest.raises(ValueError, match="column.*count.*mismatch|expected.*3.*got.*4"):
@@ -1083,20 +1390,38 @@ class TestCSVSourceFieldNormalization:
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "narrow.csv"
-        csv_file.write_text("1,alice\n")  # 2 values
+        csv_file.write_text("1,alice\n")
 
         source = CSVSource({
             "path": str(csv_file),
             "schema": {"fields": "dynamic"},
             "on_validation_failure": "quarantine",
-            "columns": ["id", "name", "amount"],  # 3 columns
+            "columns": ["id", "name", "amount"],
         })
 
         with pytest.raises(ValueError, match="column.*count.*mismatch|expected.*3.*got.*2"):
             list(source.load(ctx))
 
-    def test_audit_trail_contains_resolution_mapping(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Audit trail includes complete field resolution mapping."""
+    def test_default_behavior_no_normalization(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Without normalize_fields, headers pass through unchanged (backward compatibility)."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "messy.csv"
+        csv_file.write_text("User ID,Amount $\n1,100\n")
+
+        source = CSVSource({
+            "path": str(csv_file),
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+            # normalize_fields defaults to False
+        })
+
+        rows = list(source.load(ctx))
+        # Headers should be unchanged
+        assert rows[0].row == {"User ID": "1", "Amount $": "100"}
+
+    def test_audit_trail_contains_resolution_and_version(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Audit trail includes complete field resolution mapping and version."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "audit.csv"
@@ -1111,27 +1436,28 @@ class TestCSVSourceFieldNormalization:
 
         list(source.load(ctx))
 
-        # Verify the resolution mapping is available for audit
         assert source._field_resolution is not None
-        assert "CaSE Study1 !!!! xx!" in source._field_resolution
-        assert source._field_resolution["CaSE Study1 !!!! xx!"] == "case_study1_xx"
-        assert source._field_resolution["Amount $"] == "amount"
+        assert "CaSE Study1 !!!! xx!" in source._field_resolution.resolution_mapping
+        assert source._field_resolution.resolution_mapping["CaSE Study1 !!!! xx!"] == "case_study1_xx"
+        assert source._field_resolution.resolution_mapping["Amount $"] == "amount"
+        assert source._field_resolution.normalization_version == "1.0.0"
 ```
 
-### Step 6.2: Run tests to verify they fail
+### Step 8.2: Run tests to verify they fail
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_csv_source.py::TestCSVSourceFieldNormalization -v`
-Expected: FAIL with "Extra inputs are not permitted" (CSVSource doesn't accept normalize_fields yet)
+Expected: FAIL
 
-### Step 6.3: Update CSVSourceConfig and CSVSource
+### Step 8.3: Update CSVSourceConfig and CSVSource
 
 Update `csv_source.py`:
 
 ```python
 # Change import
 from elspeth.plugins.config_base import TabularSourceDataConfig
+from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 
-# Change config class to inherit from TabularSourceDataConfig
+
 class CSVSourceConfig(TabularSourceDataConfig):
     """Configuration for CSV source plugin.
 
@@ -1145,7 +1471,6 @@ class CSVSourceConfig(TabularSourceDataConfig):
     skip_rows: int = 0
 
 
-# In CSVSource.__init__, store config for use in load():
 class CSVSource(BaseSource):
     # ... existing code ...
 
@@ -1163,16 +1488,11 @@ class CSVSource(BaseSource):
         self._normalize_fields = cfg.normalize_fields
         self._field_mapping = cfg.field_mapping
 
-        # Field resolution computed at load() time
-        self._field_resolution: dict[str, str] | None = None
+        # Field resolution computed at load() time - includes version for audit
+        self._field_resolution: FieldResolution | None = None
 
         # ... rest of existing __init__ ...
-```
 
-Update `load()` method to use field resolution:
-
-```python
-from elspeth.plugins.sources.field_normalization import resolve_field_names
 
 def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
     """Load rows from CSV file with optional field normalization."""
@@ -1197,14 +1517,13 @@ def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
                 return  # Empty file
 
         # Resolve field names (normalization + mapping)
-        resolution = resolve_field_names(
+        self._field_resolution = resolve_field_names(
             raw_headers=raw_headers,
             normalize_fields=self._normalize_fields,
             field_mapping=self._field_mapping,
             columns=self._columns,
         )
-        headers = resolution.final_headers
-        self._field_resolution = resolution.resolution_mapping
+        headers = self._field_resolution.final_headers
 
         # Yield rows with resolved headers
         expected_count = len(headers)
@@ -1219,240 +1538,170 @@ def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
             yield SourceRow(row=row, source_meta={"row_number": row_num})
 ```
 
-### Step 6.4: Run tests to verify they pass
+### Step 8.4: Run tests to verify they pass
 
 Run: `.venv/bin/python -m pytest tests/plugins/sources/test_csv_source.py -v`
 Expected: PASS (all tests including existing ones)
 
-### Step 6.5: Commit
+### Step 8.5: Commit
 
 ```bash
 git add src/elspeth/plugins/sources/csv_source.py tests/plugins/sources/test_csv_source.py
 git commit -m "feat(csv): integrate field normalization into CSVSource
 
 CSVSourceConfig now inherits TabularSourceDataConfig. Field resolution
-happens at start of load(), storing resolution_mapping for audit trail.
-Column count validation added for headerless mode."
+happens at start of load(), storing FieldResolution (with version) for
+audit trail. Column count validation added for headerless mode.
+
+Backward compatibility verified: default behavior unchanged."
 ```
 
 ---
 
-## Task 7: Add Template Field Validation to LLM Transforms
+## Task 9: Add Deployment Guard Script
 
-**CRITICAL**: This task prevents the "Fixes that Fail" archetype where normalization silently breaks templates.
+**CRITICAL:** Prevents partial deployment that causes audit trail corruption.
 
 **Files:**
-- Modify: `src/elspeth/plugins/llm/base.py`
-- Create: `tests/plugins/llm/test_template_field_validation.py`
+- Create: `scripts/validate_deployment.py`
+- Test: `tests/scripts/test_validate_deployment.py`
 
-### Step 7.1: Write failing test for template validation
+### Step 9.1: Write failing test
 
 ```python
-# tests/plugins/llm/test_template_field_validation.py
-"""Tests for template field validation against schema."""
+# tests/scripts/test_validate_deployment.py
+"""Tests for deployment validation script."""
 
 import pytest
 
-from elspeth.plugins.config_base import PluginConfigError
 
+class TestValidateDeployment:
+    """Tests for deployment validation."""
 
-class TestTemplateFieldValidation:
-    """Tests that template field references are validated against schema."""
+    def test_validate_field_normalization_deployment_passes_when_complete(self) -> None:
+        """Validation passes when all components present."""
+        from scripts.validate_deployment import validate_field_normalization_deployment
 
-    def test_template_references_guaranteed_field_passes(self) -> None:
-        """Template referencing a guaranteed field passes validation."""
-        from elspeth.plugins.llm.base import LLMConfig
-
-        # This should not raise - template references 'user_id' which is guaranteed
-        config = LLMConfig.from_dict({
-            "model": "gpt-4",
-            "template": "Hello {{ row.user_id }}",
-            "required_input_fields": ["user_id"],
-            "schema": {
-                "fields": {
-                    "user_id": {"type": "string"},
-                },
-                "guaranteed_fields": ["user_id"],
-            },
-        })
-        assert config.template == "Hello {{ row.user_id }}"
-
-    def test_template_references_non_guaranteed_field_raises(self) -> None:
-        """Template referencing field not in guaranteed_fields raises error."""
-        from elspeth.plugins.llm.base import LLMConfig
-
-        # Template references 'customer_name' but it's not in guaranteed_fields
-        with pytest.raises(ValueError, match="customer_name.*not guaranteed"):
-            LLMConfig.from_dict({
-                "model": "gpt-4",
-                "template": "Hello {{ row.customer_name }}",
-                "required_input_fields": ["customer_name"],
-                "schema": {
-                    "fields": {
-                        "customer_id": {"type": "string"},
-                    },
-                    "guaranteed_fields": ["customer_id"],
-                },
-            })
-
-    def test_template_references_unnormalized_name_suggests_fix(self) -> None:
-        """Error message suggests normalized name when template uses old name."""
-        from elspeth.plugins.llm.base import LLMConfig
-
-        # Template uses "User ID" (unnormalized) but schema has "user_id" (normalized)
-        with pytest.raises(ValueError) as exc_info:
-            LLMConfig.from_dict({
-                "model": "gpt-4",
-                "template": "Hello {{ row['User ID'] }}",
-                "required_input_fields": ["User ID"],  # User incorrectly declared old name
-                "schema": {
-                    "fields": {
-                        "user_id": {"type": "string"},  # Normalized name
-                    },
-                    "guaranteed_fields": ["user_id"],
-                },
-            })
-
-        error = str(exc_info.value)
-        # Should suggest the normalized name
-        assert "user_id" in error.lower() or "normalized" in error.lower()
-
-    def test_dynamic_schema_skips_validation(self) -> None:
-        """Templates with dynamic schema skip field validation."""
-        from elspeth.plugins.llm.base import LLMConfig
-
-        # Dynamic schema = accept any fields, no validation
-        config = LLMConfig.from_dict({
-            "model": "gpt-4",
-            "template": "Hello {{ row.anything_goes }}",
-            "required_input_fields": ["anything_goes"],
-            "schema": {"fields": "dynamic"},
-        })
-        assert config.template == "Hello {{ row.anything_goes }}"
-
-    def test_template_with_multiple_fields_validates_all(self) -> None:
-        """All template field references are validated."""
-        from elspeth.plugins.llm.base import LLMConfig
-
-        # Template references both 'name' (guaranteed) and 'missing' (not guaranteed)
-        with pytest.raises(ValueError, match="missing.*not guaranteed"):
-            LLMConfig.from_dict({
-                "model": "gpt-4",
-                "template": "Hello {{ row.name }}, your ID is {{ row.missing }}",
-                "required_input_fields": ["name", "missing"],
-                "schema": {
-                    "fields": {
-                        "name": {"type": "string"},
-                        "id": {"type": "string"},
-                    },
-                    "guaranteed_fields": ["name", "id"],
-                },
-            })
+        # Should not raise when all components exist
+        validate_field_normalization_deployment()
 ```
 
-### Step 7.2: Run tests to verify they fail
-
-Run: `.venv/bin/python -m pytest tests/plugins/llm/test_template_field_validation.py -v`
-Expected: FAIL with assertion errors (validation doesn't exist yet)
-
-### Step 7.3: Add template validation to LLMConfig
-
-Modify `src/elspeth/plugins/llm/base.py` - add a new model validator:
+### Step 9.2: Create deployment validation script
 
 ```python
-@model_validator(mode="after")
-def _validate_template_fields_against_schema(self) -> LLMConfig:
-    """Validate template field references exist in schema's guaranteed_fields.
+#!/usr/bin/env python3
+# scripts/validate_deployment.py
+"""Pre-deployment validation for field normalization feature.
 
-    This prevents the "Fixes that Fail" archetype where:
-    1. Source normalizes headers (e.g., "User ID" → "user_id")
-    2. Template still references old name (e.g., {{ row['User ID'] }})
-    3. Runtime fails silently or with confusing KeyError
+This script enforces atomic deployment of the field normalization feature.
+Partial deployment creates AUDIT TRAIL CORRUPTION risk:
+- Tasks 1-8 implement normalization
+- If templates reference normalized names but normalization isn't deployed,
+  templates fail silently with KeyError or empty string
 
-    By validating at config time, we catch template/schema mismatches early.
+Run this as part of CI/CD pipeline pre-deployment checks.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def validate_field_normalization_deployment() -> None:
+    """Ensure atomic deployment of field normalization feature.
+
+    Checks that if any normalization component is present,
+    ALL required components are present.
+
+    Raises:
+        RuntimeError: If partial deployment detected
     """
-    # Skip validation for dynamic schema
-    if self.schema_config is None:
-        return self
-    if self.schema_config.fields == "dynamic":
-        return self
+    base = Path(__file__).parent.parent / "src" / "elspeth"
 
-    # Get guaranteed fields from schema
-    guaranteed = set(self.schema_config.guaranteed_fields or [])
-    if not guaranteed:
-        # No guaranteed fields declared - can't validate
-        return self
+    # Check what's deployed
+    field_norm_exists = (base / "plugins/sources/field_normalization.py").exists()
 
-    # Get fields referenced in template
-    from elspeth.core.templates import extract_jinja2_fields
-    template_fields = extract_jinja2_fields(self.template)
+    config_base_path = base / "plugins/config_base.py"
+    tabular_config_exists = (
+        config_base_path.exists()
+        and "TabularSourceDataConfig" in config_base_path.read_text()
+    )
 
-    # Check each template field is guaranteed
-    missing = template_fields - guaranteed
-    if missing:
-        # Try to provide helpful suggestions for normalized names
-        suggestions = []
-        for field in sorted(missing):
-            # Check if a normalized version exists in guaranteed
-            from elspeth.plugins.sources.field_normalization import normalize_field_name
-            try:
-                normalized = normalize_field_name(field)
-                if normalized in guaranteed:
-                    suggestions.append(f"  '{field}' → did you mean '{normalized}'?")
-                else:
-                    suggestions.append(f"  '{field}' - not in guaranteed_fields")
-            except ValueError:
-                suggestions.append(f"  '{field}' - not in guaranteed_fields")
+    identifiers_exists = (base / "core/identifiers.py").exists()
 
-        raise ValueError(
-            f"Template references fields not guaranteed by schema:\n"
-            + "\n".join(suggestions)
-            + f"\n\nGuaranteed fields: {sorted(guaranteed)}"
+    # If ANY normalization component exists, ALL must exist
+    components = {
+        "field_normalization.py": field_norm_exists,
+        "TabularSourceDataConfig": tabular_config_exists,
+        "core/identifiers.py": identifiers_exists,
+    }
+
+    deployed = {k for k, v in components.items() if v}
+    missing = {k for k, v in components.items() if not v}
+
+    if deployed and missing:
+        raise RuntimeError(
+            f"DEPLOYMENT VIOLATION: Partial field normalization deployment detected!\n"
+            f"Deployed: {sorted(deployed)}\n"
+            f"Missing: {sorted(missing)}\n\n"
+            f"This creates AUDIT TRAIL CORRUPTION risk.\n"
+            f"Deploy ALL components together or NONE."
         )
 
-    return self
+
+if __name__ == "__main__":
+    try:
+        validate_field_normalization_deployment()
+        print("✓ Field normalization deployment validation passed")
+    except RuntimeError as e:
+        print(f"✗ {e}")
+        raise SystemExit(1)
 ```
 
-### Step 7.4: Run tests to verify they pass
+### Step 9.3: Run validation
 
-Run: `.venv/bin/python -m pytest tests/plugins/llm/test_template_field_validation.py -v`
-Expected: PASS (all tests)
+Run: `.venv/bin/python scripts/validate_deployment.py`
+Expected: PASS (all components will be deployed together)
 
-### Step 7.5: Commit
+### Step 9.4: Commit
 
 ```bash
-git add src/elspeth/plugins/llm/base.py tests/plugins/llm/test_template_field_validation.py
-git commit -m "feat(llm): add template field validation against schema
+git add scripts/validate_deployment.py tests/scripts/test_validate_deployment.py
+git commit -m "feat(deploy): add deployment guard for field normalization
 
-Validates at config time that template field references ({{ row.field }})
-exist in schema's guaranteed_fields. Prevents 'Fixes that Fail' archetype
-where normalization breaks templates referencing old field names.
+Validates atomic deployment of field normalization feature. Prevents
+partial deployment that would cause audit trail corruption.
 
-Provides helpful suggestions when normalized name is available."
+Run as: python scripts/validate_deployment.py"
 ```
 
 ---
 
-## Task 8: Run Full Test Suite and Type Check
+## Task 10: Run Full Test Suite and Type Check
 
 **Files:** None (verification only)
 
-### Step 8.1: Run full test suite
+### Step 10.1: Run full test suite
 
 Run: `.venv/bin/python -m pytest tests/ -v --tb=short`
 Expected: PASS (all tests)
 
-### Step 8.2: Run type checker
+### Step 10.2: Run type checker
 
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/plugins/llm/base.py`
+Run: `.venv/bin/python -m mypy src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/core/identifiers.py`
 Expected: PASS (no type errors)
 
-### Step 8.3: Run linter
+### Step 10.3: Run linter
 
-Run: `.venv/bin/python -m ruff check src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/plugins/llm/base.py`
+Run: `.venv/bin/python -m ruff check src/elspeth/plugins/sources/field_normalization.py src/elspeth/plugins/config_base.py src/elspeth/core/identifiers.py`
 Expected: PASS (no lint errors)
 
-### Step 8.4: Commit any fixes if needed
+### Step 10.4: Run deployment guard
+
+Run: `.venv/bin/python scripts/validate_deployment.py`
+Expected: PASS
+
+### Step 10.5: Commit any fixes if needed
 
 ```bash
 git add -A
@@ -1461,25 +1710,25 @@ git commit -m "fix: address type/lint issues from full test run"
 
 ---
 
-## Task 9: Update Azure Blob Source (If Time Permits)
+## Task 11: Update Azure Blob Source (Optional MVP+1)
 
 **Files:**
 - Modify: `src/elspeth/plugins/azure/blob_source.py`
 - Test: `tests/plugins/azure/test_blob_source.py`
 
-This task follows the same pattern as Task 6. The Azure blob source reads CSV data from Azure Blob Storage and should support the same normalization options.
+This task follows the same pattern as Task 8. The Azure blob source reads CSV data from Azure Blob Storage and should support the same normalization options.
 
-### Step 9.1: Update config class to inherit TabularSourceDataConfig
+### Step 11.1: Update config class to inherit TabularSourceDataConfig
 
-### Step 9.2: Apply field resolution when reading CSV data
+### Step 11.2: Apply field resolution when reading CSV data
 
-### Step 9.3: Add integration tests
+### Step 11.3: Add integration tests
 
-### Step 9.4: Commit
+### Step 11.4: Commit
 
 ---
 
-## Task 10: Update JSONSource (MVP+1 - DEFERRED)
+## Task 12: Update JSONSource (MVP+1 - DEFERRED)
 
 **Status:** DEFERRED to MVP+1
 
@@ -1500,18 +1749,20 @@ This task follows the same pattern as Task 6. The Azure blob source reads CSV da
 
 | Task | Description | Commits | Status |
 |------|-------------|---------|--------|
-| 1 | Create field_normalization.py with core algorithm | 1 | MVP |
+| 1 | Create field_normalization.py with algorithm + versioning | 1 | MVP |
 | 2 | Add P0 Unicode and keyword tests | 1 | MVP |
-| 3 | Add collision detection functions | 1 | MVP |
-| 4 | Add resolve_field_names function | 1 | MVP |
-| 5 | Create TabularSourceDataConfig | 1 | MVP |
-| 6 | Update CSVSource with P0 tests | 1 | MVP |
-| 7 | Add template field validation (CRITICAL) | 1 | MVP |
-| 8 | Full test suite verification | 0-1 | MVP |
-| 9 | Update Azure Blob Source | 1 | Optional |
-| 10 | Update JSONSource | 1 | **DEFERRED** |
+| 3 | Add property-based tests and thread safety | 1 | MVP |
+| 4 | Add collision detection functions | 1 | MVP |
+| 5 | Add resolve_field_names with FieldResolution | 1 | MVP |
+| 6 | Create validate_field_names in core/ | 1 | MVP |
+| 7 | Create TabularSourceDataConfig | 1 | MVP |
+| 8 | Update CSVSource with P0 tests | 1 | MVP |
+| 9 | Add deployment guard script | 1 | MVP |
+| 10 | Full test suite verification | 0-1 | MVP |
+| 11 | Update Azure Blob Source | 1 | Optional |
+| 12 | Update JSONSource | 1 | **DEFERRED** |
 
-**Total MVP: ~7-8 commits**
+**Total MVP: ~9-10 commits**
 
 ---
 
@@ -1522,3 +1773,4 @@ After completing all MVP tasks:
 1. Update the design doc status to "Implemented"
 2. Close any related bug tracking issues
 3. Document JSON normalization requirements for MVP+1 planning
+4. Add deployment guard to CI/CD pipeline pre-deployment checks
