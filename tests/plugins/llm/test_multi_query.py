@@ -365,3 +365,220 @@ class TestMultiQueryConfig:
         assert "cs1_treatment" in prefixes
         assert "cs2_diagnosis" in prefixes
         assert "cs2_treatment" in prefixes
+
+
+class TestOutputFieldConfig:
+    """Tests for OutputFieldConfig and JSON schema generation."""
+
+    def test_string_type_to_json_schema(self) -> None:
+        """String type generates correct JSON schema."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        config = OutputFieldConfig.from_dict({"suffix": "rationale", "type": "string"})
+        schema = config.to_json_schema()
+
+        assert schema == {"type": "string"}
+
+    def test_integer_type_to_json_schema(self) -> None:
+        """Integer type generates correct JSON schema."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        config = OutputFieldConfig.from_dict({"suffix": "score", "type": "integer"})
+        schema = config.to_json_schema()
+
+        assert schema == {"type": "integer"}
+
+    def test_number_type_to_json_schema(self) -> None:
+        """Number type generates correct JSON schema."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        config = OutputFieldConfig.from_dict({"suffix": "probability", "type": "number"})
+        schema = config.to_json_schema()
+
+        assert schema == {"type": "number"}
+
+    def test_boolean_type_to_json_schema(self) -> None:
+        """Boolean type generates correct JSON schema."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        config = OutputFieldConfig.from_dict({"suffix": "is_valid", "type": "boolean"})
+        schema = config.to_json_schema()
+
+        assert schema == {"type": "boolean"}
+
+    def test_enum_type_to_json_schema(self) -> None:
+        """Enum type generates JSON schema with allowed values."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        config = OutputFieldConfig.from_dict(
+            {
+                "suffix": "confidence",
+                "type": "enum",
+                "values": ["low", "medium", "high"],
+            }
+        )
+        schema = config.to_json_schema()
+
+        assert schema == {"type": "string", "enum": ["low", "medium", "high"]}
+
+    def test_enum_requires_values(self) -> None:
+        """Enum type without values raises validation error."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        with pytest.raises(PluginConfigError):
+            OutputFieldConfig.from_dict({"suffix": "level", "type": "enum"})
+
+    def test_enum_requires_non_empty_values(self) -> None:
+        """Enum type with empty values list raises validation error."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        with pytest.raises(PluginConfigError):
+            OutputFieldConfig.from_dict({"suffix": "level", "type": "enum", "values": []})
+
+    def test_non_enum_rejects_values(self) -> None:
+        """Non-enum types reject values parameter."""
+        from elspeth.plugins.llm.multi_query import OutputFieldConfig
+
+        with pytest.raises(PluginConfigError):
+            OutputFieldConfig.from_dict(
+                {
+                    "suffix": "score",
+                    "type": "integer",
+                    "values": ["a", "b"],  # Invalid for non-enum
+                }
+            )
+
+
+class TestResponseFormatBuilding:
+    """Tests for build_json_schema and build_response_format methods."""
+
+    def test_build_json_schema_single_field(self) -> None:
+        """build_json_schema generates valid schema for single field."""
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        config = MultiQueryConfig.from_dict(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "key",
+                "template": "{{ row.input_1 }}",
+                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                "criteria": [{"name": "crit1"}],
+                "response_format": "structured",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        schema = config.build_json_schema()
+
+        assert schema == {
+            "type": "object",
+            "properties": {"score": {"type": "integer"}},
+            "required": ["score"],
+            "additionalProperties": False,
+        }
+
+    def test_build_json_schema_multiple_fields(self) -> None:
+        """build_json_schema generates valid schema for multiple fields."""
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        config = MultiQueryConfig.from_dict(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "key",
+                "template": "{{ row.input_1 }}",
+                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                "criteria": [{"name": "crit1"}],
+                "response_format": "structured",
+                "output_mapping": {
+                    "score": {"suffix": "score", "type": "integer"},
+                    "rationale": {"suffix": "rationale", "type": "string"},
+                    "confidence": {"suffix": "confidence", "type": "enum", "values": ["low", "medium", "high"]},
+                },
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        schema = config.build_json_schema()
+
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is False
+        assert set(schema["required"]) == {"score", "rationale", "confidence"}
+        assert schema["properties"]["score"] == {"type": "integer"}
+        assert schema["properties"]["rationale"] == {"type": "string"}
+        assert schema["properties"]["confidence"] == {"type": "string", "enum": ["low", "medium", "high"]}
+
+    def test_build_response_format_standard_mode(self) -> None:
+        """build_response_format returns json_object for standard mode."""
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        config = MultiQueryConfig.from_dict(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "key",
+                "template": "{{ row.input_1 }}",
+                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                "criteria": [{"name": "crit1"}],
+                "response_format": "standard",
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        response_format = config.build_response_format()
+
+        assert response_format == {"type": "json_object"}
+
+    def test_build_response_format_structured_mode(self) -> None:
+        """build_response_format returns json_schema for structured mode."""
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        config = MultiQueryConfig.from_dict(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "key",
+                "template": "{{ row.input_1 }}",
+                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                "criteria": [{"name": "crit1"}],
+                "response_format": "structured",
+                "output_mapping": {
+                    "score": {"suffix": "score", "type": "integer"},
+                    "rationale": {"suffix": "rationale", "type": "string"},
+                },
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        response_format = config.build_response_format()
+
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["name"] == "query_response"
+        assert response_format["json_schema"]["strict"] is True
+        assert response_format["json_schema"]["schema"]["type"] == "object"
+        assert "score" in response_format["json_schema"]["schema"]["properties"]
+        assert "rationale" in response_format["json_schema"]["schema"]["properties"]
+
+    def test_response_format_default_is_standard(self) -> None:
+        """response_format defaults to standard when not specified."""
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig, ResponseFormat
+
+        config = MultiQueryConfig.from_dict(
+            {
+                "deployment_name": "gpt-4o",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "key",
+                "template": "{{ row.input_1 }}",
+                "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                "criteria": [{"name": "crit1"}],
+                # No response_format specified
+                "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        assert config.response_format == ResponseFormat.STANDARD
+        assert config.build_response_format() == {"type": "json_object"}
