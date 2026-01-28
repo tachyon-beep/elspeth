@@ -119,10 +119,33 @@
 
 ## Verification Criteria
 
-- [ ] JSON parse failure returns TransformResult.error()
-- [ ] Error includes content_type and body_preview
-- [ ] Audit trail records the parse failure
-- [ ] No silent fallback to raw text
+- [x] JSON parse failure returns TransformResult.error()
+- [x] Error includes content_type and body_preview
+- [x] Audit trail records the parse failure
+- [x] No silent fallback to raw text
+
+## Resolution
+
+**Already fixed - bug report inaccurate about current implementation.**
+
+The bug report described a pattern that does not exist in the current codebase. The actual implementation has proper error handling at multiple layers:
+
+**HTTP Client Layer (`plugins/clients/http.py:229-249`):**
+- Catches `JSONDecodeError` specifically (not broad `Exception`)
+- Logs warning with URL, status_code, body_preview, and error
+- Records `{_json_parse_failed: True, _error: ..., _raw_text: ...}` in audit trail
+
+**Transform Layer (openrouter.py:294-305, openrouter_multi_query.py:527-537):**
+- Wraps `response.json()` in try/except
+- Returns `TransformResult.error()` with `reason="invalid_json_response"`
+- Includes `content_type` and `body_preview` in error details
+- Row is routed appropriately (to error handling/quarantine)
+
+**Test coverage:**
+- `test_openrouter.py::test_invalid_json_response_emits_error` - PASSED
+- Verifies error includes content_type="text/html" and body_preview
+
+**Note:** The bug report described `except Exception: response_body = response.text` which does not exist in the codebase. The HTTP client catches `JSONDecodeError` specifically and records structured error data.
 
 ## Cross-References
 
