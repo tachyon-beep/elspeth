@@ -247,29 +247,29 @@ class PooledExecutor:
     def _wait_for_dispatch_gate(self) -> None:
         """Wait until we're allowed to dispatch, ensuring global pacing.
 
-        Coordinates with other workers to ensure at least min_dispatch_delay_ms
-        between consecutive dispatches. This implements the design spec:
-        "Dispatcher waits current_delay between dispatches (AIMD-controlled)"
+        Enforces min_dispatch_delay_ms between consecutive dispatches across
+        ALL workers. This prevents burst traffic that can overwhelm APIs.
 
-        Uses max(current_delay_ms, min_dispatch_delay_ms) to ensure minimum
-        pacing is always enforced, even before any capacity errors trigger
-        AIMD backoff.
+        NOTE: This gate only enforces min_dispatch_delay_ms, NOT AIMD delay.
+        AIMD backoff is per-worker retry behavior applied in _execute_single()
+        after capacity errors. Separating these concerns ensures:
+        - Initial dispatches are evenly spaced (global pacing)
+        - Failing workers back off personally (AIMD backoff)
+        - Healthy workers continue at normal pace during pressure
 
         The lock is only held during check-and-update, not during sleep,
         allowing other workers to make progress.
         """
+        delay_ms = self._config.min_dispatch_delay_ms
+        if delay_ms <= 0:
+            return  # No pacing configured
+
+        delay_s = delay_ms / 1000
         total_wait_ms = 0.0
 
         while True:
             with self._dispatch_gate_lock:
                 now = time.monotonic()
-
-                # Use max of current delay and configured minimum
-                # This ensures minimum pacing even when AIMD starts at 0
-                throttle_delay_ms = self._throttle.current_delay_ms
-                min_delay_ms = self._config.min_dispatch_delay_ms
-                delay_ms = max(throttle_delay_ms, min_delay_ms)
-                delay_s = delay_ms / 1000
 
                 # Handle first dispatch: let it through immediately
                 # _last_dispatch_time == 0 means no dispatch yet (since monotonic() > 0)
