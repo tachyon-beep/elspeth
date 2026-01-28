@@ -1039,9 +1039,6 @@ class AggregationExecutor:
                 f"restore or buffer management."
             )
 
-        # Compute input hash for batch (hash of all input rows)
-        input_hash = stable_hash(buffered_rows)
-
         # Use first token for node_state (represents the batch operation)
         representative_token = buffered_tokens[0]
 
@@ -1055,6 +1052,10 @@ class AggregationExecutor:
         # Step 2: Begin node state for flush operation
         # Wrap batch rows in a dict for node_state recording
         batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
+
+        # Compute input hash AFTER wrapping (must match what begin_node_state records)
+        # See: P2-2026-01-21-aggregation-input-hash-mismatch
+        input_hash = stable_hash(batch_input)
         state = self._recorder.begin_node_state(
             token_id=representative_token.token_id,
             node_id=node_id,

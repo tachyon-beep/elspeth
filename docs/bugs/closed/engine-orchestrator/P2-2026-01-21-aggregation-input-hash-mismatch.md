@@ -161,3 +161,40 @@ YES - The bug is still present. The code still exhibits the exact behavior descr
 **Recommendation:**
 
 **Keep open** - This is a valid P2 audit integrity bug that violates ELSPETH's auditability standard. The fix is straightforward (align the hash input representation), low-risk, and should include a regression test to verify `result.input_hash == node_state.input_hash` after aggregation flush.
+
+---
+
+## RESOLUTION: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code
+
+**Branch:** `feat/structured-outputs`
+
+**Fix Summary:**
+
+Moved `input_hash` computation from BEFORE the wrapping step to AFTER the wrapping step in `AggregationExecutor.execute_flush()`.
+
+**Code Changes:**
+
+1. **`src/elspeth/engine/executors.py`** (~line 1054-1058):
+   - Removed early `input_hash = stable_hash(buffered_rows)` computation
+   - Added `input_hash = stable_hash(batch_input)` AFTER creating `batch_input = {"batch_rows": buffered_rows}`
+   - Added comment referencing this bug report
+
+2. **`tests/engine/test_aggregation_audit.py`**:
+   - Added regression test `test_flush_result_hash_matches_node_state_hash` that explicitly asserts `result.input_hash == agg_state.input_hash`
+
+**Verification:**
+
+- All 10 aggregation audit tests pass
+- New regression test verifies hash consistency
+- No type errors (mypy clean)
+
+**Acceptance Criteria Met:**
+
+- [x] `result.input_hash == node_state.input_hash` for all aggregation flushes
+- [x] New regression test verifies hash consistency
+- [x] All existing aggregation tests pass
+- [x] No type errors introduced
