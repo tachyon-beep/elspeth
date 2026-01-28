@@ -11,7 +11,7 @@ import csv
 import hashlib
 import os
 from collections.abc import Sequence
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
@@ -32,7 +32,7 @@ class CSVSinkConfig(PathConfig):
     delimiter: str = ","
     encoding: str = "utf-8"
     validate_input: bool = False  # Optional runtime validation of incoming rows
-    mode: str = "write"  # "write" (truncate) or "append"
+    mode: Literal["write", "append"] = "write"
 
 
 class CSVSink(BaseSink):

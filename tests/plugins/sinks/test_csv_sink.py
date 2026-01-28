@@ -318,3 +318,43 @@ class TestCSVSink:
 
         assert fieldnames is not None
         assert sorted(fieldnames) == ["a", "b"]
+
+    def test_invalid_mode_rejected(self, tmp_path: Path) -> None:
+        """Invalid mode values should be rejected at config time.
+
+        This prevents typos like 'apend' from silently truncating files.
+        """
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
+
+        with pytest.raises(PluginConfigError, match=r"'write'.*'append'"):
+            CSVSinkConfig.from_dict(
+                {
+                    "path": str(tmp_path / "output.csv"),
+                    "schema": DYNAMIC_SCHEMA,
+                    "mode": "apend",  # Typo - should be "append"
+                }
+            )
+
+    def test_valid_modes_accepted(self, tmp_path: Path) -> None:
+        """Valid mode values 'write' and 'append' should be accepted."""
+        from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
+
+        # Both valid values should work without error
+        write_config = CSVSinkConfig.from_dict(
+            {
+                "path": str(tmp_path / "write_output.csv"),
+                "schema": DYNAMIC_SCHEMA,
+                "mode": "write",
+            }
+        )
+        assert write_config.mode == "write"
+
+        append_config = CSVSinkConfig.from_dict(
+            {
+                "path": str(tmp_path / "append_output.csv"),
+                "schema": DYNAMIC_SCHEMA,
+                "mode": "append",
+            }
+        )
+        assert append_config.mode == "append"
