@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import Field
 
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -34,6 +35,7 @@ class BatchReplicateConfig(TransformDataConfig):
     )
     default_copies: int = Field(
         default=1,
+        ge=1,
         description="Default number of copies if copies_field is missing or invalid",
     )
     include_copy_index: bool = Field(
@@ -89,14 +91,20 @@ class BatchReplicate(BaseTransform):
         assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
-        # Create schema from config
-        schema = create_schema_from_config(
+        # Input schema from config
+        self.input_schema = create_schema_from_config(
             self._schema_config,
-            "BatchReplicateSchema",
+            "BatchReplicateInputSchema",
             allow_coercion=False,
         )
-        self.input_schema = schema
-        self.output_schema = schema
+
+        # Output schema MUST be dynamic because BatchReplicate adds copy_index field
+        # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
+        self.output_schema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "BatchReplicateOutputSchema",
+            allow_coercion=False,
+        )
 
     def process(  # type: ignore[override]
         self, rows: list[dict[str, Any]], ctx: PluginContext

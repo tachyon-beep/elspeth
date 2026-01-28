@@ -221,3 +221,70 @@ class TestBatchReplicateTypeEnforcement:
 
         with pytest.raises(TypeError, match="upstream validation bug"):
             transform.process(rows, ctx)
+
+
+class TestBatchReplicateConfigValidation:
+    """Config validation tests."""
+
+    def test_default_copies_zero_rejected(self) -> None:
+        """Config with default_copies=0 is rejected at validation time."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        with pytest.raises(PluginConfigError, match="default_copies"):
+            BatchReplicate(
+                {
+                    "schema": {"fields": "dynamic"},
+                    "default_copies": 0,
+                }
+            )
+
+    def test_default_copies_negative_rejected(self) -> None:
+        """Config with negative default_copies is rejected at validation time."""
+        from elspeth.plugins.config_base import PluginConfigError
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        with pytest.raises(PluginConfigError, match="default_copies"):
+            BatchReplicate(
+                {
+                    "schema": {"fields": "dynamic"},
+                    "default_copies": -1,
+                }
+            )
+
+
+class TestBatchReplicateSchemaContract:
+    """Schema contract tests."""
+
+    def test_output_schema_is_dynamic_when_copy_index_enabled(self) -> None:
+        """Output schema is dynamic to accommodate copy_index field."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": {"fields": [{"id": "int"}], "mode": "strict"},
+                "include_copy_index": True,
+            }
+        )
+
+        # Output schema should accept the copy_index field (dynamic schema)
+        output_schema = transform.output_schema
+        # Dynamic schemas accept any fields
+        validated = output_schema.model_validate({"id": 1, "copy_index": 0})
+        assert validated.copy_index == 0
+
+    def test_output_schema_accepts_copy_index_field(self) -> None:
+        """Output schema validation passes for rows with copy_index."""
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate(
+            {
+                "schema": {"fields": "dynamic"},
+                "include_copy_index": True,
+            }
+        )
+
+        # Simulate what process() outputs
+        output_row = {"original_field": "value", "copy_index": 2}
+        # This should not raise
+        transform.output_schema.model_validate(output_row)

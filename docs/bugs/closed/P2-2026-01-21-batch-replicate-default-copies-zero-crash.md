@@ -183,3 +183,42 @@ Keep open - bug confirmed valid and unfixed. Two-part fix needed:
    - OR guard before `success_multi()` call to handle edge case if config validation somehow fails
 
 Priority should remain P2 - this is a configuration error that would be caught quickly in testing, but represents a crash-on-invalid-config scenario that violates principle of graceful degradation.
+
+---
+
+## CLOSURE: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code
+
+**Resolution:**
+
+Added `ge=1` constraint to `default_copies` field in `BatchReplicateConfig` (line 38):
+
+```python
+default_copies: int = Field(
+    default=1,
+    ge=1,  # Added constraint
+    description="Default number of copies if copies_field is missing or invalid",
+)
+```
+
+**Note on runtime safety:** The runtime check at lines 137-141 (`if raw_copies < 1: raise ValueError`) already prevents invalid copies values from row data. The fix ensures config validation catches `default_copies < 1` at load time, preventing the circular fallback issue.
+
+**Files Changed:**
+
+- `src/elspeth/plugins/transforms/batch_replicate.py` - Added `ge=1` constraint
+- `tests/plugins/transforms/test_batch_replicate.py` - Added config validation tests
+
+**Tests Added:**
+
+- `TestBatchReplicateConfigValidation::test_default_copies_zero_rejected`
+- `TestBatchReplicateConfigValidation::test_default_copies_negative_rejected`
+
+**Verification:**
+
+```bash
+pytest tests/plugins/transforms/test_batch_replicate.py -v -k config_validation
+# Both tests pass - PluginConfigError raised for default_copies=0 and default_copies=-1
+```

@@ -198,3 +198,51 @@ The recent schema validation refactor (docs/plans/2026-01-24-fix-schema-validati
 **Keep open - HIGH priority for fixing before RC-2**
 
 This bug undermines the recent schema validation work. If BatchReplicate declares `output_schema` that doesn't match its actual output, edge validation will give false confidence that pipelines are valid when they may fail at runtime.
+
+---
+
+## CLOSURE: 2026-01-28
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code
+
+**Resolution:**
+
+Changed `output_schema` to dynamic to accommodate the `copy_index` field that BatchReplicate adds to output rows. This follows the established pattern for shape-changing transforms (json_explode, batch_stats, field_mapper).
+
+```python
+# Input schema from config
+self.input_schema = create_schema_from_config(
+    self._schema_config,
+    "BatchReplicateInputSchema",
+    allow_coercion=False,
+)
+
+# Output schema MUST be dynamic because BatchReplicate adds copy_index field
+# Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
+self.output_schema = create_schema_from_config(
+    SchemaConfig.from_dict({"fields": "dynamic"}),
+    "BatchReplicateOutputSchema",
+    allow_coercion=False,
+)
+```
+
+**Files Changed:**
+
+- `src/elspeth/plugins/transforms/batch_replicate.py` - Added SchemaConfig import, split input/output schemas
+- `tests/plugins/transforms/test_batch_replicate.py` - Added schema contract tests
+
+**Tests Added:**
+
+- `TestBatchReplicateSchemaContract::test_output_schema_is_dynamic_when_copy_index_enabled`
+- `TestBatchReplicateSchemaContract::test_output_schema_accepts_copy_index_field`
+
+**Verification:**
+
+```bash
+pytest tests/plugins/transforms/test_batch_replicate.py -v -k schema_contract
+# Both tests pass - output schema accepts copy_index field
+pytest tests/audit/test_plugin_schema_contracts.py -v -k batch_replicate
+# Schema audit test passes
+```
