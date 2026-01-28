@@ -28,11 +28,13 @@ from elspeth.contracts import (
     SourceRow,
 )
 from elspeth.core.config import (
+    AggregationSettings,
     CoalesceSettings,
     ElspethSettings,
     GateSettings,
     SinkSettings,
     SourceSettings,
+    TriggerConfig,
 )
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -951,3 +953,217 @@ class TestCoalesceTimeoutIntegration:
 
         # All rows should have been written to sink
         assert len(sink.rows) == 3, f"Expected 3 rows in sink, got {len(sink.rows)}"
+
+
+class TestForkAggregationCoalesce:
+    """Test fork -> aggregation -> coalesce via production path.
+
+    This class tests the scenario where:
+    1. Rows are forked to multiple paths
+    2. One path has aggregation (count trigger)
+    3. Both paths coalesce at a merge point
+
+    Bug regression test: Brief 2 - Coalesce Metadata Dropped on Aggregation Continuation
+
+    The bug was that _WorkItem created by aggregation continuation paths lacked
+    coalesce_at_step and coalesce_name, causing forked branches to skip coalesce
+    points. This test exercises the production path to catch wiring bugs between:
+    - ExecutionGraph.from_plugin_instances() (branch_to_coalesce mapping)
+    - Orchestrator (coalesce step computation and metadata propagation)
+    - RowProcessor (aggregation continuation with coalesce metadata)
+    """
+
+    def test_aggregation_then_fork_coalesce(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Aggregation output should correctly fork and reach coalesce.
+
+        Pipeline topology:
+        source -> aggregation (count=2) -> fork_gate -> coalesce -> sink
+
+        Scenario:
+        - Source emits 4 rows with values [10, 20, 30, 40]
+        - Aggregation buffers 2 rows, sums values, emits 1 aggregated result
+        - Fork gate splits each aggregated result to 'agg_path' and 'direct_path'
+        - Coalesce merges both paths with best_effort policy
+
+        Expected flow:
+        - 4 source rows processed
+        - Aggregation: rows 1+2 -> aggregated output 1, rows 3+4 -> aggregated output 2
+        - 2 aggregated outputs hit fork gate -> 2 FORKED parents, 4 fork children
+        - Fork children reach coalesce -> 2 merged outputs
+
+        This test verifies that coalesce metadata propagates correctly through
+        the fork, even when the forked tokens originate from aggregation output.
+        """
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.results import TransformResult
+
+        # === Source: emits 4 rows ===
+        class ValueSource(_TestSourceBase):
+            name = "value_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                super().__init__()
+                self._data = [
+                    {"id": 1, "value": 10},
+                    {"id": 2, "value": 20},
+                    {"id": 3, "value": 30},
+                    {"id": 4, "value": 40},
+                ]
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                for row in self._data:
+                    yield SourceRow.valid(row)
+
+            def close(self) -> None:
+                pass
+
+        # === Aggregation transform: sums values ===
+        class SumAggregation(BaseTransform):
+            """Aggregation that sums values from batched rows."""
+
+            name = "sum_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch mode: sum all values
+                    total = sum(r.get("value", 0) for r in row)
+                    ids = [r.get("id") for r in row]
+                    return TransformResult.success(
+                        {
+                            "aggregated": True,
+                            "sum": total,
+                            "source_ids": ids,
+                        }
+                    )
+                # Single row mode (shouldn't happen with count trigger)
+                return TransformResult.success(dict(row))
+
+        # === Collect sink ===
+        sink = CollectSink()
+
+        # Build source and transform
+        source = as_source(ValueSource())
+        agg_transform = as_transform(SumAggregation())
+
+        # === Build graph to get node IDs ===
+        # We build without aggregations first to get the transform node_id
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[agg_transform],
+            sinks={"output": as_sink(sink)},
+            aggregations={},  # Will add via aggregation_settings
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["agg_path", "direct_path"],
+                ),
+            ],
+            default_sink="output",
+            coalesce_settings=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["agg_path", "direct_path"],
+                    policy="best_effort",  # Don't block on missing branches
+                    timeout_seconds=1.0,  # Reasonable timeout
+                    merge="nested",  # Use nested to see which path data came from
+                ),
+            ],
+        )
+
+        # Get the transform node_id
+        transform_id_map = graph.get_transform_id_map()
+        assert 0 in transform_id_map, "Transform should have an assigned node_id"
+        agg_node_id = transform_id_map[0]
+
+        # === Aggregation settings: trigger after 2 rows, single output ===
+        agg_settings = AggregationSettings(
+            name="sum_agg",
+            plugin="sum_agg",
+            trigger=TriggerConfig(count=2),  # Trigger after 2 rows
+            output_mode="single",  # Emit one aggregated result per batch
+        )
+
+        # === Settings for coalesce computation ===
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="value_source", options={}),
+            sinks={"output": SinkSettings(plugin="collect_sink", options={})},
+            default_sink="output",
+            gates=[
+                GateSettings(
+                    name="forker",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["agg_path", "direct_path"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches=["agg_path", "direct_path"],
+                    policy="best_effort",
+                    timeout_seconds=1.0,
+                    merge="nested",
+                ),
+            ],
+        )
+
+        # === Pipeline config ===
+        config = PipelineConfig(
+            source=source,
+            transforms=[agg_transform],
+            sinks={"output": as_sink(sink)},
+            gates=settings.gates,
+            coalesce_settings=settings.coalesce,
+            aggregation_settings={agg_node_id: agg_settings},
+            config={},
+        )
+
+        # === Run pipeline ===
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # === Assertions ===
+        assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
+
+        # 4 source rows should have been processed
+        assert result.rows_processed == 4
+
+        # Aggregation produces 2 outputs (4 rows / count=2)
+        # Each aggregated output hits fork gate -> 2 FORKED parent tokens
+        assert result.rows_forked == 2, f"Expected 2 forked rows (from 2 aggregated outputs), got {result.rows_forked}"
+
+        # Each fork creates 2 children (agg_path, direct_path)
+        # With require_all or best_effort, all 4 children should coalesce into 2 merged tokens
+        assert result.rows_coalesced == 2, (
+            f"Expected 2 coalesced rows, got {result.rows_coalesced}. "
+            f"This indicates fork children may be skipping the coalesce point. "
+            f"Bug: coalesce metadata not propagating through fork."
+        )
+
+        # Verify sink received exactly 2 merged outputs
+        assert len(sink.rows) == 2, (
+            f"Expected 2 rows in sink (one per fork parent), got {len(sink.rows)}. Rows should flow through coalesce to sink."
+        )
+
+        # Verify the merged outputs have nested structure from both paths
+        for row in sink.rows:
+            # With 'nested' merge strategy, each path's data is under its branch name
+            assert "agg_path" in row or "direct_path" in row, f"Merged row should have branch data, got: {row}"
