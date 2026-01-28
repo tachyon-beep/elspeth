@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RunStatus
+from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointManager
 from elspeth.core.landscape.database import LandscapeDB
@@ -234,7 +234,7 @@ class RecoveryManager:
         """Get row IDs that were not processed before the run failed.
 
         Uses token outcomes to determine which rows need processing:
-        - Rows whose tokens have terminal sink outcomes (COMPLETED, ROUTED) are done
+        - Rows with terminal outcomes (COMPLETED, ROUTED, QUARANTINED, FAILED) are done
         - Rows whose tokens lack terminal outcomes need reprocessing
 
         This correctly handles multi-sink scenarios where rows are routed to
@@ -295,7 +295,16 @@ class RecoveryManager:
                 )
                 .where(token_outcomes_table.c.run_id == run_id)
                 .where(token_outcomes_table.c.is_terminal == 1)
-                .where(token_outcomes_table.c.outcome.in_(["completed", "routed", "quarantined", "failed"]))
+                .where(
+                    token_outcomes_table.c.outcome.in_(
+                        [
+                            RowOutcome.COMPLETED.value,
+                            RowOutcome.ROUTED.value,
+                            RowOutcome.QUARANTINED.value,
+                            RowOutcome.FAILED.value,
+                        ]
+                    )
+                )
             )
             completed_row_ids = {row.row_id for row in conn.execute(tokens_with_terminal_outcomes_query).fetchall()}
 

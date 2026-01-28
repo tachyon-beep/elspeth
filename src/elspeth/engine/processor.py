@@ -651,9 +651,10 @@ class RowProcessor:
                         )
                 else:
                     # Single/transform mode: PREVIOUSLY buffered tokens have CONSUMED_IN_BATCH
-                    # (recorded when they were buffered via non-flushing path at lines 893-899).
-                    # However, the TRIGGERING token (current_token) went straight from buffer_row()
-                    # to execute_flush(), skipping the non-flushing path. It needs CONSUMED_IN_BATCH.
+                    # (recorded when they were buffered via the non-flushing return path in
+                    # _process_transform_with_aggregation). However, the TRIGGERING token
+                    # (current_token) went straight from buffer_row() to execute_flush(),
+                    # skipping the non-flushing path. It needs CONSUMED_IN_BATCH.
                     #
                     # Record CONSUMED_IN_BATCH for triggering token only.
                     # DO NOT record FAILED - would violate unique terminal outcome constraint.
