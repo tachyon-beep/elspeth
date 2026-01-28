@@ -261,6 +261,162 @@ class TestTokenManagerForkIsolation:
         assert children[1].row_data["nested"]["key"] == "original"
 
 
+class TestTokenManagerExpandIsolation:
+    """Test that expanded tokens have isolated row_data (no shared mutable objects).
+
+    Mirrors TestTokenManagerForkIsolation - both fork_token and expand_token
+    create sibling tokens that must have independent data.
+    """
+
+    def test_expand_nested_data_isolation(self) -> None:
+        """Expanded children must not share nested mutable objects.
+
+        Bug: P2-2026-01-21-expand-token-shared-row-data
+        When expanded_rows contain nested dicts/lists, shallow copy causes siblings
+        to share nested objects. Mutating one affects all.
+        """
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+
+        # Create parent token
+        parent = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"original": "data"},
+        )
+
+        # Expand with NESTED data (common from batch aggregations)
+        expanded_rows = [
+            {"payload": {"x": 1, "y": 2}, "items": [1, 2, 3]},
+            {"payload": {"x": 10, "y": 20}, "items": [10, 20, 30]},
+        ]
+
+        children = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=expanded_rows,
+            step_in_pipeline=1,
+        )
+
+        child_a = children[0]
+        child_b = children[1]
+
+        # Mutate nested data in child_a
+        child_a.row_data["payload"]["x"] = 999
+        child_a.row_data["items"].append(4)
+
+        # Bug: child_b should NOT be affected
+        assert child_b.row_data["payload"]["x"] == 10, "Nested dict mutation leaked to sibling!"
+        assert child_b.row_data["items"] == [10, 20, 30], "Nested list mutation leaked to sibling!"
+
+    def test_expand_shared_input_isolation(self) -> None:
+        """Expanded tokens must be isolated even when input rows share objects.
+
+        This tests the case where a plugin returns rows with shared nested objects
+        (e.g., using dict(row) shallow copy). TokenManager must isolate them.
+        """
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+        parent = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"value": 1},
+        )
+
+        # Simulate plugin using dict(row) shallow copy - SHARED nested object
+        shared_metadata = {"version": 1, "tags": ["a", "b"]}
+        expanded_rows = [
+            {"id": 1, "meta": shared_metadata},  # Both point to SAME dict!
+            {"id": 2, "meta": shared_metadata},
+        ]
+
+        children = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=expanded_rows,
+            step_in_pipeline=1,
+        )
+
+        # Mutate nested data in child 0
+        children[0].row_data["meta"]["version"] = 999
+        children[0].row_data["meta"]["tags"].append("mutated")
+
+        # Child 1 must NOT see the mutation
+        assert children[1].row_data["meta"]["version"] == 1, "Shared object mutation leaked!"
+        assert children[1].row_data["meta"]["tags"] == ["a", "b"], "Shared list mutation leaked!"
+
+    def test_expand_deep_nesting_isolation(self) -> None:
+        """Test isolation with deeply nested structures (3+ levels)."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+        parent = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"value": 1},
+        )
+
+        # Deep nesting: dict -> list -> dict -> list
+        expanded_rows = [
+            {"level1": {"level2": [{"level3": ["deep_value"]}]}},
+            {"level1": {"level2": [{"level3": ["deep_value"]}]}},
+        ]
+
+        children = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=expanded_rows,
+            step_in_pipeline=1,
+        )
+
+        # Mutate at the deepest level
+        children[0].row_data["level1"]["level2"][0]["level3"][0] = "MUTATED"
+
+        # Sibling must be unaffected
+        assert children[1].row_data["level1"]["level2"][0]["level3"][0] == "deep_value"
+
+
 class TestTokenManagerEdgeCases:
     """Test edge cases and error handling."""
 

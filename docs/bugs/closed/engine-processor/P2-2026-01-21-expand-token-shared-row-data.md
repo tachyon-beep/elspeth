@@ -197,3 +197,59 @@ This is a **critical audit integrity bug** that violates ELSPETH's core principl
 4. Performance testing to ensure deep copy overhead is acceptable for multi-row expansion scenarios
 
 The bug is low-probability (requires nested data + downstream mutation) but **high-impact** (complete audit trail corruption). Should be fixed before production deployment.
+
+---
+
+## RESOLUTION: 2026-01-29
+
+**Status:** FIXED
+
+**Closed By:** Claude Code
+
+**Fix Details:**
+
+Added `copy.deepcopy(row_data)` to `expand_token` in `src/elspeth/engine/tokens.py`, mirroring the pattern established by `fork_token`.
+
+**Code Change (line 249-262):**
+```python
+# CRITICAL: Use deepcopy to prevent nested mutable objects from being
+# shared across expanded children. Same reasoning as fork_token - without
+# this, mutations in one sibling leak to others, corrupting audit trail.
+# Bug: P2-2026-01-21-expand-token-shared-row-data
+return [
+    TokenInfo(
+        row_id=parent_token.row_id,
+        token_id=db_child.token_id,
+        row_data=copy.deepcopy(row_data),
+        branch_name=parent_token.branch_name,
+        expand_group_id=db_child.expand_group_id,
+    )
+    for db_child, row_data in zip(db_children, expanded_rows, strict=True)
+]
+```
+
+**Tests Added:**
+
+Created `TestTokenManagerExpandIsolation` class in `tests/engine/test_tokens.py` with 3 tests:
+- `test_expand_nested_data_isolation` - nested dict/list mutations don't leak to siblings
+- `test_expand_shared_input_isolation` - shared objects in expanded_rows list are isolated
+- `test_expand_deep_nesting_isolation` - isolation works at 3+ levels of nesting
+
+**Acceptance Criteria Met:**
+- ✅ `expand_token` uses `copy.deepcopy()` like `fork_token`
+- ✅ New isolation tests pass (3/3)
+- ✅ All existing tests pass (656 passed, 1 skipped)
+- ✅ Symmetry restored between `fork_token` and `expand_token`
+
+**Review Process:**
+
+4-perspective review board (architecture, python, QA, systems thinking) approved with recommendations:
+- Architecture: APPROVE - correct location, restores symmetry
+- Python: REQUEST CHANGES → addressed by adding deepcopy
+- QA: REQUEST CHANGES → addressed by adding isolation tests
+- Systems Thinking: APPROVE with follow-up - deepcopy is correct leverage point
+
+**Follow-Up Work (Tracked Separately):**
+- Performance benchmarking for large row expansions
+- Consider canonical-safe validation at transform boundaries
+- Document "Token Isolation Invariant" in architecture docs
