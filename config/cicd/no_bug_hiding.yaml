@@ -670,13 +670,13 @@ allow_hits:
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _check_aggregation_timeouts: routed_destinations counter for timeout-triggered downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2427
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2433
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _flush_remaining_aggregation_buffers: routed_destinations counter for end-of-source flush downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2560
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2574
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter

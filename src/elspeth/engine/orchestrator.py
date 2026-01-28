@@ -2400,13 +2400,19 @@ class Orchestrator:
             # Process work items through remaining transforms
             # These tokens need to continue through the pipeline
             for work_item in work_items:
-                # Process token starting from the step AFTER the aggregation
-                # (start_step is 0-indexed, so start_step+1 is the next transform)
-                downstream_results = processor.process_token_from_step(
+                # Determine start_step: if coalesce is set, use it directly
+                # Otherwise, add 1 to current position to get next transform
+                if work_item.coalesce_at_step is not None:
+                    continuation_start = work_item.coalesce_at_step
+                else:
+                    continuation_start = work_item.start_step + 1
+                downstream_results = processor.process_token(
                     token=work_item.token,
                     transforms=config.transforms,
                     ctx=ctx,
-                    start_step=work_item.start_step + 1,
+                    start_step=continuation_start,
+                    coalesce_at_step=work_item.coalesce_at_step,
+                    coalesce_name=work_item.coalesce_name,
                 )
 
                 for result in downstream_results:
@@ -2430,7 +2436,7 @@ class Orchestrator:
                         # Row quarantined by downstream transform - already recorded
                         rows_quarantined += 1
                     # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
-                    # handled within process_token_from_step - final outcomes will
+                    # handled within process_token - final outcomes will
                     # appear as separate results
 
         return rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations
@@ -2527,11 +2533,19 @@ class Orchestrator:
             # Process work items through remaining transforms
             # These tokens need to continue through the pipeline
             for work_item in work_items:
-                downstream_results = processor.process_token_from_step(
+                # Determine start_step: if coalesce is set, use it directly
+                # Otherwise, add 1 to current position to get next transform
+                if work_item.coalesce_at_step is not None:
+                    continuation_start = work_item.coalesce_at_step
+                else:
+                    continuation_start = work_item.start_step + 1
+                downstream_results = processor.process_token(
                     token=work_item.token,
                     transforms=config.transforms,
                     ctx=ctx,
-                    start_step=work_item.start_step + 1,
+                    start_step=continuation_start,
+                    coalesce_at_step=work_item.coalesce_at_step,
+                    coalesce_name=work_item.coalesce_name,
                 )
 
                 for result in downstream_results:

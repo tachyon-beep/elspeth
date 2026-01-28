@@ -299,7 +299,8 @@ class RowProcessor:
             node_id: The aggregation node ID
             transform: The batch-aware transform to execute
             ctx: Plugin context
-            step: Position of this aggregation in the pipeline (0-indexed)
+            step: Position of this aggregation in the pipeline (0-indexed).
+                Converted to 1-indexed internally for audit recording.
             total_steps: Total number of transform steps in pipeline
             trigger_type: The trigger type (TIMEOUT or END_OF_SOURCE)
 
@@ -312,12 +313,17 @@ class RowProcessor:
         settings = self._aggregation_settings[node_id]
         output_mode = settings.output_mode
 
+        # Convert 0-indexed step to 1-indexed for audit recording
+        # Normal transform execution uses: step = start_step + step_offset + 1
+        # Timeout/end-of-source paths must match this 1-indexed convention
+        audit_step = step + 1
+
         # Execute flush with the specified trigger type
         result, buffered_tokens, _batch_id = self._aggregation_executor.execute_flush(
             node_id=node_id,
             transform=transform,
             ctx=ctx,
-            step_in_pipeline=step,
+            step_in_pipeline=audit_step,
             trigger_type=trigger_type,
         )
 
@@ -381,6 +387,20 @@ class RowProcessor:
         # Calculate if there are more transforms after this aggregation
         more_transforms = step < total_steps
 
+        # Derive coalesce metadata from buffered tokens' branch_name
+        # For timeout/end-of-source flushes, we need to preserve coalesce path
+        # so tokens can still join at coalesce points after aggregation
+        coalesce_at_step: int | None = None
+        coalesce_name: CoalesceName | None = None
+        if buffered_tokens:
+            branch_name = buffered_tokens[0].branch_name
+            if branch_name and BranchName(branch_name) in self._branch_to_coalesce:
+                coalesce_name = self._branch_to_coalesce[BranchName(branch_name)]
+                # Direct indexing: coalesce_step_map is internal data. If coalesce_name
+                # exists in branch_to_coalesce but not in coalesce_step_map, that's a
+                # bug in graph construction that must crash immediately (Tier 1 data).
+                coalesce_at_step = self._coalesce_step_map[coalesce_name]
+
         if output_mode == "single":
             # Single output: one aggregated result row
             final_data = result.row if result.row is not None else {}
@@ -391,20 +411,29 @@ class RowProcessor:
                 expanded = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=[final_data],
-                    step_in_pipeline=step,
+                    step_in_pipeline=audit_step,
                 )
                 output_token = expanded[0]
 
-                if more_transforms:
-                    # Queue for remaining transforms
+                # Check if token needs to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and output_token.branch_name is not None
+
+                if more_transforms or needs_coalesce:
+                    # Queue for remaining transforms with coalesce metadata
+                    # NOTE: start_step is set to current 0-indexed position.
+                    # Orchestrator adds +1 when calling process_token_from_step.
+                    # If there's a coalesce point, orchestrator should skip directly there.
                     child_items.append(
                         _WorkItem(
                             token=output_token,
-                            start_step=step,  # Continue from current step
+                            start_step=step,  # 0-indexed current position
+                            coalesce_at_step=coalesce_at_step,
+                            coalesce_name=coalesce_name,
                         )
                     )
                 else:
-                    # No more transforms - return COMPLETED
+                    # No more transforms and no coalesce - return COMPLETED
                     results.append(
                         RowResult(
                             token=output_token,
@@ -439,16 +468,24 @@ class RowProcessor:
                     branch_name=token.branch_name,
                 )
 
-                if more_transforms:
-                    # Queue for remaining transforms
+                # Check if token needs to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
+
+                if more_transforms or needs_coalesce:
+                    # Queue for remaining transforms with coalesce metadata
+                    # NOTE: start_step is set to current 0-indexed position.
+                    # Orchestrator adds +1 when calling process_token_from_step.
                     child_items.append(
                         _WorkItem(
                             token=updated_token,
-                            start_step=step,
+                            start_step=step,  # 0-indexed current position
+                            coalesce_at_step=coalesce_at_step,
+                            coalesce_name=coalesce_name,
                         )
                     )
                 else:
-                    # No more transforms - return COMPLETED
+                    # No more transforms and no coalesce - return COMPLETED
                     results.append(
                         RowResult(
                             token=updated_token,
@@ -471,20 +508,30 @@ class RowProcessor:
                 expanded_tokens = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=output_rows,
-                    step_in_pipeline=step,
+                    step_in_pipeline=audit_step,
                 )
 
-                if more_transforms:
-                    # Queue expanded tokens for remaining transforms
+                # Check if expanded tokens need to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                # Use first expanded token to check branch_name
+                first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
+
+                if more_transforms or needs_coalesce:
+                    # Queue expanded tokens for remaining transforms with coalesce metadata
+                    # NOTE: start_step is set to current 0-indexed position.
+                    # Orchestrator adds +1 when calling process_token_from_step.
                     for token in expanded_tokens:
                         child_items.append(
                             _WorkItem(
                                 token=token,
-                                start_step=step,
+                                start_step=step,  # 0-indexed current position
+                                coalesce_at_step=coalesce_at_step,
+                                coalesce_name=coalesce_name,
                             )
                         )
                 else:
-                    # No more transforms - return COMPLETED
+                    # No more transforms and no coalesce - return COMPLETED
                     for token in expanded_tokens:
                         results.append(
                             RowResult(
@@ -507,6 +554,8 @@ class RowProcessor:
         step: int,
         child_items: list[_WorkItem],
         total_steps: int,
+        coalesce_at_step: int | None = None,
+        coalesce_name: CoalesceName | None = None,
     ) -> tuple[RowResult | list[RowResult], list[_WorkItem]]:
         """Process a row at an aggregation node using engine buffering.
 
@@ -520,6 +569,8 @@ class RowProcessor:
             step: Pipeline step number
             child_items: Work items to return with result
             total_steps: Total number of steps in the pipeline
+            coalesce_at_step: Step index at which fork children should coalesce (optional)
+            coalesce_name: Name of the coalesce point for merging (optional)
 
         Returns:
             (RowResult or list[RowResult], child_items) tuple
@@ -591,18 +642,29 @@ class RowProcessor:
                 # Check if there are more transforms after this one
                 more_transforms = step < total_steps
 
-                if more_transforms:
+                # Check if token needs to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
+
+                if more_transforms or needs_coalesce:
                     # Queue aggregated token as work item for remaining transforms
+                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
+                    # 0-indexed position of the NEXT transform (since step = p + 1 where
+                    # p is current 0-indexed position). So transforms[step:] gives remaining.
+                    # If there's a coalesce point, skip directly there (matches fork behavior).
+                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
                     child_items.append(
                         _WorkItem(
                             token=updated_token,
-                            start_step=step,  # Continue from current step (0-indexed next)
+                            start_step=continuation_start,
+                            coalesce_at_step=coalesce_at_step,
+                            coalesce_name=coalesce_name,
                         )
                     )
                     # Return empty list - result will come from child item
                     return ([], child_items)
                 else:
-                    # No more transforms - return COMPLETED
+                    # No more transforms and no coalesce - return COMPLETED
                     # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                     return (
                         RowResult(
@@ -636,8 +698,19 @@ class RowProcessor:
                 # Check if there are more transforms after this one
                 more_transforms = step < total_steps
 
-                if more_transforms:
+                # Check if tokens need to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                # Use first buffered token to check branch_name (all should have same branch)
+                first_token_branch = buffered_tokens[0].branch_name if buffered_tokens else None
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_token_branch is not None
+
+                if more_transforms or needs_coalesce:
                     # Queue enriched tokens as work items for remaining transforms
+                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
+                    # 0-indexed position of the NEXT transform (since step = p + 1 where
+                    # p is current 0-indexed position). So transforms[step:] gives remaining.
+                    # If there's a coalesce point, skip directly there (matches fork behavior).
+                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
                     for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
                         updated_token = TokenInfo(
                             row_id=token.row_id,
@@ -648,13 +721,15 @@ class RowProcessor:
                         child_items.append(
                             _WorkItem(
                                 token=updated_token,
-                                start_step=step,  # Continue from current step (0-indexed next)
+                                start_step=continuation_start,
+                                coalesce_at_step=coalesce_at_step,
+                                coalesce_name=coalesce_name,
                             )
                         )
                     # Return empty list - all results will come from child items
                     return ([], child_items)
                 else:
-                    # No more transforms - return COMPLETED for all tokens
+                    # No more transforms and no coalesce - return COMPLETED for all tokens
                     results: list[RowResult] = []
                     for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
                         updated_token = TokenInfo(
@@ -713,19 +788,32 @@ class RowProcessor:
                 # Check if there are more transforms after this one
                 more_transforms = step < total_steps
 
-                if more_transforms:
+                # Check if expanded tokens need to go to a coalesce point
+                # This must happen EVEN if no more transforms - coalesce may be last step
+                # Use first expanded token to check branch_name
+                first_expanded_branch = expanded_tokens[0].branch_name if expanded_tokens else None
+                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and first_expanded_branch is not None
+
+                if more_transforms or needs_coalesce:
                     # Queue expanded tokens as work items for remaining transforms
+                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
+                    # 0-indexed position of the NEXT transform (since step = p + 1 where
+                    # p is current 0-indexed position). So transforms[step:] gives remaining.
+                    # If there's a coalesce point, skip directly there (matches fork behavior).
+                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
                     for token in expanded_tokens:
                         child_items.append(
                             _WorkItem(
                                 token=token,
-                                start_step=step,  # Continue from current step (0-indexed next)
+                                start_step=continuation_start,
+                                coalesce_at_step=coalesce_at_step,
+                                coalesce_name=coalesce_name,
                             )
                         )
                     # Return triggering result - expanded tokens will produce results via work queue
                     return (triggering_result, child_items)
                 else:
-                    # No more transforms - return COMPLETED for expanded tokens
+                    # No more transforms and no coalesce - return COMPLETED for expanded tokens
                     output_results: list[RowResult] = [triggering_result]
                     for token in expanded_tokens:
                         # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
@@ -1321,6 +1409,8 @@ class RowProcessor:
                         step=step,
                         child_items=child_items,
                         total_steps=total_steps,
+                        coalesce_at_step=coalesce_at_step,
+                        coalesce_name=coalesce_name,
                     )
 
                 # Regular transform (with optional retry)

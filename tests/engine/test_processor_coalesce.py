@@ -11,20 +11,19 @@ because the processor uses isinstance() for type-safe plugin detection.
 Gates are config-driven using GateSettings.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from elspeth.contracts import NodeType, RunStatus
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
-
-if TYPE_CHECKING:
-    from elspeth.core.landscape import LandscapeDB
-
+from elspeth.core.config import AggregationSettings, TriggerConfig
+from elspeth.core.landscape import LandscapeDB
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
     RowOutcome,
     TransformResult,
 )
+from tests.conftest import as_transform
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
@@ -1273,3 +1272,224 @@ class TestCoalesceLinkage:
 
         assert processor._branch_to_coalesce == {BranchName("path_a"): CoalesceName("merge_point")}
         assert processor._coalesce_step_map == {CoalesceName("merge_point"): 3}
+
+
+class TestAggregationCoalesceMetadataPropagation:
+    """UNIT TEST: Aggregation continuation paths propagate coalesce metadata.
+
+    Scope: Tests RowProcessor._process_batch_aggregation_node and handle_timeout_flush
+    internal behavior. Does NOT test full orchestrator/graph integration.
+
+    Bug: Brief 2 - Coalesce Metadata Dropped on Aggregation Continuation (P2)
+
+    Root cause: _WorkItem carries coalesce_at_step/coalesce_name, but when
+    _process_batch_aggregation_node queues work items for continuation, it
+    creates them without these fields. Same for handle_timeout_flush.
+
+    Impact: A forked branch that aggregates and then continues in single mode
+    will skip the coalesce point, leaving the other branch to hang.
+
+    Note: This is a unit test of RowProcessor internals. For production-path
+    integration tests of fork+aggregation+coalesce, see the orchestrator tests
+    once full fork+coalesce fixtures are available.
+    """
+
+    def test_aggregation_single_mode_preserves_coalesce_metadata(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Aggregation continuation should preserve coalesce metadata.
+
+        Scenario:
+        - Token has branch_name "path_a" (from a prior fork)
+        - Token processes through aggregation (single mode)
+        - Aggregation flushes and creates continuation _WorkItem
+        - The continuation should have coalesce_at_step and coalesce_name
+
+        Without the fix, the continuation _WorkItem lacks coalesce metadata,
+        causing the token to skip the coalesce point.
+        """
+        from elspeth.contracts import NodeType
+        from elspeth.contracts.types import BranchName, CoalesceName, NodeID
+        from elspeth.core.config import CoalesceSettings
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.engine.tokens import TokenManager
+        from elspeth.plugins.context import PluginContext
+
+        recorder = LandscapeRecorder(landscape_db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Aggregation transform
+        class BatchAggForCoalesce(BaseTransform):
+            """Aggregation that sums values."""
+
+            name = "batch_agg_coalesce"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total})
+                return TransformResult.success(dict(row))
+
+        agg_transform = as_transform(BatchAggForCoalesce())
+
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="batch_agg_coalesce",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="coalesce_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Set node_id on transform
+        agg_transform.node_id = agg_node.node_id
+
+        # Coalesce settings: merge path_a and path_b
+        coalesce_settings = CoalesceSettings(
+            name="merge",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+        )
+
+        # Aggregation settings - triggers after 2 rows
+        agg_settings = AggregationSettings(
+            name="batch_agg_coalesce",
+            plugin="batch_agg_coalesce",
+            trigger=TriggerConfig(count=2),
+            output_mode="single",
+        )
+
+        # Create coalesce executor
+        coalesce_executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+
+        coalesce_executor.register_coalesce(
+            settings=coalesce_settings,
+            node_id=coalesce_node.node_id,
+        )
+
+        # Branch to coalesce mapping
+        branch_to_coalesce = {
+            BranchName("path_a"): CoalesceName("merge"),
+            BranchName("path_b"): CoalesceName("merge"),
+        }
+
+        # Coalesce step is at step 1 (after aggregation at step 0)
+        coalesce_step_map = {CoalesceName("merge"): 1}
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            coalesce_executor=coalesce_executor,
+            coalesce_node_ids={CoalesceName("merge"): NodeID(coalesce_node.node_id)},
+            branch_to_coalesce=branch_to_coalesce,
+            coalesce_step_map=coalesce_step_map,
+            aggregation_settings={NodeID(agg_node.node_id): agg_settings},
+        )
+
+        # Create source token
+        source_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            row_index=0,
+            row_data={"id": 1, "value": 100},
+        )
+
+        # Fork to create a token with branch_name
+        forked_token = token_manager.fork_token(
+            parent_token=source_token,
+            branches=["path_a"],
+            step_in_pipeline=0,
+        )[0]
+
+        assert forked_token.branch_name == "path_a"
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process first token - gets buffered
+        results = processor.process_token(
+            token=forked_token,
+            transforms=[agg_transform],
+            ctx=ctx,
+            start_step=0,
+            coalesce_at_step=1,
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        # Create second forked token
+        source_token2 = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            row_index=1,
+            row_data={"id": 2, "value": 200},
+        )
+        forked_token2 = token_manager.fork_token(
+            parent_token=source_token2,
+            branches=["path_a"],
+            step_in_pipeline=0,
+        )[0]
+
+        # Process second token - triggers flush
+        results2 = processor.process_token(
+            token=forked_token2,
+            transforms=[agg_transform],
+            ctx=ctx,
+            start_step=0,
+            coalesce_at_step=1,
+            coalesce_name=CoalesceName("merge"),
+        )
+
+        all_results = results + results2
+
+        # Check that no token has COMPLETED outcome (which would mean it
+        # bypassed coalesce). All tokens should either be:
+        # - CONSUMED_IN_BATCH (buffered for aggregation)
+        # - None (held for coalesce, waiting for path_b)
+        #
+        # If the bug exists, we'd see COMPLETED because the continuation
+        # _WorkItem lacks coalesce metadata, so it skips coalesce check.
+
+        for result in all_results:
+            if result.outcome == RowOutcome.COMPLETED:
+                raise AssertionError(
+                    f"Aggregation output has COMPLETED outcome, which means it "
+                    f"bypassed the coalesce point. Bug: aggregation continuation "
+                    f"_WorkItem is missing coalesce_at_step and coalesce_name. "
+                    f"Result: {result}"
+                )

@@ -1650,3 +1650,305 @@ class TestTimeoutFlushErrorHandling:
             "routed_destinations should track where rows were routed. "
             "Got empty dict. Bug: _check_aggregation_timeouts doesn't update routed_destinations."
         )
+
+
+class TestTimeoutFlushStepIndexing:
+    """Test that timeout/end-of-source flushes record correct 1-indexed step.
+
+    Bug: Brief 1 - Timeout/End-of-Source Flush Step Indexing (P2)
+
+    Root cause: _find_aggregation_transform returns 0-indexed position which
+    flows directly to audit recording, but normal transform execution uses
+    1-indexed steps (step = start_step + step_offset + 1).
+
+    Impact: Audit trails for timeout/end-of-source batches have step_index=0
+    for the first aggregation, while normal processing records step_index=1.
+    """
+
+    def test_timeout_flush_records_1_indexed_step(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Timeout flush at first transform should record step_index=1, not 0.
+
+        The aggregation is at position 0 in transforms list (first transform).
+        Normal processing would record step_index=1 (1-indexed).
+        Timeout flush should record the same step_index=1.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import node_states_table
+
+        class SlowSource(_TestSourceBase):
+            """Source that emits rows with delays to allow timeout to fire."""
+
+            name = "slow_source_step_test"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Emit first row, it will be buffered
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Sleep to allow timeout to fire (0.8s > 0.5s timeout with margin for CI)
+                time.sleep(0.8)
+                # Emit second row - timeout check happens before this is processed
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class BatchAgg(BaseTransform):
+            """Simple aggregation that returns batch sum."""
+
+            name = "batch_agg_step_test"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_step_test"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(SlowSource())
+        transform = as_transform(BatchAgg())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],  # First (and only) transform at position 0
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        agg_settings = AggregationSettings(
+            name="test_step",
+            plugin="batch_agg_step_test",
+            trigger=TriggerConfig(count=100, timeout_seconds=0.5),  # Timeout trigger (0.5s with CI margin)
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="slow_source_step_test", options={}),
+            sinks={"output": SinkSettings(plugin="collector_step_test", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
+
+        # Query node_states to find the timeout-triggered flush's step_index
+        with landscape_db.connection() as conn:
+            # Get all node_states for this transform node
+            states = conn.execute(
+                select(node_states_table.c.step_index, node_states_table.c.node_id)
+                .where(node_states_table.c.run_id == result.run_id)
+                .where(node_states_table.c.node_id == node_id)
+            ).fetchall()
+
+        # There should be at least one state (the timeout flush)
+        assert len(states) >= 1, f"Expected at least 1 node_state, got {len(states)}"
+
+        # All step_index values should be 1 (1-indexed for first transform)
+        for step_index, _state_node_id in states:
+            assert step_index == 1, (
+                f"Timeout flush step_index should be 1 (1-indexed), got {step_index}. "
+                f"Bug: _find_aggregation_transform returns 0-indexed position which "
+                f"flows directly to audit recording without +1 conversion."
+            )
+
+    def test_end_of_source_flush_records_1_indexed_step(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """End-of-source flush at first transform should record step_index=1, not 0.
+
+        Same as timeout test but using END_OF_SOURCE trigger (no timeout, just
+        source completion with buffered rows).
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import node_states_table
+
+        class FastSource(_TestSourceBase):
+            """Source that completes quickly with buffered rows."""
+
+            name = "fast_source_step_test"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Emit rows that will be buffered (count trigger won't fire)
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                # Source completes - end-of-source flush triggers
+
+            def close(self) -> None:
+                pass
+
+        class BatchAgg(BaseTransform):
+            """Simple aggregation that returns batch sum."""
+
+            name = "batch_agg_eos_step_test"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects output."""
+
+            name = "collector_eos_step_test"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(BatchAgg())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],  # First (and only) transform at position 0
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        agg_settings = AggregationSettings(
+            name="test_eos_step",
+            plugin="batch_agg_eos_step_test",
+            trigger=TriggerConfig(count=100),  # High count, no timeout - forces END_OF_SOURCE
+            output_mode="single",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_step_test", options={}),
+            sinks={"output": SinkSettings(plugin="collector_eos_step_test", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
+
+        # Query node_states to find the END_OF_SOURCE flush's step_index
+        with landscape_db.connection() as conn:
+            states = conn.execute(
+                select(node_states_table.c.step_index, node_states_table.c.node_id)
+                .where(node_states_table.c.run_id == result.run_id)
+                .where(node_states_table.c.node_id == node_id)
+            ).fetchall()
+
+        assert len(states) >= 1, f"Expected at least 1 node_state, got {len(states)}"
+
+        for step_index, _state_node_id in states:
+            assert step_index == 1, (
+                f"END_OF_SOURCE flush step_index should be 1 (1-indexed), got {step_index}. "
+                f"Bug: _find_aggregation_transform returns 0-indexed position which "
+                f"flows directly to audit recording without +1 conversion."
+            )
