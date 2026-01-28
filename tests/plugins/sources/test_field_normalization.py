@@ -1,6 +1,11 @@
 """Tests for field normalization algorithm."""
 
+import concurrent.futures
+import keyword
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 
 class TestNormalizeFieldName:
@@ -104,3 +109,62 @@ class TestNormalizeFieldName:
 
         assert precomposed != decomposed  # Different byte representations
         assert normalize_field_name(precomposed) == normalize_field_name(decomposed)
+
+
+class TestNormalizationProperties:
+    """Property-based tests for normalization invariants."""
+
+    @given(raw=st.text(min_size=1, max_size=100))
+    def test_property_normalized_result_is_identifier(self, raw: str) -> None:
+        """Property: All normalized results are valid Python identifiers."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        try:
+            result = normalize_field_name(raw)
+            # If it didn't raise, result must be valid identifier
+            assert result.isidentifier(), f"'{result}' is not a valid identifier"
+            # And not a keyword (keywords get suffix)
+            assert not keyword.iskeyword(result), f"'{result}' is a keyword without suffix"
+        except ValueError as e:
+            # Accept expected error types:
+            # - "normalizes to empty" for inputs that become empty after normalization
+            # - "not a valid identifier" for defense-in-depth rejection (e.g., Unicode
+            #   chars like '¼' that pass regex but aren't valid identifiers)
+            error_msg = str(e)
+            valid_errors = "normalizes to empty" in error_msg or "not a valid identifier" in error_msg
+            assert valid_errors, f"Unexpected error: {e}"
+
+    @given(raw=st.text(min_size=1, max_size=100))
+    def test_property_normalization_is_idempotent(self, raw: str) -> None:
+        """Property: Normalizing twice gives same result as normalizing once."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        try:
+            once = normalize_field_name(raw)
+            twice = normalize_field_name(once)
+            assert once == twice, f"Not idempotent: '{once}' != '{twice}'"
+        except ValueError:
+            pass  # Empty result expected for some inputs
+
+
+class TestNormalizationThreadSafety:
+    """Thread safety tests - module-level regex patterns are immutable but verify."""
+
+    def test_concurrent_normalization_no_interference(self) -> None:
+        """Multiple threads normalizing fields doesn't cause interference."""
+        from elspeth.plugins.sources.field_normalization import normalize_field_name
+
+        headers = ["User ID", "Amount $", "CaSE Study1", "data.field"]
+        expected = ["user_id", "amount", "case_study1", "data_field"]
+
+        def normalize_batch(batch: list[str]) -> list[str]:
+            return [normalize_field_name(h) for h in batch]
+
+        # Run 100 iterations in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(normalize_batch, headers) for _ in range(100)]
+            results = [f.result() for f in futures]
+
+        # All results should be identical
+        for result in results:
+            assert result == expected
