@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Example MCP configurations for Claude Code.",
+    "Copy the relevant section to ~/.claude/settings.json or .mcp.json in project root.",
+    "See docs/guides/landscape-mcp-analysis.md for full documentation."
+  ],
+
+  "examples": {
+    "local-sqlite": {
+      "_description": "Local SQLite database (development)",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "elspeth-mcp",
+          "args": ["--database", "sqlite:///./state/audit.db"]
+        }
+      }
+    },
+
+    "environment-variable": {
+      "_description": "Use ELSPETH_DATABASE_URL environment variable",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "elspeth-mcp",
+          "env": {
+            "ELSPETH_DATABASE_URL": "sqlite:///./state/audit.db"
+          }
+        }
+      }
+    },
+
+    "postgresql": {
+      "_description": "PostgreSQL database (production)",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "elspeth-mcp",
+          "args": ["--database", "postgresql://user:pass@localhost:5432/elspeth_audit"]
+        }
+      }
+    },
+
+    "absolute-path": {
+      "_description": "Absolute path to SQLite database",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "elspeth-mcp",
+          "args": ["--database", "sqlite:////var/lib/elspeth/audit.db"]
+        }
+      }
+    },
+
+    "with-python-path": {
+      "_description": "Explicit Python path (if not in PATH)",
+      "mcpServers": {
+        "elspeth-landscape": {
+          "command": "/home/user/elspeth/.venv/bin/elspeth-mcp",
+          "args": ["--database", "sqlite:///./state/audit.db"]
+        }
+      }
+    }
+  },
+
+  "recommended-for-project": {
+    "_description": "Copy this to .mcp.json in project root",
+    "mcpServers": {
+      "elspeth-landscape": {
+        "command": "elspeth-mcp",
+        "args": ["--database", "sqlite:///./state/audit.db"],
+        "description": "ELSPETH Landscape audit database analysis"
+      }
+    }
+  }
+}
