@@ -617,34 +617,68 @@ allow_hits:
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1090
+# _execute_run: routed_destinations counter accumulation (6 usages)
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1067
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1100
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1157
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1167
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1249
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1231
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1269
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2003
+# _process_resumed_rows: routed_destinations counter accumulation (5 usages)
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2008
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2033
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2059
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2089
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2124
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2128
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2164
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+# _check_aggregation_timeouts: routed_destinations counter for timeout-triggered downstream routing
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2427
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  expires: null
+# _flush_remaining_aggregation_buffers: routed_destinations counter for end-of-source flush downstream routing
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2560
+  owner: architecture
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # OpenRouter multi-query external API responses (Tier 3 trust boundary)

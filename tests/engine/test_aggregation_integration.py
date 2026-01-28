@@ -4,6 +4,10 @@ These tests verify that aggregation timeouts fire during active processing,
 not just at end-of-source.
 
 Bug reference: P1-2026-01-22-aggregation-timeout-idle-never-fires
+
+Additional tests for timeout/end-of-source flush error handling:
+- Bug: Duplicate terminal outcomes on flush errors in single/transform modes
+- Bug: Routed/quarantined counts not tracked for timeout flushes
 """
 
 from __future__ import annotations
@@ -1296,3 +1300,353 @@ class TestEndOfSourceFlush:
         # From downstream transform:
         assert output["processed"] is True
         assert output["doubled_total"] == 600  # 300*2
+
+
+class TestTimeoutFlushErrorHandling:
+    """Tests for timeout/end-of-source flush error handling bugs.
+
+    These tests verify correctness of error handling in timeout flush paths:
+    - Bug 1: Duplicate terminal outcomes when flush fails in single/transform modes
+    - Bug 2: Routed/quarantined counts not tracked for timeout flushes
+    """
+
+    def test_timeout_flush_error_single_mode_no_duplicate_outcomes(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Timeout flush errors in single mode must not record duplicate terminal outcomes.
+
+        Bug: When handle_timeout_flush is called and the flush fails:
+        - In single/transform modes, buffered tokens already have CONSUMED_IN_BATCH recorded
+        - The error path tries to record FAILED for all buffered tokens
+        - This violates the unique terminal outcome constraint → IntegrityError
+
+        Expected behavior: The batch failure is recorded in the batch table.
+        The tokens' CONSUMED_IN_BATCH outcome remains valid (they were consumed
+        into a batch that failed). The pipeline should complete without crashing.
+
+        Test setup:
+        - Aggregation with short timeout (0.1s), high count (never triggers by count)
+        - Single output mode (tokens get CONSUMED_IN_BATCH when buffered)
+        - Transform that FAILS when batch is flushed
+        - Source emits row, waits for timeout, emits another row to trigger timeout check
+        """
+        flush_calls: list[str] = []
+
+        class FailingBatchTransform(BaseTransform):
+            """Batch transform that fails on flush."""
+
+            name = "failing_batch"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch flush - FAIL
+                    flush_calls.append("flush_failed")
+                    return TransformResult.error({"reason": "deliberate_failure"})
+                # Single row passthrough (shouldn't happen in batch mode)
+                return TransformResult.success(dict(row))
+
+        class TimeoutTriggerSource(_TestSourceBase):
+            """Source that triggers timeout flush."""
+
+            name = "timeout_trigger_source"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row 1: Gets buffered, marked CONSUMED_IN_BATCH
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Wait for timeout to expire
+                time.sleep(0.15)
+                # Row 2: Triggers timeout check → flush fails
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class CollectorSink(_TestSinkBase):
+            """Sink that collects results."""
+
+            name = "collector_timeout_err"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://test",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(TimeoutTriggerSource())
+        transform = as_transform(FailingBatchTransform())
+        sink = as_sink(CollectorSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="failing_agg",
+            plugin="failing_batch",
+            trigger=TriggerConfig(
+                timeout_seconds=0.1,  # Short timeout
+                count=100,  # High count - won't trigger by count
+            ),
+            output_mode="single",  # Tokens get CONSUMED_IN_BATCH when buffered
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={transform_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="timeout_trigger_source", options={}),
+            sinks={"output": SinkSettings(plugin="collector_timeout_err", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+
+        # BUG: This should NOT crash with IntegrityError
+        # The fix should handle the fact that tokens in single mode already
+        # have CONSUMED_IN_BATCH recorded when the flush fails.
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Verify the flush was attempted and failed
+        assert len(flush_calls) >= 1, "Batch flush should have been called"
+
+        # Pipeline should complete (possibly with failures) but NOT crash
+        assert result.status in [RunStatus.COMPLETED, RunStatus.FAILED], (
+            f"Pipeline should complete gracefully even with flush failures, got {result.status}"
+        )
+
+        # Verify failure was recorded appropriately
+        # Note: Since the batch failed, we expect rows_failed to include the failed batch
+        # The exact count depends on implementation details, but there should be failures
+        assert result.rows_failed >= 1, f"Failed flush should result in at least 1 failed row, got {result.rows_failed}"
+
+    def test_timeout_flush_downstream_routed_counts_tracked(
+        self,
+        landscape_db: LandscapeDB,
+    ) -> None:
+        """Downstream ROUTED outcomes from timeout flush must be tracked in stats.
+
+        Bug: In _check_aggregation_timeouts and _flush_remaining_aggregation_buffers,
+        when downstream processing results in ROUTED outcomes:
+        - The code adds to pending_tokens correctly
+        - But increments rows_succeeded instead of rows_routed
+        - And doesn't update routed_destinations dict
+
+        Expected: rows_routed should be incremented and routed_destinations
+        should track where rows were routed.
+
+        Test setup:
+        - Aggregation with short timeout, single mode
+        - Downstream gate that routes rows to named sink
+        - Verify RunResult.rows_routed reflects timeout-flushed routed rows
+        """
+        from elspeth.core.config import GateSettings
+
+        class SimpleAggTransform(BaseTransform):
+            """Simple aggregation transform."""
+
+            name = "simple_agg_for_routing"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Batch mode - combine rows
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)})
+                return TransformResult.success(dict(row))
+
+        class TimeoutSource(_TestSourceBase):
+            """Source that triggers timeout."""
+
+            name = "timeout_source_routing"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Row 1: Gets buffered
+                yield SourceRow.valid({"id": 1, "value": 100})
+                # Wait for timeout
+                time.sleep(0.15)
+                # Row 2: Triggers timeout flush → aggregated result goes to gate → ROUTED
+                yield SourceRow.valid({"id": 2, "value": 200})
+
+            def close(self) -> None:
+                pass
+
+        class RoutedSink(_TestSinkBase):
+            """Sink for routed rows."""
+
+            name = "routed_sink"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://routed",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        class DefaultSink(_TestSinkBase):
+            """Default sink."""
+
+            name = "default_sink_routing"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(
+                    path="memory://default",
+                    size_bytes=0,
+                    content_hash="test",
+                )
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(TimeoutSource())
+        agg_transform = as_transform(SimpleAggTransform())
+        routed_sink = as_sink(RoutedSink())
+        default_sink = as_sink(DefaultSink())
+
+        # Use GateSettings with expression - all rows route to "routed_sink"
+        gate_settings = GateSettings(
+            name="route_all",
+            condition="True",  # Always route
+            routes={"true": "routed_sink", "false": "output"},
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[agg_transform],
+            sinks={"output": default_sink, "routed_sink": routed_sink},
+            gates=[gate_settings],
+            aggregation_settings={},  # Will be set after graph build
+            coalesce_settings={},
+        )
+
+        from tests.engine.orchestrator_test_helpers import build_production_graph
+
+        graph = build_production_graph(config)
+
+        # Get transform node_id from graph
+        transform_id_map = graph.get_transform_id_map()
+        agg_node_id = transform_id_map[0]
+
+        agg_settings = AggregationSettings(
+            name="agg_for_routing",
+            plugin="simple_agg_for_routing",
+            trigger=TriggerConfig(
+                timeout_seconds=0.1,
+                count=100,  # Won't trigger by count
+            ),
+            output_mode="single",
+        )
+
+        # Rebuild config with aggregation settings
+        config = PipelineConfig(
+            source=source,
+            transforms=[agg_transform],
+            sinks={"output": default_sink, "routed_sink": routed_sink},
+            gates=[gate_settings],
+            aggregation_settings={agg_node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="timeout_source_routing", options={}),
+            sinks={
+                "output": SinkSettings(plugin="default_sink_routing", options={}),
+                "routed_sink": SinkSettings(plugin="routed_sink", options={}),
+            },
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings)
+
+        assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
+
+        # BUG: rows_routed should be > 0 for rows that went through the gate
+        # The current code incorrectly counts them as rows_succeeded
+        assert result.rows_routed >= 1, (
+            f"Timeout-flushed rows going through gate should increment rows_routed. "
+            f"Got rows_routed={result.rows_routed}, rows_succeeded={result.rows_succeeded}. "
+            f"Bug: _check_aggregation_timeouts counts ROUTED as succeeded."
+        )
+
+        # Verify routed_destinations is populated
+        assert len(result.routed_destinations) > 0, (
+            "routed_destinations should track where rows were routed. "
+            "Got empty dict. Bug: _check_aggregation_timeouts doesn't update routed_destinations."
+        )

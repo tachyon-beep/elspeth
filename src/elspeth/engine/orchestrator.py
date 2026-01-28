@@ -1045,7 +1045,13 @@ class Orchestrator:
                     # new row ensures the timed-out batch contains only previously
                     # buffered rows, not the row that just arrived.
                     # ─────────────────────────────────────────────────────────────────
-                    pre_agg_succ, pre_agg_fail = self._check_aggregation_timeouts(
+                    (
+                        pre_agg_succ,
+                        pre_agg_fail,
+                        pre_agg_routed,
+                        pre_agg_quarantined,
+                        pre_agg_routed_dests,
+                    ) = self._check_aggregation_timeouts(
                         config=config,
                         processor=processor,
                         ctx=ctx,
@@ -1055,6 +1061,10 @@ class Orchestrator:
                     )
                     rows_succeeded += pre_agg_succ
                     rows_failed += pre_agg_fail
+                    rows_routed += pre_agg_routed
+                    rows_quarantined += pre_agg_quarantined
+                    for dest, count in pre_agg_routed_dests.items():
+                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
                     results = processor.process_row(
                         row_index=row_index,
@@ -1196,7 +1206,13 @@ class Orchestrator:
                 # CRITICAL: Flush remaining aggregation buffers at end-of-source
                 # ─────────────────────────────────────────────────────────────────
                 if config.aggregation_settings:
-                    agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                    (
+                        agg_succeeded,
+                        agg_failed,
+                        agg_routed,
+                        agg_quarantined,
+                        agg_routed_dests,
+                    ) = self._flush_remaining_aggregation_buffers(
                         config=config,
                         processor=processor,
                         ctx=ctx,
@@ -1209,6 +1225,10 @@ class Orchestrator:
                     )
                     rows_succeeded += agg_succeeded
                     rows_failed += agg_failed
+                    rows_routed += agg_routed
+                    rows_quarantined += agg_quarantined
+                    for dest, count in agg_routed_dests.items():
+                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
                 # Flush pending coalesce operations at end-of-source
                 if coalesce_executor is not None:
@@ -1966,7 +1986,13 @@ class Orchestrator:
                 # Check for timed-out aggregations BEFORE processing this row
                 # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
                 # ─────────────────────────────────────────────────────────────────
-                pre_agg_succ, pre_agg_fail = self._check_aggregation_timeouts(
+                (
+                    pre_agg_succ,
+                    pre_agg_fail,
+                    pre_agg_routed,
+                    pre_agg_quarantined,
+                    pre_agg_routed_dests,
+                ) = self._check_aggregation_timeouts(
                     config=config,
                     processor=processor,
                     ctx=ctx,
@@ -1976,6 +2002,10 @@ class Orchestrator:
                 )
                 rows_succeeded += pre_agg_succ
                 rows_failed += pre_agg_fail
+                rows_routed += pre_agg_routed
+                rows_quarantined += pre_agg_quarantined
+                for dest, count in pre_agg_routed_dests.items():
+                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
                 results = processor.process_existing_row(
                     row_id=row_id,
@@ -2074,7 +2104,13 @@ class Orchestrator:
             # CRITICAL: Flush remaining aggregation buffers at end-of-source
             # ─────────────────────────────────────────────────────────────────
             if config.aggregation_settings:
-                agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                (
+                    agg_succeeded,
+                    agg_failed,
+                    agg_routed,
+                    agg_quarantined,
+                    agg_routed_dests,
+                ) = self._flush_remaining_aggregation_buffers(
                     config=config,
                     processor=processor,
                     ctx=ctx,
@@ -2086,6 +2122,10 @@ class Orchestrator:
                 )
                 rows_succeeded += agg_succeeded
                 rows_failed += agg_failed
+                rows_routed += agg_routed
+                rows_quarantined += agg_quarantined
+                for dest, count in agg_routed_dests.items():
+                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
             # Flush pending coalesce operations
             if coalesce_executor is not None:
@@ -2268,7 +2308,7 @@ class Orchestrator:
         pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
         default_sink_name: str,
         agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int, int, dict[str, int]]:
         """Check and flush any aggregations whose timeout has expired.
 
         Called BEFORE processing each row to ensure timeouts fire during active
@@ -2300,10 +2340,13 @@ class Orchestrator:
                 If None, lookup is computed on each call (less efficient).
 
         Returns:
-            Tuple of (rows_succeeded, rows_failed) from timeout flushes
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations)
         """
         rows_succeeded = 0
         rows_failed = 0
+        rows_routed = 0
+        rows_quarantined = 0
+        routed_destinations: dict[str, int] = {}
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
             agg_node_id = NodeID(agg_node_id_str)
@@ -2379,17 +2422,18 @@ class Orchestrator:
                     elif result.outcome == RowOutcome.ROUTED:
                         # Gate routed to named sink - MUST enqueue or row is lost
                         # GateExecutor contract: ROUTED outcome always has sink_name set
+                        rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
+                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                         pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
-                        rows_succeeded += 1
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
-                        rows_failed += 1
+                        rows_quarantined += 1
                     # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
                     # handled within process_token_from_step - final outcomes will
                     # appear as separate results
 
-        return rows_succeeded, rows_failed
+        return rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations
 
     def _flush_remaining_aggregation_buffers(
         self,
@@ -2402,7 +2446,7 @@ class Orchestrator:
         recorder: LandscapeRecorder,
         checkpoint: bool = True,
         last_node_id: str | None = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int, int, dict[str, int]]:
         """Flush remaining aggregation buffers at end-of-source.
 
         Without this, rows buffered but not yet flushed (e.g., 50 rows
@@ -2425,7 +2469,7 @@ class Orchestrator:
             last_node_id: Node ID to use for checkpointing (required if checkpoint=True)
 
         Returns:
-            Tuple of (rows_succeeded, rows_failed) from flushing
+            Tuple of (rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations)
 
         Raises:
             RuntimeError: If no batch-aware transform found for an aggregation
@@ -2433,6 +2477,9 @@ class Orchestrator:
         """
         rows_succeeded = 0
         rows_failed = 0
+        rows_routed = 0
+        rows_quarantined = 0
+        routed_destinations: dict[str, int] = {}
         total_steps = len(config.transforms)
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
@@ -2508,9 +2555,10 @@ class Orchestrator:
                     elif result.outcome == RowOutcome.ROUTED:
                         # Gate routed to named sink - MUST enqueue or row is lost
                         # GateExecutor contract: ROUTED outcome always has sink_name set
+                        rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
+                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
                         pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
-                        rows_succeeded += 1
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
@@ -2521,9 +2569,9 @@ class Orchestrator:
                             )
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
-                        rows_failed += 1
+                        rows_quarantined += 1
                     # FORKED/CONSUMED_IN_BATCH/COALESCED are intermediate states
                     # handled within process_token_from_step - final outcomes will
                     # appear as separate results
 
-        return rows_succeeded, rows_failed
+        return rows_succeeded, rows_failed, rows_routed, rows_quarantined, routed_destinations

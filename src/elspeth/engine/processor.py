@@ -325,27 +325,57 @@ class RowProcessor:
         results: list[RowResult] = []
 
         if result.status != "success":
-            # Flush failed - mark all buffered tokens as FAILED
+            # Flush failed - handle based on output_mode
+            #
+            # CRITICAL: Token outcome recording depends on output_mode:
+            # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
+            # - single/transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+            #
+            # For single/transform modes, the batch failure is already recorded in the
+            # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
+            # semantically correct (tokens were consumed into a batch that failed).
+            # Recording FAILED would violate the unique terminal outcome constraint.
             error_msg = "Batch transform failed during timeout flush"
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
-            for token in buffered_tokens:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=RowOutcome.FAILED,
-                    error_hash=error_hash,
-                )
-                results.append(
-                    RowResult(
-                        token=token,
-                        final_data=token.row_data,
+
+            if output_mode == "passthrough":
+                # Passthrough mode: tokens have BUFFERED outcome (non-terminal)
+                # Record FAILED to give them a terminal outcome
+                for token in buffered_tokens:
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=token.token_id,
                         outcome=RowOutcome.FAILED,
-                        error=FailureInfo(
-                            exception_type="TransformError",
-                            message=error_msg,
-                        ),
+                        error_hash=error_hash,
                     )
-                )
+                    results.append(
+                        RowResult(
+                            token=token,
+                            final_data=token.row_data,
+                            outcome=RowOutcome.FAILED,
+                            error=FailureInfo(
+                                exception_type="TransformError",
+                                message=error_msg,
+                            ),
+                        )
+                    )
+            else:
+                # Single/transform mode: tokens already have CONSUMED_IN_BATCH (terminal)
+                # DO NOT record FAILED - would violate unique terminal outcome constraint
+                # Return FAILED results for count tracking, but no DB recording needed
+                for token in buffered_tokens:
+                    results.append(
+                        RowResult(
+                            token=token,
+                            final_data=token.row_data,
+                            outcome=RowOutcome.FAILED,
+                            error=FailureInfo(
+                                exception_type="TransformError",
+                                message=error_msg,
+                            ),
+                        )
+                    )
+
             return (results, child_items)
 
         # Calculate if there are more transforms after this aggregation
