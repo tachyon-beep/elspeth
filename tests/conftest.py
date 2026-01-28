@@ -70,7 +70,7 @@ support the direct instantiation pattern by providing Protocol-compliant default
 """
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
@@ -242,6 +242,79 @@ class _TestSourceBase:
     def close(self) -> None:
         """Cleanup - no-op for tests."""
         pass
+
+
+class CallbackSource(_TestSourceBase):
+    """Source with callbacks for deterministic MockClock testing.
+
+    Enables tests to advance a MockClock between row yields, allowing
+    deterministic testing of timeout-dependent code paths without time.sleep().
+
+    The callback is called AFTER each yield resumes (when the orchestrator
+    asks for the next row). This timing is critical:
+
+    Flow:
+        1. yield row 0 (pause)
+        2. Orchestrator: timeout check (empty), process row 0 (buffered)
+        3. Orchestrator asks for next row → generator resumes
+        4. after_yield_callback(0) called → can advance clock here
+        5. Loop continues
+        6. yield row 1 (pause)
+        7. Orchestrator: timeout check (sees advanced clock, may trigger!)
+
+    Example:
+        clock = MockClock()
+
+        def advance_after_row(row_idx: int) -> None:
+            if row_idx == 0:
+                clock.advance(0.25)  # Advance 250ms after first row
+
+        source = CallbackSource(
+            rows=[{"id": 1}, {"id": 2}, {"id": 3}],
+            output_schema=MySchema,
+            after_yield_callback=advance_after_row,
+        )
+
+        orchestrator = Orchestrator(..., clock=clock)
+        result = orchestrator.run(source=source, ...)
+
+        # Timeout fires before row 2 is processed because clock
+        # was advanced to 0.25s (past 0.1s timeout threshold)
+    """
+
+    name: str = "callback_source"
+    output_schema: type[PluginSchema] = _TestSchema
+
+    def __init__(
+        self,
+        rows: list[dict[str, Any]],
+        output_schema: type[PluginSchema] | None = None,
+        after_yield_callback: Callable[[int], None] | None = None,
+        source_name: str = "callback_source",
+    ) -> None:
+        """Initialize callback source.
+
+        Args:
+            rows: List of row dicts to yield.
+            output_schema: Schema for this source (defaults to _TestSchema).
+            after_yield_callback: Called with row index after each yield resumes.
+                Use this to advance MockClock between rows.
+            source_name: Name for this source instance.
+        """
+        super().__init__()
+        self._rows = rows
+        self._after_yield_callback = after_yield_callback
+        self.name = source_name
+        if output_schema is not None:
+            self.output_schema = output_schema
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        """Yield rows with callbacks between them for clock advancement."""
+        for i, row in enumerate(self._rows):
+            yield SourceRow.valid(row)
+            # Called when generator resumes (after row i processed, before row i+1 yields)
+            if self._after_yield_callback is not None:
+                self._after_yield_callback(i)
 
 
 class _TestSinkBase:
@@ -504,6 +577,7 @@ def real_landscape_recorder_with_payload_store(real_landscape_db, tmp_path):
 
 # Re-export for convenient import
 __all__ = [
+    "CallbackSource",
     "_TestSchema",
     "_TestSinkBase",
     "_TestSourceBase",

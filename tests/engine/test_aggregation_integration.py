@@ -12,7 +12,6 @@ Additional tests for timeout/end-of-source flush error handling:
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -31,10 +30,12 @@ from elspeth.core.config import (
 )
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
+from elspeth.engine.clock import MockClock
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
+    CallbackSource,
     _TestSchema,
     _TestSinkBase,
     _TestSourceBase,
@@ -68,43 +69,34 @@ class TestAggregationTimeoutIntegration:
         """Aggregation should flush on timeout during processing, not wait for end-of-source.
 
         This test proves BUG P1-2026-01-22-aggregation-timeout-idle-never-fires:
-        - Row 1 buffered at T=0s (timeout=0.1s)
-        - Source sleeps for 0.25s
-        - Row 2 emitted at T=0.25s, gives time for timeout to fire
+        - Row 1 buffered at T=0 (timeout=0.1s)
+        - MockClock advanced to 0.25s after row 1
+        - Row 2 triggers timeout check which sees 0.25s elapsed
         - Expect: Row 1's batch flushes via timeout DURING processing of row 2
         - Actual (bug): Row 1's batch only flushes at end-of-source
+
+        Uses MockClock for deterministic testing without time.sleep().
         """
-        # Track when batches arrive at sink
-        flush_times: list[tuple[int, float]] = []  # (batch_num, time)
-        start_time = time.monotonic()
+        # Create mock clock starting at 0
+        clock = MockClock(start=0.0)
 
-        class SlowSource(_TestSourceBase):
-            """Source that emits rows with delays between them."""
+        def advance_after_first_row(row_idx: int) -> None:
+            """Advance clock after first row to trigger timeout before row 2."""
+            if row_idx == 0:
+                # Advance past the 0.1s timeout threshold
+                clock.advance(0.25)
 
-            name = "slow_source"
-            output_schema = _TestSchema
-
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Row 1: buffered into aggregation at T=0
-                yield SourceRow.valid({"id": 1, "value": 100})
-                # Wait long enough for timeout to fire if check is called
-                time.sleep(0.25)
-                # Row 2: should trigger timeout check for row 1's batch
-                yield SourceRow.valid({"id": 2, "value": 200})
-                # Row 3: will start a new batch
-                yield SourceRow.valid({"id": 3, "value": 300})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement between rows
+        callback_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Buffered at T=0
+                {"id": 2, "value": 200},  # Arrives after clock advances to T=0.25
+                {"id": 3, "value": 300},  # Will go in second batch
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="callback_source",
+        )
 
         class BatchStatsTransform(BaseTransform):
             """Simple batch-aware transform that aggregates rows."""
@@ -133,14 +125,13 @@ class TestAggregationTimeoutIntegration:
                     # Single row mode - passthrough
                     return TransformResult.success(dict(row))
 
-        class TimingSink(_TestSinkBase):
-            """Sink that tracks when batches arrive."""
+        class CollectingSink(_TestSinkBase):
+            """Sink that collects rows for verification."""
 
-            name = "timing_sink"
+            name = "collecting_sink"
 
             def __init__(self) -> None:
                 self.rows: list[dict[str, Any]] = []
-                self.batch_num = 0
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -149,10 +140,7 @@ class TestAggregationTimeoutIntegration:
                 pass
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                now = time.monotonic()
-                self.batch_num += 1
                 for row in rows:
-                    flush_times.append((self.batch_num, now - start_time))
                     self.rows.append(row)
                 return ArtifactDescriptor.for_file(
                     path="memory://test",
@@ -164,9 +152,10 @@ class TestAggregationTimeoutIntegration:
                 pass
 
         # Build pipeline with short timeout
-        source = as_source(SlowSource())
+        source = as_source(callback_source)
         transform = as_transform(BatchStatsTransform())
-        sink = as_sink(TimingSink())
+        collecting_sink = CollectingSink()
+        sink = as_sink(collecting_sink)
 
         # Build graph FIRST to get the assigned node_id for the transform
         # We pass an empty aggregations dict since we're using a batch-aware
@@ -211,21 +200,22 @@ class TestAggregationTimeoutIntegration:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="slow_source", options={}),
-            sinks={"output": SinkSettings(plugin="timing_sink", options={})},
+            source=SourceSettings(plugin="callback_source", options={}),
+            sinks={"output": SinkSettings(plugin="collecting_sink", options={})},
             default_sink="output",
             transforms=[],
             gates=[],
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock into Orchestrator for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
         # Verify we got results
-        written_rows = sink.rows
+        written_rows = collecting_sink.rows
         assert len(written_rows) >= 1, "Expected at least one batch to be flushed"
 
         # KEY ASSERTION: Timeout should cause MULTIPLE flushes
@@ -279,36 +269,32 @@ class TestAggregationTimeoutIntegration:
 
         The first aggregation node should flush multiple times due to timeout,
         proving the loop logic works correctly.
+
+        Uses MockClock for deterministic testing without time.sleep().
         """
         batch_sizes: list[int] = []
 
-        class SlowSource(_TestSourceBase):
-            """Source that emits rows with delays."""
+        # Create mock clock starting at 0
+        clock = MockClock(start=0.0)
 
-            name = "slow_source_loop"
-            output_schema = _TestSchema
+        def advance_after_second_row(row_idx: int) -> None:
+            """Advance clock after row 2 to trigger timeout before row 3."""
+            if row_idx == 1:  # After second row (0-indexed)
+                # Advance past the 0.1s timeout threshold
+                clock.advance(0.2)
 
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Rows 1-2 at T=0
-                yield SourceRow.valid({"id": 1, "value": 100})
-                yield SourceRow.valid({"id": 2, "value": 200})
-                # Sleep to let timeout fire
-                time.sleep(0.2)
-                # Rows 3-4 trigger timeout checks
-                yield SourceRow.valid({"id": 3, "value": 300})
-                yield SourceRow.valid({"id": 4, "value": 400})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement after row 2
+        callback_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Row 1 at T=0
+                {"id": 2, "value": 200},  # Row 2 at T=0, then clock advances to T=0.2
+                {"id": 3, "value": 300},  # Row 3 triggers timeout check
+                {"id": 4, "value": 400},  # Row 4 in second batch
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_second_row,
+            source_name="callback_source_loop",
+        )
 
         class AggTransform(BaseTransform):
             """Aggregation transform."""
@@ -350,7 +336,7 @@ class TestAggregationTimeoutIntegration:
             def close(self) -> None:
                 pass
 
-        source = as_source(SlowSource())
+        source = as_source(callback_source)
         transform = as_transform(AggTransform())
         sink = as_sink(CollectorSink())
 
@@ -386,7 +372,7 @@ class TestAggregationTimeoutIntegration:
         )
 
         settings = ElspethSettings(
-            source=SourceSettings(plugin="slow_source_loop", options={}),
+            source=SourceSettings(plugin="callback_source_loop", options={}),
             sinks={"output": SinkSettings(plugin="collector_loop", options={})},
             default_sink="output",
             transforms=[],
@@ -394,21 +380,22 @@ class TestAggregationTimeoutIntegration:
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock into Orchestrator for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         assert result.status == RunStatus.COMPLETED
 
         # Aggregation should have flushed multiple times:
-        # First flush: timeout at 0.2s for first 2 rows
+        # First flush: timeout at T=0.2 for first 2 rows
         # Second flush: end-of-source for last 2 rows
         assert len(batch_sizes) >= 2, (
             f"Aggregation should have multiple batches due to timeout. Got {len(batch_sizes)} batches: {batch_sizes}"
         )
 
-        # First batch should be rows 1-2 (before sleep)
-        # Second batch should be rows 3-4 (after sleep)
-        assert batch_sizes == [2, 2], f"Expected [2, 2] batch pattern, got {batch_sizes}. Timeout should fire after 0.2s sleep."
+        # First batch should be rows 1-2 (before clock advance)
+        # Second batch should be rows 3-4 (after clock advance)
+        assert batch_sizes == [2, 2], f"Expected [2, 2] batch pattern, got {batch_sizes}. Timeout should fire after clock advance."
 
     def test_timeout_fires_before_row_processing(
         self,
@@ -429,43 +416,39 @@ class TestAggregationTimeoutIntegration:
         Setup:
         - count=2, timeout=0.1s
         - Row 1 at T=0
-        - Sleep 0.15s (timeout expires)
-        - Row 2 at T=0.15s
+        - MockClock advances to T=0.15 (timeout expires)
+        - Row 2 at T=0.15
 
         Expected (correct behavior):
         - Before processing row 2: timeout check fires (0.15s > 0.1s)
         - Row 1 flushed alone via timeout → batch size 1
         - Row 2 starts new batch, flushed at end-of-source → batch size 1
         - Total: 2 flushes with [1, 1]
+
+        Uses MockClock for deterministic testing without time.sleep().
         """
         flush_count = 0
         batch_sizes: list[int] = []
 
-        class TimedSource(_TestSourceBase):
-            """Source that times rows to trigger timeout before second row."""
+        # Create mock clock starting at 0
+        clock = MockClock(start=0.0)
 
-            name = "timed_source"
-            output_schema = _TestSchema
+        def advance_after_first_row(row_idx: int) -> None:
+            """Advance clock after row 1 to trigger timeout before row 2."""
+            if row_idx == 0:
+                # Advance past the 0.1s timeout threshold
+                clock.advance(0.15)
 
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Row 1 at T=0
-                yield SourceRow.valid({"id": 1, "value": 100})
-                # Wait for timeout to expire
-                time.sleep(0.15)
-                # Row 2 arrives after timeout has expired
-                yield SourceRow.valid({"id": 2, "value": 200})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement after row 1
+        callback_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Row 1 at T=0, then clock advances to T=0.15
+                {"id": 2, "value": 200},  # Row 2 arrives after timeout expired
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="timed_source",
+        )
 
         class CountingAggTransform(BaseTransform):
             """Transform that counts flushes."""
@@ -509,7 +492,7 @@ class TestAggregationTimeoutIntegration:
             def close(self) -> None:
                 pass
 
-        source = as_source(TimedSource())
+        source = as_source(callback_source)
         transform = as_transform(CountingAggTransform())
         sink = as_sink(SimpleSink())
 
@@ -555,7 +538,8 @@ class TestAggregationTimeoutIntegration:
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock into Orchestrator for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         assert result.status == RunStatus.COMPLETED
@@ -1352,31 +1336,24 @@ class TestTimeoutFlushErrorHandling:
                 # Single row passthrough (shouldn't happen in batch mode)
                 return TransformResult.success(dict(row))
 
-        class TimeoutTriggerSource(_TestSourceBase):
-            """Source that triggers timeout flush."""
+        # Create mock clock for deterministic timeout testing
+        clock = MockClock(start=0.0)
 
-            name = "timeout_trigger_source"
-            output_schema = _TestSchema
+        def advance_after_first_row(row_idx: int) -> None:
+            """Advance clock after row 1 to trigger timeout before row 2."""
+            if row_idx == 0:
+                clock.advance(0.15)  # Past 0.1s timeout
 
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Row 1: Gets buffered, marked CONSUMED_IN_BATCH
-                yield SourceRow.valid({"id": 1, "value": 100})
-                # Wait for timeout to expire
-                time.sleep(0.15)
-                # Row 2: Triggers timeout check → flush fails
-                yield SourceRow.valid({"id": 2, "value": 200})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement
+        timeout_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Gets buffered, marked CONSUMED_IN_BATCH
+                {"id": 2, "value": 200},  # Triggers timeout check → flush fails
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="timeout_trigger_source",
+        )
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects results."""
@@ -1398,7 +1375,7 @@ class TestTimeoutFlushErrorHandling:
             def close(self) -> None:
                 pass
 
-        source = as_source(TimeoutTriggerSource())
+        source = as_source(timeout_source)
         transform = as_transform(FailingBatchTransform())
         sink = as_sink(CollectorSink())
 
@@ -1445,7 +1422,8 @@ class TestTimeoutFlushErrorHandling:
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
 
         # BUG: This should NOT crash with IntegrityError
         # The fix should handle the fact that tokens in single mode already
@@ -1505,31 +1483,24 @@ class TestTimeoutFlushErrorHandling:
                     return TransformResult.success({"total": total, "count": len(row)})
                 return TransformResult.success(dict(row))
 
-        class TimeoutSource(_TestSourceBase):
-            """Source that triggers timeout."""
+        # Create mock clock for deterministic timeout testing
+        clock = MockClock(start=0.0)
 
-            name = "timeout_source_routing"
-            output_schema = _TestSchema
+        def advance_after_first_row(row_idx: int) -> None:
+            """Advance clock after row 1 to trigger timeout before row 2."""
+            if row_idx == 0:
+                clock.advance(0.15)  # Past 0.1s timeout
 
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Row 1: Gets buffered
-                yield SourceRow.valid({"id": 1, "value": 100})
-                # Wait for timeout
-                time.sleep(0.15)
-                # Row 2: Triggers timeout flush → aggregated result goes to gate → ROUTED
-                yield SourceRow.valid({"id": 2, "value": 200})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement
+        timeout_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Gets buffered
+                {"id": 2, "value": 200},  # Triggers timeout flush → aggregated result goes to gate → ROUTED
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="timeout_source_routing",
+        )
 
         class RoutedSink(_TestSinkBase):
             """Sink for routed rows."""
@@ -1571,7 +1542,7 @@ class TestTimeoutFlushErrorHandling:
             def close(self) -> None:
                 pass
 
-        source = as_source(TimeoutSource())
+        source = as_source(timeout_source)
         agg_transform = as_transform(SimpleAggTransform())
         routed_sink = as_sink(RoutedSink())
         default_sink = as_sink(DefaultSink())
@@ -1632,7 +1603,8 @@ class TestTimeoutFlushErrorHandling:
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
@@ -1679,31 +1651,24 @@ class TestTimeoutFlushStepIndexing:
 
         from elspeth.core.landscape.schema import node_states_table
 
-        class SlowSource(_TestSourceBase):
-            """Source that emits rows with delays to allow timeout to fire."""
+        # Create mock clock for deterministic timeout testing
+        clock = MockClock(start=0.0)
 
-            name = "slow_source_step_test"
-            output_schema = _TestSchema
+        def advance_after_first_row(row_idx: int) -> None:
+            """Advance clock after row 1 to trigger timeout before row 2."""
+            if row_idx == 0:
+                clock.advance(0.8)  # Past 0.5s timeout
 
-            def __init__(self) -> None:
-                pass
-
-            def on_start(self, ctx: Any) -> None:
-                pass
-
-            def on_complete(self, ctx: Any) -> None:
-                pass
-
-            def load(self, ctx: Any) -> Iterator[SourceRow]:
-                # Emit first row, it will be buffered
-                yield SourceRow.valid({"id": 1, "value": 100})
-                # Sleep to allow timeout to fire (0.8s > 0.5s timeout with margin for CI)
-                time.sleep(0.8)
-                # Emit second row - timeout check happens before this is processed
-                yield SourceRow.valid({"id": 2, "value": 200})
-
-            def close(self) -> None:
-                pass
+        # CallbackSource with clock advancement
+        timeout_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Emit first row, it will be buffered
+                {"id": 2, "value": 200},  # Emit second row - timeout check happens before this is processed
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="slow_source_step_test",
+        )
 
         class BatchAgg(BaseTransform):
             """Simple aggregation that returns batch sum."""
@@ -1744,7 +1709,7 @@ class TestTimeoutFlushStepIndexing:
             def close(self) -> None:
                 pass
 
-        source = as_source(SlowSource())
+        source = as_source(timeout_source)
         transform = as_transform(BatchAgg())
         sink = as_sink(CollectorSink())
 
@@ -1787,7 +1752,8 @@ class TestTimeoutFlushStepIndexing:
             aggregation={},
         )
 
-        orchestrator = Orchestrator(db=landscape_db)
+        # Inject MockClock for deterministic timeout testing
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
         result = orchestrator.run(config, graph=graph, settings=settings)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
