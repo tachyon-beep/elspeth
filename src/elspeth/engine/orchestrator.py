@@ -547,8 +547,8 @@ class Orchestrator:
                     payload_store=payload_store,
                 )
 
-            # Complete run
-            recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+            # Complete run with reproducibility grade computation
+            recorder.finalize_run(run.run_id, status=RunStatus.COMPLETED)
             result.status = RunStatus.COMPLETED
             run_completed = True
 
@@ -637,7 +637,7 @@ class Orchestrator:
                 )
             else:
                 # Run failed before completion - emit FAILED status with zero metrics
-                recorder.complete_run(run.run_id, status=RunStatus.FAILED)
+                recorder.finalize_run(run.run_id, status=RunStatus.FAILED)
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -1756,7 +1756,7 @@ class Orchestrator:
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
-            recorder.complete_run(run_id, status=RunStatus.COMPLETED)
+            recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
 
             # Delete checkpoints on successful completion (Bug #8 fix)
             self._delete_checkpoints(run_id)
@@ -1783,8 +1783,8 @@ class Orchestrator:
             payload_store=payload_store,
         )
 
-        # 6. Complete the run
-        recorder.complete_run(run_id, status=RunStatus.COMPLETED)
+        # 6. Complete the run with reproducibility grade
+        recorder.finalize_run(run_id, status=RunStatus.COMPLETED)
         result.status = RunStatus.COMPLETED
 
         # 7. Delete checkpoints on successful completion

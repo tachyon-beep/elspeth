@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, RunStatus, SinkName
+from elspeth.contracts import Determinism, NodeID, NodeType, RoutingMode, RowOutcome, RunStatus, SinkName
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -25,6 +25,7 @@ from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
     runs_table,
+    token_outcomes_table,
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -202,6 +203,21 @@ class TestOrchestratorResumeRowProcessing:
                         created_at=now,
                     )
                 )
+
+                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
+                # Rows 3, 4 have no terminal outcomes and will be returned as unprocessed
+                if i < 3:
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-{i:03d}",
+                            run_id=run_id,
+                            token_id=token_id,
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="default",
+                        )
+                    )
 
             conn.commit()
 

@@ -123,10 +123,15 @@ allow_hits:
   reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict() must accept it'
   safety: Explicit check for serialized form before standard parsing - enables audit trail storage
   expires: null
-- key: contracts/data.py:R3:_type_name:line=199
+- key: contracts/data.py:R3:_type_name:line=212
   owner: architecture
   reason: 'Type introspection: not all types have __name__ attribute'
   safety: Graceful fallback to str() - error message still produced
+  expires: null
+- key: contracts/data.py:R1:check_compatibility:line=184
+  owner: architecture
+  reason: 'Framework boundary: Pydantic model_config may not have ''extra'' key (uses default)'
+  safety: Missing key returns None, which != "forbid", correctly treated as permissive
   expires: null
 - key: engine/retry.py:R1:RetryConfig:from_policy:line=80
   owner: architecture
@@ -339,15 +344,15 @@ allow_hits:
   reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed data, etc.)'
   safety: Logged and row quarantined with full error details
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1036
+- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=925
   owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  reason: 'Framework boundary: Pydantic model_config may not have ''extra'' key (uses default)'
+  safety: Missing key returns None, which != "allow", correctly treated as not-dynamic
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=1037
+- key: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=926
   owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  reason: 'Framework boundary: Pydantic model_config may not have ''extra'' key (uses default)'
+  safety: Missing key returns None, which != "allow", correctly treated as not-dynamic
   expires: null
 - key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=156
   owner: architecture

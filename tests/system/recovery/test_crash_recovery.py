@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RunStatus, SourceRow
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RowOutcome, RunStatus, SourceRow
 from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -342,6 +342,15 @@ class TestResumeIdempotence:
         # "Simulate" that first 3 rows were processed and checkpointed at row 2
         pre_crash_output = [{"id": i, "value": (i + 1) * 10 * 2} for i in range(3)]
 
+        # Record terminal outcomes for first 3 rows (recovery uses these)
+        for i in range(3):
+            recorder.record_token_outcome(
+                token_id=token_ids[i],
+                run_id=run_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="default",
+            )
+
         # Create checkpoint at row 2 (0-indexed, so rows 0, 1, 2 are processed)
         checkpoint_mgr.create_checkpoint(
             run_id=run_id,
@@ -580,6 +589,7 @@ class TestCheckpointRecovery:
             nodes_table,
             rows_table,
             runs_table,
+            token_outcomes_table,
             tokens_table,
         )
 
@@ -655,6 +665,19 @@ class TestCheckpointRecovery:
                         created_at=now,
                     )
                 )
+                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
+                if i < 3:
+                    conn.execute(
+                        token_outcomes_table.insert().values(
+                            outcome_id=f"outcome-{i:03d}",
+                            run_id=run_id,
+                            token_id=token_id,
+                            outcome=RowOutcome.COMPLETED.value,
+                            is_terminal=1,
+                            recorded_at=now,
+                            sink_name="default",
+                        )
+                    )
             conn.commit()
 
         # Checkpoint at row 2 (token tok-002)

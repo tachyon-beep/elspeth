@@ -1034,3 +1034,182 @@ class TestIsBooleanExpression:
     def test_string_literal_is_not_boolean(self) -> None:
         """String literals are not boolean."""
         assert not ExpressionParser("'hello'").is_boolean_expression()
+
+
+class TestExpressionParserBugFixes:
+    """Tests for expression parser bug fixes.
+
+    These tests verify fixes for:
+    - P2-2026-01-21: BoolOp classifier treats all and/or as boolean
+    - P2-2026-01-21: Slice syntax accepted but crashes at runtime
+    - P3-2026-01-21: is/is not not restricted to None checks
+    - P3-2026-01-21: Bare row.get attribute allowed without call
+    - P3-2026-01-21: Subscript allowed on any expression, not just row
+    """
+
+    # =========================================================================
+    # BoolOp Classifier Fixes (P2-2026-01-21)
+    # =========================================================================
+
+    def test_boolop_or_with_string_fallback_is_not_boolean(self) -> None:
+        """'row.get('x') or 'default'' returns a string, not boolean."""
+        parser = ExpressionParser("row.get('label') or 'unknown'")
+        assert not parser.is_boolean_expression()
+        # Verify it actually returns strings at runtime
+        assert parser.evaluate({"label": "vip"}) == "vip"
+        assert parser.evaluate({}) == "unknown"
+
+    def test_boolop_and_with_non_boolean_operands_is_not_boolean(self) -> None:
+        """'row['x'] and row['y']' can return non-boolean values."""
+        parser = ExpressionParser("row['x'] and row['y']")
+        assert not parser.is_boolean_expression()
+        # Python's 'and' returns the last truthy value or first falsy value
+        assert parser.evaluate({"x": "hello", "y": "world"}) == "world"
+        assert parser.evaluate({"x": "", "y": "world"}) == ""
+
+    def test_boolop_and_with_comparisons_is_boolean(self) -> None:
+        """'row['x'] > 0 and row['y'] > 0' is boolean (both operands are comparisons)."""
+        parser = ExpressionParser("row['x'] > 0 and row['y'] > 0")
+        assert parser.is_boolean_expression()
+
+    def test_boolop_or_with_comparisons_is_boolean(self) -> None:
+        """'row['x'] == 1 or row['y'] == 1' is boolean."""
+        parser = ExpressionParser("row['x'] == 1 or row['y'] == 1")
+        assert parser.is_boolean_expression()
+
+    def test_nested_boolop_must_have_all_boolean_operands(self) -> None:
+        """Nested and/or must have all boolean operands to be classified as boolean."""
+        # This has a non-boolean operand (string literal)
+        parser = ExpressionParser("(row['x'] > 0 and row['y'] > 0) or 'fallback'")
+        assert not parser.is_boolean_expression()
+
+        # This is all boolean
+        parser2 = ExpressionParser("(row['x'] > 0 and row['y'] > 0) or row['z'] > 0")
+        assert parser2.is_boolean_expression()
+
+    # =========================================================================
+    # Slice Syntax Rejection (P2-2026-01-21)
+    # =========================================================================
+
+    def test_reject_slice_syntax_simple(self) -> None:
+        """Slice syntax like [1:3] must be rejected at parse time."""
+        with pytest.raises(ExpressionSecurityError, match="Slice syntax"):
+            ExpressionParser("row['items'][1:3]")
+
+    def test_reject_slice_syntax_with_step(self) -> None:
+        """Slice syntax with step like [::2] must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="Slice syntax"):
+            ExpressionParser("row['items'][::2]")
+
+    def test_reject_slice_syntax_open_ended(self) -> None:
+        """Open-ended slice like [:5] must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="Slice syntax"):
+            ExpressionParser("row['items'][:5]")
+
+    def test_allow_explicit_integer_indexing(self) -> None:
+        """Explicit integer indexing like [0] is allowed."""
+        parser = ExpressionParser("row['items'][0] == 'first'")
+        assert parser.evaluate({"items": ["first", "second"]}) is True
+
+    # =========================================================================
+    # is/is not Restriction (P3-2026-01-21)
+    # =========================================================================
+
+    def test_reject_is_with_integer(self) -> None:
+        """'is' with integer must be rejected (identity semantics are dangerous)."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed for None"):
+            ExpressionParser("row['x'] is 1")
+
+    def test_reject_is_with_string(self) -> None:
+        """'is' with string must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed for None"):
+            ExpressionParser("row['status'] is 'active'")
+
+    def test_reject_is_not_with_non_none(self) -> None:
+        """'is not' with non-None value must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed for None"):
+            ExpressionParser("row['x'] is not 'value'")
+
+    def test_allow_is_none(self) -> None:
+        """'is None' is allowed."""
+        parser = ExpressionParser("row.get('x') is None")
+        assert parser.evaluate({}) is True
+        assert parser.evaluate({"x": "value"}) is False
+
+    def test_allow_none_is(self) -> None:
+        """'None is row.get(...)' is allowed (None on left side)."""
+        parser = ExpressionParser("None is row.get('x')")
+        assert parser.evaluate({}) is True
+        assert parser.evaluate({"x": "value"}) is False
+
+    def test_allow_is_not_none(self) -> None:
+        """'is not None' is allowed."""
+        parser = ExpressionParser("row.get('required') is not None")
+        assert parser.evaluate({"required": "value"}) is True
+        assert parser.evaluate({}) is False
+
+    # =========================================================================
+    # Bare row.get Rejection (P3-2026-01-21)
+    # =========================================================================
+
+    def test_reject_bare_row_get(self) -> None:
+        """Bare 'row.get' without calling it must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match=r"Bare 'row\.get'"):
+            ExpressionParser("row.get")
+
+    def test_reject_row_get_in_comparison(self) -> None:
+        """'row.get' in comparison without calling it must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match=r"Bare 'row\.get'"):
+            ExpressionParser("row.get == None")
+
+    def test_reject_row_get_in_membership(self) -> None:
+        """'row.get' in membership test without calling must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match=r"Bare 'row\.get'"):
+            ExpressionParser("row.get in [1, 2, 3]")
+
+    def test_allow_row_get_with_call(self) -> None:
+        """'row.get(key)' is allowed."""
+        parser = ExpressionParser("row.get('status') == 'active'")
+        assert parser.evaluate({"status": "active"}) is True
+
+    def test_allow_row_get_with_default(self) -> None:
+        """'row.get(key, default)' is allowed."""
+        parser = ExpressionParser("row.get('status', 'unknown') == 'unknown'")
+        assert parser.evaluate({}) is True
+
+    # =========================================================================
+    # Subscript Restriction (P3-2026-01-21)
+    # =========================================================================
+
+    def test_reject_dict_literal_subscript(self) -> None:
+        """Subscript on dict literal must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+            ExpressionParser("{'a': 1}['a'] == 1")
+
+    def test_reject_string_literal_subscript(self) -> None:
+        """Subscript on string literal must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+            ExpressionParser("'abc'[0] == 'a'")
+
+    def test_reject_list_literal_subscript(self) -> None:
+        """Subscript on list literal must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="only allowed on row data"):
+            ExpressionParser("[1, 2, 3][0] == 1")
+
+    def test_allow_row_subscript(self) -> None:
+        """Subscript on row is allowed."""
+        parser = ExpressionParser("row['field'] == 'value'")
+        assert parser.evaluate({"field": "value"}) is True
+
+    def test_allow_nested_row_subscript(self) -> None:
+        """Nested subscript on row data is allowed."""
+        parser = ExpressionParser("row['data']['nested'] == 'value'")
+        assert parser.evaluate({"data": {"nested": "value"}}) is True
+
+    def test_allow_row_get_result_subscript(self) -> None:
+        """Subscript on row.get() result is allowed."""
+        parser = ExpressionParser("row.get('data', {})['key'] == 'value'")
+        assert parser.evaluate({"data": {"key": "value"}}) is True
+        # Default case
+        parser2 = ExpressionParser("row.get('missing', {'key': 'default'})['key'] == 'default'")
+        assert parser2.evaluate({}) is True

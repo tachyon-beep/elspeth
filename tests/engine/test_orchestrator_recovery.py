@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType, PluginSchema, RunStatus
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RoutingMode, RunStatus
 from elspeth.contracts.enums import BatchStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
@@ -59,6 +59,7 @@ class TestOrchestratorResume:
         schema_config = {"schema": {"fields": "dynamic"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=schema_config)
+        graph.add_edge("source", "agg_node", label="continue")
         return graph
 
     @pytest.fixture
@@ -67,9 +68,11 @@ class TestOrchestratorResume:
         landscape_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
         mock_graph: ExecutionGraph,
+        payload_store: FilesystemPayloadStore,
     ) -> dict[str, Any]:
         """Create a failed run with an incomplete batch."""
-        recorder = LandscapeRecorder(landscape_db)
+        # Pass payload_store so rows get source_data_ref recorded for resume
+        recorder = LandscapeRecorder(landscape_db, payload_store=payload_store)
 
         # Create run with source schema for resume type restoration
         source_schema_json = json.dumps(RowSchema.model_json_schema())
@@ -95,6 +98,15 @@ class TestOrchestratorResume:
             config={},
             determinism=Determinism.DETERMINISTIC,
             schema_config=_make_dynamic_schema(),
+        )
+
+        # Register edge (required for resume edge_map)
+        recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id="source",
+            to_node_id="agg_node",
+            label="continue",
+            mode=RoutingMode.MOVE,
         )
 
         # Create rows and tokens

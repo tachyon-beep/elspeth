@@ -24,7 +24,18 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeID, NodeStateStatus, NodeType, PluginSchema, RoutingMode, RunStatus, SinkName, SourceRow
+from elspeth.contracts import (
+    Determinism,
+    NodeID,
+    NodeStateStatus,
+    NodeType,
+    PluginSchema,
+    RoutingMode,
+    RowOutcome,
+    RunStatus,
+    SinkName,
+    SourceRow,
+)
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -452,6 +463,13 @@ class TestCheckpointDurability:
                 node_id="sink_default",  # Checkpoint at sink node
                 sequence_number=i + 1,
                 graph=test_graph,
+            )
+            # Also record terminal outcomes (recovery uses these, not checkpoints)
+            recorder.record_token_outcome(
+                token_id=token_ids[i],
+                run_id=run_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="default",
             )
 
         # Mark run as failed (simulating crash after 2 rows written)

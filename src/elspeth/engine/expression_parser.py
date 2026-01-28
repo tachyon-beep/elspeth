@@ -75,6 +75,31 @@ class _ExpressionValidator(ast.NodeVisitor):
 
     def __init__(self) -> None:
         self.errors: list[str] = []
+        self._in_call_func: bool = False  # Track if currently visiting a Call's func
+
+    def _is_none_constant(self, node: ast.expr) -> bool:
+        """Check if node is a None literal (ast.Constant or ast.Name)."""
+        if isinstance(node, ast.Constant) and node.value is None:
+            return True
+        return isinstance(node, ast.Name) and node.id == "None"
+
+    def _is_row_derived(self, node: ast.expr) -> bool:
+        """Check if node is 'row' or derived from row access.
+
+        Handles: row, row['x'], row['x']['y'], row.get('x')['y']
+        """
+        if isinstance(node, ast.Name) and node.id == "row":
+            return True
+        if isinstance(node, ast.Subscript):
+            return self._is_row_derived(node.value)
+        # row.get(...) calls return row-derived data
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "row"
+            and node.func.attr == "get"
+        )
 
     def visit_Name(self, node: ast.Name) -> None:
         """Allow only 'row' as a name."""
@@ -83,15 +108,27 @@ class _ExpressionValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        """Allow row['field'] subscript access."""
-        # Subscript access is allowed - the evaluator will enforce row access
+        """Allow row['field'] subscript access on row-derived data only."""
+        # Reject slice syntax (defense-in-depth, also caught by visit_Slice)
+        if isinstance(node.slice, ast.Slice):
+            self.errors.append("Slice syntax (e.g., [1:3]) is forbidden")
+        # Restrict subscript to row-derived data
+        if not self._is_row_derived(node.value):
+            self.errors.append(f"Subscript access is only allowed on row data; got subscript on {ast.dump(node.value)}")
         self.generic_visit(node)
 
+    def visit_Slice(self, node: ast.Slice) -> None:
+        """Reject slice syntax."""
+        self.errors.append("Slice syntax (e.g., [1:3]) is forbidden")
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        """Allow only row.get method access."""
+        """Allow only row.get method access when called."""
         if isinstance(node.value, ast.Name) and node.value.id == "row":
             if node.attr != "get":
                 self.errors.append(f"Forbidden row attribute: {node.attr!r} (only 'get' is allowed)")
+            elif not self._in_call_func:
+                # row.get without a call is forbidden - returns method object
+                self.errors.append("Bare 'row.get' is forbidden; use 'row.get(key)' or 'row.get(key, default)'")
         else:
             self.errors.append(f"Forbidden attribute access: {node.attr!r}")
         self.generic_visit(node)
@@ -109,16 +146,31 @@ class _ExpressionValidator(ast.NodeVisitor):
                 self.errors.append(f"row.get() requires 1 or 2 arguments, got {len(node.args)}")
             if node.keywords:
                 self.errors.append("row.get() does not accept keyword arguments")
-            self.generic_visit(node)
+            # Visit func with context flag set to allow row.get attribute
+            self._in_call_func = True
+            self.visit(node.func)
+            self._in_call_func = False
+            # Visit arguments normally
+            for arg in node.args:
+                self.visit(arg)
             return
         self.errors.append(f"Forbidden function call: {ast.dump(node.func)}")
         self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> None:
         """Validate comparison operators."""
-        for op in node.ops:
+        # Build list of all operands for is/is not validation
+        all_operands = [node.left, *node.comparators]
+
+        for i, op in enumerate(node.ops):
             if type(op) not in _COMPARISON_OPS:
                 self.errors.append(f"Forbidden comparison operator: {type(op).__name__}")
+            # Restrict is/is not to None checks only
+            elif isinstance(op, ast.Is | ast.IsNot):
+                left_operand = all_operands[i]
+                right_operand = all_operands[i + 1]
+                if not (self._is_none_constant(left_operand) or self._is_none_constant(right_operand)):
+                    self.errors.append("'is' and 'is not' operators are only allowed for None checks")
         self.generic_visit(node)
 
     def visit_BoolOp(self, node: ast.BoolOp) -> None:
@@ -423,11 +475,11 @@ class ExpressionParser:
         if isinstance(node, ast.Compare):
             return True
 
-        # Boolean operators (and, or) always return truthy/falsy value
-        # Note: In Python, `x and y` returns y if x is truthy, not necessarily bool
-        # But for gate routing purposes, we treat this as boolean-ish
+        # Boolean operators (and, or) only return bool if ALL operands are boolean
+        # Python's `x and y` returns y if x is truthy, not necessarily bool
+        # So `row.get('label') or 'default'` returns a string, not bool
         if isinstance(node, ast.BoolOp):
-            return True
+            return all(self._is_boolean_node(v) for v in node.values)
 
         # Unary not always returns bool
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
