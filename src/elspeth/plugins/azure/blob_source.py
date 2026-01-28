@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, Self
 
@@ -26,6 +27,8 @@ from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
+
+logger = logging.getLogger(__name__)
 
 
 class CSVOptions(BaseModel):
@@ -331,6 +334,19 @@ class AzureBlobSource(BaseSource):
             # are external system errors - propagate with context
             raise type(e)(f"Failed to download blob '{self._blob_path}' from container '{self._container}': {e}") from e
 
+        # Log blob download for operator visibility
+        blob_size_kb = len(blob_data) / 1024
+        if blob_size_kb >= 1024:
+            size_str = f"{blob_size_kb / 1024:.1f} MB"
+        else:
+            size_str = f"{blob_size_kb:.1f} KB"
+        logger.info(
+            "Downloaded blob '%s' from container '%s' (%s)",
+            self._blob_path,
+            self._container,
+            size_str,
+        )
+
         # Parse blob content based on format
         if self._format == "csv":
             yield from self._load_csv(blob_data, ctx)
@@ -401,6 +417,10 @@ class AzureBlobSource(BaseSource):
                 )
             return  # No rows to process if file is completely unparseable
 
+        # Log row count for operator visibility
+        row_count = len(df)
+        logger.info("Parsed %d rows from CSV blob '%s'", row_count, self._blob_path)
+
         # DataFrame columns are strings from CSV headers
         for record in df.to_dict(orient="records"):
             row = {str(k): v for k, v in record.items()}
@@ -441,6 +461,9 @@ class AzureBlobSource(BaseSource):
         if not isinstance(data, list):
             raise ValueError(f"Expected JSON array, got {type(data).__name__}")
 
+        # Log row count for operator visibility
+        logger.info("Parsed %d rows from JSON array blob '%s'", len(data), self._blob_path)
+
         for row in data:
             yield from self._validate_and_yield(row, ctx)
 
@@ -463,7 +486,12 @@ class AzureBlobSource(BaseSource):
         except UnicodeDecodeError as e:
             raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
 
-        for line_num, line in enumerate(text_data.splitlines(), start=1):
+        # Split lines and count non-empty for logging
+        lines = text_data.splitlines()
+        non_empty_count = sum(1 for line in lines if line.strip())
+        logger.info("Parsed %d lines from JSONL blob '%s'", non_empty_count, self._blob_path)
+
+        for line_num, line in enumerate(lines, start=1):
             line = line.strip()
             if not line:  # Skip empty lines
                 continue
