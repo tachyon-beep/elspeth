@@ -548,6 +548,40 @@ class TestExcepthookSuppression:
             with _suppressed_lock:
                 _suppressed_thread_idents.discard(77777)
 
+    def test_suppression_cleanup_after_clean_exit(self) -> None:
+        """Thread idents are cleaned up even when thread exits without exception.
+
+        Verifies fix for stale thread ident accumulation. After close(),
+        leaker thread idents should be removed from the suppression set
+        regardless of whether AssertionError was raised.
+        """
+        from elspeth.core.rate_limit import RateLimiter
+        from elspeth.core.rate_limit.limiter import (
+            _suppressed_lock,
+            _suppressed_thread_idents,
+        )
+
+        # Create rate limiter which spawns leaker threads
+        limiter = RateLimiter(name="cleanup_test", requests_per_second=10)
+
+        # Acquire to ensure leaker thread is active
+        limiter.acquire()
+
+        # Get leaker ident before close - leaker is on first bucket's limiter
+        leaker_idents = []
+        for internal_limiter in limiter._limiters:
+            leaker = internal_limiter.bucket_factory._leaker
+            if leaker is not None and leaker.ident is not None:
+                leaker_idents.append(leaker.ident)
+
+        # Close the limiter - this should clean up thread idents
+        limiter.close()
+
+        # Verify all leaker idents were removed from suppression set
+        with _suppressed_lock:
+            for ident in leaker_idents:
+                assert ident not in _suppressed_thread_idents, f"Stale thread ident {ident} found in suppression set after close()"
+
 
 class TestAcquireThreadSafety:
     """Tests for acquire() thread safety and atomicity.

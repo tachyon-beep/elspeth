@@ -99,6 +99,19 @@ class TestVerificationResult:
         # Missing recording is not considered a "difference"
         assert result.has_differences is False
 
+    def test_has_differences_false_when_payload_missing(self) -> None:
+        """has_differences is False when payload is purged (not a real diff)."""
+        result = VerificationResult(
+            request_hash="abc123",
+            live_response={"content": "Hello"},
+            recorded_response=None,
+            is_match=False,
+            payload_missing=True,
+        )
+
+        # Missing payload is not considered a "difference"
+        assert result.has_differences is False
+
 
 class TestVerificationReport:
     """Tests for VerificationReport dataclass."""
@@ -111,6 +124,7 @@ class TestVerificationReport:
         assert report.matches == 0
         assert report.mismatches == 0
         assert report.missing_recordings == 0
+        assert report.missing_payloads == 0
         assert report.results == []
 
     def test_success_rate_no_calls(self) -> None:
@@ -446,7 +460,7 @@ class TestCallVerifier:
         )
 
     def test_verify_with_none_recorded_response(self) -> None:
-        """Handles calls where recorded response couldn't be retrieved."""
+        """Handles calls where recorded response payload is missing/purged."""
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
@@ -462,9 +476,14 @@ class TestCallVerifier:
             live_response={"content": "Hello"},
         )
 
-        # Empty dict vs live response will mismatch
+        # Should track as missing payload, not mismatch
         assert result.is_match is False
-        assert result.recorded_response == {}
+        assert result.recorded_response is None
+        assert result.payload_missing is True
+        assert result.has_differences is False  # Not a real difference
+        assert verifier.get_report().missing_payloads == 1
+        # Should not increment mismatches
+        assert verifier.get_report().mismatches == 0
 
     def test_verify_order_independent_comparison(self) -> None:
         """Verifier ignores order in list comparisons."""

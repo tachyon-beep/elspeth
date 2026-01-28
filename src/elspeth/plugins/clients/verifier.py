@@ -33,10 +33,11 @@ class VerificationResult:
     Attributes:
         request_hash: Hash of the request data (for identification)
         live_response: The response from the live call
-        recorded_response: The previously recorded response (None if missing)
+        recorded_response: The previously recorded response (None if missing or purged)
         is_match: Whether live and recorded responses match
         differences: DeepDiff results as dict (empty if match)
         recorded_call_missing: True if no recorded call was found
+        payload_missing: True if call exists but response payload is missing/purged
     """
 
     request_hash: str
@@ -45,15 +46,16 @@ class VerificationResult:
     is_match: bool
     differences: dict[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
+    payload_missing: bool = False
 
     @property
     def has_differences(self) -> bool:
         """Check if there are meaningful differences.
 
         Returns True only when there are actual differences between
-        responses (not when the recording is simply missing).
+        responses (not when the recording is simply missing or payload is purged).
         """
-        return not self.is_match and not self.recorded_call_missing
+        return not self.is_match and not self.recorded_call_missing and not self.payload_missing
 
 
 @dataclass
@@ -68,6 +70,7 @@ class VerificationReport:
         matches: Number of calls that matched recorded baseline
         mismatches: Number of calls with differences from baseline
         missing_recordings: Number of calls with no recorded baseline
+        missing_payloads: Number of calls where response payload is missing/purged
         results: Individual verification results for inspection
     """
 
@@ -75,6 +78,7 @@ class VerificationReport:
     matches: int = 0
     mismatches: int = 0
     missing_recordings: int = 0
+    missing_payloads: int = 0
     results: list[VerificationResult] = field(default_factory=list)
 
     @property
@@ -197,7 +201,20 @@ class CallVerifier:
             return result
 
         # Get recorded response
-        recorded_response = self._recorder.get_call_response_data(call.call_id) or {}
+        recorded_response = self._recorder.get_call_response_data(call.call_id)
+
+        # Handle missing/purged payload explicitly
+        if recorded_response is None:
+            result = VerificationResult(
+                request_hash=request_hash,
+                live_response=live_response,
+                recorded_response=None,
+                is_match=False,
+                payload_missing=True,
+            )
+            self._report.missing_payloads += 1
+            self._report.results.append(result)
+            return result
 
         # Compare using DeepDiff
         diff = DeepDiff(

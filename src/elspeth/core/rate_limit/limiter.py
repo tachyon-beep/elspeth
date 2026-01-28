@@ -272,20 +272,22 @@ class RateLimiter:
 
     def close(self) -> None:
         """Close the rate limiter and release resources."""
-        # Get references to the leaker threads before disposing
-        # Each limiter's bucket_factory has a _leaker attribute
-        leakers = []
+        # Get references to the leaker threads before disposing.
+        # Each limiter's bucket_factory has a _leaker attribute.
+        # We capture (thread, ident) pairs because ident may become None after thread exits.
+        leakers_with_idents: list[tuple[threading.Thread, int]] = []
         for limiter in self._limiters:
             leaker = limiter.bucket_factory._leaker
             if leaker is not None and leaker.is_alive() and leaker.ident is not None:
-                leakers.append(leaker)
+                leaker_ident = leaker.ident  # Capture before it can become None
+                leakers_with_idents.append((leaker, leaker_ident))
                 # Register thread ident for exception suppression.
                 # pyrate-limiter has a race condition that causes AssertionError
                 # during cleanup - this is benign but noisy. We register by
                 # ident (not name) to avoid accidentally suppressing unrelated
                 # threads that share a name.
                 with _suppressed_lock:
-                    _suppressed_thread_idents.add(leaker.ident)
+                    _suppressed_thread_idents.add(leaker_ident)
 
         # Dispose all buckets from their limiters
         # This deregisters them from the leaker thread
@@ -296,9 +298,14 @@ class RateLimiter:
         # The pyrate-limiter Leaker thread has a race condition where it can fail
         # with an assertion error if we close too quickly. We suppress that
         # exception via the custom excepthook above.
-        for leaker in leakers:
+        for leaker_thread, leaker_ident in leakers_with_idents:
             # Wait up to 50ms for thread to exit
-            leaker.join(timeout=0.05)
+            leaker_thread.join(timeout=0.05)
+            # Clean up suppression registration after join completes.
+            # If the thread raised AssertionError, the hook already removed it (discard is safe).
+            # If the thread exited cleanly, we remove it here to prevent stale idents.
+            with _suppressed_lock:
+                _suppressed_thread_idents.discard(leaker_ident)
 
         if self._conn is not None:
             self._conn.close()
