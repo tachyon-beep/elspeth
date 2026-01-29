@@ -85,9 +85,10 @@ def get_fingerprint_key() -> bytes:
         try:
             client = _get_keyvault_client(vault_url)
             secret = client.get_secret(secret_name)
-            if secret.value is None:
+            secret_value: str | None = secret.value
+            if secret_value is None:
                 raise ValueError(f"Secret '{secret_name}' has no value")
-            return secret.value.encode("utf-8")
+            return secret_value.encode("utf-8")
         except ImportError:
             raise  # Re-raise ImportError as-is
         except Exception as e:

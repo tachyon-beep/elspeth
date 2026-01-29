@@ -313,10 +313,11 @@ class TestPresetLoading:
         assert config_dict["latency"]["base_ms"] == 10
 
     def test_load_chaos_preset(self) -> None:
-        """Load chaos preset and verify high error rates."""
+        """Load chaos preset and verify ~25% total error rate."""
         config_dict = load_preset("chaos")
-        assert config_dict["error_injection"]["rate_limit_pct"] == 10.0
-        assert config_dict["error_injection"]["invalid_json_pct"] == 2.0
+        # Scaled to ~25% total (was 40%, multiplied by 0.625)
+        assert config_dict["error_injection"]["rate_limit_pct"] == 6.25
+        assert config_dict["error_injection"]["invalid_json_pct"] == 1.25
         assert config_dict["error_injection"]["burst"]["enabled"] is True
 
     def test_load_nonexistent_preset(self) -> None:
