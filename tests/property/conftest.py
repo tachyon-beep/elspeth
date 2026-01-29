@@ -18,6 +18,16 @@ Usage:
         ...
 """
 
+# =============================================================================
+# Hypothesis Settings
+# =============================================================================
+#
+# For standardized @settings decorators, import from tests.property.settings:
+#   from tests.property.settings import STANDARD_SETTINGS, DETERMINISM_SETTINGS
+#
+# Tiers: DETERMINISM (500), STATE_MACHINE (200), STANDARD (100), SLOW (50), QUICK (20)
+# =============================================================================
+
 from __future__ import annotations
 
 import keyword
