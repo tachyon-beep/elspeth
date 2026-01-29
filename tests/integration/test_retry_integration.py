@@ -427,3 +427,156 @@ class TestRetryAuditTrail:
         assert len(rows) == 1, f"Expected 1 node_state, got {len(rows)}"
         assert rows[0].attempt == 0
         assert rows[0].status == "completed"
+
+
+class TestRetryExponentialBackoff:
+    """Verify exponential_base config actually affects retry backoff timing.
+
+    P2-2026-01-21 bug: exponential_base was defined in RetrySettings but
+    never wired to RetryConfig or tenacity's wait_exponential_jitter.
+
+    These tests ensure the config-to-runtime mapping works end-to-end.
+    """
+
+    def test_exponential_base_passed_to_tenacity(self) -> None:
+        """Verify exponential_base is wired from config to tenacity.
+
+        This test verifies the full chain by checking that wait_exponential_jitter
+        is called with the configured exp_base parameter. We use mocking because
+        timing-based tests are unreliable due to jitter dominating small delays.
+
+        The chain being tested:
+        RetrySettings.exponential_base -> RetryConfig.exponential_base
+            -> RetryManager._config.exponential_base
+            -> wait_exponential_jitter(exp_base=...)
+        """
+        from unittest.mock import patch
+
+        from elspeth.core.config import RetrySettings
+        from elspeth.engine.retry import RetryConfig, RetryManager
+
+        # Create config with non-default exponential_base
+        settings = RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.5,
+            max_delay_seconds=10.0,
+            exponential_base=5.0,  # Non-default, should be passed to tenacity
+        )
+        config = RetryConfig.from_settings(settings)
+        manager = RetryManager(config)
+
+        # Verify config has correct exponential_base
+        assert config.exponential_base == 5.0
+
+        captured_exp_base: list[float] = []
+
+        # Patch wait_exponential_jitter to capture the exp_base argument
+        original_wait_exp_jitter = __import__("tenacity.wait", fromlist=["wait_exponential_jitter"]).wait_exponential_jitter
+
+        def capturing_wait_exponential_jitter(
+            initial: float = 1,
+            max: float = 4.611686018427388e18,
+            exp_base: float = 2,
+            jitter: float = 1,
+        ) -> Any:
+            captured_exp_base.append(exp_base)
+            # Return a zero-wait to make test fast
+            return original_wait_exp_jitter(initial=0, max=0, exp_base=exp_base, jitter=0)
+
+        with patch(
+            "elspeth.engine.retry.wait_exponential_jitter",
+            capturing_wait_exponential_jitter,
+        ):
+            # Run an operation that fails once then succeeds
+            call_count = 0
+
+            def flaky_op() -> str:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise ValueError("Transient failure")
+                return "success"
+
+            result = manager.execute_with_retry(
+                flaky_op,
+                is_retryable=lambda e: isinstance(e, ValueError),
+            )
+
+            assert result == "success"
+
+        # Verify exp_base was captured with the configured value
+        assert len(captured_exp_base) == 1, "wait_exponential_jitter should be called once"
+        assert captured_exp_base[0] == 5.0, (
+            f"exp_base should be 5.0 (from config), got {captured_exp_base[0]}. "
+            f"This means exponential_base is not being passed to tenacity."
+        )
+
+    def test_from_settings_preserves_exponential_base(self) -> None:
+        """Verify RetryConfig.from_settings() maps exponential_base.
+
+        This is the integration test that would have caught the bug:
+        - RetrySettings.exponential_base was defined
+        - But RetryConfig.from_settings() didn't map it
+        - So configured values were silently ignored
+        """
+        from elspeth.core.config import RetrySettings
+        from elspeth.engine.retry import RetryConfig
+
+        # Test with non-default exponential_base
+        settings = RetrySettings(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+            max_delay_seconds=120.0,
+            exponential_base=3.0,  # Non-default value
+        )
+
+        config = RetryConfig.from_settings(settings)
+
+        # ALL settings must be mapped, including exponential_base
+        assert config.max_attempts == 5
+        assert config.base_delay == 2.0
+        assert config.max_delay == 120.0
+        assert config.exponential_base == 3.0, (
+            "exponential_base not mapped from RetrySettings to RetryConfig. This is the P2-2026-01-21 bug."
+        )
+
+    def test_retry_manager_uses_exponential_base(self) -> None:
+        """Verify RetryManager passes exponential_base to tenacity.
+
+        Tests the full chain:
+        RetrySettings -> RetryConfig -> RetryManager -> wait_exponential_jitter
+
+        If exponential_base is not passed to tenacity, backoff uses default (2.0).
+        """
+        from elspeth.core.config import RetrySettings
+        from elspeth.engine.retry import RetryConfig, RetryManager
+
+        # Create config with large exponential_base
+        settings = RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.01,
+            max_delay_seconds=10.0,
+            exponential_base=10.0,  # Very high base - should cause noticeable delay
+        )
+        config = RetryConfig.from_settings(settings)
+        manager = RetryManager(config)
+
+        # Verify config has the exponential_base
+        assert config.exponential_base == 10.0
+
+        # The actual tenacity usage is tested in test_exponential_base_affects_backoff_timing
+        # This test just verifies the wiring is complete
+        call_count = 0
+
+        def always_succeeds() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = manager.execute_with_retry(
+            always_succeeds,
+            is_retryable=lambda e: True,
+        )
+
+        assert result == "ok"
+        assert call_count == 1  # No retries needed

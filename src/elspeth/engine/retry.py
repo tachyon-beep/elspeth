@@ -17,7 +17,7 @@ Integration Point (Phase 5):
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from elspeth.core.config import RetrySettings
@@ -33,6 +33,26 @@ from tenacity import (
 from elspeth.contracts import RetryPolicy
 
 T = TypeVar("T")
+
+# Explicit defaults for RetryPolicy fields - MUST match RetryConfig defaults.
+# If you add a field to RetryConfig, add it here too or from_policy() will crash.
+# This is intentional - crashing on missing fields prevents silent bugs.
+POLICY_DEFAULTS: dict[str, int | float] = {
+    "max_attempts": 3,
+    "base_delay": 1.0,
+    "max_delay": 60.0,
+    "jitter": 1.0,
+    "exponential_base": 2.0,
+}
+
+
+def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
+    """Merge policy with defaults, returning dict with numeric values.
+
+    Policy values override defaults. The result has all POLICY_DEFAULTS keys
+    with values from either policy (if present) or defaults.
+    """
+    return {**POLICY_DEFAULTS, **cast(dict[str, Any], policy)}
 
 
 class MaxRetriesExceeded(Exception):
@@ -56,6 +76,7 @@ class RetryConfig:
     base_delay: float = 1.0  # seconds
     max_delay: float = 60.0  # seconds
     jitter: float = 1.0  # seconds
+    exponential_base: float = 2.0  # backoff multiplier
 
     def __post_init__(self) -> None:
         if self.max_attempts < 1:
@@ -68,19 +89,39 @@ class RetryConfig:
 
     @classmethod
     def from_policy(cls, policy: RetryPolicy | None) -> "RetryConfig":
-        """Factory from plugin policy dict with safe defaults.
+        """Factory from plugin policy dict.
 
-        Handles missing/malformed policy gracefully.
-        This is a trust boundary - external config may have invalid values.
+        RetryPolicy is total=False (all fields optional), so plugins can specify
+        partial overrides. Missing fields use POLICY_DEFAULTS.
+
+        This is a trust boundary - plugin config (user YAML) may have invalid
+        values that need clamping to safe minimums.
+
+        Note: We deliberately avoid .get() here. If a field exists in RetryConfig
+        but not in POLICY_DEFAULTS, the direct access below will crash. This is
+        intentional - it catches the bug at development time, not production.
         """
         if policy is None:
             return cls.no_retry()
 
+        # Merge explicit defaults with provided policy - policy values override
+        full = _merge_policy_with_defaults(policy)
+
+        # Direct access - crashes if POLICY_DEFAULTS is missing a field
+        # Clamp values to safe minimums (user config may have invalid values)
+        # Type narrowing: values are int|float from POLICY_DEFAULTS or policy
+        max_attempts = full["max_attempts"]
+        base_delay = full["base_delay"]
+        max_delay_val = full["max_delay"]
+        jitter = full["jitter"]
+        exponential_base = full["exponential_base"]
+
         return cls(
-            max_attempts=max(1, policy.get("max_attempts", 3)),
-            base_delay=max(0.01, policy.get("base_delay", 1.0)),
-            max_delay=max(0.1, policy.get("max_delay", 60.0)),
-            jitter=max(0.0, policy.get("jitter", 1.0)),
+            max_attempts=max(1, int(max_attempts)),
+            base_delay=max(0.01, float(base_delay)),
+            max_delay=max(0.1, float(max_delay_val)),
+            jitter=max(0.0, float(jitter)),
+            exponential_base=max(1.01, float(exponential_base)),
         )
 
     @classmethod
@@ -98,6 +139,7 @@ class RetryConfig:
             base_delay=settings.initial_delay_seconds,
             max_delay=settings.max_delay_seconds,
             jitter=1.0,  # Fixed jitter, not exposed in settings
+            exponential_base=settings.exponential_base,
         )
 
 
@@ -155,6 +197,7 @@ class RetryManager:
                 wait=wait_exponential_jitter(
                     initial=self._config.base_delay,
                     max=self._config.max_delay,
+                    exp_base=self._config.exponential_base,
                     jitter=self._config.jitter,
                 ),
                 retry=retry_if_exception(is_retryable),

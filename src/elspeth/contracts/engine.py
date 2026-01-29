@@ -14,9 +14,11 @@ class RetryPolicy(TypedDict, total=False):
         base_delay: Initial delay between retries in seconds
         max_delay: Maximum delay between retries in seconds
         jitter: Random jitter to add to delays in seconds
+        exponential_base: Exponential backoff multiplier (default 2.0)
     """
 
     max_attempts: int
     base_delay: float
     max_delay: float
     jitter: float
+    exponential_base: float

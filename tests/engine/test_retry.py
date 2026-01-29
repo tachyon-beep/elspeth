@@ -136,6 +136,8 @@ class TestRetryConfig:
         assert config.max_delay == 120.0
         # jitter defaults to 1.0 when not specified in settings
         assert config.jitter == 1.0
+        # exponential_base must be preserved (P2-2026-01-21 bug fix)
+        assert config.exponential_base == 3.0
 
     def test_default_values(self) -> None:
         from elspeth.engine.retry import RetryConfig
@@ -146,6 +148,7 @@ class TestRetryConfig:
         assert config.base_delay == 1.0
         assert config.max_delay == 60.0
         assert config.jitter == 1.0
+        assert config.exponential_base == 2.0
 
     def test_invalid_max_attempts_raises(self) -> None:
         from elspeth.engine.retry import RetryConfig
@@ -172,6 +175,7 @@ class TestRetryConfig:
                 "base_delay": 2.0,
                 "max_delay": 120.0,
                 "jitter": 0.5,
+                "exponential_base": 4.0,
             }
         )
 
@@ -179,6 +183,7 @@ class TestRetryConfig:
         assert config.base_delay == 2.0
         assert config.max_delay == 120.0
         assert config.jitter == 0.5
+        assert config.exponential_base == 4.0
 
 
 class TestMaxRetriesExceeded:
