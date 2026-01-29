@@ -133,8 +133,8 @@ ENGLISH_VOCABULARY: tuple[str, ...] = (
     "output",
 )
 
-# Lorem Ipsum vocabulary
-LOREM_VOCABULARY: tuple[str, ...] = (
+# Lorem Ipsum vocabulary (deduplicated to ensure uniform distribution)
+_LOREM_SET = {
     "lorem",
     "ipsum",
     "dolor",
@@ -207,21 +207,18 @@ LOREM_VOCABULARY: tuple[str, ...] = (
     "pharetra",
     "viverra",
     "semper",
-    "nisi",
     "blandit",
     "massa",
-    "enim",
     "nec",
     "dui",
     "nunc",
     "mattis",
-    "enim",
-    "ut",
     "tellus",
     "elementum",
     "sagittis",
     "vitae",
-)
+}
+LOREM_VOCABULARY: tuple[str, ...] = tuple(sorted(_LOREM_SET))
 
 
 @dataclass(frozen=True, slots=True)
@@ -581,8 +578,7 @@ class ResponseGenerator:
         elif mode == "preset":
             content = self._generate_preset_response()
         else:
-            # This shouldn't happen with valid config, but handle gracefully
-            content = self._generate_random_text()
+            raise ValueError(f"Unknown response mode: {mode}")
 
         # Estimate token counts
         prompt_text = self._extract_prompt_text(request)

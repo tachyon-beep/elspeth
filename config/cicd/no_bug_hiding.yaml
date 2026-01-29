@@ -878,62 +878,62 @@ allow_hits:
 # These .get() calls are on the request dict from external HTTP clients, which is
 # zero-trust data. The OpenAI API spec makes many fields optional (messages can be
 # empty, model can be omitted in some configurations, etc.)
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=485
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=482
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
   safety: Empty list default is safe - template receives empty messages array
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=486
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=483
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
   safety: Default "unknown" is safe - used for template context only
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=491
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=488
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
   safety: Empty list default triggers "(no messages provided)" response
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=496
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=493
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
   safety: Empty string default means message is not matched as "user" role
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=495
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  safety: 'Empty string default produces "Echo:" response'
   expires: null
 - key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=498
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
   safety: 'Empty string default produces "Echo:" response'
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=501
-  owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
-  safety: 'Empty string default produces "Echo:" response'
-  expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=537
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=534
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
   safety: Empty list default produces empty prompt text for token estimation
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=540
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=537
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
   safety: Empty string default is safe for token estimation formatting
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=541
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=538
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
   safety: Empty string default is safe for token estimation
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=574
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=571
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
   safety: Empty list default is safe for template rendering with override
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=575
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=572
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
   safety: Default "unknown" is safe for template context
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=597
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=593
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
   safety: Default "gpt-4" is safe for response metadata
