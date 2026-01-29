@@ -100,6 +100,11 @@ class FieldMappingViolation:
     This catches "misrouted" fields where code maps a settings field to
     the wrong runtime field. For example:
         base_delay=settings.max_delay_seconds  # Wrong! Should be initial_delay_seconds
+
+    Note: line is always 0 because tracking exact line numbers for field
+    mappings would require additional AST position tracking. The
+    runtime_class + runtime_field combination is sufficient for locating
+    the issue - users can search for the from_settings() method.
     """
 
     runtime_class: str
@@ -107,7 +112,30 @@ class FieldMappingViolation:
     settings_field: str
     expected_settings_field: str
     file: str
-    line: int
+    line: int  # Always 0 - see docstring
+
+
+@dataclass
+class HardcodeViolation:
+    """A hardcoded literal in from_settings() not documented in INTERNAL_DEFAULTS.
+
+    This catches undocumented internal defaults where code uses a literal
+    value instead of settings.X but the literal is not documented in
+    INTERNAL_DEFAULTS. For example:
+        jitter=1.0  # OK if INTERNAL_DEFAULTS["retry"]["jitter"] = 1.0
+        magic_number=42  # VIOLATION - not documented anywhere
+
+    Note: line is always 0 because tracking exact line numbers for hardcodes
+    would require additional AST position tracking. The runtime_class +
+    runtime_field combination is sufficient for locating the issue.
+    """
+
+    runtime_class: str
+    runtime_field: str
+    literal_value: str  # String representation of the literal
+    subsystem: str  # Expected subsystem key in INTERNAL_DEFAULTS
+    file: str
+    line: int  # Always 0 - see docstring
 
 
 def load_whitelist(path: Path) -> tuple[dict[str, set[str]], list[WhitelistEntry]]:
@@ -610,6 +638,69 @@ class FieldMappingVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+class HardcodeLiteralVisitor(ast.NodeVisitor):
+    """Extract runtime_field=<literal> assignments from AST.
+
+    Used to find hardcoded literals in from_settings() methods.
+    Looks for keyword arguments in constructor calls like:
+        cls(
+            jitter=1.0,  # Hardcoded literal
+            max_attempts=settings.max_attempts,  # Not a literal (skipped)
+        )
+
+    Captures tuples of (runtime_field, literal_value).
+    Ignores values that are:
+    - settings.X accesses (handled by FieldMappingVisitor)
+    - Function calls like float(INTERNAL_DEFAULTS["retry"]["jitter"])
+    - Subscripts like INTERNAL_DEFAULTS["retry"]["jitter"]
+    - Variable references
+    """
+
+    def __init__(self, param_name: str = "settings") -> None:
+        self.param_name = param_name
+        self.hardcoded_literals: list[tuple[str, object]] = []  # (runtime_field, literal_value)
+
+    def _is_plain_literal(self, node: ast.expr) -> tuple[bool, object]:
+        """Check if node is a plain literal (not wrapped in function call).
+
+        Returns (is_literal, value).
+        """
+        # Plain constants: 1.0, 42, "string", True
+        if isinstance(node, ast.Constant):
+            return True, node.value
+        # Negative numbers: -1.0, -42
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant):
+            operand_value = node.operand.value
+            # Only negate numeric types
+            if isinstance(operand_value, int | float):
+                return True, -operand_value
+        return False, None
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Capture keyword arguments that use plain literals."""
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                # **kwargs - skip
+                continue
+            runtime_field = keyword.arg
+
+            # Skip settings.X accesses
+            if (
+                isinstance(keyword.value, ast.Attribute)
+                and isinstance(keyword.value.value, ast.Name)
+                and keyword.value.value.id == self.param_name
+            ):
+                continue
+
+            # Check if it's a plain literal (not wrapped in float(), int(), etc.)
+            is_literal, value = self._is_plain_literal(keyword.value)
+            if is_literal:
+                self.hardcoded_literals.append((runtime_field, value))
+
+        # Continue visiting children (nested calls)
+        self.generic_visit(node)
+
+
 def extract_from_settings_accesses(runtime_path: Path) -> dict[str, set[str]]:
     """Extract all settings.X accesses from from_settings() methods in a file.
 
@@ -754,6 +845,139 @@ def check_field_name_mappings(runtime_path: Path) -> list[FieldMappingViolation]
                             line=0,  # Line number would require more complex tracking
                         )
                     )
+
+    return violations
+
+
+def extract_from_settings_hardcodes(runtime_path: Path) -> dict[str, list[tuple[str, object]]]:
+    """Extract runtime_field=<literal> assignments from from_settings() methods.
+
+    Parses the runtime.py file and finds all Runtime*Config classes with
+    from_settings() methods. For each, extracts hardcoded literal values.
+
+    Args:
+        runtime_path: Path to contracts/config/runtime.py
+
+    Returns:
+        Dict mapping RuntimeClassName -> list of (runtime_field, literal_value) tuples
+    """
+    try:
+        source = runtime_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return {}
+
+    result: dict[str, list[tuple[str, object]]] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Runtime") and node.name.endswith("Config"):
+            # Find from_settings() method in this class
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "from_settings":
+                    # Get the parameter name (first param after cls)
+                    param_name = "settings"  # default
+                    if len(item.args.args) > 1:
+                        param_name = item.args.args[1].arg
+
+                    # Visit the method body to find hardcoded literals
+                    visitor = HardcodeLiteralVisitor(param_name)
+                    for stmt in item.body:
+                        visitor.visit(stmt)
+
+                    result[node.name] = visitor.hardcoded_literals
+                    break
+
+    return result
+
+
+# Mapping from Runtime class name to INTERNAL_DEFAULTS subsystem key
+RUNTIME_TO_SUBSYSTEM: dict[str, str] = {
+    "RuntimeRetryConfig": "retry",
+    # Future: "RuntimeCheckpointConfig": "checkpoint",
+}
+
+
+def check_hardcode_documentation(runtime_path: Path) -> list[HardcodeViolation]:
+    """Check that hardcoded literals in from_settings() are documented in INTERNAL_DEFAULTS.
+
+    For each Runtime*Config class with a from_settings() method:
+    1. Extract all runtime_field=<literal> assignments (plain literals only)
+    2. Look up the expected subsystem in RUNTIME_TO_SUBSYSTEM
+    3. Check if the literal is documented in INTERNAL_DEFAULTS[subsystem][field]
+    4. Report violations for undocumented hardcodes
+
+    Example violation (undocumented hardcode):
+        def from_settings(cls, settings):
+            return cls(
+                jitter=1.0,  # OK if INTERNAL_DEFAULTS["retry"]["jitter"] = 1.0
+                magic_number=42,  # VIOLATION - not documented anywhere
+            )
+
+    Note: This check only catches PLAIN literals (1.0, 42, "string").
+    Wrapped literals like float(INTERNAL_DEFAULTS["retry"]["jitter"]) are not checked
+    because they explicitly reference INTERNAL_DEFAULTS (self-documenting).
+
+    Args:
+        runtime_path: Path to contracts/config/runtime.py (Runtime classes)
+
+    Returns:
+        List of HardcodeViolation for undocumented hardcodes
+    """
+    from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
+
+    # Get all hardcoded literals from from_settings() methods
+    runtime_hardcodes = extract_from_settings_hardcodes(runtime_path)
+
+    violations: list[HardcodeViolation] = []
+
+    for runtime_class, hardcodes in runtime_hardcodes.items():
+        # Get the subsystem for this runtime class
+        subsystem = RUNTIME_TO_SUBSYSTEM.get(runtime_class)
+        if subsystem is None:
+            # No subsystem mapping - all hardcodes in this class are violations
+            for runtime_field, literal_value in hardcodes:
+                violations.append(
+                    HardcodeViolation(
+                        runtime_class=runtime_class,
+                        runtime_field=runtime_field,
+                        literal_value=repr(literal_value),
+                        subsystem="(no subsystem mapping)",
+                        file=str(runtime_path),
+                        line=0,
+                    )
+                )
+            continue
+
+        # Get the documented defaults for this subsystem
+        subsystem_defaults = INTERNAL_DEFAULTS.get(subsystem, {})
+
+        # Check each hardcoded literal
+        for runtime_field, literal_value in hardcodes:
+            if runtime_field not in subsystem_defaults:
+                # Field not documented in INTERNAL_DEFAULTS
+                violations.append(
+                    HardcodeViolation(
+                        runtime_class=runtime_class,
+                        runtime_field=runtime_field,
+                        literal_value=repr(literal_value),
+                        subsystem=subsystem,
+                        file=str(runtime_path),
+                        line=0,
+                    )
+                )
+            elif subsystem_defaults[runtime_field] != literal_value:
+                # Field documented but value doesn't match (more serious!)
+                # This means the code has a different value than documented
+                violations.append(
+                    HardcodeViolation(
+                        runtime_class=runtime_class,
+                        runtime_field=runtime_field,
+                        literal_value=f"{literal_value!r} (documented: {subsystem_defaults[runtime_field]!r})",
+                        subsystem=subsystem,
+                        file=str(runtime_path),
+                        line=0,
+                    )
+                )
 
     return violations
 
@@ -976,6 +1200,9 @@ def main() -> int:
     # Check from_settings() field name mappings match FIELD_MAPPINGS
     mapping_violations = check_field_name_mappings(runtime_path)
 
+    # Check hardcoded literals in from_settings() are documented in INTERNAL_DEFAULTS
+    hardcode_violations = check_hardcode_documentation(runtime_path)
+
     has_violations = False
     has_stale = False
 
@@ -1023,6 +1250,16 @@ def main() -> int:
             print(f"    Fix: Update from_settings() to use settings.{mv.expected_settings_field}")
             print("    Or update FIELD_MAPPINGS in contracts/config/alignment.py\n")
 
+    if hardcode_violations:
+        has_violations = True
+        print("❌ Undocumented hardcoded values in from_settings() found:\n")
+        print("  (Literal values in from_settings() must be documented in INTERNAL_DEFAULTS)\n")
+        for hv in hardcode_violations:
+            print(f"  {hv.runtime_class}.{hv.runtime_field} = {hv.literal_value}")
+            print(f"    Subsystem: {hv.subsystem}")
+            print(f"    Fix: Add to INTERNAL_DEFAULTS['{hv.subsystem}']['{hv.runtime_field}']")
+            print("    in contracts/config/defaults.py\n")
+
     if stale_entries:
         has_stale = True
         print("❌ Stale whitelist entries found:\n")
@@ -1048,6 +1285,7 @@ def main() -> int:
     print("✅ All Settings classes have Runtime counterparts or are exempt")
     print("✅ All Settings fields are accessed in from_settings() methods")
     print("✅ All field name mappings match FIELD_MAPPINGS")
+    print("✅ All hardcoded values are documented in INTERNAL_DEFAULTS")
     return 0
 
 

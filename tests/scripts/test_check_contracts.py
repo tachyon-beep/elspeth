@@ -7,13 +7,17 @@ from scripts.check_contracts import (
     FieldCoverageViolation,
     FieldMappingViolation,
     FieldMappingVisitor,
+    HardcodeLiteralVisitor,
+    HardcodeViolation,
     SettingsAccessVisitor,
     SettingsViolation,
     check_field_name_mappings,
     check_from_settings_coverage,
+    check_hardcode_documentation,
     check_settings_alignment,
     extract_from_settings_accesses,
     extract_from_settings_field_mappings,
+    extract_from_settings_hardcodes,
     find_settings_classes,
     find_type_definitions,
     get_settings_class_fields,
@@ -1101,3 +1105,343 @@ def test_field_mapping_violation_dataclass() -> None:
     assert violation.expected_settings_field == "initial_delay_seconds"
     assert violation.file == "/path/to/runtime.py"
     assert violation.line == 42
+
+
+# =============================================================================
+# Hardcode Documentation Tests (check_hardcode_documentation)
+# =============================================================================
+
+
+def test_hardcode_literal_visitor_finds_plain_literals() -> None:
+    """HardcodeLiteralVisitor finds plain literal values in keyword args."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        field_a=settings.field_a,
+        jitter=1.0,
+        magic_number=42,
+        name="default",
+        enabled=True,
+    )
+"""
+    tree = ast.parse(code)
+    visitor = HardcodeLiteralVisitor("settings")
+    visitor.visit(tree)
+
+    # Should find: jitter=1.0, magic_number=42, name="default", enabled=True
+    # Should NOT find: field_a=settings.field_a
+    assert len(visitor.hardcoded_literals) == 4
+    literals_dict = dict(visitor.hardcoded_literals)
+    assert literals_dict["jitter"] == 1.0
+    assert literals_dict["magic_number"] == 42
+    assert literals_dict["name"] == "default"
+    assert literals_dict["enabled"] is True
+
+
+def test_hardcode_literal_visitor_ignores_function_calls() -> None:
+    """HardcodeLiteralVisitor ignores values wrapped in function calls."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        jitter=float(INTERNAL_DEFAULTS["retry"]["jitter"]),
+        base_delay=float(settings.initial_delay_seconds),
+        computed=some_func(42),
+    )
+"""
+    tree = ast.parse(code)
+    visitor = HardcodeLiteralVisitor("settings")
+    visitor.visit(tree)
+
+    # Should NOT find any - all are function calls
+    assert len(visitor.hardcoded_literals) == 0
+
+
+def test_hardcode_literal_visitor_ignores_subscripts() -> None:
+    """HardcodeLiteralVisitor ignores subscript values like dict["key"]."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        jitter=INTERNAL_DEFAULTS["retry"]["jitter"],
+        value=some_dict["key"],
+    )
+"""
+    tree = ast.parse(code)
+    visitor = HardcodeLiteralVisitor("settings")
+    visitor.visit(tree)
+
+    # Should NOT find any - all are subscripts
+    assert len(visitor.hardcoded_literals) == 0
+
+
+def test_hardcode_literal_visitor_finds_negative_numbers() -> None:
+    """HardcodeLiteralVisitor finds negative number literals."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        offset=-1.5,
+        countdown=-42,
+    )
+"""
+    tree = ast.parse(code)
+    visitor = HardcodeLiteralVisitor("settings")
+    visitor.visit(tree)
+
+    assert len(visitor.hardcoded_literals) == 2
+    literals_dict = dict(visitor.hardcoded_literals)
+    assert literals_dict["offset"] == -1.5
+    assert literals_dict["countdown"] == -42
+
+
+def test_extract_from_settings_hardcodes_finds_method(tmp_path: Path) -> None:
+    """extract_from_settings_hardcodes finds hardcodes in from_settings method."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    field_a: int
+    jitter: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            field_a=settings.field_a,
+            jitter=1.0,
+        )
+""")
+
+    result = extract_from_settings_hardcodes(runtime_file)
+
+    assert "RuntimeTestConfig" in result
+    assert len(result["RuntimeTestConfig"]) == 1
+    assert ("jitter", 1.0) in result["RuntimeTestConfig"]
+
+
+def test_extract_from_settings_hardcodes_multiple_classes(tmp_path: Path) -> None:
+    """extract_from_settings_hardcodes handles multiple Runtime classes."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+    jitter: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            max_attempts=settings.max_attempts,
+            jitter=1.0,
+        )
+
+
+@dataclass
+class RuntimeCheckpointConfig:
+    enabled: bool
+    buffer_size: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            enabled=settings.enabled,
+            buffer_size=1000,
+        )
+""")
+
+    result = extract_from_settings_hardcodes(runtime_file)
+
+    assert len(result) == 2
+    assert ("jitter", 1.0) in result["RuntimeRetryConfig"]
+    assert ("buffer_size", 1000) in result["RuntimeCheckpointConfig"]
+
+
+def test_check_hardcode_documentation_passes_documented(tmp_path: Path) -> None:
+    """check_hardcode_documentation passes when hardcode is documented."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+    jitter: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            max_attempts=settings.max_attempts,
+            jitter=1.0,  # Documented in INTERNAL_DEFAULTS["retry"]["jitter"]
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.defaults.INTERNAL_DEFAULTS",
+        {"retry": {"jitter": 1.0}},
+    ):
+        violations = check_hardcode_documentation(runtime_file)
+
+    assert violations == []
+
+
+def test_check_hardcode_documentation_detects_undocumented(tmp_path: Path) -> None:
+    """check_hardcode_documentation detects undocumented hardcode (the key test).
+
+    This is the primary test case - catching hardcoded literals that are NOT
+    documented in INTERNAL_DEFAULTS.
+    """
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+    jitter: float
+    magic_number: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            max_attempts=settings.max_attempts,
+            jitter=1.0,
+            magic_number=42,  # UNDOCUMENTED - should be violation!
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.defaults.INTERNAL_DEFAULTS",
+        {"retry": {"jitter": 1.0}},  # magic_number is NOT documented
+    ):
+        violations = check_hardcode_documentation(runtime_file)
+
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.runtime_class == "RuntimeRetryConfig"
+    assert v.runtime_field == "magic_number"
+    assert "42" in v.literal_value
+    assert v.subsystem == "retry"
+
+
+def test_check_hardcode_documentation_detects_wrong_value(tmp_path: Path) -> None:
+    """check_hardcode_documentation detects when documented value differs from code."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    jitter: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            jitter=2.0,  # Code has 2.0 but documented as 1.0!
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.defaults.INTERNAL_DEFAULTS",
+        {"retry": {"jitter": 1.0}},  # Documented as 1.0
+    ):
+        violations = check_hardcode_documentation(runtime_file)
+
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.runtime_class == "RuntimeRetryConfig"
+    assert v.runtime_field == "jitter"
+    assert "2.0" in v.literal_value
+    assert "1.0" in v.literal_value  # Should mention the documented value
+
+
+def test_check_hardcode_documentation_no_subsystem_mapping(tmp_path: Path) -> None:
+    """check_hardcode_documentation flags hardcodes in classes without subsystem mapping."""
+    runtime_file = tmp_path / "runtime.py"
+    # RuntimeUnknownConfig is not in RUNTIME_TO_SUBSYSTEM
+    runtime_file.write_text("""
+@dataclass
+class RuntimeUnknownConfig:
+    magic: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            magic=42,  # No subsystem mapping - all hardcodes are violations
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.defaults.INTERNAL_DEFAULTS",
+        {},
+    ):
+        violations = check_hardcode_documentation(runtime_file)
+
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.runtime_class == "RuntimeUnknownConfig"
+    assert "(no subsystem mapping)" in v.subsystem
+
+
+def test_check_hardcode_documentation_ignores_classes_without_hardcodes(tmp_path: Path) -> None:
+    """check_hardcode_documentation passes classes with no hardcoded literals."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+    base_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            max_attempts=settings.max_attempts,
+            base_delay=settings.initial_delay_seconds,
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.defaults.INTERNAL_DEFAULTS",
+        {"retry": {}},
+    ):
+        violations = check_hardcode_documentation(runtime_file)
+
+    assert violations == []
+
+
+def test_check_hardcode_documentation_real_codebase() -> None:
+    """Integration test: actual codebase has documented hardcodes.
+
+    This verifies that the current codebase passes the check.
+    If this fails, a hardcoded literal was added to from_settings()
+    without documenting it in INTERNAL_DEFAULTS.
+    """
+    import pytest
+
+    runtime_path = Path("src/elspeth/contracts/config/runtime.py")
+
+    if not runtime_path.exists():
+        pytest.skip("Running from different directory - required files not found")
+
+    violations = check_hardcode_documentation(runtime_path)
+    assert violations == [], (
+        f"Undocumented hardcode violations found: "
+        f"{[(v.runtime_class, v.runtime_field, v.literal_value) for v in violations]}. "
+        f"Add these to INTERNAL_DEFAULTS in contracts/config/defaults.py."
+    )
+
+
+def test_hardcode_violation_dataclass() -> None:
+    """HardcodeViolation dataclass holds expected fields."""
+    violation = HardcodeViolation(
+        runtime_class="RuntimeRetryConfig",
+        runtime_field="magic_number",
+        literal_value="42",
+        subsystem="retry",
+        file="/path/to/runtime.py",
+        line=0,
+    )
+    assert violation.runtime_class == "RuntimeRetryConfig"
+    assert violation.runtime_field == "magic_number"
+    assert violation.literal_value == "42"
+    assert violation.subsystem == "retry"
+    assert violation.file == "/path/to/runtime.py"
+    assert violation.line == 0
