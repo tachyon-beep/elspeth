@@ -304,114 +304,139 @@ elspeth health --json
 
 ---
 
-## Examples
+## Examples Walkthrough
 
-### Example 1: Simple CSV Processing
+ELSPETH includes several example pipelines in `examples/`:
 
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/data.csv
-    schema:
-      fields: dynamic
+### 1. Boolean Routing
 
-row_plugins:
-  - plugin: field_mapper
-    options:
-      mapping:
-        full_name: "{{ row.first_name }} {{ row.last_name }}"
-
-sinks:
-  output:
-    plugin: csv
-    options:
-      path: output/processed.csv
-      schema:
-        fields: dynamic
-
-default_sink: output
-
-landscape:
-  url: sqlite:///runs/audit.db
-```
+Routes rows based on a true/false field.
 
 ```bash
-elspeth run -s settings.yaml --execute
+elspeth run -s examples/boolean_routing/settings.yaml --execute
 ```
 
-### Example 2: LLM Sentiment Analysis
+**Input:** CSV with `approved` column (true/false)
+**Output:** Separate CSVs for approved and rejected rows
 
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/reviews.csv
-    schema:
-      fields: dynamic
-
-row_plugins:
-  - plugin: openrouter_llm
-    options:
-      api_key: "${OPENROUTER_API_KEY}"
-      model: "openai/gpt-4o-mini"
-      template: |
-        Analyze sentiment: {{ row.text }}
-        Respond with JSON: {"sentiment": "positive/negative/neutral"}
-      response_field: analysis
-
-sinks:
-  output:
-    plugin: csv
-    options:
-      path: output/analyzed.csv
-      schema:
-        fields: dynamic
-
-default_sink: output
-
-landscape:
-  url: sqlite:///runs/audit.db
+**Verify:**
+```bash
+wc -l examples/boolean_routing/output/*.csv
+#   6 approved.csv   (5 data rows + header)
+#   6 rejected.csv   (5 data rows + header)
 ```
+
+### 2. Threshold Gate
+
+Routes high-value transactions to separate output.
 
 ```bash
-# Just run - .env is loaded automatically
-elspeth run -s settings.yaml --execute
+elspeth run -s examples/threshold_gate/settings.yaml --execute
 ```
 
-### Example 3: Content Moderation with Routing
+**Input:** CSV with `amount` column
+**Output:** High values (>1000) and normal values in separate files
 
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/submissions.csv
-
-gates:
-  - name: safety_check
-    condition: "row.get('flagged', False)"
-    routes:
-      "true": review_queue
-      "false": continue
-
-sinks:
-  approved:
-    plugin: csv
-    options:
-      path: output/approved.csv
-  review_queue:
-    plugin: csv
-    options:
-      path: output/needs_review.csv
-
-default_sink: approved
-
-landscape:
-  url: sqlite:///runs/audit.db
+**Verify:**
+```bash
+cat examples/threshold_gate/output/high_values.csv | head -3
+# id,amount,description
+# 2,1500,Large purchase
+# 4,2000,Premium service
 ```
+
+### 3. Batch Aggregation
+
+Computes statistics over batches of rows.
+
+```bash
+elspeth run -s examples/batch_aggregation/settings.yaml --execute
+```
+
+**Input:** 15 transactions
+**Output:** 3 batch summaries (one per 5 rows, grouped by category)
+
+**Verify:**
+```bash
+cat examples/batch_aggregation/output/batch_summaries.csv
+# category,count,sum,mean
+# electronics,5,2750,550.0
+# clothing,5,1250,250.0
+# groceries,5,375,75.0
+```
+
+### 4. Deaggregation
+
+Demonstrates N→M row expansion with new tokens.
+
+```bash
+elspeth run -s examples/deaggregation/settings.yaml --execute
+```
+
+**Input:** 6 rows with `copies` field (values: 2,1,3,2,1,2 = 11 total)
+**Output:** 11 rows (each replicated by its copies value)
+
+**Verify:**
+```bash
+wc -l examples/deaggregation/output/replicated.csv
+# 12 (11 data rows + header)
+
+head -4 examples/deaggregation/output/replicated.csv
+# id,name,copies,category,copy_index
+# 1,Alice,2,standard,0
+# 1,Alice,2,standard,1
+# 2,Bob,1,premium,0
+```
+
+### 5. JSON Explode
+
+Expands array fields into individual rows.
+
+```bash
+elspeth run -s examples/json_explode/settings.yaml --execute
+```
+
+**Input:** 3 orders with `items` arrays
+**Output:** 6 rows (one per item)
+
+**Verify:**
+```bash
+cat examples/json_explode/output/order_items.json | head -20
+# Shows individual items with order_id, item details, and item_index
+```
+
+### 6. Audit Export
+
+Exports complete audit trail to JSON for compliance.
+
+```bash
+elspeth run -s examples/audit_export/settings.yaml --execute
+```
+
+**Input:** 8 submissions
+**Output:** Routed results + complete audit trail JSON
+
+**Verify:**
+```bash
+# Check routed outputs
+wc -l examples/audit_export/output/*.csv
+#   5 corporate.csv      (4 data rows + header)
+#   5 non_corporate.csv  (4 data rows + header)
+
+# Check audit trail exists and has content
+ls -la examples/audit_export/output/audit_trail.json
+# Should show non-zero file size
+```
+
+### Additional Examples
+
+For more complex scenarios, see the configuration reference:
+
+- **LLM Sentiment Analysis** - Using `openrouter_llm` plugin with templates
+- **Content Moderation with Routing** - Gates with condition expressions
+- **Fork/Join Patterns** - Parallel processing with coalesce
+
+See [Configuration Reference](reference/configuration.md) for the complete settings documentation.
 
 ---
 
