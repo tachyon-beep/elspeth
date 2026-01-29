@@ -27,12 +27,12 @@ terminal state and that the audit trail is complete, queryable, and defensible.
 
 ## Workstreams (delegation map)
 
-- Workstream A: Contract + schema invariants (docs/audit/tokens/00-token-outcome-contract.md)
-- Workstream B: Outcome path mapping (docs/audit/tokens/01-outcome-path-map.md)
-- Workstream C: Audit sweep + SQL checks (docs/audit/tokens/02-audit-sweep.md)
-- Workstream D: Test strategy + coverage (docs/audit/tokens/03-test-strategy.md)
-- Workstream E: CI gates + metrics (docs/audit/tokens/05-ci-gates-and-metrics.md)
-- Workstream F: Investigation playbook (docs/audit/tokens/04-investigation-playbook.md)
+- Workstream A: Contract + schema invariants (docs/audit-trail/tokens/00-token-outcome-contract.md)
+- Workstream B: Outcome path mapping (docs/audit-trail/tokens/01-outcome-path-map.md)
+- Workstream C: Audit sweep + SQL checks (docs/audit-trail/tokens/02-audit-sweep.md)
+- Workstream D: Test strategy + coverage (docs/audit-trail/tokens/03-test-strategy.md)
+- Workstream E: CI gates + metrics (docs/audit-trail/tokens/05-ci-gates-and-metrics.md)
+- Workstream F: Investigation playbook (docs/audit-trail/tokens/04-investigation-playbook.md)
 
 ## Index
 

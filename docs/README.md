@@ -52,11 +52,11 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
 
 ## Audit Trail
 
-- **[Token Outcome Contract](audit/tokens/00-token-outcome-contract.md)** - Terminal state guarantees
-- **[Outcome Path Map](audit/tokens/01-outcome-path-map.md)** - How rows reach terminal states
-- **[Audit Sweep](audit/tokens/02-audit-sweep.md)** - Verification procedures
-- **[Test Strategy](audit/tokens/03-test-strategy.md)** - Audit testing approach
-- **[Investigation Playbook](audit/tokens/04-investigation-playbook.md)** - Debugging audit issues
+- **[Token Outcome Contract](audit-trail/tokens/00-token-outcome-contract.md)** - Terminal state guarantees
+- **[Outcome Path Map](audit-trail/tokens/01-outcome-path-map.md)** - How rows reach terminal states
+- **[Audit Sweep](audit-trail/tokens/02-audit-sweep.md)** - Verification procedures
+- **[Test Strategy](audit-trail/tokens/03-test-strategy.md)** - Audit testing approach
+- **[Investigation Playbook](audit-trail/tokens/04-investigation-playbook.md)** - Debugging audit issues
 
 ## Project Management
 

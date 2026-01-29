@@ -13,7 +13,7 @@ permanent fixes.
 
 ## Step 1: Run the audit sweep
 
-Run all queries in `docs/audit/tokens/02-audit-sweep.md`.
+Run all queries in `docs/audit-trail/tokens/02-audit-sweep.md`.
 Save results grouped by outcome type.
 
 ## Step 2: Classify the gap
@@ -26,7 +26,7 @@ For each failing token group, classify by symptom:
 
 ## Step 3: Map to path
 
-Use `docs/audit/tokens/01-outcome-path-map.md` to locate the responsible
+Use `docs/audit-trail/tokens/01-outcome-path-map.md` to locate the responsible
 code path. This gives you the exact file and function to inspect.
 
 ## Step 4: Identify the minimal reproduction

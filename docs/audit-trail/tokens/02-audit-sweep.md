@@ -114,6 +114,6 @@ WHERE t.expand_group_id IS NOT NULL
 ## What to do with results
 
 1. Group failures by outcome type.
-2. Map each group to the outcome path map (docs/audit/tokens/01-outcome-path-map.md).
+2. Map each group to the outcome path map (docs/audit-trail/tokens/01-outcome-path-map.md).
 3. Reproduce with a minimal pipeline test.
 4. Add regression test that fails the audit sweep.

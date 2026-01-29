@@ -46,7 +46,7 @@ Existing tests to extend:
 
 Use minimal pipeline configurations that exercise full paths end to end.
 After each run, execute the audit sweep from
-`docs/audit/tokens/02-audit-sweep.md`.
+`docs/audit-trail/tokens/02-audit-sweep.md`.
 
 Recommended scenarios:
 - Gate route to named sink (ROUTED)

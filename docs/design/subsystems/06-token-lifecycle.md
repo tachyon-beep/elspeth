@@ -6,7 +6,7 @@
 **Related Documentation:**
 - [CLAUDE.md Audit Section](../../../CLAUDE.md) - Trust model and audit principles
 - [Landscape MCP Guide](../../guides/landscape-mcp-analysis.md) - MCP server for audit queries
-- [Token Outcome Contract](../../audit/tokens/00-token-outcome-contract.md) - Formal outcome requirements
+- [Token Outcome Contract](../../audit-trail/tokens/00-token-outcome-contract.md) - Formal outcome requirements
 
 ---
 
@@ -420,7 +420,7 @@ if outcome == RowOutcome.COMPLETED:
     if sink_name is None:
         raise ValueError(
             "COMPLETED outcome requires sink_name but got None. "
-            "Contract violation - see docs/audit/tokens/00-token-outcome-contract.md"
+            "Contract violation - see docs/audit-trail/tokens/00-token-outcome-contract.md"
         )
 ```
 
