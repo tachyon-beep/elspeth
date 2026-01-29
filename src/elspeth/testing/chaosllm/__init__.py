@@ -20,6 +20,24 @@ Usage:
         })
 """
 
-from elspeth.testing.chaosllm.config import ChaosLLMConfig
+from elspeth.testing.chaosllm.config import (
+    ChaosLLMConfig,
+    ErrorInjectionConfig,
+    LatencyConfig,
+    ResponseConfig,
+    ServerConfig,
+    list_presets,
+    load_config,
+    load_preset,
+)
 
-__all__ = ["ChaosLLMConfig"]
+__all__ = [
+    "ChaosLLMConfig",
+    "ErrorInjectionConfig",
+    "LatencyConfig",
+    "ResponseConfig",
+    "ServerConfig",
+    "list_presets",
+    "load_config",
+    "load_preset",
+]
