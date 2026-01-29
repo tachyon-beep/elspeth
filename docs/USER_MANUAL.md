@@ -12,7 +12,8 @@ This manual covers day-to-day usage of the ELSPETH CLI for running auditable pip
 6. [Explaining Pipeline Results](#explaining-pipeline-results)
 7. [Managing Storage](#managing-storage)
 8. [Resuming Failed Runs](#resuming-failed-runs)
-9. [Examples](#examples)
+9. [Health Checks](#health-checks)
+10. [Examples](#examples)
 
 ---
 
@@ -55,6 +56,9 @@ elspeth [OPTIONS] COMMAND [ARGS]
 Options:
   --version, -V    Show version and exit
   --no-dotenv      Skip loading .env file
+  --env-file PATH  Path to .env file (skips automatic search)
+  --verbose, -v    Enable verbose/debug logging
+  --json-logs      Output structured JSON logs (for machine processing)
   --help           Show help message
 ```
 
@@ -68,6 +72,7 @@ Options:
 | `plugins list` | List available plugins |
 | `purge` | Delete old payloads to free storage |
 | `resume` | Resume a failed run from checkpoint |
+| `health` | Check system health for deployment verification |
 
 ---
 
@@ -248,6 +253,54 @@ Resume mode:
 - Uses `NullSource` (data comes from stored payloads)
 - Appends to existing output files (doesn't overwrite)
 - Continues from last successful checkpoint
+
+---
+
+## Health Checks
+
+The `health` command verifies system readiness for deployment:
+
+```bash
+# Basic health check
+elspeth health
+
+# Verbose output with details
+elspeth health --verbose
+
+# JSON output (for automation)
+elspeth health --json
+```
+
+### Health Check Options
+
+| Option | Description |
+|--------|-------------|
+| `--verbose, -v` | Include detailed check information |
+| `--json, -j` | Output as JSON |
+
+### What Gets Checked
+
+- **version**: ELSPETH version
+- **commit**: Git commit SHA (if available)
+- **python**: Python version
+- **database**: Database connectivity (if `DATABASE_URL` is set)
+- **plugins**: Plugin availability
+
+### Example JSON Output
+
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0",
+  "commit": "abc123f",
+  "checks": {
+    "version": {"status": "ok", "value": "0.1.0"},
+    "python": {"status": "ok", "value": "3.11.9"},
+    "database": {"status": "ok", "value": "connected"},
+    "plugins": {"status": "ok", "value": "4 sources, 11 transforms, 4 sinks"}
+  }
+}
+```
 
 ---
 
