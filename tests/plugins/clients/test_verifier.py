@@ -707,3 +707,44 @@ class TestCallVerifier:
             live_response=live_response,
         )
         assert result_strict.is_match is False
+
+    def test_ignore_order_applies_recursively_to_nested_lists(self) -> None:
+        """Document that ignore_order affects ALL list levels recursively."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {
+            "results": [
+                {"id": 1, "tags": ["a", "b"]},
+                {"id": 2, "tags": ["x", "y"]},
+            ]
+        }
+        live_response = {
+            "results": [
+                {"id": 2, "tags": ["y", "x"]},  # Both levels reordered
+                {"id": 1, "tags": ["b", "a"]},
+            ]
+        }
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True: matches (recursive order-independence)
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: does NOT match
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False
