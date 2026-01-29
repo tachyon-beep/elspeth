@@ -875,27 +875,27 @@ allow_hits:
   safety: False default triggers ValueError with actionable message - fail-fast, not silent degradation
   expires: null
 # OpenRouter Batch LLM Transform - external LLM API responses (Tier 3)
-- key: plugins/llm/openrouter_batch.py:R4:OpenRouterBatchLLMTransform:_process_batch:line=244
+- key: plugins/llm/openrouter_batch.py:R4:OpenRouterBatchLLMTransform:_process_batch:line=258
   owner: architecture
   reason: 'Trust boundary (Tier 3): ThreadPoolExecutor futures may fail for many reasons (network, API errors)'
   safety: Caught and stored; assembled into error rows with full details for audit trail
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:line=252
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:line=264
   owner: architecture
   reason: 'Internal dict lookup after parallel execution - results dict is fully populated'
   safety: None check on next line handles unexpected missing entries with error row
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=471
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=486
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=476
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=491
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API model field is optional in response'
   safety: None in audit trail is acceptable - field is informational only
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=490
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=505
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit still captures actual value

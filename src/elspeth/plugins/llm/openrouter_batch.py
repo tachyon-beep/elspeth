@@ -229,19 +229,31 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if not rows:
             return TransformResult.success({"batch_empty": True, "row_count": 0})
 
-        # Process rows in parallel
+        # Process rows in parallel using a SHARED httpx.Client
+        # httpx.Client is thread-safe and reusing it avoids connection overhead
         results: dict[int, dict[str, Any] | Exception] = {}
 
-        with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
-            # Submit all rows
-            futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
+        with (
+            httpx.Client(
+                base_url=self._base_url,
+                timeout=self._timeout,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "HTTP-Referer": "https://github.com/elspeth-rapid",
+                },
+            ) as client,
+            ThreadPoolExecutor(max_workers=self._pool_size) as executor,
+        ):
+            # Submit all rows with shared client
+            futures = {executor.submit(self._process_single_row, idx, row, ctx, client): idx for idx, row in enumerate(rows)}
 
-            # Collect results
+            # Collect results - catch only transport exceptions, let plugin bugs crash
             for future in as_completed(futures):
                 idx = futures[future]
                 try:
                     results[idx] = future.result()
-                except Exception as e:
+                except (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError) as e:
+                    # Transport-level errors are row-level failures, not plugin bugs
                     results[idx] = e
 
         # Assemble output rows in original order
@@ -252,12 +264,21 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             result = results.get(idx)
 
             if result is None:
-                # Should not happen
+                # Should not happen - but audit trail must record everything
                 output_row = dict(rows[idx])
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {"reason": "result_missing"}
                 output_rows.append(output_row)
                 row_errors.append({"row_index": idx, "reason": "result_missing"})
+                # Record to audit trail - "I don't know what happened" is never acceptable
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data={"row_index": idx, "reason": "result_missing_from_future"},
+                    response_data=None,
+                    error={"reason": "result_missing", "row_index": idx},
+                    latency_ms=None,
+                )
 
             elif isinstance(result, Exception):
                 # Unexpected exception
@@ -294,6 +315,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         idx: int,
         row: dict[str, Any],
         ctx: PluginContext,
+        client: httpx.Client,
     ) -> dict[str, Any]:
         """Process a single row through OpenRouter API.
 
@@ -304,6 +326,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             idx: Row index in batch
             row: Row to process
             ctx: Plugin context
+            client: Shared httpx.Client (thread-safe) for making requests
 
         Returns:
             Processed row dict or {"error": {...}} on failure
@@ -343,22 +366,14 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         start = time.perf_counter()
         try:
-            # Use a simple httpx client for the request (no auditing through AuditedHTTPClient
-            # since we'll record via ctx.record_call with proper state_id)
-            with httpx.Client(
-                base_url=self._base_url,
-                timeout=self._timeout,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "HTTP-Referer": "https://github.com/elspeth-rapid",
-                },
-            ) as client:
-                response = client.post(
-                    "/chat/completions",
-                    json=request_body,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
+            # Use the shared httpx.Client passed from _process_batch
+            # (httpx.Client is thread-safe, avoids per-row connection overhead)
+            response = client.post(
+                "/chat/completions",
+                json=request_body,
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
             latency_ms = (time.perf_counter() - start) * 1000
 
         except httpx.HTTPStatusError as e:
