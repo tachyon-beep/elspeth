@@ -1,5 +1,7 @@
 # Property Test Remediation Plan
 
+> **Status:** ✅ **COMPLETED** (2026-01-29)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Eliminate duplication, consolidate shared infrastructure, and close coverage gaps in ELSPETH's property test suite.
