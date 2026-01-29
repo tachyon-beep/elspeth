@@ -980,20 +980,10 @@ class Orchestrator:
                 self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
                 raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
 
-            # Record field resolution mapping if source computed one during load()
-            # This captures original→final header mappings for audit trail (e.g., when
-            # normalize_fields is used). Must happen after load() but before processing.
-            # Explicitly check for tuple type to handle MagicMock in tests gracefully.
-            field_resolution = config.source.get_field_resolution()
-            if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
-                resolution_mapping, normalization_version = field_resolution
-                recorder.record_source_field_resolution(
-                    run_id=run_id,
-                    resolution_mapping=resolution_mapping,
-                    normalization_version=normalization_version,
-                )
-
             self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+
+            # Track whether field resolution has been recorded (must happen after first iteration)
+            field_resolution_recorded = False
 
             # PROCESS phase - iterate through rows
             phase_start = time.perf_counter()
@@ -1003,6 +993,21 @@ class Orchestrator:
             try:
                 for row_index, source_item in enumerate(source_iterator):
                     rows_processed += 1
+
+                    # Record field resolution mapping on first iteration
+                    # Must happen AFTER iterator advances because generators (like CSVSource.load())
+                    # only execute their body when iterated. The _field_resolution assignment in
+                    # CSVSource happens inside the generator, not when load() is called.
+                    if not field_resolution_recorded:
+                        field_resolution_recorded = True
+                        field_resolution = config.source.get_field_resolution()
+                        if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                            resolution_mapping, normalization_version = field_resolution
+                            recorder.record_source_field_resolution(
+                                run_id=run_id,
+                                resolution_mapping=resolution_mapping,
+                                normalization_version=normalization_version,
+                            )
 
                     # Handle quarantined source rows - route directly to sink
                     if source_item.is_quarantined:

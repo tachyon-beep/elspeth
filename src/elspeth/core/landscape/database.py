@@ -27,6 +27,10 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("tokens", "expand_group_id"),
     # Added for composite FK to nodes (node_id, run_id) - enables run-isolated queries
     ("node_states", "run_id"),
+    # Field resolution audit trail - captures original→final header mapping
+    ("runs", "source_field_resolution_json"),
+    # Fork/expand branch contract - enables recovery validation
+    ("token_outcomes", "expected_branches_json"),
 ]
 
 # Required foreign keys for audit integrity (Tier 1 trust).
