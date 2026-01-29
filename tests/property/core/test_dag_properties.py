@@ -567,17 +567,17 @@ class TestGuaranteedFieldsProperties:
 
     @given(
         common_fields=st.frozensets(
-            st.text(min_size=1, max_size=8, alphabet=st.characters(whitelist_categories=("L",))),
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
             min_size=1,
             max_size=3,
         ),
         branch_a_only=st.frozensets(
-            st.text(min_size=1, max_size=8, alphabet=st.characters(whitelist_categories=("L",))),
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
             min_size=0,
             max_size=2,
         ),
         branch_b_only=st.frozensets(
-            st.text(min_size=1, max_size=8, alphabet=st.characters(whitelist_categories=("L",))),
+            st.from_regex(r"[a-zA-Z_][a-zA-Z0-9_]{0,7}", fullmatch=True),
             min_size=0,
             max_size=2,
         ),

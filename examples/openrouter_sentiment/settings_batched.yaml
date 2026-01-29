@@ -39,14 +39,14 @@ source:
         - "text: str"
     on_validation_failure: discard
 
-# Batch aggregation using OpenRouter LLM transform
-# The transform is batch-aware (is_batch_aware=True), so the engine:
+# Batch aggregation using OpenRouter Batch LLM transform
+# The openrouter_batch_llm transform is batch-aware (is_batch_aware=True), so the engine:
 #   1. Buffers incoming rows until trigger condition is met
 #   2. Calls transform._process_batch(rows) with the full batch
 #   3. With output_mode: passthrough, each input row gets enriched output
 aggregations:
   - name: sentiment_batch
-    plugin: openrouter_llm
+    plugin: openrouter_batch_llm
     trigger:
       count: 5  # Buffer 5 rows, then process batch in parallel
     output_mode: passthrough  # Each input row produces one output row (N->N)
