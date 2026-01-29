@@ -11,6 +11,8 @@ replace the Landscape audit trail:
 Components:
 - events: TelemetryEvent base and all event dataclasses
 - buffer: BoundedBuffer for event batching with overflow tracking
+- filtering: should_emit() for granularity-based event filtering
+- manager: TelemetryManager for coordinating event emission
 - protocols: ExporterProtocol for implementing exporters
 - hookspecs: pluggy hooks for exporter discovery
 - errors: TelemetryExporterError for configuration failures
@@ -29,6 +31,9 @@ Usage:
         ExternalCallCompleted,
         # Buffer
         BoundedBuffer,
+        # Manager
+        TelemetryManager,
+        should_emit,
         # Protocol
         ExporterProtocol,
         # Errors
@@ -49,6 +54,8 @@ from elspeth.telemetry.events import (
     TokenCompleted,
     TransformCompleted,
 )
+from elspeth.telemetry.filtering import should_emit
+from elspeth.telemetry.manager import TelemetryManager
 from elspeth.telemetry.protocols import ExporterProtocol
 
 __all__ = [
@@ -62,6 +69,8 @@ __all__ = [
     "RunStarted",
     "TelemetryEvent",
     "TelemetryExporterError",
+    "TelemetryManager",
     "TokenCompleted",
     "TransformCompleted",
+    "should_emit",
 ]

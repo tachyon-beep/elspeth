@@ -900,3 +900,24 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit still captures actual value
   expires: null
+# TelemetryManager - exporter boundary (exporters are external code that can throw any exception)
+- key: telemetry/manager.py:R4:TelemetryManager:handle_event:line=125
+  owner: architecture
+  reason: 'Exporter boundary: export() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning, failure tracked in health metrics; pipeline continues
+  expires: null
+- key: telemetry/manager.py:R1:TelemetryManager:handle_event:line=127
+  owner: architecture
+  reason: 'Counter accumulation pattern: exporter_failures counts may not exist for all exporters'
+  safety: Default 0 for first failure of each exporter is correct initialization
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:flush:line=203
+  owner: architecture
+  reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning; other exporters still flushed
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=221
+  owner: architecture
+  reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning; other exporters still closed
+  expires: null
