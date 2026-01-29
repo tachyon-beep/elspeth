@@ -135,6 +135,15 @@ class ExplainScreen:
         """Current screen state for pattern matching."""
         return self._state
 
+    @property
+    def detail_panel(self) -> NodeDetailPanel:
+        """Get the detail panel for composition.
+
+        This is a public interface for ExplainApp to access the detail panel
+        without directly accessing the private _detail_panel attribute.
+        """
+        return self._detail_panel
+
     def _load_pipeline_structure(self, db: LandscapeDB, run_id: str) -> LoadedState | LoadingFailedState:
         """Load pipeline structure from database.
 

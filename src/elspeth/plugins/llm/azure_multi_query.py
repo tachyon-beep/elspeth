@@ -10,7 +10,6 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 
 from __future__ import annotations
 
-import json
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +26,7 @@ from elspeth.plugins.llm.multi_query import (
     ResponseFormat,
 )
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.validation import ValidationSuccess, validate_json_object_response
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -401,31 +401,26 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             if content.endswith("```"):
                 content = content[:-3].strip()
 
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as e:
-            return TransformResult.error(
-                {
-                    "reason": "json_parse_failed",
-                    "error": str(e),
-                    "query": spec.output_prefix,
-                    "raw_response": response.content,
-                    "content_after_fence_strip": content,
-                    "usage": response.usage,
-                }
-            )
+        # Validate JSON response (EXTERNAL DATA - Tier 3 validation)
+        validation_result = validate_json_object_response(content)
+        if not isinstance(validation_result, ValidationSuccess):
+            # Map validation error to TransformResult with context
+            error_info: dict[str, Any] = {
+                "reason": validation_result.reason,
+                "query": spec.output_prefix,
+                "raw_response": response.content[:500] if response.content else None,
+            }
+            if validation_result.detail:
+                error_info["error"] = validation_result.detail
+                error_info["content_after_fence_strip"] = content
+                error_info["usage"] = response.usage
+            if validation_result.expected:
+                error_info["expected"] = validation_result.expected
+            if validation_result.actual:
+                error_info["actual"] = validation_result.actual
+            return TransformResult.error(error_info)
 
-        # Validate JSON type is object (EXTERNAL DATA - validate structure)
-        if not isinstance(parsed, dict):
-            return TransformResult.error(
-                {
-                    "reason": "invalid_json_type",
-                    "expected": "object",
-                    "actual": type(parsed).__name__,
-                    "query": spec.output_prefix,
-                    "raw_response": response.content[:500],
-                }
-            )
+        parsed = validation_result.data
 
         # 8. Map and validate output fields
         output: dict[str, Any] = {}

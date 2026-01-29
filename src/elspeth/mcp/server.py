@@ -25,6 +25,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.core.landscape.lineage import explain
 from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -34,43 +35,9 @@ logger = logging.getLogger(__name__)
 JsonResult = dict[str, Any] | list[dict[str, Any]]
 
 
-def _serialize_datetime(obj: Any) -> Any:
-    """Convert datetime objects to ISO format strings for JSON serialization."""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if isinstance(obj, dict):
-        return {k: _serialize_datetime(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_serialize_datetime(item) for item in obj]
-    return obj
-
-
-def _dataclass_to_dict(obj: Any) -> Any:
-    """Convert a dataclass (or list of dataclasses) to JSON-serializable structure.
-
-    Returns:
-        dict for dataclasses, list for lists, or the original value for primitives
-    """
-    if obj is None:
-        return {}
-    if isinstance(obj, list):
-        return [_dataclass_to_dict(item) for item in obj]
-    if hasattr(obj, "__dataclass_fields__"):
-        # Handle dataclass
-        result: dict[str, Any] = {}
-        for field_name in obj.__dataclass_fields__:
-            value = getattr(obj, field_name)
-            if hasattr(value, "__dataclass_fields__"):
-                result[field_name] = _dataclass_to_dict(value)
-            elif isinstance(value, list):
-                result[field_name] = [_dataclass_to_dict(item) for item in value]
-            elif hasattr(value, "value"):
-                # Enum - get string value
-                result[field_name] = value.value
-            else:
-                result[field_name] = _serialize_datetime(value)
-        return result
-    return obj
+# Use shared implementations from landscape.formatters
+_serialize_datetime = serialize_datetime
+_dataclass_to_dict = dataclass_to_dict
 
 
 class LandscapeAnalyzer:

@@ -40,6 +40,16 @@ class TestExplainScreen:
 
         assert "NodeDetailPanel" in widgets
 
+    def test_detail_panel_property_accessible(self) -> None:
+        """detail_panel property provides public access to NodeDetailPanel."""
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        screen = ExplainScreen()
+        panel = screen.detail_panel
+
+        assert isinstance(panel, NodeDetailPanel)
+
     def test_screen_initializes_with_db(self) -> None:
         """Screen can be initialized with database connection."""
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
