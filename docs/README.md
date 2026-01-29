@@ -50,6 +50,12 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
   - [Mutation Testing Summary](quality-audit/MUTATION_TESTING_SUMMARY_2026-01-25.md)
   - [Integration Seam Analysis](quality-audit/INTEGRATION_SEAM_ANALYSIS_REPORT.md)
 
+## Testing Tools
+
+- **[Testing Tools Overview](testing/README.md)** - Load testing, stress testing, fault injection
+- **[ChaosLLM](testing/chaosllm.md)** - Fake LLM server for testing pipelines at scale
+- **[ChaosLLM MCP Server](testing/chaosllm-mcp.md)** - Claude-optimized analysis tools
+
 ## Audit Trail
 
 - **[Token Outcome Contract](audit-trail/tokens/00-token-outcome-contract.md)** - Terminal state guarantees
