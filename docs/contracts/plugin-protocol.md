@@ -4,7 +4,7 @@
 > **Last Updated:** 2026-01-20
 > **Authority:** This document is the master reference for all plugin interactions.
 
-> ⚠️ **Implementation Status:** Features in v1.5 (multi-row output, `creates_tokens`, aggregation output modes) are **specified but not yet implemented**. See [`docs/plans/2026-01-19-multi-row-output.md`](../plans/2026-01-19-multi-row-output.md) for the implementation plan.
+> ⚠️ **Implementation Status:** Features in v1.5 (multi-row output, `creates_tokens`, aggregation output modes) are **specified but not yet implemented**. See [`docs/plans/completed/2026-01-19-multi-row-output.md`](../plans/completed/2026-01-19-multi-row-output.md) for the implementation plan.
 
 ## Overview
 

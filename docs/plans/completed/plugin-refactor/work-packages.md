@@ -596,7 +596,7 @@ Schema configuration recorded at run start in `nodes` table:
 **Effort:** Medium-High (~4-6 hours)
 **Dependencies:** None
 **Unlocks:** WP-12 (simplified)
-**Plan:** [2026-01-17-wp11.99-config-driven-schemas.md](../../2026-01-17-wp11.99-config-driven-schemas.md)
+**Plan:** [2026-01-17-wp11.99-config-driven-schemas.md](./2026-01-17-wp11.99-config-driven-schemas.md)
 
 ---
 

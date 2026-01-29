@@ -3,7 +3,7 @@
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Date:** 2026-01-27
-**Source:** Architecture Analysis by 17+ parallel agents (docs/arch-analysis-2026-01-27-2132/)
+**Source:** Architecture Analysis by 17+ parallel agents (archive/2026-01-27-arch-analysis/)
 **Total Issues Identified:** 75+
 **Recommendation:** Relabel as Alpha until Phase 1-2 complete
 
