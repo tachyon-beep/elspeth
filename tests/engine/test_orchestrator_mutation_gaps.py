@@ -32,8 +32,7 @@ from tests.conftest import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts.results import TransformResult
-    from elspeth.plugins.context import PluginContext
+    pass
 
 
 @pytest.fixture(scope="module")
@@ -288,104 +287,9 @@ class TestRouteValidationEdgeCases:
         assert "errors" in error_msg or "output" in error_msg  # Available sinks listed
 
 
-# =============================================================================
-# Tests for transform error sink validation (lines 290, 294, 299-302)
-# Mutations: changing None checks, 'discard' check, error message
-# =============================================================================
-
-
-class TestTransformErrorSinkValidation:
-    """Test transform on_error destination validation.
-
-    These tests MUST use actual BaseTransform subclasses (not _TestTransformBase)
-    because _validate_transform_error_sinks checks isinstance(transform, BaseTransform)
-    before accessing _on_error. _TestTransformBase is protocol-based and skipped.
-    """
-
-    @pytest.fixture
-    def orchestrator(self, landscape_db: LandscapeDB) -> Orchestrator:
-        """Create orchestrator using module-scoped database."""
-        return Orchestrator(landscape_db)
-
-    def test_transform_with_none_on_error_is_valid(self, orchestrator: Orchestrator) -> None:
-        """Line 290: Transform with on_error=None should pass validation."""
-        from elspeth.plugins.base import BaseTransform
-
-        class TransformNoErrorRouting(BaseTransform):
-            name = "no_error_routing"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            _on_error = None  # No error routing
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                from elspeth.contracts.results import TransformResult
-
-                return TransformResult.success(row)
-
-        transforms = [TransformNoErrorRouting(config={})]
-        available_sinks = {"output"}
-
-        # Should not raise
-        orchestrator._validate_transform_error_sinks(
-            transforms=transforms,
-            available_sinks=available_sinks,
-            _transform_id_map={0: "transform_0"},
-        )
-
-    def test_transform_with_discard_on_error_is_valid(self, orchestrator: Orchestrator) -> None:
-        """Line 294: Transform with on_error='discard' should pass validation."""
-        from elspeth.plugins.base import BaseTransform
-
-        class TransformDiscardErrors(BaseTransform):
-            name = "discard_errors"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            _on_error = "discard"  # Special value, not a sink
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                from elspeth.contracts.results import TransformResult
-
-                return TransformResult.success(row)
-
-        transforms = [TransformDiscardErrors(config={})]
-        available_sinks = {"output"}  # 'discard' not in sinks, but shouldn't error
-
-        # Should not raise
-        orchestrator._validate_transform_error_sinks(
-            transforms=transforms,
-            available_sinks=available_sinks,
-            _transform_id_map={0: "transform_0"},
-        )
-
-    def test_transform_with_invalid_on_error_raises(self, orchestrator: Orchestrator) -> None:
-        """Lines 299-302: Invalid on_error sink raises RouteValidationError."""
-        from elspeth.plugins.base import BaseTransform
-
-        class TransformBadErrorSink(BaseTransform):
-            name = "bad_error_sink"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            _on_error = "nonexistent_error_sink"
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                from elspeth.contracts.results import TransformResult
-
-                return TransformResult.success(row)
-
-        transforms = [TransformBadErrorSink(config={})]
-        available_sinks = {"output", "errors"}
-
-        with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator._validate_transform_error_sinks(
-                transforms=transforms,
-                available_sinks=available_sinks,
-                _transform_id_map={0: "transform_0"},
-            )
-
-        error_msg = str(exc_info.value)
-        assert "bad_error_sink" in error_msg
-        assert "nonexistent_error_sink" in error_msg
-        assert "discard" in error_msg  # Suggests using discard
+# NOTE: TestTransformErrorSinkValidation removed - duplicate of
+# tests/engine/test_orchestrator_validation.py::TestTransformErrorSinkValidation
+# which provides integration-level coverage of the same validation logic.
 
 
 # =============================================================================
