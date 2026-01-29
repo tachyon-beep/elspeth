@@ -518,6 +518,9 @@ def _execute_pipeline(
         raise typer.Exit(1)
     payload_store = FilesystemPayloadStore(config.payload_store.base_path)
 
+    # Initialize rate_limit_registry to None so it's defined in finally block
+    rate_limit_registry = None
+
     try:
         # Instantiate transforms from transforms via PluginManager
         transforms: list[BaseTransform] = []
@@ -711,8 +714,17 @@ def _execute_pipeline(
             event_bus.subscribe(RunCompleted, _format_run_completed)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
+        # Create rate limit registry for external calls
+        from elspeth.core.rate_limit import RateLimitRegistry
+
+        rate_limit_registry = RateLimitRegistry(config.rate_limit)
+
         # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+        )
         result = orchestrator.run(
             pipeline_config,
             graph=graph,
@@ -726,6 +738,8 @@ def _execute_pipeline(
             "rows_processed": result.rows_processed,
         }
     finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
         db.close()
 
 
@@ -790,6 +804,9 @@ def _execute_pipeline_with_instances(
         )
         raise typer.Exit(1)
     payload_store = FilesystemPayloadStore(config.payload_store.base_path)
+
+    # Initialize rate_limit_registry to None so it's defined in finally block
+    rate_limit_registry = None
 
     try:
         # Build PipelineConfig with pre-instantiated plugins
@@ -945,8 +962,17 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(RunCompleted, _format_run_completed)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
+        # Create rate limit registry for external calls
+        from elspeth.core.rate_limit import RateLimitRegistry
+
+        rate_limit_registry = RateLimitRegistry(config.rate_limit)
+
         # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+        )
         result = orchestrator.run(
             pipeline_config,
             graph=graph,
@@ -960,6 +986,8 @@ def _execute_pipeline_with_instances(
             "rows_processed": result.rows_processed,
         }
     finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
         db.close()
 
 
@@ -1390,9 +1418,19 @@ def _execute_resume_with_instances(
     event_bus.subscribe(RunCompleted, _format_run_completed)
     event_bus.subscribe(ProgressEvent, _format_progress)
 
+    # Create rate limit registry for external calls
+    from elspeth.core.rate_limit import RateLimitRegistry
+
+    rate_limit_registry = RateLimitRegistry(config.rate_limit)
+
     # Create checkpoint manager and orchestrator for resume
     checkpoint_manager = CheckpointManager(db)
-    orchestrator = Orchestrator(db, event_bus=event_bus, checkpoint_manager=checkpoint_manager)
+    orchestrator = Orchestrator(
+        db,
+        event_bus=event_bus,
+        checkpoint_manager=checkpoint_manager,
+        rate_limit_registry=rate_limit_registry,
+    )
 
     # Execute resume
     result = orchestrator.resume(
@@ -1402,6 +1440,9 @@ def _execute_resume_with_instances(
         payload_store=payload_store,
         settings=config,
     )
+
+    # Clean up rate limit registry
+    rate_limit_registry.close()
 
     return result
 

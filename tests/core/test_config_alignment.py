@@ -47,8 +47,8 @@ class TestRetryConfigAlignment:
 
     def test_settings_fields_exist_in_config(self) -> None:
         """Every RetrySettings field must have a corresponding RetryConfig field."""
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         settings_fields = set(RetrySettings.model_fields.keys())
         config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
@@ -60,8 +60,8 @@ class TestRetryConfigAlignment:
 
     def test_config_covers_settings(self) -> None:
         """RetryConfig should not have unexpected fields beyond Settings + internals."""
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         settings_fields = set(RetrySettings.model_fields.keys())
         config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
@@ -87,8 +87,8 @@ class TestRetryConfigAlignment:
 
     def test_from_settings_maps_all_fields(self) -> None:
         """Verify from_settings() uses non-default values (catches forgotten mappings)."""
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         settings = RetrySettings(
             max_attempts=99,
@@ -148,13 +148,13 @@ class TestConcurrencySettingsAlignment:
 class TestRateLimitSettingsAlignment:
     """Verify RateLimitSettings field usage.
 
-    STATUS: PENDING IMPLEMENTATION
-    RateLimitRegistry exists and is well-designed, but never instantiated
-    from CLI code paths. All 5 fields are orphaned.
+    STATUS: WIRED (Task 7)
+    RateLimitRegistry is created in CLI and passed to Orchestrator,
+    which injects it into PluginContext for plugin access.
     """
 
-    # All fields pending - registry never instantiated
-    PENDING_FIELDS: ClassVar[set[str]] = {
+    # Fields wired through RateLimitRegistry
+    WIRED_FIELDS: ClassVar[set[str]] = {
         "enabled",
         "default_requests_per_second",
         "default_requests_per_minute",
@@ -162,22 +162,37 @@ class TestRateLimitSettingsAlignment:
         "services",
     }
 
-    def test_documents_pending_fields(self) -> None:
-        """Document which fields are pending implementation."""
+    def test_documents_wired_fields(self) -> None:
+        """Document which fields are wired to runtime."""
         from elspeth.core.config import RateLimitSettings
 
         actual_fields = set(RateLimitSettings.model_fields.keys())
 
-        assert actual_fields == self.PENDING_FIELDS, "RateLimitSettings fields changed. Update PENDING_FIELDS."
+        assert actual_fields == self.WIRED_FIELDS, "RateLimitSettings fields changed. Update WIRED_FIELDS."
 
-    @pytest.mark.xfail(reason="RateLimitRegistry never instantiated from CLI")
     def test_registry_instantiated_from_settings(self) -> None:
-        """RateLimitRegistry should be created from RateLimitSettings.
+        """RateLimitRegistry is created from RateLimitSettings in CLI.
 
-        The registry class exists and has proper from_settings pattern,
-        but CLI never calls it. This test documents the gap.
+        The registry is created in _execute_pipeline_with_instances() and
+        _execute_resume_with_instances(), then passed to Orchestrator which
+        injects it into PluginContext.rate_limit_registry.
         """
-        pytest.fail("RateLimitRegistry not wired to CLI execution path")
+        from elspeth.core.config import RateLimitSettings
+        from elspeth.core.rate_limit import RateLimitRegistry
+
+        # Verify the registry can be created from settings
+        settings = RateLimitSettings(
+            enabled=True,
+            default_requests_per_second=5,
+        )
+        registry = RateLimitRegistry(settings)
+
+        # Verify the registry uses the settings
+        limiter = registry.get_limiter("test_service")
+        assert limiter is not None  # Should return a real limiter when enabled
+
+        # Clean up
+        registry.close()
 
 
 class TestLandscapeSettingsAlignment:

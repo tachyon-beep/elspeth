@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import CheckpointSettings, ElspethSettings
+    from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
 
 
@@ -147,6 +148,7 @@ class Orchestrator:
         checkpoint_manager: "CheckpointManager | None" = None,
         checkpoint_settings: "CheckpointSettings | None" = None,
         clock: "Clock | None" = None,
+        rate_limit_registry: "RateLimitRegistry | None" = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -158,6 +160,7 @@ class Orchestrator:
         self._checkpoint_manager = checkpoint_manager
         self._checkpoint_settings = checkpoint_settings
         self._clock = clock if clock is not None else DEFAULT_CLOCK
+        self._rate_limit_registry = rate_limit_registry
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
@@ -844,6 +847,7 @@ class Orchestrator:
             run_id=run_id,
             config=config.config,
             landscape=recorder,
+            rate_limit_registry=self._rate_limit_registry,
             _batch_checkpoints=batch_checkpoints or {},
         )
 
@@ -1917,6 +1921,7 @@ class Orchestrator:
             run_id=run_id,
             config=config.config,
             landscape=recorder,
+            rate_limit_registry=self._rate_limit_registry,
         )
 
         # Call on_start for transforms and sinks.

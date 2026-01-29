@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.identity import TokenInfo
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.payload_store import PayloadStore
+    from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.plugins.clients.http import AuditedHTTPClient
     from elspeth.plugins.clients.llm import AuditedLLMClient
 
@@ -84,6 +85,7 @@ class PluginContext:
     landscape: "LandscapeRecorder | None" = None
     tracer: "Tracer | None" = None
     payload_store: "PayloadStore | None" = None
+    rate_limit_registry: "RateLimitRegistry | None" = None
 
     # Additional metadata
     node_id: str | None = field(default=None)
