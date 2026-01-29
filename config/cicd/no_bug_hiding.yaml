@@ -938,3 +938,55 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
+# ChaosLLM MCP Server - external MCP client arguments (Tier 3)
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:line=945
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): MCP arguments from Claude client - limit is optional'
+  safety: Default 5 matches tool schema; MCP client may omit optional args
+  expires: null
+- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:line=961
+  owner: chaosllm
+  reason: 'MCP server boundary: must catch all exceptions and return error to client'
+  safety: Error message returned to MCP client; server continues running for next request
+  expires: null
+# ChaosLLM Server - external HTTP request data (Tier 3)
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=245
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
+  safety: Default "gpt-4" is safe for response metadata
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=246
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
+  safety: Empty list default is safe - echo mode handles empty messages
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=249
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Response-Mode'
+  safety: None default means use configured mode; HTTP Headers API returns None for missing headers
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=250
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Template'
+  safety: None default means use configured template; HTTP Headers API returns None for missing headers
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_http_error:line=442
+  owner: chaosllm
+  reason: 'Intentional mapping with fallback: error_type from config maps to OpenAI error format'
+  safety: Default "server_error" is valid OpenAI error type for unknown error codes
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_http_error:line=443
+  owner: chaosllm
+  reason: 'Intentional mapping with fallback: error_type from config maps to error message'
+  safety: Default "An error occurred" is generic but valid error message
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=574
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
+  safety: Default "gpt-4" is safe for response metadata
+  expires: null
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=578
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
+  safety: Empty list default produces 0 for message_count in metrics - safe for recording
+  expires: null

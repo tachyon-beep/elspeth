@@ -407,20 +407,18 @@ class TestMetricsRecording:
 
         # Verify in database directly
         db_path = chaosllm_server.metrics_db
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
 
-        cursor = conn.execute("SELECT COUNT(*) FROM requests")
-        count = cursor.fetchone()[0]
-        assert count == 1
+            cursor = conn.execute("SELECT COUNT(*) FROM requests")
+            count = cursor.fetchone()[0]
+            assert count == 1
 
-        cursor = conn.execute("SELECT * FROM requests LIMIT 1")
-        row = dict(cursor.fetchone())
-        assert row["outcome"] == "success"
-        assert row["status_code"] == 200
-        assert row["endpoint"] == "/v1/chat/completions"
-
-        conn.close()
+            cursor = conn.execute("SELECT * FROM requests LIMIT 1")
+            row = dict(cursor.fetchone())
+            assert row["outcome"] == "success"
+            assert row["status_code"] == 200
+            assert row["endpoint"] == "/v1/chat/completions"
 
     def test_stats_reflect_actual_requests(self, chaosllm_server):
         """Stats accurately reflect actual requests made."""
@@ -448,14 +446,12 @@ class TestMetricsRecording:
         chaosllm_server.post_azure_completion("my-test-deployment")
 
         db_path = chaosllm_server.metrics_db
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
 
-        cursor = conn.execute("SELECT deployment FROM requests LIMIT 1")
-        row = cursor.fetchone()
-        assert row["deployment"] == "my-test-deployment"
-
-        conn.close()
+            cursor = conn.execute("SELECT deployment FROM requests LIMIT 1")
+            row = cursor.fetchone()
+            assert row["deployment"] == "my-test-deployment"
 
     def test_latency_stats_populated(self, chaosllm_server):
         """Latency statistics are populated after requests."""

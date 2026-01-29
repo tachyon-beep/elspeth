@@ -97,9 +97,7 @@ class ChaosLLMAnalyzer:
         patterns = self._detect_patterns(conn)
 
         # AIMD assessment based on 429 rate and patterns
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM requests WHERE status_code = 429"
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE status_code = 429")
         rate_limit_count = cursor.fetchone()[0]
         rate_limit_pct = (rate_limit_count / total) * 100 if total > 0 else 0.0
 
@@ -117,10 +115,7 @@ class ChaosLLMAnalyzer:
         pattern_summary = ", ".join(patterns) if patterns else "none"
 
         summary = (
-            f"{total} requests, {success_rate:.1f}% success. "
-            f"Top errors: {error_summary}. "
-            f"Patterns: {pattern_summary}. "
-            f"AIMD: {aimd_status}."
+            f"{total} requests, {success_rate:.1f}% success. Top errors: {error_summary}. Patterns: {pattern_summary}. AIMD: {aimd_status}."
         )
 
         return {
@@ -157,17 +152,13 @@ class ChaosLLMAnalyzer:
             patterns.append(f"burst_periods({burst_windows})")
 
         # Check for timeout clustering
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM requests WHERE error_type = 'timeout'"
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE error_type = 'timeout'")
         timeout_count = cursor.fetchone()[0]
         if timeout_count > 10:
             patterns.append(f"timeout_cluster({timeout_count})")
 
         # Check for error type diversity
-        cursor = conn.execute(
-            "SELECT COUNT(DISTINCT error_type) FROM requests WHERE error_type IS NOT NULL"
-        )
+        cursor = conn.execute("SELECT COUNT(DISTINCT error_type) FROM requests WHERE error_type IS NOT NULL")
         error_types = cursor.fetchone()[0]
         if error_types >= 5:
             patterns.append(f"diverse_errors({error_types}_types)")
@@ -220,7 +211,7 @@ class ChaosLLMAnalyzer:
 
         # Calculate recovery times
         recovery_times = []
-        for start, end in zip(burst_starts, burst_ends, strict=False):
+        for start, end in zip(burst_starts, burst_ends, strict=True):
             recovery_buckets = end - start
             recovery_times.append(recovery_buckets)
 
@@ -232,7 +223,7 @@ class ChaosLLMAnalyzer:
 
         for i, bucket in enumerate(buckets):
             success = bucket["requests_success"]
-            is_burst = any(s <= i < e for s, e in zip(burst_starts, burst_ends, strict=False))
+            is_burst = any(s <= i < e for s, e in zip(burst_starts, burst_ends, strict=True))
             if is_burst:
                 during_burst_throughput.append(success)
             else:
@@ -244,9 +235,7 @@ class ChaosLLMAnalyzer:
         degradation_pct = ((avg_normal - avg_burst) / avg_normal * 100) if avg_normal > 0 else 0
 
         # Backoff effectiveness (ratio of 429s to total during recovery)
-        cursor = conn.execute(
-            "SELECT COUNT(*) FROM requests WHERE status_code = 429"
-        )
+        cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE status_code = 429")
         total_429s = cursor.fetchone()[0]
 
         cursor = conn.execute("SELECT COUNT(*) FROM requests")
@@ -307,11 +296,13 @@ class ChaosLLMAnalyzer:
         error_breakdown = []
         for row in cursor.fetchall():
             pct = (row["count"] / total) * 100
-            error_breakdown.append({
-                "type": row["error_type"],
-                "count": row["count"],
-                "pct": round(pct, 2),
-            })
+            error_breakdown.append(
+                {
+                    "type": row["error_type"],
+                    "count": row["count"],
+                    "pct": round(pct, 2),
+                }
+            )
 
         # Error breakdown by status code
         cursor = conn.execute(
@@ -326,11 +317,13 @@ class ChaosLLMAnalyzer:
         status_breakdown = []
         for row in cursor.fetchall():
             pct = (row["count"] / total) * 100
-            status_breakdown.append({
-                "status_code": row["status_code"],
-                "count": row["count"],
-                "pct": round(pct, 2),
-            })
+            status_breakdown.append(
+                {
+                    "status_code": row["status_code"],
+                    "count": row["count"],
+                    "pct": round(pct, 2),
+                }
+            )
 
         # Sample timestamps for each error type
         samples: dict[str, list[str]] = {}
@@ -375,9 +368,7 @@ class ChaosLLMAnalyzer:
         conn = self._get_connection()
 
         # Get all latencies
-        cursor = conn.execute(
-            "SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms"
-        )
+        cursor = conn.execute("SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms")
         latencies = [row["latency_ms"] for row in cursor.fetchall()]
 
         if not latencies:
@@ -469,11 +460,13 @@ class ChaosLLMAnalyzer:
         )
         for row in cursor.fetchall():
             if row["status_code"] not in expected_codes:
-                anomalies.append({
-                    "type": "unexpected_status",
-                    "status_code": row["status_code"],
-                    "count": row["count"],
-                })
+                anomalies.append(
+                    {
+                        "type": "unexpected_status",
+                        "status_code": row["status_code"],
+                        "count": row["count"],
+                    }
+                )
 
         # Check for throughput cliffs (sudden 50%+ drop)
         cursor = conn.execute(
@@ -488,11 +481,13 @@ class ChaosLLMAnalyzer:
             prev_success = buckets[i - 1]["requests_success"]
             curr_success = buckets[i]["requests_success"]
             if prev_success > 10 and curr_success < prev_success * 0.5:
-                anomalies.append({
-                    "type": "throughput_cliff",
-                    "bucket": buckets[i]["bucket_utc"],
-                    "drop_pct": round((1 - curr_success / prev_success) * 100, 1),
-                })
+                anomalies.append(
+                    {
+                        "type": "throughput_cliff",
+                        "bucket": buckets[i]["bucket_utc"],
+                        "drop_pct": round((1 - curr_success / prev_success) * 100, 1),
+                    }
+                )
 
         # Check for unusual error clustering (all errors in <10% of time)
         cursor = conn.execute("SELECT COUNT(*) FROM requests WHERE outcome != 'success'")
@@ -510,12 +505,14 @@ class ChaosLLMAnalyzer:
             )
             error_buckets = cursor.fetchone()[0]
             if error_buckets < total_buckets * 0.1:
-                anomalies.append({
-                    "type": "error_clustering",
-                    "error_buckets": error_buckets,
-                    "total_buckets": total_buckets,
-                    "concentration_pct": round(error_buckets / total_buckets * 100, 1),
-                })
+                anomalies.append(
+                    {
+                        "type": "error_clustering",
+                        "error_buckets": error_buckets,
+                        "total_buckets": total_buckets,
+                        "concentration_pct": round(error_buckets / total_buckets * 100, 1),
+                    }
+                )
 
         # Check for zero-success periods
         cursor = conn.execute(
@@ -526,10 +523,12 @@ class ChaosLLMAnalyzer:
         )
         zero_success_buckets = cursor.fetchone()[0]
         if zero_success_buckets > 0:
-            anomalies.append({
-                "type": "zero_success_periods",
-                "bucket_count": zero_success_buckets,
-            })
+            anomalies.append(
+                {
+                    "type": "zero_success_periods",
+                    "bucket_count": zero_success_buckets,
+                }
+            )
 
         if not anomalies:
             summary = "No anomalies detected. Behavior appears normal."
@@ -582,9 +581,9 @@ class ChaosLLMAnalyzer:
                 burst_end_idx = i
 
                 # Collect stats
-                before_buckets = buckets[max(0, burst_start_idx - 3):burst_start_idx]
+                before_buckets = buckets[max(0, burst_start_idx - 3) : burst_start_idx]
                 during_buckets = buckets[burst_start_idx:burst_end_idx]
-                after_buckets = buckets[burst_end_idx:min(len(buckets), burst_end_idx + 3)]
+                after_buckets = buckets[burst_end_idx : min(len(buckets), burst_end_idx + 3)]
 
                 def _avg_success(b_list: list[dict[str, Any]]) -> float:
                     if not b_list:
@@ -596,25 +595,27 @@ class ChaosLLMAnalyzer:
                     lats = [b["avg_latency_ms"] for b in b_list if b["avg_latency_ms"] is not None]
                     return sum(lats) / len(lats) if lats else 0.0
 
-                burst_events.append({
-                    "start_bucket": buckets[burst_start_idx]["bucket_utc"],
-                    "end_bucket": buckets[burst_end_idx - 1]["bucket_utc"] if burst_end_idx > burst_start_idx else None,
-                    "duration_buckets": burst_end_idx - burst_start_idx,
-                    "before": {
-                        "avg_success": round(_avg_success(before_buckets), 2),
-                        "avg_latency_ms": round(_avg_latency(before_buckets), 2),
-                    },
-                    "during": {
-                        "avg_success": round(_avg_success(during_buckets), 2),
-                        "avg_latency_ms": round(_avg_latency(during_buckets), 2),
-                        "total_rate_limited": sum(b["requests_rate_limited"] for b in during_buckets),
-                        "total_capacity_errors": sum(b["requests_capacity_error"] for b in during_buckets),
-                    },
-                    "after": {
-                        "avg_success": round(_avg_success(after_buckets), 2),
-                        "avg_latency_ms": round(_avg_latency(after_buckets), 2),
-                    },
-                })
+                burst_events.append(
+                    {
+                        "start_bucket": buckets[burst_start_idx]["bucket_utc"],
+                        "end_bucket": buckets[burst_end_idx - 1]["bucket_utc"] if burst_end_idx > burst_start_idx else None,
+                        "duration_buckets": burst_end_idx - burst_start_idx,
+                        "before": {
+                            "avg_success": round(_avg_success(before_buckets), 2),
+                            "avg_latency_ms": round(_avg_latency(before_buckets), 2),
+                        },
+                        "during": {
+                            "avg_success": round(_avg_success(during_buckets), 2),
+                            "avg_latency_ms": round(_avg_latency(during_buckets), 2),
+                            "total_rate_limited": sum(b["requests_rate_limited"] for b in during_buckets),
+                            "total_capacity_errors": sum(b["requests_capacity_error"] for b in during_buckets),
+                        },
+                        "after": {
+                            "avg_success": round(_avg_success(after_buckets), 2),
+                            "avg_latency_ms": round(_avg_latency(after_buckets), 2),
+                        },
+                    }
+                )
 
         return {
             "burst_count": len(burst_events),
@@ -738,7 +739,7 @@ class ChaosLLMAnalyzer:
         columns = [desc[0] for desc in cursor.description]
         rows = cursor.fetchall()
 
-        return [dict(zip(columns, row, strict=False)) for row in rows]
+        return [dict(zip(columns, row, strict=True)) for row in rows]
 
     def describe_schema(self) -> dict[str, Any]:
         """Describe the metrics database schema."""
@@ -823,10 +824,7 @@ def create_server(database_path: str) -> Server:
             ),
             Tool(
                 name="analyze_aimd_behavior",
-                description=(
-                    "AIMD analysis: recovery times after bursts, backoff effectiveness, "
-                    "throughput degradation percentage."
-                ),
+                description=("AIMD analysis: recovery times after bursts, backoff effectiveness, throughput degradation percentage."),
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -834,10 +832,7 @@ def create_server(database_path: str) -> Server:
             ),
             Tool(
                 name="analyze_errors",
-                description=(
-                    "Error breakdown: grouped by category with counts, percentages, "
-                    "and sample timestamps."
-                ),
+                description=("Error breakdown: grouped by category with counts, percentages, and sample timestamps."),
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -845,10 +840,7 @@ def create_server(database_path: str) -> Server:
             ),
             Tool(
                 name="analyze_latency",
-                description=(
-                    "Latency analysis: p50/p95/p99, slow request count, correlation "
-                    "with error periods."
-                ),
+                description=("Latency analysis: p50/p95/p99, slow request count, correlation with error periods."),
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -856,10 +848,7 @@ def create_server(database_path: str) -> Server:
             ),
             Tool(
                 name="find_anomalies",
-                description=(
-                    "Auto-detect unusual patterns: unexpected errors, throughput cliffs, "
-                    "error clustering."
-                ),
+                description=("Auto-detect unusual patterns: unexpected errors, throughput cliffs, error clustering."),
                 inputSchema={
                     "type": "object",
                     "properties": {},
