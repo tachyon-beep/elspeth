@@ -568,3 +568,139 @@ class TestForkJoinEdgeCases:
         assert stats["total_fork_groups"] == 0
         missing = count_fork_children_missing_parents(db, run.run_id)
         assert missing == 0
+
+
+class TestForkRecoveryInvariant:
+    """Property tests for recovery invariant with forked tokens.
+
+    These tests verify that the recovery system correctly detects partial
+    fork completion. Bug P2-2026-01-29-recovery-skips-partial-forks showed
+    that recovery could miss rows where only some fork children completed.
+    """
+
+    @given(n_rows=st.integers(min_value=1, max_value=10))
+    @settings(max_examples=20, deadline=None)
+    def test_partial_fork_detected_by_recovery(self, n_rows: int) -> None:
+        """Property: Recovery detects rows with incomplete forks.
+
+        For any row that forks, if we simulate a crash after partial
+        completion (by deleting one child's outcome), recovery must
+        identify the row as unprocessed.
+
+        This tests the fix for P2-2026-01-29-recovery-skips-partial-forks.
+        """
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+        from elspeth.core.config import ElspethSettings
+        from elspeth.core.landscape.schema import token_outcomes_table
+
+        db = LandscapeDB.in_memory()
+
+        rows = [{"value": i} for i in range(n_rows)]
+        source = _ListSource(rows)
+        sink_a = _CollectSink("sink_a")
+        sink_b = _CollectSink("sink_b")
+
+        # Gate that forks all rows to both sinks
+        gate = GateSettings(
+            name="fork_gate",
+            condition="True",
+            routes={"true": "fork", "false": "continue"},
+            fork_to=["sink_a", "sink_b"],
+        )
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
+            gates=[gate],
+        )
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],
+            sinks={"sink_a": as_sink(sink_a), "sink_b": as_sink(sink_b)},
+            gates=[gate],
+            aggregations={},
+            coalesce_settings=[],
+            default_sink="sink_a",
+        )
+
+        settings = ElspethSettings(
+            source={"plugin": "test"},
+            sinks={"sink_a": {"plugin": "test"}, "sink_b": {"plugin": "test"}},
+            default_sink="sink_a",
+            gates=[gate],
+        )
+
+        orchestrator = Orchestrator(db)
+        run = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Pipeline completed successfully - all rows processed
+        # Now simulate partial failure by deleting ONE child outcome per row
+
+        # Get tokens that went to sink_a (one branch of the fork)
+        with db.engine.connect() as conn:
+            sink_a_outcomes = conn.execute(
+                text("""
+                    SELECT o.outcome_id, t.row_id
+                    FROM token_outcomes o
+                    JOIN tokens t ON t.token_id = o.token_id
+                    JOIN rows r ON r.row_id = t.row_id
+                    WHERE r.run_id = :run_id
+                      AND o.sink_name = 'sink_a'
+                """),
+                {"run_id": run.run_id},
+            ).fetchall()
+
+            # Delete one branch's outcomes to simulate partial fork completion
+            for outcome in sink_a_outcomes:
+                conn.execute(token_outcomes_table.delete().where(token_outcomes_table.c.outcome_id == outcome.outcome_id))
+            conn.commit()
+
+        # Create a checkpoint (required for recovery to work)
+        # Use actual token and sink node from the run
+        sink_node_ids = graph.get_sinks()
+        with db.engine.connect() as conn:
+            # Get an actual token from the run
+            actual_token = conn.execute(
+                text("""
+                    SELECT t.token_id
+                    FROM tokens t
+                    JOIN rows r ON r.row_id = t.row_id
+                    WHERE r.run_id = :run_id
+                    LIMIT 1
+                """),
+                {"run_id": run.run_id},
+            ).fetchone()
+            # Token must exist since run completed successfully
+            assert actual_token is not None, "No tokens found for run"
+            token_id = actual_token.token_id
+
+        checkpoint_manager = CheckpointManager(db)
+        checkpoint_manager.create_checkpoint(
+            run_id=run.run_id,
+            token_id=token_id,  # Use actual token from run
+            node_id=sink_node_ids[0],  # Use actual sink node ID from graph
+            sequence_number=1,
+            graph=graph,
+        )
+
+        # Mark run as failed (required for recovery)
+        with db.engine.connect() as conn:
+            conn.execute(
+                text("UPDATE runs SET status = 'failed' WHERE run_id = :run_id"),
+                {"run_id": run.run_id},
+            )
+            conn.commit()
+
+        # Now test recovery - it should find all rows as unprocessed
+        recovery_manager = RecoveryManager(db, checkpoint_manager)
+        unprocessed = recovery_manager.get_unprocessed_rows(run.run_id)
+
+        # PROPERTY: When fork is partial (one child outcome deleted),
+        # ALL rows should appear in unprocessed list
+        assert len(unprocessed) == n_rows, (
+            f"RECOVERY INVARIANT VIOLATED: Expected {n_rows} unprocessed rows "
+            f"(all have partial fork completion), got {len(unprocessed)}. "
+            f"Recovery is incorrectly marking partially-completed forks as done."
+        )
