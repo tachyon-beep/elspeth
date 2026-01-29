@@ -802,3 +802,58 @@ class TestCallVerifier:
                 live_response=live_response,
             )
             assert result.is_match is True, f"Failed with ignore_order={ignore_order}"
+
+    def test_order_sensitivity_with_realistic_llm_response(self) -> None:
+        """Verify order handling with actual LLM tool call structure."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": [{"role": "user", "content": "test"}]}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {"id": "call_1", "function": {"name": "search", "arguments": "{}"}},
+                            {"id": "call_2", "function": {"name": "summarize", "arguments": "{}"}},
+                            {"id": "call_3", "function": {"name": "respond", "arguments": "{}"}},
+                        ]
+                    }
+                }
+            ]
+        }
+        live_response = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {"id": "call_2", "function": {"name": "summarize", "arguments": "{}"}},
+                            {"id": "call_1", "function": {"name": "search", "arguments": "{}"}},
+                            {"id": "call_3", "function": {"name": "respond", "arguments": "{}"}},
+                        ]
+                    }
+                }
+            ]
+        }
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True (default): matches despite tool call reordering
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: tool call reordering is detected as drift
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False, "Tool call reordering should be detected"
