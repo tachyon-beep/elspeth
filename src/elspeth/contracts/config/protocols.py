@@ -23,9 +23,10 @@ Example:
         self._config = config
 
 Note on jitter:
-    jitter is INTERNAL to RetryConfig (hardcoded to 1.0, not in Settings).
-    It's deliberately excluded from RuntimeRetryProtocol - the protocol only
-    defines what Settings MUST provide, not internal implementation details.
+    jitter is INTERNAL to RuntimeRetryConfig (hardcoded to 1.0, not in Settings).
+    It's included in RuntimeRetryProtocol because RetryManager needs to access it
+    for tenacity's wait_exponential_jitter(). However, it's not a Settings field -
+    the value is always provided by RuntimeRetryConfig's factory methods.
 """
 
 from typing import Protocol, runtime_checkable
@@ -40,8 +41,10 @@ class RuntimeRetryProtocol(Protocol):
     - base_delay: RetrySettings.initial_delay_seconds (renamed)
     - max_delay: RetrySettings.max_delay_seconds (renamed)
     - exponential_base: RetrySettings.exponential_base (direct)
+    - jitter: INTERNAL - hardcoded to 1.0 second, not from Settings
 
-    Note: jitter is internal-only (hardcoded in RetryConfig, not in Settings).
+    Note: jitter is internal to RuntimeRetryConfig (hardcoded, not in Settings)
+    but is included in the protocol because RetryManager needs it for tenacity.
     """
 
     @property
@@ -62,6 +65,11 @@ class RuntimeRetryProtocol(Protocol):
     @property
     def exponential_base(self) -> float:
         """Exponential backoff multiplier (e.g., 2.0 for doubling)."""
+        ...
+
+    @property
+    def jitter(self) -> float:
+        """Jitter to add to backoff delay in seconds (internal, not from Settings)."""
         ...
 
 

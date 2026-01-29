@@ -219,9 +219,10 @@ class TestRowProcessorRetry:
         from unittest.mock import Mock
 
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.retry import RetryManager
 
-        retry_manager = RetryManager(RetryConfig(max_attempts=3))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         # Should not raise
         processor = RowProcessor(
@@ -240,7 +241,8 @@ class TestRowProcessorRetry:
 
         from elspeth.contracts import TransformResult
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.retry import RetryManager
 
         # Track call count
         call_count = 0
@@ -268,7 +270,9 @@ class TestRowProcessorRetry:
             span_factory=Mock(),
             run_id="test-run",
             source_node_id=NodeID("source"),
-            retry_manager=RetryManager(RetryConfig(max_attempts=3, base_delay=0.01)),
+            retry_manager=RetryManager(
+                RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0)
+            ),
         )
 
         # Mock the transform executor
@@ -428,7 +432,8 @@ class TestRowProcessorRetry:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.retry import RetryManager
         from elspeth.engine.spans import SpanFactory
 
         # Set up real Landscape
@@ -472,7 +477,9 @@ class TestRowProcessorRetry:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
-            retry_manager=RetryManager(RetryConfig(max_attempts=2, base_delay=0.01)),
+            retry_manager=RetryManager(
+                RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0)
+            ),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})

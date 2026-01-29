@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
+from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.enums import TriggerType
 from elspeth.contracts.events import (
     PhaseAction,
@@ -46,7 +47,7 @@ from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSetti
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
-from elspeth.engine.retry import RetryConfig, RetryManager
+from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import GateProtocol, SinkProtocol, SourceProtocol, TransformProtocol
@@ -862,7 +863,7 @@ class Orchestrator:
         # Create retry manager from settings if available
         retry_manager: RetryManager | None = None
         if settings is not None:
-            retry_manager = RetryManager(RetryConfig.from_settings(settings.retry))
+            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
 
         # Create coalesce executor if config has coalesce settings
         from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -1932,7 +1933,7 @@ class Orchestrator:
         # Create retry manager from settings if available
         retry_manager: RetryManager | None = None
         if settings is not None:
-            retry_manager = RetryManager(RetryConfig.from_settings(settings.retry))
+            retry_manager = RetryManager(RuntimeRetryConfig.from_settings(settings.retry))
 
         # Create coalesce executor if config has coalesce settings
         from elspeth.engine.coalesce_executor import CoalesceExecutor

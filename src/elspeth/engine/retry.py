@@ -13,14 +13,18 @@ Integration Point (Phase 5):
     (run_id, row_id, transform_seq, attempt). The on_retry callback should
     call recorder.record_retry_attempt() to audit each attempt, ensuring
     complete traceability of transient failures and recovery.
+
+Configuration:
+    RetryManager accepts RuntimeRetryProtocol, allowing structural typing.
+    Use RuntimeRetryConfig from contracts/config for concrete instances:
+    - RuntimeRetryConfig.from_settings(settings.retry) - from YAML config
+    - RuntimeRetryConfig.from_policy(policy) - from plugin policies
+    - RuntimeRetryConfig.default() - standard retry behavior
+    - RuntimeRetryConfig.no_retry() - single attempt, no retries
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar, cast
-
-if TYPE_CHECKING:
-    from elspeth.core.config import RetrySettings
+from typing import TypeVar
 
 from tenacity import (
     RetryError,
@@ -30,29 +34,9 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from elspeth.contracts import RetryPolicy
+from elspeth.contracts.config import RuntimeRetryProtocol
 
 T = TypeVar("T")
-
-# Explicit defaults for RetryPolicy fields - MUST match RetryConfig defaults.
-# If you add a field to RetryConfig, add it here too or from_policy() will crash.
-# This is intentional - crashing on missing fields prevents silent bugs.
-POLICY_DEFAULTS: dict[str, int | float] = {
-    "max_attempts": 3,
-    "base_delay": 1.0,
-    "max_delay": 60.0,
-    "jitter": 1.0,
-    "exponential_base": 2.0,
-}
-
-
-def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
-    """Merge policy with defaults, returning dict with numeric values.
-
-    Policy values override defaults. The result has all POLICY_DEFAULTS keys
-    with values from either policy (if present) or defaults.
-    """
-    return {**POLICY_DEFAULTS, **cast(dict[str, Any], policy)}
 
 
 class MaxRetriesExceeded(Exception):
@@ -64,85 +48,6 @@ class MaxRetriesExceeded(Exception):
         super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
 
 
-@dataclass
-class RetryConfig:
-    """Configuration for retry behavior.
-
-    max_attempts is the TOTAL number of tries, not the number of retries.
-    So max_attempts=3 means: try, retry, retry (3 total).
-    """
-
-    max_attempts: int = 3
-    base_delay: float = 1.0  # seconds
-    max_delay: float = 60.0  # seconds
-    jitter: float = 1.0  # seconds
-    exponential_base: float = 2.0  # backoff multiplier
-
-    def __post_init__(self) -> None:
-        if self.max_attempts < 1:
-            raise ValueError("max_attempts must be >= 1")
-
-    @classmethod
-    def no_retry(cls) -> "RetryConfig":
-        """Factory for no-retry configuration (single attempt)."""
-        return cls(max_attempts=1)
-
-    @classmethod
-    def from_policy(cls, policy: RetryPolicy | None) -> "RetryConfig":
-        """Factory from plugin policy dict.
-
-        RetryPolicy is total=False (all fields optional), so plugins can specify
-        partial overrides. Missing fields use POLICY_DEFAULTS.
-
-        This is a trust boundary - plugin config (user YAML) may have invalid
-        values that need clamping to safe minimums.
-
-        Note: We deliberately avoid .get() here. If a field exists in RetryConfig
-        but not in POLICY_DEFAULTS, the direct access below will crash. This is
-        intentional - it catches the bug at development time, not production.
-        """
-        if policy is None:
-            return cls.no_retry()
-
-        # Merge explicit defaults with provided policy - policy values override
-        full = _merge_policy_with_defaults(policy)
-
-        # Direct access - crashes if POLICY_DEFAULTS is missing a field
-        # Clamp values to safe minimums (user config may have invalid values)
-        # Type narrowing: values are int|float from POLICY_DEFAULTS or policy
-        max_attempts = full["max_attempts"]
-        base_delay = full["base_delay"]
-        max_delay_val = full["max_delay"]
-        jitter = full["jitter"]
-        exponential_base = full["exponential_base"]
-
-        return cls(
-            max_attempts=max(1, int(max_attempts)),
-            base_delay=max(0.01, float(base_delay)),
-            max_delay=max(0.1, float(max_delay_val)),
-            jitter=max(0.0, float(jitter)),
-            exponential_base=max(1.01, float(exponential_base)),
-        )
-
-    @classmethod
-    def from_settings(cls, settings: "RetrySettings") -> "RetryConfig":
-        """Factory from RetrySettings config model.
-
-        Args:
-            settings: Validated Pydantic settings model
-
-        Returns:
-            RetryConfig with mapped values
-        """
-        return cls(
-            max_attempts=settings.max_attempts,
-            base_delay=settings.initial_delay_seconds,
-            max_delay=settings.max_delay_seconds,
-            jitter=1.0,  # Fixed jitter, not exposed in settings
-            exponential_base=settings.exponential_base,
-        )
-
-
 class RetryManager:
     """Manages retry logic for transform execution.
 
@@ -150,7 +55,9 @@ class RetryManager:
     Integrates with Landscape for attempt tracking.
 
     Example:
-        manager = RetryManager(RetryConfig(max_attempts=3))
+        from elspeth.contracts.config import RuntimeRetryConfig
+
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         result = manager.execute_with_retry(
             operation=lambda: transform.process(row, ctx),
@@ -159,11 +66,11 @@ class RetryManager:
         )
     """
 
-    def __init__(self, config: RetryConfig) -> None:
-        """Initialize with config.
+    def __init__(self, config: RuntimeRetryProtocol) -> None:
+        """Initialize with config implementing RuntimeRetryProtocol.
 
         Args:
-            config: Retry configuration
+            config: Retry configuration (must implement RuntimeRetryProtocol)
         """
         self._config = config
 

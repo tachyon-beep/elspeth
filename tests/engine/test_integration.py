@@ -250,11 +250,11 @@ class TestEngineIntegration:
             MissingEdgeError,
             Orchestrator,
             PipelineConfig,
-            RetryConfig,
             RetryManager,
             RowProcessor,
             RowResult,
             RunResult,
+            RuntimeRetryConfig,
             SinkExecutor,
             SpanFactory,
             TokenInfo,
@@ -276,7 +276,7 @@ class TestEngineIntegration:
         assert SinkExecutor is not None
         assert MissingEdgeError is not None
         assert RetryManager is not None
-        assert RetryConfig is not None
+        assert RuntimeRetryConfig is not None
         assert MaxRetriesExceeded is not None
         assert SpanFactory is not None
 

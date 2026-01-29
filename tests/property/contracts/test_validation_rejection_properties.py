@@ -198,10 +198,10 @@ class TestConfigRejection:
     @settings(max_examples=30)
     def test_invalid_retry_max_attempts_rejected(self, max_attempts: int) -> None:
         """Property: RetryConfig rejects max_attempts < 1."""
-        from elspeth.engine.retry import RetryConfig
+        from elspeth.contracts.config import RuntimeRetryConfig
 
         with pytest.raises(ValueError, match="max_attempts"):
-            RetryConfig(max_attempts=max_attempts)
+            RuntimeRetryConfig(max_attempts=max_attempts, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0)
 
     @given(count=st.integers(max_value=0))
     @settings(max_examples=30)

@@ -25,6 +25,7 @@ Example:
 """
 
 from elspeth.contracts import RowResult, TokenInfo
+from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.engine.coalesce_executor import CoalesceExecutor, CoalesceOutcome
 from elspeth.engine.executors import (
     AggregationExecutor,
@@ -45,7 +46,7 @@ from elspeth.engine.orchestrator import (
     RunResult,
 )
 from elspeth.engine.processor import RowProcessor
-from elspeth.engine.retry import MaxRetriesExceeded, RetryConfig, RetryManager
+from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 
@@ -61,12 +62,12 @@ __all__ = [
     "MissingEdgeError",
     "Orchestrator",
     "PipelineConfig",
-    "RetryConfig",
     "RetryManager",
     "RouteValidationError",
     "RowProcessor",
     "RowResult",
     "RunResult",
+    "RuntimeRetryConfig",
     "SinkExecutor",
     "SpanFactory",
     "TokenInfo",

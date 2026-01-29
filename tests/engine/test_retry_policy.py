@@ -3,14 +3,15 @@
 
 from typing import ClassVar
 
+from elspeth.contracts import RetryPolicy
+from elspeth.contracts.config import POLICY_DEFAULTS, RuntimeRetryConfig
+
 
 class TestRetryPolicy:
     """Verify RetryPolicy TypedDict works correctly."""
 
     def test_retry_policy_schema(self) -> None:
         """RetryPolicy should be a partial TypedDict with expected fields."""
-        from elspeth.contracts import RetryPolicy
-
         # Verify total=False (all fields optional)
         assert RetryPolicy.__total__ is False
 
@@ -25,8 +26,6 @@ class TestRetryPolicy:
 
     def test_retry_policy_importable(self) -> None:
         """RetryPolicy should be importable from contracts."""
-        from elspeth.contracts import RetryPolicy
-
         policy: RetryPolicy = {
             "max_attempts": 3,
             "base_delay": 1.0,
@@ -34,10 +33,7 @@ class TestRetryPolicy:
         assert policy["max_attempts"] == 3
 
     def test_retry_config_from_policy_with_typed_dict(self) -> None:
-        """RetryConfig.from_policy should accept RetryPolicy."""
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
+        """RuntimeRetryConfig.from_policy should accept RetryPolicy."""
         policy: RetryPolicy = {
             "max_attempts": 5,
             "base_delay": 2.0,
@@ -46,7 +42,7 @@ class TestRetryPolicy:
             "exponential_base": 3.0,
         }
 
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.max_attempts == 5
         assert config.base_delay == 2.0
         assert config.max_delay == 120.0
@@ -55,12 +51,9 @@ class TestRetryPolicy:
 
     def test_retry_policy_partial(self) -> None:
         """RetryPolicy should allow partial specification with correct defaults."""
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         # Only specify some fields
         policy: RetryPolicy = {"max_attempts": 10}
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.max_attempts == 10
         # Defaults for unspecified fields - verify ALL optional fields have defaults
         assert config.base_delay == 1.0
@@ -70,24 +63,18 @@ class TestRetryPolicy:
 
     def test_retry_policy_exponential_base(self) -> None:
         """RetryPolicy should support exponential_base configuration."""
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         policy: RetryPolicy = {
             "max_attempts": 3,
             "exponential_base": 3.0,
         }
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.exponential_base == 3.0
 
     def test_retry_policy_exponential_base_clamped(self) -> None:
         """exponential_base should be clamped to minimum 1.01."""
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         # Invalid base < 1 should be clamped
         policy: RetryPolicy = {"exponential_base": 0.5}
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.exponential_base >= 1.01
 
     def test_retry_policy_exponential_base_exactly_one_clamped(self) -> None:
@@ -96,11 +83,8 @@ class TestRetryPolicy:
         A base of exactly 1.0 would mean 1^n = 1 for all n, resulting in
         constant delay instead of exponential backoff. This must be rejected.
         """
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         policy: RetryPolicy = {"exponential_base": 1.0}
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.exponential_base > 1.0, "exponential_base=1.0 must be clamped"
         assert config.exponential_base >= 1.01
 
@@ -110,16 +94,13 @@ class TestRetryPolicy:
         Negative bases would cause alternating positive/negative delays
         which is nonsensical for retry timing.
         """
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         policy: RetryPolicy = {"exponential_base": -5.0}
-        config = RetryConfig.from_policy(policy)
+        config = RuntimeRetryConfig.from_policy(policy)
         assert config.exponential_base >= 1.01
 
 
 class TestRetrySchemaAlignment:
-    """Verify RetrySettings, RetryConfig, and RetryPolicy stay in sync.
+    """Verify RetrySettings, RuntimeRetryConfig, and RetryPolicy stay in sync.
 
     These tests catch "config field orphaning" - when a field is added to
     Settings but not wired through to the runtime config or tenacity call.
@@ -139,38 +120,35 @@ class TestRetrySchemaAlignment:
     CONFIG_INTERNAL_ONLY: ClassVar[set[str]] = {"jitter"}
 
     def test_policy_defaults_matches_config_fields(self) -> None:
-        """POLICY_DEFAULTS must have same fields as RetryConfig.
+        """POLICY_DEFAULTS must have same fields as RuntimeRetryConfig.
 
-        This catches the case where someone adds a field to RetryConfig but
+        This catches the case where someone adds a field to RuntimeRetryConfig but
         forgets to add it to POLICY_DEFAULTS. Without this, from_policy()
         would crash at runtime when accessing the missing field.
         """
-        from elspeth.engine.retry import POLICY_DEFAULTS, RetryConfig
-
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
         defaults_fields = set(POLICY_DEFAULTS.keys())
 
         missing_from_defaults = config_fields - defaults_fields
         extra_in_defaults = defaults_fields - config_fields
 
         assert not missing_from_defaults, (
-            f"POLICY_DEFAULTS missing fields: {missing_from_defaults}. Add these to POLICY_DEFAULTS in engine/retry.py."
+            f"POLICY_DEFAULTS missing fields: {missing_from_defaults}. Add these to POLICY_DEFAULTS in contracts/config/defaults.py."
         )
         assert not extra_in_defaults, (
-            f"POLICY_DEFAULTS has extra fields: {extra_in_defaults}. Remove these or add to RetryConfig dataclass."
+            f"POLICY_DEFAULTS has extra fields: {extra_in_defaults}. Remove these or add to RuntimeRetryConfig dataclass."
         )
 
     def test_retry_settings_fields_exist_in_config(self) -> None:
-        """Every RetrySettings field must have a corresponding RetryConfig field.
+        """Every RetrySettings field must have a corresponding RuntimeRetryConfig field.
 
         This catches the case where someone adds a field to Settings but
         forgets to add it to the runtime Config dataclass.
         """
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
 
         settings_fields = set(RetrySettings.model_fields.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         # Map Settings field names to expected Config field names
         expected_in_config = {self.FIELD_MAPPINGS.get(f, f) for f in settings_fields}
@@ -178,48 +156,48 @@ class TestRetrySchemaAlignment:
         # Check that all expected fields exist in Config
         missing_from_config = expected_in_config - config_fields
         assert not missing_from_config, (
-            f"RetrySettings fields not in RetryConfig: {missing_from_config}. "
-            f"Add these fields to RetryConfig dataclass and wire in from_settings()."
+            f"RetrySettings fields not in RuntimeRetryConfig: {missing_from_config}. "
+            f"Add these fields to RuntimeRetryConfig dataclass and wire in from_settings()."
         )
 
     def test_retry_config_covers_settings(self) -> None:
-        """RetryConfig should not have unexpected fields beyond Settings + internals.
+        """RuntimeRetryConfig should not have unexpected fields beyond Settings + internals.
 
         This catches Config bloat - fields added to Config that don't come
         from Settings and aren't documented as internal-only.
         """
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
 
         settings_fields = set(RetrySettings.model_fields.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         # Expected Config fields = mapped Settings fields + internal-only
         expected_config = {self.FIELD_MAPPINGS.get(f, f) for f in settings_fields} | self.CONFIG_INTERNAL_ONLY
 
         unexpected_in_config = config_fields - expected_config
         assert not unexpected_in_config, (
-            f"RetryConfig has undocumented fields: {unexpected_in_config}. Either add to Settings, add to CONFIG_INTERNAL_ONLY, or remove."
+            f"RuntimeRetryConfig has undocumented fields: {unexpected_in_config}. Either add to Settings, add to CONFIG_INTERNAL_ONLY, or remove."
         )
 
     def test_retry_policy_matches_config(self) -> None:
-        """RetryPolicy TypedDict should have same fields as RetryConfig.
+        """RetryPolicy TypedDict should have same fields as RuntimeRetryConfig.
 
         This ensures plugin-level config (RetryPolicy) can configure the
-        same options as global config (RetrySettings -> RetryConfig).
+        same options as global config (RetrySettings -> RuntimeRetryConfig).
         """
-        from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
-
         policy_fields = set(RetryPolicy.__annotations__.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         # Policy and Config should match exactly
         missing_from_policy = config_fields - policy_fields
         missing_from_config = policy_fields - config_fields
 
-        assert not missing_from_policy, f"RetryConfig fields not in RetryPolicy: {missing_from_policy}. Add these to RetryPolicy TypedDict."
-        assert not missing_from_config, f"RetryPolicy fields not in RetryConfig: {missing_from_config}. Add these to RetryConfig dataclass."
+        assert not missing_from_policy, (
+            f"RuntimeRetryConfig fields not in RetryPolicy: {missing_from_policy}. Add these to RetryPolicy TypedDict."
+        )
+        assert not missing_from_config, (
+            f"RetryPolicy fields not in RuntimeRetryConfig: {missing_from_config}. Add these to RuntimeRetryConfig dataclass."
+        )
 
     def test_from_settings_maps_all_fields_with_sentinel_values(self) -> None:
         """Verify from_settings() actually maps every Settings field.
@@ -228,7 +206,6 @@ class TestRetrySchemaAlignment:
         If a field uses default instead of the Settings value, test fails.
         """
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
 
         # Use distinctive non-default values
         settings = RetrySettings(
@@ -238,7 +215,7 @@ class TestRetrySchemaAlignment:
             exponential_base=9.9,
         )
 
-        config = RetryConfig.from_settings(settings)
+        config = RuntimeRetryConfig.from_settings(settings)
 
         # Verify all Settings fields reached Config with correct values
         assert config.max_attempts == 99, "max_attempts not mapped from Settings"

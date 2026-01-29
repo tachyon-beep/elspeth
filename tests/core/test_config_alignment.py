@@ -8,7 +8,7 @@ They serve as:
 3. Refactoring guide showing what needs to be connected
 
 P2-2026-01-21 bug: exponential_base was added to RetrySettings but never
-mapped to RetryConfig. That bug motivated this comprehensive audit.
+mapped to RuntimeRetryConfig. That bug motivated this comprehensive audit.
 
 ## Field Orphaning Categories
 
@@ -48,10 +48,10 @@ class TestRetryConfigAlignment:
     def test_settings_fields_exist_in_config(self) -> None:
         """Every RetrySettings field must have a corresponding RetryConfig field."""
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
+        from elspeth.contracts.config import RuntimeRetryConfig
 
         settings_fields = set(RetrySettings.model_fields.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         expected_in_config = {self.FIELD_MAPPINGS.get(f, f) for f in settings_fields}
 
@@ -61,10 +61,10 @@ class TestRetryConfigAlignment:
     def test_config_covers_settings(self) -> None:
         """RetryConfig should not have unexpected fields beyond Settings + internals."""
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
+        from elspeth.contracts.config import RuntimeRetryConfig
 
         settings_fields = set(RetrySettings.model_fields.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         expected = {self.FIELD_MAPPINGS.get(f, f) for f in settings_fields} | self.CONFIG_INTERNAL_ONLY
 
@@ -72,12 +72,12 @@ class TestRetryConfigAlignment:
         assert not unexpected, f"RetryConfig has undocumented fields: {unexpected}. Add to Settings, CONFIG_INTERNAL_ONLY, or remove."
 
     def test_policy_matches_config(self) -> None:
-        """RetryPolicy TypedDict should have same fields as RetryConfig."""
+        """RetryPolicy TypedDict should have same fields as RuntimeRetryConfig."""
         from elspeth.contracts import RetryPolicy
-        from elspeth.engine.retry import RetryConfig
+        from elspeth.contracts.config import RuntimeRetryConfig
 
         policy_fields = set(RetryPolicy.__annotations__.keys())
-        config_fields = set(RetryConfig.__dataclass_fields__.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
 
         assert policy_fields == config_fields, (
             f"RetryPolicy/RetryConfig mismatch. "
@@ -88,7 +88,7 @@ class TestRetryConfigAlignment:
     def test_from_settings_maps_all_fields(self) -> None:
         """Verify from_settings() uses non-default values (catches forgotten mappings)."""
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
+        from elspeth.contracts.config import RuntimeRetryConfig
 
         settings = RetrySettings(
             max_attempts=99,
@@ -96,7 +96,7 @@ class TestRetryConfigAlignment:
             max_delay_seconds=999.0,
             exponential_base=9.9,
         )
-        config = RetryConfig.from_settings(settings)
+        config = RuntimeRetryConfig.from_settings(settings)
 
         assert config.max_attempts == 99
         assert config.base_delay == 99.0
