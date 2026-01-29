@@ -515,15 +515,10 @@ class RuntimeTelemetryConfig:
         # Fail fast on unimplemented backpressure modes
         if backpressure_mode not in _IMPLEMENTED_BACKPRESSURE_MODES:
             implemented = sorted(m.value for m in _IMPLEMENTED_BACKPRESSURE_MODES)
-            raise NotImplementedError(
-                f"backpressure_mode='{backpressure_mode.value}' is not yet implemented. "
-                f"Use one of: {implemented}"
-            )
+            raise NotImplementedError(f"backpressure_mode='{backpressure_mode.value}' is not yet implemented. Use one of: {implemented}")
 
         # Convert exporter list to tuple of ExporterConfig
-        exporter_configs = tuple(
-            ExporterConfig(name=exp.name, options=dict(exp.options)) for exp in settings.exporters
-        )
+        exporter_configs = tuple(ExporterConfig(name=exp.name, options=dict(exp.options)) for exp in settings.exporters)
 
         return cls(
             enabled=settings.enabled,
