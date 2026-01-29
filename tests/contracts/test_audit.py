@@ -359,23 +359,8 @@ class TestNodeStateVariants:
         )
         assert state is not None
 
-    def test_frozen_dataclass_immutable(self) -> None:
-        """NodeState variants are frozen (immutable)."""
-        import dataclasses
-
-        state = NodeStateOpen(
-            state_id="state-1",
-            token_id="token-1",
-            node_id="node-1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.OPEN,
-            input_hash="abc123",
-            started_at=datetime.now(UTC),
-        )
-        # Frozen dataclass should raise FrozenInstanceError on mutation
-        with __import__("pytest").raises(dataclasses.FrozenInstanceError):
-            state.state_id = "modified"  # type: ignore[misc]
+    # NOTE: Frozen dataclass immutability is tested in TestFrozenDataclassImmutability
+    # (parametrized test covering all frozen dataclasses - see line ~1372)
 
 
 class TestCall:
@@ -872,25 +857,7 @@ class TestNodeStatePending:
         field_names = {f.name for f in dataclasses.fields(state)}
         assert "output_hash" not in field_names
 
-    def test_pending_state_is_frozen(self) -> None:
-        """NodeStatePending is frozen (immutable) for audit integrity."""
-        import dataclasses
-
-        now = datetime.now(UTC)
-        state = NodeStatePending(
-            state_id="state-1",
-            token_id="token-1",
-            node_id="node-1",
-            step_index=0,
-            attempt=1,
-            status=NodeStateStatus.PENDING,
-            input_hash="abc123",
-            started_at=now,
-            completed_at=now,
-            duration_ms=100.0,
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            state.state_id = "modified"  # type: ignore[misc]
+    # NOTE: Frozen immutability tested in TestFrozenDataclassImmutability
 
     def test_pending_state_with_context_fields(self) -> None:
         """NodeStatePending can have optional context_before/after_json."""
@@ -1027,20 +994,7 @@ class TestTokenOutcome:
         assert outcome.error_hash == "err_abc123"
         assert outcome.context_json == '{"reason": "validation_failed"}'
 
-    def test_token_outcome_is_frozen(self) -> None:
-        """TokenOutcome is frozen (immutable) for audit integrity."""
-        import dataclasses
-
-        outcome = TokenOutcome(
-            outcome_id="out-1",
-            run_id="run-1",
-            token_id="tok-1",
-            outcome=RowOutcome.COMPLETED,
-            is_terminal=True,
-            recorded_at=datetime.now(UTC),
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            outcome.outcome_id = "modified"  # type: ignore[misc]
+    # NOTE: Frozen immutability tested in TestFrozenDataclassImmutability
 
 
 class TestNonCanonicalMetadata:
@@ -1095,17 +1049,7 @@ class TestNonCanonicalMetadata:
         assert meta.type_name == "list"
         assert "inf" in meta.repr_value.lower()
 
-    def test_non_canonical_metadata_is_frozen(self) -> None:
-        """NonCanonicalMetadata is frozen (immutable)."""
-        import dataclasses
-
-        meta = NonCanonicalMetadata(
-            repr_value="test",
-            type_name="str",
-            canonical_error="test error",
-        )
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            meta.repr_value = "modified"  # type: ignore[misc]
+    # NOTE: Frozen immutability tested in TestFrozenDataclassImmutability
 
 
 class TestValidationErrorRecord:

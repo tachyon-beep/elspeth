@@ -94,29 +94,8 @@ class TestRowOutcome:
 
         assert RowOutcome.BUFFERED.value == "buffered"
 
-    def test_row_outcome_buffered_is_not_terminal(self) -> None:
-        """BUFFERED is non-terminal - token will reappear with final outcome."""
-        from elspeth.contracts.enums import RowOutcome
-
-        assert RowOutcome.BUFFERED.is_terminal is False
-
-    def test_row_outcome_consumed_in_batch_is_terminal(self) -> None:
-        """CONSUMED_IN_BATCH is terminal - token is absorbed into aggregate."""
-        from elspeth.contracts.enums import RowOutcome
-
-        assert RowOutcome.CONSUMED_IN_BATCH.is_terminal is True
-
-    def test_row_outcome_expanded_is_terminal(self) -> None:
-        """EXPANDED is terminal - parent token's journey ends, children continue."""
-        from elspeth.contracts.enums import RowOutcome
-
-        assert RowOutcome.EXPANDED.is_terminal is True
-
-    def test_row_outcome_completed_is_terminal(self) -> None:
-        """COMPLETED is terminal."""
-        from elspeth.contracts.enums import RowOutcome
-
-        assert RowOutcome.COMPLETED.is_terminal is True
+    # NOTE: Individual is_terminal tests removed - test_terminal_mappings (line ~66)
+    # comprehensively tests ALL terminal/non-terminal outcomes in one assertion
 
     def test_all_outcomes_have_is_terminal(self) -> None:
         """All RowOutcome values have is_terminal property."""

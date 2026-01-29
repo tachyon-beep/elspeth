@@ -1,11 +1,8 @@
 # tests/contracts/config/test_runtime_checkpoint.py
 """Tests for RuntimeCheckpointConfig.
 
-TDD tests written before implementation. These verify:
-1. Protocol compliance (structural typing)
-2. Orphan field detection (no fields without Settings origin)
-3. Field name mapping (explicit mapping assertions)
-4. Factory method behavior (from_settings, default)
+Checkpoint-specific tests only. Common tests (frozen, slots, protocol, orphan fields)
+are in test_runtime_common.py.
 
 Note on frequency field:
     CheckpointSettings.frequency is a Literal["every_row", "every_n", "aggregation_only"]
@@ -20,36 +17,7 @@ Note on frequency field:
 
 import pytest
 
-
-class TestRuntimeCheckpointProtocolCompliance:
-    """Verify RuntimeCheckpointConfig implements RuntimeCheckpointProtocol."""
-
-    def test_runtime_checkpoint_implements_protocol(self) -> None:
-        """RuntimeCheckpointConfig must implement RuntimeCheckpointProtocol.
-
-        This uses runtime_checkable to verify structural typing.
-        """
-        from elspeth.contracts.config import RuntimeCheckpointProtocol
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        # Create instance with defaults
-        config = RuntimeCheckpointConfig.default()
-
-        # Protocol check via isinstance (runtime_checkable)
-        assert isinstance(config, RuntimeCheckpointProtocol), (
-            "RuntimeCheckpointConfig does not implement RuntimeCheckpointProtocol. "
-            "Check that all protocol properties are present with correct types."
-        )
-
-    def test_protocol_fields_have_correct_types(self) -> None:
-        """Protocol fields must return correct types."""
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        config = RuntimeCheckpointConfig.default()
-
-        assert isinstance(config.enabled, bool)
-        assert isinstance(config.frequency, int)
-        assert isinstance(config.aggregation_boundaries, bool)
+# NOTE: Protocol compliance, orphan detection, frozen/slots tests are in test_runtime_common.py
 
 
 class TestRuntimeCheckpointAllFields:
@@ -86,59 +54,6 @@ class TestRuntimeCheckpointAllFields:
             f"RuntimeCheckpointConfig fields mismatch.\n"
             f"Missing: {expected_fields - actual_fields}\n"
             f"Extra: {actual_fields - expected_fields}"
-        )
-
-
-class TestRuntimeCheckpointNoOrphanFields:
-    """Verify RuntimeCheckpointConfig has no orphan fields.
-
-    Every field must come from CheckpointSettings (no internal-only fields).
-    """
-
-    def test_runtime_has_no_orphan_fields(self) -> None:
-        """Every RuntimeCheckpointConfig field must have documented origin."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, CheckpointSettings
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        # Get all RuntimeCheckpointConfig fields
-        runtime_fields = set(RuntimeCheckpointConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "CheckpointSettings"
-        settings_fields = set(CheckpointSettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # All runtime fields must be accounted for
-        orphan_fields = runtime_fields - runtime_from_settings
-
-        assert not orphan_fields, (
-            f"RuntimeCheckpointConfig has orphan fields: {orphan_fields}. These must be mapped from CheckpointSettings."
-        )
-
-    def test_no_missing_settings_fields(self) -> None:
-        """RuntimeCheckpointConfig must receive all Settings fields."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, CheckpointSettings
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        # Get all RuntimeCheckpointConfig fields
-        runtime_fields = set(RuntimeCheckpointConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "CheckpointSettings"
-        settings_fields = set(CheckpointSettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # All settings fields must exist in runtime
-        missing_fields = runtime_from_settings - runtime_fields
-
-        assert not missing_fields, (
-            f"RuntimeCheckpointConfig is missing Settings fields: {missing_fields}. Add these fields to RuntimeCheckpointConfig."
         )
 
 
@@ -270,27 +185,6 @@ class TestRuntimeCheckpointConvenienceFactories:
         assert config.frequency == 1  # "every_row" -> 1
         assert config.checkpoint_interval is None
         assert config.aggregation_boundaries is True
-
-
-class TestRuntimeCheckpointImmutability:
-    """Test that RuntimeCheckpointConfig is immutable (frozen dataclass)."""
-
-    def test_frozen_dataclass(self) -> None:
-        """RuntimeCheckpointConfig should be frozen (immutable)."""
-        from dataclasses import FrozenInstanceError
-
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        config = RuntimeCheckpointConfig.default()
-
-        with pytest.raises(FrozenInstanceError):
-            config.enabled = False  # type: ignore[misc]
-
-    def test_has_slots(self) -> None:
-        """RuntimeCheckpointConfig should use __slots__ for memory efficiency."""
-        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
-
-        assert hasattr(RuntimeCheckpointConfig, "__slots__"), "RuntimeCheckpointConfig should have __slots__"
 
 
 class TestRuntimeCheckpointValidation:
