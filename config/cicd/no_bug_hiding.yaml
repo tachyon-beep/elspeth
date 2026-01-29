@@ -574,7 +574,7 @@ allow_hits:
   expires: null
 # REMOVED: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1428
 # Reason: elapsed_age_seconds is now REQUIRED in checkpoint v1.0 format - no old checkpoints exist
-- key: plugins/base.py:R1:BaseGate:__init__:line=164
+- key: plugins/base.py:R1:BaseGate:__init__:line=175
   owner: architecture
   reason: 'Optional field: fork_to validated by GateSettings schema - None when gate does not fork'
   safety: Schema validation guarantees valid type; .get() appropriate for optional field
@@ -848,11 +848,8 @@ allow_hits:
   reason: 'MCP server boundary: must catch all exceptions and return error to client'
   safety: Error message returned to MCP client; server continues running for next request
   expires: null
-- key: mcp/server.py:R1:main:line=1756
-  owner: architecture
-  reason: 'Trust boundary: environment variable ELSPETH_DATABASE_URL is optional external input'
-  safety: Explicit check follows - exits with error message if neither arg nor env var provided
-  expires: null
+# REMOVED: mcp/server.py:R1:main:line=1756
+# Reason: Code refactored to use 'in os.environ' check instead of .get() - no longer matches pattern
 # Azure Multi-Query LLM Transform - external LLM API responses (Tier 3)
 - key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=373
   owner: architecture
