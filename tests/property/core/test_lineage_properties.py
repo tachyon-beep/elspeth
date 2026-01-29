@@ -31,28 +31,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from hypothesis import given, settings
-from hypothesis import strategies as st
 
 from elspeth.core.landscape.lineage import LineageResult, explain
-
-# =============================================================================
-# Strategies for generating lineage test data
-# =============================================================================
-
-# Valid ID strings (UUID-like)
-id_strings = st.text(
-    min_size=8,
-    max_size=40,
-    alphabet="0123456789abcdef",
-)
-
-# Sink names
-sink_names = st.text(
-    min_size=1,
-    max_size=30,
-    alphabet="abcdefghijklmnopqrstuvwxyz_",
-)
-
+from tests.property.conftest import id_strings, sink_names
 
 # =============================================================================
 # explain() Input Validation Property Tests

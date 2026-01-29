@@ -192,6 +192,32 @@ multiple_branches = st.lists(branch_names, min_size=2, max_size=5, unique=True)
 
 
 # =============================================================================
+# ID and Name Strategies
+# =============================================================================
+
+# Valid ID strings (UUID-like hex strings)
+id_strings = st.text(
+    min_size=8,
+    max_size=40,
+    alphabet="0123456789abcdef",
+)
+
+# Sink/node names (lowercase with underscores)
+sink_names = st.text(
+    min_size=1,
+    max_size=30,
+    alphabet="abcdefghijklmnopqrstuvwxyz_",
+)
+
+# Path/label names (for routing)
+path_names = st.text(
+    min_size=1,
+    max_size=30,
+    alphabet="abcdefghijklmnopqrstuvwxyz_0123456789",
+).filter(lambda s: s[0].isalpha())
+
+
+# =============================================================================
 # Shared Test Fixtures (for integration/audit property tests)
 # =============================================================================
 
