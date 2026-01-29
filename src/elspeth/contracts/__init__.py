@@ -99,6 +99,18 @@ from elspeth.contracts.config import (
     SinkSettings,
     SourceSettings,
     TransformSettings,
+    # Runtime protocols
+    RuntimeCheckpointProtocol,
+    RuntimeConcurrencyProtocol,
+    RuntimeRateLimitProtocol,
+    RuntimeRetryProtocol,
+    # Default registries
+    INTERNAL_DEFAULTS,
+    POLICY_DEFAULTS,
+    # Alignment documentation
+    EXEMPT_SETTINGS,
+    FIELD_MAPPINGS,
+    SETTINGS_TO_RUNTIME,
 )
 from elspeth.contracts.events import (
     PhaseAction,
@@ -151,7 +163,7 @@ __all__ = [  # Grouped by category for readability
     "TokenParent",
     "TransformErrorRecord",
     "ValidationErrorRecord",
-    # config
+    # config - Settings classes
     "CheckpointSettings",
     "ConcurrencySettings",
     "DatabaseSettings",
@@ -164,6 +176,18 @@ __all__ = [  # Grouped by category for readability
     "SinkSettings",
     "SourceSettings",
     "TransformSettings",
+    # config - Runtime protocols
+    "RuntimeCheckpointProtocol",
+    "RuntimeConcurrencyProtocol",
+    "RuntimeRateLimitProtocol",
+    "RuntimeRetryProtocol",
+    # config - Default registries
+    "INTERNAL_DEFAULTS",
+    "POLICY_DEFAULTS",
+    # config - Alignment documentation
+    "EXEMPT_SETTINGS",
+    "FIELD_MAPPINGS",
+    "SETTINGS_TO_RUNTIME",
     # enums
     "BatchStatus",
     "CallStatus",
