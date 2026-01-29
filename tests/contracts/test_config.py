@@ -34,6 +34,7 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
     # Runtime configuration dataclasses
+    "RuntimeRateLimitConfig",
     "RuntimeRetryConfig",
     # Default registries
     "INTERNAL_DEFAULTS",

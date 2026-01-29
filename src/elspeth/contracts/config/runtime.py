@@ -24,7 +24,7 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 
 if TYPE_CHECKING:
-    from elspeth.core.config import RetrySettings
+    from elspeth.core.config import RateLimitSettings, RetrySettings, ServiceRateLimit
 
 
 def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
@@ -165,4 +165,78 @@ class RuntimeRetryConfig:
             max_delay=max(0.1, float(max_delay_val)),
             jitter=max(0.0, float(jitter)),
             exponential_base=max(1.01, float(exponential_base)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRateLimitConfig:
+    """Runtime configuration for rate limiting.
+
+    Implements RuntimeRateLimitProtocol for structural typing verification.
+
+    Field Origins (all from RateLimitSettings, direct mapping):
+        - enabled: RateLimitSettings.enabled
+        - default_requests_per_second: RateLimitSettings.default_requests_per_second
+        - default_requests_per_minute: RateLimitSettings.default_requests_per_minute
+        - persistence_path: RateLimitSettings.persistence_path
+        - services: RateLimitSettings.services
+
+    Protocol Coverage:
+        RuntimeRateLimitProtocol requires: enabled, default_requests_per_second,
+        default_requests_per_minute. The additional fields (persistence_path, services)
+        are preserved for full Settings fidelity but not part of the protocol.
+
+    Note: Unlike RetryConfig, there are no plugin-level rate limit overrides.
+    Rate limiting is configured globally in Settings only.
+    """
+
+    enabled: bool
+    default_requests_per_second: float | None
+    default_requests_per_minute: float | None
+    persistence_path: str | None
+    services: dict[str, "ServiceRateLimit"]
+
+    @classmethod
+    def default(cls) -> "RuntimeRateLimitConfig":
+        """Factory for default rate limit configuration.
+
+        Returns disabled rate limiting - no constraints by default.
+        This is safe because rate limiting is opt-in.
+        """
+        return cls(
+            enabled=False,
+            default_requests_per_second=None,
+            default_requests_per_minute=None,
+            persistence_path=None,
+            services={},
+        )
+
+    @classmethod
+    def from_settings(cls, settings: "RateLimitSettings") -> "RuntimeRateLimitConfig":
+        """Factory from RateLimitSettings config model.
+
+        Field Mapping (all direct, no renames):
+            settings.enabled -> enabled
+            settings.default_requests_per_second -> default_requests_per_second (int -> float)
+            settings.default_requests_per_minute -> default_requests_per_minute (int -> float)
+            settings.persistence_path -> persistence_path
+            settings.services -> services
+
+        Note: Protocol expects float for rate fields, but Settings uses int.
+        We convert int to float for protocol compliance.
+
+        Args:
+            settings: Validated Pydantic settings model
+
+        Returns:
+            RuntimeRateLimitConfig with mapped values
+        """
+        return cls(
+            enabled=settings.enabled,
+            default_requests_per_second=float(settings.default_requests_per_second),
+            default_requests_per_minute=(
+                float(settings.default_requests_per_minute) if settings.default_requests_per_minute is not None else None
+            ),
+            persistence_path=settings.persistence_path,
+            services=dict(settings.services),
         )
