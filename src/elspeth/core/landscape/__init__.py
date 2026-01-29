@@ -48,6 +48,9 @@ from elspeth.core.landscape.formatters import (
     CSVFormatter,
     ExportFormatter,
     JSONFormatter,
+    LineageTextFormatter,
+    dataclass_to_dict,
+    serialize_datetime,
 )
 from elspeth.core.landscape.lineage import LineageResult, explain
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -92,6 +95,7 @@ __all__ = [
     "LandscapeExporter",
     "LandscapeRecorder",
     "LineageResult",
+    "LineageTextFormatter",
     "Node",
     "NodeState",
     "NodeStateCompleted",
@@ -116,6 +120,7 @@ __all__ = [
     "batches_table",
     "calls_table",
     "compute_grade",
+    "dataclass_to_dict",
     "edges_table",
     "explain",
     "metadata",
@@ -124,6 +129,7 @@ __all__ = [
     "routing_events_table",
     "rows_table",
     "runs_table",
+    "serialize_datetime",
     "set_run_grade",
     "token_parents_table",
     "tokens_table",

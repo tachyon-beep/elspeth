@@ -2,9 +2,164 @@
 """Tests for export formatters."""
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 
-from elspeth.core.landscape.formatters import CSVFormatter, JSONFormatter
+import pytest
+
+from elspeth.core.landscape.formatters import (
+    CSVFormatter,
+    JSONFormatter,
+    dataclass_to_dict,
+    serialize_datetime,
+)
+
+
+class TestSerializeDatetime:
+    """Tests for serialize_datetime utility."""
+
+    def test_converts_datetime_to_iso(self) -> None:
+        """datetime objects become ISO strings."""
+        dt = datetime(2026, 1, 29, 12, 30, 45, tzinfo=UTC)
+        result = serialize_datetime(dt)
+        assert result == "2026-01-29T12:30:45+00:00"
+
+    def test_preserves_non_datetime(self) -> None:
+        """Non-datetime values pass through unchanged."""
+        assert serialize_datetime("hello") == "hello"
+        assert serialize_datetime(42) == 42
+        assert serialize_datetime(None) is None
+
+    def test_recursively_handles_dict(self) -> None:
+        """Dicts have datetime values converted recursively."""
+        dt = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        data = {"created_at": dt, "name": "test", "nested": {"time": dt}}
+        result = serialize_datetime(data)
+
+        assert result["created_at"] == "2026-01-29T12:00:00+00:00"
+        assert result["name"] == "test"
+        assert result["nested"]["time"] == "2026-01-29T12:00:00+00:00"
+
+    def test_recursively_handles_list(self) -> None:
+        """Lists have datetime values converted recursively."""
+        dt = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        data = [dt, "string", {"time": dt}]
+        result = serialize_datetime(data)
+
+        assert result[0] == "2026-01-29T12:00:00+00:00"
+        assert result[1] == "string"
+        assert result[2]["time"] == "2026-01-29T12:00:00+00:00"
+
+    def test_rejects_nan(self) -> None:
+        """NaN values are rejected per CLAUDE.md audit integrity requirements."""
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime(float("nan"))
+
+    def test_rejects_infinity(self) -> None:
+        """Infinity values are rejected per CLAUDE.md audit integrity requirements."""
+        with pytest.raises(ValueError, match="Infinity"):
+            serialize_datetime(float("inf"))
+
+        with pytest.raises(ValueError, match="Infinity"):
+            serialize_datetime(float("-inf"))
+
+    def test_rejects_nan_in_nested_structure(self) -> None:
+        """NaN in nested structures is also rejected."""
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime({"nested": {"value": float("nan")}})
+
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime([1, 2, float("nan")])
+
+
+class TestDataclassToDict:
+    """Tests for dataclass_to_dict utility."""
+
+    def test_converts_simple_dataclass(self) -> None:
+        """Simple dataclass becomes dict."""
+
+        @dataclass
+        class Simple:
+            name: str
+            value: int
+
+        obj = Simple(name="test", value=42)
+        result = dataclass_to_dict(obj)
+
+        assert result == {"name": "test", "value": 42}
+
+    def test_converts_nested_dataclass(self) -> None:
+        """Nested dataclasses are recursively converted."""
+
+        @dataclass
+        class Inner:
+            x: int
+
+        @dataclass
+        class Outer:
+            inner: Inner
+            y: str
+
+        obj = Outer(inner=Inner(x=1), y="hello")
+        result = dataclass_to_dict(obj)
+
+        assert result == {"inner": {"x": 1}, "y": "hello"}
+
+    def test_handles_enum_values(self) -> None:
+        """Enum values are converted to their string value."""
+
+        class Status(Enum):
+            ACTIVE = "active"
+            INACTIVE = "inactive"
+
+        @dataclass
+        class WithEnum:
+            status: Status
+
+        obj = WithEnum(status=Status.ACTIVE)
+        result = dataclass_to_dict(obj)
+
+        assert result == {"status": "active"}
+
+    def test_handles_datetime_in_dataclass(self) -> None:
+        """Datetime fields are converted to ISO strings."""
+
+        @dataclass
+        class WithTime:
+            created_at: datetime
+
+        dt = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        obj = WithTime(created_at=dt)
+        result = dataclass_to_dict(obj)
+
+        assert result == {"created_at": "2026-01-29T12:00:00+00:00"}
+
+    def test_handles_list_of_dataclasses(self) -> None:
+        """Lists of dataclasses are recursively converted."""
+
+        @dataclass
+        class Item:
+            id: int
+
+        @dataclass
+        class Container:
+            items: list[Item]
+
+        obj = Container(items=[Item(id=1), Item(id=2)])
+        result = dataclass_to_dict(obj)
+
+        assert result == {"items": [{"id": 1}, {"id": 2}]}
+
+    def test_handles_none(self) -> None:
+        """None returns empty dict."""
+        result = dataclass_to_dict(None)
+        assert result == {}
+
+    def test_handles_plain_dict(self) -> None:
+        """Plain dict passes through (not a dataclass)."""
+        result = dataclass_to_dict({"a": 1})
+        assert result == {"a": 1}
 
 
 class TestCSVFormatter:
@@ -181,3 +336,88 @@ class TestJSONFormatter:
         parsed = json.loads(output)
         assert len(parsed["events"]) == 2
         assert parsed["events"][0]["type"] == "click"
+
+
+class TestLineageTextFormatter:
+    """Tests for LineageTextFormatter."""
+
+    def test_formats_basic_lineage(self) -> None:
+        """Formats LineageResult as human-readable text."""
+        from elspeth.contracts import RowLineage, Token
+        from elspeth.core.landscape.formatters import LineageTextFormatter
+        from elspeth.core.landscape.lineage import LineageResult
+
+        now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        result = LineageResult(
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            source_row=RowLineage(
+                row_id="row-456",
+                run_id="run-789",
+                source_node_id="src-node",
+                row_index=0,
+                source_data_hash="abc123",
+                created_at=now,
+                source_data={"id": 1, "name": "test"},
+                payload_available=True,
+            ),
+            node_states=[],
+            routing_events=[],
+            calls=[],
+            parent_tokens=[],
+        )
+
+        formatter = LineageTextFormatter()
+        text = formatter.format(result)
+
+        assert "Token: tok-123" in text
+        assert "Row: row-456" in text
+        assert "Source Data Hash: abc123" in text
+
+    def test_formats_with_outcome(self) -> None:
+        """Includes outcome when present."""
+        from elspeth.contracts import RowLineage, RowOutcome, Token, TokenOutcome
+        from elspeth.core.landscape.formatters import LineageTextFormatter
+        from elspeth.core.landscape.lineage import LineageResult
+
+        now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        result = LineageResult(
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            source_row=RowLineage(
+                row_id="row-456",
+                run_id="run-789",
+                source_node_id="src-node",
+                row_index=0,
+                source_data_hash="abc123",
+                created_at=now,
+                source_data={"id": 1},
+                payload_available=True,
+            ),
+            node_states=[],
+            routing_events=[],
+            calls=[],
+            parent_tokens=[],
+            outcome=TokenOutcome(
+                outcome_id="out-1",
+                token_id="tok-123",
+                run_id="run-789",
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output",
+                is_terminal=True,
+                recorded_at=now,
+            ),
+        )
+
+        formatter = LineageTextFormatter()
+        text = formatter.format(result)
+
+        assert "Outcome: COMPLETED" in text
+        assert "Sink: output" in text
+
+    def test_formats_none_gracefully(self) -> None:
+        """Returns message for None result."""
+        from elspeth.core.landscape.formatters import LineageTextFormatter
+
+        formatter = LineageTextFormatter()
+        text = formatter.format(None)
+
+        assert "not found" in text.lower() or "no lineage" in text.lower()
