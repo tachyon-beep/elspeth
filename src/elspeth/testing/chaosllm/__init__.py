@@ -30,11 +30,13 @@ from elspeth.testing.chaosllm.config import (
     load_config,
     load_preset,
 )
+from elspeth.testing.chaosllm.latency_simulator import LatencySimulator
 
 __all__ = [
     "ChaosLLMConfig",
     "ErrorInjectionConfig",
     "LatencyConfig",
+    "LatencySimulator",
     "ResponseConfig",
     "ServerConfig",
     "list_presets",
