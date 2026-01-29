@@ -111,3 +111,32 @@ state_id TEXT NULL  # Was: NOT NULL
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/bugs/BRANCH_BUG_TRIAGE_2026-01-25.md`
+
+---
+
+## CLOSURE: 2026-01-29
+
+**Status:** FIXED
+
+**Fixed By:** Claude (with 4-specialist review board)
+
+**Resolution:**
+
+LLM calls now use real state_ids (the batch's `aggregation_state_id`) rather than synthetic ones:
+
+1. `AggregationExecutor` creates ONE node_state per batch at line 1094: `ctx.state_id = state.state_id`
+2. When `ctx.record_call()` is invoked, it uses this real `state_id`
+3. Multiple LLM calls per batch are distinguished by `call_index` (auto-incremented)
+4. No synthetic state_ids are generated - all FK constraints are satisfied
+5. The `calls` table's `UniqueConstraint("state_id", "call_index")` supports this pattern
+
+**Architecture Note:**
+The key insight is that the batch already has a node_state created by `AggregationExecutor`. We record N calls against that ONE state using different `call_index` values, rather than creating N new states (which would violate uniqueness constraints and audit semantics).
+
+**Option A was chosen** (use real state_ids) rather than Option B (make FK nullable).
+
+**Tests Added:**
+- Integration tests verify `state_id` is valid and FK joins work
+- `test_llm_calls_visible_in_explain` confirms calls link to real states
+
+**Verified By:** 4-specialist review board (2026-01-29)

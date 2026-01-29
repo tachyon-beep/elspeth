@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -546,6 +547,54 @@ class TestAzureBatchLLMTransformSubmit:
 
         assert request["body"]["max_tokens"] == 100
 
+    def test_checkpoint_includes_original_requests(self, ctx: PluginContext) -> None:
+        """Checkpoint should include original LLM request data for audit recording.
+
+        This is essential for BUG-AZURE-01 fix: the audit trail must record the actual
+        LLM request bodies (including model, messages, temperature) that were sent,
+        so that when results come back they can be properly attributed.
+        """
+        transform = AzureBatchLLMTransform(
+            {
+                "deployment_name": "gpt-4o-batch",
+                "endpoint": "https://test.openai.azure.com",
+                "api_key": "test-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],  # Explicit opt-out for this test
+            }
+        )
+
+        mock_client = Mock()
+        mock_file = Mock()
+        mock_file.id = "file-123"
+        mock_file.status = "uploaded"
+        mock_client.files.create.return_value = mock_file
+
+        mock_batch = Mock()
+        mock_batch.id = "batch-456"
+        mock_batch.status = "validating"
+        mock_client.batches.create.return_value = mock_batch
+
+        transform._client = mock_client
+
+        rows = [{"text": "Hello"}, {"text": "World"}]
+
+        with pytest.raises(BatchPendingError):
+            transform.process(rows, ctx)
+
+        # Verify checkpoint includes requests
+        checkpoint = ctx._checkpoint  # type: ignore[attr-defined]
+        assert checkpoint is not None
+        assert "requests" in checkpoint
+        assert len(checkpoint["requests"]) == 2
+
+        # Each request should have the full LLM request body
+        for _custom_id, request_body in checkpoint["requests"].items():
+            assert "messages" in request_body
+            assert "model" in request_body
+            assert request_body["model"] == "gpt-4o-batch"
+
 
 class TestAzureBatchLLMTransformTemplateErrors:
     """Tests for template rendering error handling."""
@@ -640,6 +689,12 @@ class TestAzureBatchLLMTransformResume:
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 1,
+                "requests": {
+                    "row-0-abc12345": {
+                        "messages": [{"role": "user", "content": "test"}],
+                        "model": "my-gpt4o-batch",
+                    },
+                },
             }
         )
         return ctx
@@ -937,6 +992,11 @@ class TestAzureBatchLLMTransformResultAssembly:
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 3,
+                "requests": {
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                    "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "gpt-4o-batch"},
+                },
             }
         )
 
@@ -1016,6 +1076,10 @@ class TestAzureBatchLLMTransformResultAssembly:
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 2,
+                "requests": {
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "gpt-4o-batch"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "gpt-4o-batch"},
+                },
             }
         )
 
@@ -1061,6 +1125,159 @@ class TestAzureBatchLLMTransformResultAssembly:
         assert result.rows[0]["llm_response"] == "Success"
         assert result.rows[1]["llm_response"] is None
         assert result.rows[1]["llm_response_error"]["reason"] == "api_error"
+
+
+class TestAzureBatchLLMTransformAuditRecording:
+    """Tests for LLM call audit recording (BUG-AZURE-01)."""
+
+    def test_download_results_records_llm_calls(self) -> None:
+        """Processing results should record LLM calls per row against batch state."""
+        config = {
+            "deployment_name": "gpt-4o-batch",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+            "template": "Analyze: {{ row.text }}",
+            "schema": {"fields": "dynamic"},
+            "required_input_fields": [],  # Explicit opt-out for this test
+        }
+        transform = AzureBatchLLMTransform(config)
+
+        # Track recorded calls
+        recorded_calls: list[dict[str, Any]] = []
+
+        def capture_call(**kwargs: Any) -> MagicMock:
+            recorded_calls.append(kwargs)
+            return MagicMock()
+
+        # Create mock context with state_id (simulates batch's aggregation state)
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state-123"  # The batch's node_state
+        ctx.record_call = capture_call
+        ctx.get_checkpoint.return_value = {
+            "batch_id": "azure-batch-789",
+            "row_mapping": {"row-0-abc": 0, "row-1-def": 1},
+            "requests": {
+                "row-0-abc": {
+                    "messages": [{"role": "user", "content": "Analyze: Hello"}],
+                    "model": "gpt-4o-batch",
+                },
+                "row-1-def": {
+                    "messages": [{"role": "user", "content": "Analyze: World"}],
+                    "model": "gpt-4o-batch",
+                },
+            },
+        }
+        ctx.clear_checkpoint = MagicMock()
+
+        # Mock Azure batch completion
+        mock_batch = MagicMock()
+        mock_batch.id = "azure-batch-789"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-file-999"
+
+        # Mock output file content (JSONL)
+        output_jsonl = """{"custom_id": "row-0-abc", "response": {"body": {"choices": [{"message": {"content": "Analysis: Greeting"}}], "usage": {"total_tokens": 10}}}}
+{"custom_id": "row-1-def", "response": {"body": {"choices": [{"message": {"content": "Analysis: Planet"}}], "usage": {"total_tokens": 12}}}}"""
+
+        mock_output_content = MagicMock()
+        mock_output_content.text = output_jsonl
+
+        rows = [{"text": "Hello"}, {"text": "World"}]
+
+        with patch.object(transform, "_get_client") as mock_client:
+            mock_client.return_value.files.content.return_value = mock_output_content
+
+            result = transform._download_results(mock_batch, ctx.get_checkpoint(), rows, ctx)
+
+        # Verify result is successful
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 2
+
+        # Verify LLM calls were recorded
+        from elspeth.contracts import CallStatus, CallType
+
+        llm_calls = [c for c in recorded_calls if c.get("call_type") == CallType.LLM]
+        assert len(llm_calls) == 2, f"Expected 2 LLM calls, got {len(llm_calls)}"
+
+        # Verify first LLM call has correct data
+        call1 = llm_calls[0]
+        assert "custom_id" in call1["request_data"]
+        assert call1["request_data"]["messages"][0]["content"] == "Analyze: Hello"
+        assert call1["status"] == CallStatus.SUCCESS
+
+        # Verify second LLM call
+        call2 = llm_calls[1]
+        assert call2["request_data"]["messages"][0]["content"] == "Analyze: World"
+
+    def test_download_results_records_failed_llm_calls_correctly(self) -> None:
+        """LLM calls that failed should be recorded with ERROR status."""
+        config = {
+            "deployment_name": "gpt-4o-batch",
+            "endpoint": "https://test.openai.azure.com",
+            "api_key": "test-key",
+            "template": "Analyze: {{ row.text }}",
+            "schema": {"fields": "dynamic"},
+        }
+        transform = AzureBatchLLMTransform(config)
+
+        recorded_calls: list[dict[str, Any]] = []
+
+        def capture_call(**kwargs: Any) -> MagicMock:
+            recorded_calls.append(kwargs)
+            return MagicMock()
+
+        ctx = MagicMock()
+        ctx.run_id = "test-run"
+        ctx.state_id = "batch-state-123"
+        ctx.record_call = capture_call
+        ctx.get_checkpoint.return_value = {
+            "batch_id": "azure-batch-789",
+            "row_mapping": {"row-0-abc": 0, "row-1-def": 1},
+            "requests": {
+                "row-0-abc": {"messages": [{"role": "user", "content": "Good"}], "model": "gpt-4o-batch"},
+                "row-1-def": {"messages": [{"role": "user", "content": "Bad"}], "model": "gpt-4o-batch"},
+            },
+        }
+        ctx.clear_checkpoint = MagicMock()
+
+        mock_batch = MagicMock()
+        mock_batch.output_file_id = "output-file-999"
+
+        # One success, one error
+        output_jsonl = """{"custom_id": "row-0-abc", "response": {"body": {"choices": [{"message": {"content": "OK"}}]}}}
+{"custom_id": "row-1-def", "error": {"code": "content_filter", "message": "Content filtered"}}"""
+
+        mock_output_content = MagicMock()
+        mock_output_content.text = output_jsonl
+
+        rows = [{"text": "Good"}, {"text": "Bad"}]
+
+        with patch.object(transform, "_get_client") as mock_client:
+            mock_client.return_value.files.content.return_value = mock_output_content
+            # Result unused - we're testing side effects (recorded calls)
+            transform._download_results(mock_batch, ctx.get_checkpoint(), rows, ctx)
+
+        from elspeth.contracts import CallStatus, CallType
+
+        llm_calls = [c for c in recorded_calls if c.get("call_type") == CallType.LLM]
+        assert len(llm_calls) == 2
+
+        # Find success and error calls by content
+        success_call = next(c for c in llm_calls if "Good" in str(c["request_data"]))
+        error_call = next(c for c in llm_calls if "Bad" in str(c["request_data"]))
+
+        # Success call assertions
+        assert success_call["status"] == CallStatus.SUCCESS
+        assert success_call["response_data"] is not None
+        assert "custom_id" in success_call["request_data"]  # QA requirement
+
+        # Error call assertions
+        assert error_call["status"] == CallStatus.ERROR
+        assert error_call["error"] is not None
+        assert "content_filter" in str(error_call["error"])
+        assert "custom_id" in error_call["request_data"]  # QA requirement
 
 
 class TestAzureBatchLLMTransformClose:

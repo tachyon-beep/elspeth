@@ -375,6 +375,10 @@ class AzureBatchLLMTransform(BaseTransform):
             requests.append(request)
             row_mapping[custom_id] = idx
 
+        # Build request lookup for audit recording (custom_id -> request body)
+        # This allows the audit trail to record exactly what was sent to the LLM
+        requests_by_id = {req["custom_id"]: req["body"] for req in requests}
+
         # If ALL rows failed template rendering, return error immediately
         if not requests:
             return TransformResult.error(
@@ -477,6 +481,7 @@ class AzureBatchLLMTransform(BaseTransform):
             "template_errors": template_errors,
             "submitted_at": datetime.now(UTC).isoformat(),
             "row_count": len(rows),
+            "requests": requests_by_id,  # BUG-AZURE-01: Store original requests for audit recording
         }
         self._update_checkpoint(ctx, checkpoint_data)
 
@@ -700,6 +705,29 @@ class AzureBatchLLMTransform(BaseTransform):
                 malformed_lines.append(f"Line {line_num}: Missing 'custom_id' field")
                 continue
 
+            # Tier 3 -> Tier 2 boundary: Validate structure immediately
+            # Azure Batch API returns either "error" OR "response", never both
+            has_error = "error" in result
+            has_response = "response" in result
+
+            if has_error and has_response:
+                malformed_lines.append(f"Line {line_num}: Has both 'error' and 'response'")
+                continue
+            if not has_error and not has_response:
+                malformed_lines.append(f"Line {line_num}: Missing both 'error' and 'response'")
+                continue
+
+            # Validate response structure if present
+            if has_response:
+                response = result["response"]
+                if not isinstance(response, dict):
+                    malformed_lines.append(f"Line {line_num}: 'response' is not a dict")
+                    continue
+                if "body" not in response:
+                    malformed_lines.append(f"Line {line_num}: Missing 'response.body'")
+                    continue
+
+            # Now validated - store as Tier 2 data
             results_by_id[custom_id] = result
 
         # If ALL lines are malformed, fail the entire batch
@@ -788,6 +816,39 @@ class AzureBatchLLMTransform(BaseTransform):
                     }
                     output_rows.append(output_row)
                     row_errors.append({"row_index": idx, "reason": "no_choices_in_response"})
+
+        # Record per-row LLM calls against the batch's state
+        # Uses existing state_id from context (set by AggregationExecutor)
+        # Note: checkpoint["requests"] is Tier 1 data (we wrote it) - crash if missing
+        requests_data = checkpoint["requests"]
+
+        for custom_id, result in results_by_id.items():
+            original_request = requests_data[custom_id]
+            row_index = row_mapping[custom_id]
+
+            # Determine call status from result (Tier 2 - validated at boundary)
+            if "error" in result:
+                call_status = CallStatus.ERROR
+                response_data = None
+                error_data = {"error": result["error"]}
+            else:
+                call_status = CallStatus.SUCCESS
+                # response.body guaranteed by boundary validation
+                response_data = result["response"]["body"]
+                error_data = None
+
+            # Record LLM call with custom_id for token mapping
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=call_status,
+                request_data={
+                    "custom_id": custom_id,
+                    "row_index": row_index,
+                    **original_request,
+                },
+                response_data=response_data,
+                error=error_data,
+            )
 
         # Clear checkpoint after successful completion
         self._clear_checkpoint(ctx)

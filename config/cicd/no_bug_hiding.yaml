@@ -202,87 +202,87 @@ allow_hits:
   reason: Checkpoint may be None or empty dict - checking for batch_id existence
   safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=415
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=419
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=454
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=458
   owner: architecture
   reason: 'Trust boundary: Azure batches.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=534
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=539
   owner: architecture
   reason: 'Trust boundary: Azure batches.retrieve API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=662
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=667
   owner: architecture
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=530
+- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=535
   owner: architecture
   reason: 'Trust boundary: Azure batch.output_file_id only exists on completed batches'
   safety: Recorded as None in audit trail - field is informational only
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=566
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=571
   owner: architecture
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=594
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=599
   owner: architecture
   reason: submitted_at may not exist in old checkpoint format
   safety: Missing submitted_at skips timeout check - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=639
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=644
   owner: architecture
   reason: row_mapping may not exist in corrupted checkpoint
   safety: Empty dict default allows graceful recovery - rows return with error
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=640
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=645
   owner: architecture
   reason: template_errors may not exist in old checkpoint format
   safety: Empty list default means no template errors tracked - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=698
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=703
   owner: architecture
   reason: 'Trust boundary: Azure JSONL result custom_id field validated as external data'
   safety: None check follows on next line - returns error row if missing
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=740
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=768
   owner: architecture
   reason: 'Intentional Optional API: rows with template errors aren''t in mapping'
   safety: None is checked explicitly on next line with 'if custom_id is None'
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=756
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=784
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''error'' field is optional'
   safety: Graceful handling - checks for error before extracting response
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=768
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=796
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=769
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=797
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''body'' field may be missing'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=770
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=798
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''choices'' field may be missing'
   safety: Graceful default to [] - explicit check for empty choices follows
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=773
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=801
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=774
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=802
   owner: architecture
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical

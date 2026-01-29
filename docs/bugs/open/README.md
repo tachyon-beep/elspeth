@@ -20,7 +20,7 @@ open/
 ├── engine-processor/     # Token management, outcomes (2 P1, 3 P2)
 ├── engine-retry/         # Retry logic (3 P2, 2 P3)
 ├── engine-spans/         # Observability, tracing (2 P2, 1 P3)
-├── llm-azure/            # Azure LLM integration (3 P1, 8 P2, 1 P3)
+├── llm-azure/            # Azure LLM integration (1 P1, 8 P2, 1 P3)
 ├── plugins-llm/          # Base LLM transforms (4 P1, 1 P2, 2 P3)
 ├── plugins-sinks/        # Sink implementations (3 P1, 2 P2, 1 P3)
 ├── plugins-sources/      # Source implementations (2 P2, 1 P3)
@@ -32,7 +32,7 @@ open/
 | Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Focus Area |
 |-----------|---------|---------|---------|-------|------------|
 | **engine-orchestrator** | 6 | 8 | 4 | 18 | Aggregations, routing, quarantine ⚠️ LARGEST HOTSPOT |
-| **llm-azure** | 3 | 8 | 1 | 12 | Azure integration, error handling ⚠️ HOTSPOT |
+| **llm-azure** | 1 | 8 | 1 | 10 | Azure integration, error handling ⚠️ HOTSPOT |
 | **core-landscape** | 4 | 5 | 3 | 12 | Audit trail, recovery, verifier ⚠️ HOTSPOT |
 | **core-config** | 0 | 4 | 5 | 9 | Expression validation, config contracts |
 | **engine-coalesce** | 3 | 4 | 0 | 7 | Fork/join semantics, timeouts |
@@ -47,7 +47,7 @@ open/
 | **engine-spans** | 0 | 2 | 1 | 3 | Observability, tracing |
 | **plugins-sources** | 0 | 2 | 1 | 3 | JSON parsing, validation |
 | **core-dag** | 1 | 0 | 0 | 1 | Branch name validation |
-| **TOTAL** | **30** | **49** | **25** | **104** | All bugs organized |
+| **TOTAL** | **28** | **49** | **25** | **102** | All bugs organized |
 
 **Note:** Total includes bugs from both original triage (73) and pending verification (33 STILL VALID).
 
@@ -57,7 +57,7 @@ open/
 1. **plugins-sinks/P1-databasesink-noncanonical-hash** - Audit integrity violation
 2. **engine-coalesce/P1-coalesce-timeouts-never-fired** - Feature completely broken
 3. **engine-coalesce/P1-coalesce-late-arrivals-duplicate-merge** - Data corruption
-4. **llm-azure/P1-azure-batch-missing-audit-payloads** - Auditability violation
+4. ~~**llm-azure/P1-azure-batch-missing-audit-payloads** - Auditability violation~~ ✅ FIXED (2026-01-29)
 5. **core-dag/P1-duplicate-branch-names-break-coalesce** - Silent data loss
 6. **engine-orchestrator/P1-orchestrator-aggregation-flush-output-mode-ignored** - Token identity broken
 7. **core-landscape/P1-recovery-skips-rows-multi-sink** - Recovery broken
@@ -99,7 +99,7 @@ open/
 ### LLM Integration
 **Owner:** LLM/Azure specialist
 **Files:** `src/elspeth/plugins/llm/`, `src/elspeth/plugins/transforms/azure/`
-- `azure_batch.py` - 1 bug (missing audit payloads)
+- `azure_batch.py` - ✅ 2 bugs FIXED (BUG-AZURE-01, BUG-AZURE-02 - 2026-01-29)
 - `azure/content_safety.py`, `azure/prompt_shield.py` - 1 bug (global call_index)
 - `azure_multi_query.py` - 1 bug (synthetic state_id)
 
@@ -110,7 +110,7 @@ open/
 
 ## Verification Status
 
-**All bugs (30 P1, 49 P2, 25 P3 = 104 total) verified and organized by subsystem (2026-01-29):**
+**All bugs (28 P1, 49 P2, 25 P3 = 102 total) verified and organized by subsystem (2026-01-29):**
 - ✅ **93% STILL VALID** (97/104 bugs) - Real technical debt, accurate triage
 - 🔄 **7 OBE** - Fixed by refactors or documentation-only
 - ❌ **0 LOST** - No bugs invalidated by code changes
@@ -123,7 +123,7 @@ open/
 - **Combined:** 97 STILL VALID, 7 OBE (93% validation rate)
 
 **Results by Priority:**
-- **P1:** 29/30 STILL VALID (97%) - Nearly all critical bugs remain unfixed
+- **P1:** 27/28 STILL VALID (96%) - BUG-AZURE-01 and BUG-AZURE-02 fixed (2026-01-29)
 - **P2:** 46/49 STILL VALID (94%) - High validation rate
 - **P3:** 22/25 STILL VALID (88%) - Quality/enhancement issues
 
