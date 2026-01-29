@@ -65,10 +65,12 @@ class TestTokenManager:
         )
 
         # step_in_pipeline is required - Orchestrator/RowProcessor is the authority
-        children = manager.fork_token(
+        # run_id is required for atomic outcome recording
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats", "classifier"],
             step_in_pipeline=1,  # Fork happens at step 1
+            run_id=run.run_id,
         )
 
         assert len(children) == 2
@@ -139,10 +141,11 @@ class TestTokenManagerCoalesce:
             row_data={"value": 42},
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats", "classifier"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Update children with branch-specific data
@@ -203,10 +206,11 @@ class TestTokenManagerForkIsolation:
         )
 
         # Fork to two branches
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["branch_a", "branch_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         child_a = children[0]
@@ -247,10 +251,11 @@ class TestTokenManagerForkIsolation:
 
         # Fork with custom nested row_data
         custom_data = {"nested": {"key": "original"}}
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
             row_data=custom_data,
         )
 
@@ -306,10 +311,11 @@ class TestTokenManagerExpandIsolation:
             {"payload": {"x": 10, "y": 20}, "items": [10, 20, 30]},
         ]
 
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         child_a = children[0]
@@ -359,10 +365,11 @@ class TestTokenManagerExpandIsolation:
             {"id": 2, "meta": shared_metadata},
         ]
 
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Mutate nested data in child 0
@@ -404,10 +411,11 @@ class TestTokenManagerExpandIsolation:
             {"level1": {"level2": [{"level3": ["deep_value"]}]}},
         ]
 
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Mutate at the deepest level
@@ -446,10 +454,11 @@ class TestTokenManagerEdgeCases:
         )
 
         # Fork with custom row_data
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["branch_a"],
             step_in_pipeline=1,
+            run_id=run.run_id,
             row_data={"value": 42, "forked": True},
         )
 
@@ -480,10 +489,11 @@ class TestTokenManagerEdgeCases:
             row_data={"x": 1},
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["my_branch"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         updated = manager.update_row_data(
@@ -558,10 +568,11 @@ class TestTokenManagerStepInPipeline:
         )
 
         # Fork with step_in_pipeline=2
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
             step_in_pipeline=2,
+            run_id=run.run_id,
         )
 
         # Verify step_in_pipeline is stored in audit trail
@@ -598,10 +609,11 @@ class TestTokenManagerStepInPipeline:
         )
 
         # Fork and then coalesce
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["a", "b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         merged = manager.coalesce_tokens(
@@ -653,10 +665,11 @@ class TestTokenManagerExpand:
         ]
 
         # Act
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=expanded_rows,
             step_in_pipeline=2,
+            run_id=run.run_id,
         )
 
         # Assert: correct number of children
@@ -707,17 +720,19 @@ class TestTokenManagerExpand:
         )
 
         # Fork to get a token with branch_name
-        forked = manager.fork_token(
+        forked, _fork_group_id = manager.fork_token(
             parent_token=initial,
             branches=["stats_branch"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
         parent = forked[0]  # Has branch_name="stats_branch"
 
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
             step_in_pipeline=2,
+            run_id=run.run_id,
         )
 
         # Children inherit branch_name
@@ -748,10 +763,11 @@ class TestTokenManagerExpand:
             row_data={"x": 1},
         )
 
-        children = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent,
             expanded_rows=[{"a": 1}, {"a": 2}],
             step_in_pipeline=5,
+            run_id=run.run_id,
         )
 
         # Verify step_in_pipeline is stored in audit trail

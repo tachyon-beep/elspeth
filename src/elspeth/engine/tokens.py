@@ -123,9 +123,12 @@ class TokenManager:
         parent_token: TokenInfo,
         branches: list[str],
         step_in_pipeline: int,
+        run_id: str,
         row_data: dict[str, Any] | None = None,
-    ) -> list[TokenInfo]:
+    ) -> tuple[list[TokenInfo], str]:
         """Fork a token to multiple branches.
+
+        ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
 
         The step_in_pipeline is required because the Orchestrator/RowProcessor
         owns step position - TokenManager doesn't track it.
@@ -134,24 +137,26 @@ class TokenManager:
             parent_token: Parent token to fork
             branches: List of branch names
             step_in_pipeline: Current step position in the DAG (stored in audit trail)
+            run_id: Run ID (required for atomic outcome recording)
             row_data: Optional row data (defaults to parent's data)
 
         Returns:
-            List of child TokenInfo, one per branch
+            Tuple of (child TokenInfo list, fork_group_id)
         """
         data = row_data if row_data is not None else parent_token.row_data
 
-        children = self._recorder.fork_token(
+        children, fork_group_id = self._recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=parent_token.row_id,
             branches=branches,
+            run_id=run_id,
             step_in_pipeline=step_in_pipeline,
         )
 
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across forked children. Shallow copy would cause mutations in
         # one branch to leak to siblings, breaking audit trail integrity.
-        return [
+        child_infos = [
             TokenInfo(
                 row_id=parent_token.row_id,
                 token_id=child.token_id,
@@ -161,6 +166,7 @@ class TokenManager:
             )
             for child in children
         ]
+        return child_infos, fork_group_id
 
     def coalesce_tokens(
         self,
@@ -223,8 +229,13 @@ class TokenManager:
         parent_token: TokenInfo,
         expanded_rows: list[dict[str, Any]],
         step_in_pipeline: int,
-    ) -> list[TokenInfo]:
+        run_id: str,
+        record_parent_outcome: bool = True,
+    ) -> tuple[list[TokenInfo], str]:
         """Create child tokens for deaggregation (1 input -> N outputs).
+
+        ATOMIC: Creates children AND optionally records parent EXPANDED outcome
+        in single transaction.
 
         Unlike fork_token (which creates parallel paths through the same DAG),
         expand_token creates sequential children that all continue down the
@@ -234,23 +245,28 @@ class TokenManager:
             parent_token: The token being expanded
             expanded_rows: List of output row dicts
             step_in_pipeline: Current step (for audit)
+            run_id: Run ID (required for atomic outcome recording)
+            record_parent_outcome: If True (default), record EXPANDED outcome for parent.
+                Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
 
         Returns:
-            List of child TokenInfo, one per expanded row
+            Tuple of (child TokenInfo list, expand_group_id)
         """
         # Delegate to recorder which handles DB operations and parent linking
-        db_children = self._recorder.expand_token(
+        db_children, expand_group_id = self._recorder.expand_token(
             parent_token_id=parent_token.token_id,
             row_id=parent_token.row_id,
             count=len(expanded_rows),
+            run_id=run_id,
             step_in_pipeline=step_in_pipeline,
+            record_parent_outcome=record_parent_outcome,
         )
 
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across expanded children. Same reasoning as fork_token - without
         # this, mutations in one sibling leak to others, corrupting audit trail.
         # Bug: P2-2026-01-21-expand-token-shared-row-data
-        return [
+        child_infos = [
             TokenInfo(
                 row_id=parent_token.row_id,
                 token_id=db_child.token_id,
@@ -260,6 +276,7 @@ class TokenManager:
             )
             for db_child, row_data in zip(db_children, expanded_rows, strict=True)
         ]
+        return child_infos, expand_group_id
 
     # NOTE: No advance_step() method - step position is the authority of
     # Orchestrator/RowProcessor, not TokenManager. They track where tokens

@@ -3261,10 +3261,11 @@ class TestExplainQuery:
         )
 
         # Fork into two children using token_manager (records parent relationships)
-        child_tokens = token_manager.fork_token(
+        child_tokens, _fork_group_id = token_manager.fork_token(
             parent_token=parent_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run_id,
         )
         token_a = child_tokens[0]
         token_b = child_tokens[1]

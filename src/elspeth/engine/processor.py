@@ -422,11 +422,14 @@ class RowProcessor:
 
             # Use first buffered token as parent for audit trail
             # Create NEW token via expand_token (buffered tokens are CONSUMED_IN_BATCH)
+            # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
-                expanded = self._token_manager.expand_token(
+                expanded, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=[final_data],
                     step_in_pipeline=audit_step,
+                    run_id=self._run_id,
+                    record_parent_outcome=False,
                 )
                 output_token = expanded[0]
 
@@ -527,11 +530,14 @@ class RowProcessor:
                 output_rows = [result.row]
 
             # Create new tokens via expand_token using first buffered token as parent
+            # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
-                expanded_tokens = self._token_manager.expand_token(
+                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=output_rows,
                     step_in_pipeline=audit_step,
+                    run_id=self._run_id,
+                    record_parent_outcome=False,
                 )
 
                 # Check if expanded tokens need to go to a coalesce point
@@ -847,10 +853,13 @@ class RowProcessor:
 
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage
-                expanded_tokens = self._token_manager.expand_token(
+                # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
+                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
                     expanded_rows=output_rows,
                     step_in_pipeline=step,
+                    run_id=self._run_id,
+                    record_parent_outcome=False,
                 )
 
                 # The triggering token becomes CONSUMED_IN_BATCH
@@ -1447,14 +1456,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Use canonical fork_group_id from recorder (all children share same ID)
-                    fork_group_id = outcome.child_tokens[0].fork_group_id
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.FORKED,
-                        fork_group_id=fork_group_id,
-                    )
+                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+                    # to eliminate crash window between child creation and outcome recording.
                     return (
                         RowResult(
                             token=current_token,
@@ -1571,10 +1574,12 @@ class RowProcessor:
 
                     # Deaggregation: create child tokens for each output row
                     # transform_result.rows is guaranteed non-None when is_multi_row is True
-                    child_tokens = self._token_manager.expand_token(
+                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+                    child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
                         expanded_rows=transform_result.rows,  # type: ignore[arg-type]
                         step_in_pipeline=step,
+                        run_id=self._run_id,
                     )
 
                     # Queue each child for continued processing
@@ -1590,14 +1595,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Parent token is EXPANDED (terminal for parent) - use canonical expand_group_id
-                    expand_group_id = child_tokens[0].expand_group_id
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.EXPANDED,
-                        expand_group_id=expand_group_id,
-                    )
+                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+                    # to eliminate crash window between child creation and outcome recording.
                     return (
                         RowResult(
                             token=current_token,
@@ -1683,14 +1682,8 @@ class RowProcessor:
                         )
                     )
 
-                # Use canonical fork_group_id from recorder (all children share same ID)
-                cfg_fork_group_id = outcome.child_tokens[0].fork_group_id
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
-                    outcome=RowOutcome.FORKED,
-                    fork_group_id=cfg_fork_group_id,
-                )
+                # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+                # to eliminate crash window between child creation and outcome recording.
                 return (
                     RowResult(
                         token=current_token,

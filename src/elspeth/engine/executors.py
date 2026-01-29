@@ -464,7 +464,7 @@ class GateExecutor:
         Args:
             gate: Gate plugin to execute
             token: Current token with row data
-            ctx: Plugin context
+            ctx: Plugin context (includes run_id for atomic fork outcome recording)
             step_in_pipeline: Current position in DAG (Orchestrator is authority)
             token_manager: TokenManager for fork operations (required for fork_to_paths)
 
@@ -594,11 +594,12 @@ class GateExecutor:
                 node_id=gate.node_id,
                 action=action,
             )
-            # Create child tokens
-            child_tokens = token_manager.fork_token(
+            # Create child tokens (ATOMIC: also records parent FORKED outcome)
+            child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
                 branches=list(action.destinations),
                 step_in_pipeline=step_in_pipeline,
+                run_id=ctx.run_id,
                 row_data=result.row,
             )
 
@@ -768,11 +769,12 @@ class GateExecutor:
                 action=action,
             )
 
-            # Create child tokens
-            child_tokens = token_manager.fork_token(
+            # Create child tokens (ATOMIC: also records parent FORKED outcome)
+            child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
                 branches=gate_config.fork_to,
                 step_in_pipeline=step_in_pipeline,
+                run_id=ctx.run_id,
                 row_data=token.row_data,
             )
 

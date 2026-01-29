@@ -547,10 +547,11 @@ class TestRowProcessorCoalesce:
             row_index=0,
             row_data={"text": "ACME earnings report"},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["sentiment", "entities", "summary"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate processing: sentiment and entities complete, summary is quarantined
@@ -674,10 +675,11 @@ class TestRowProcessorCoalesce:
             row_index=0,
             row_data={"text": "test input"},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "medium", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate: fast arrives first with enriched data
@@ -846,10 +848,11 @@ class TestRowProcessorCoalesce:
         )
 
         # === Level 1: Fork to path_a and path_b (gate1) ===
-        level1_children = token_manager.fork_token(
+        level1_children, _fork_group_id1 = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
         assert len(level1_children) == 2
         path_a_token = level1_children[0]  # branch_name="path_a"
@@ -864,10 +867,11 @@ class TestRowProcessorCoalesce:
         assert path_b_token.branch_name == "path_b"
 
         # === Level 2: path_a forks again to A1 and A2 (gate2) ===
-        level2_children = token_manager.fork_token(
+        level2_children, _fork_group_id2 = token_manager.fork_token(
             parent_token=path_a_token,
             branches=["path_a1", "path_a2"],
             step_in_pipeline=2,
+            run_id=run.run_id,
         )
         assert len(level2_children) == 2
         path_a1_token = level2_children[0]  # branch_name="path_a1"
@@ -1137,10 +1141,11 @@ class TestRowProcessorCoalesce:
         )
 
         # Fork into fast and slow branches
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate processing: create enriched tokens for each branch
@@ -1435,11 +1440,13 @@ class TestAggregationCoalesceMetadataPropagation:
         )
 
         # Fork to create a token with branch_name
-        forked_token = token_manager.fork_token(
+        forked_tokens, _fork_group_id = token_manager.fork_token(
             parent_token=source_token,
             branches=["path_a"],
             step_in_pipeline=0,
-        )[0]
+            run_id=run.run_id,
+        )
+        forked_token = forked_tokens[0]
 
         assert forked_token.branch_name == "path_a"
 
@@ -1462,11 +1469,13 @@ class TestAggregationCoalesceMetadataPropagation:
             row_index=1,
             row_data={"id": 2, "value": 200},
         )
-        forked_token2 = token_manager.fork_token(
+        forked_tokens2, _fork_group_id2 = token_manager.fork_token(
             parent_token=source_token2,
             branches=["path_a"],
             step_in_pipeline=0,
-        )[0]
+            run_id=run.run_id,
+        )
+        forked_token2 = forked_tokens2[0]
 
         # Process second token - triggers flush
         results2 = processor.process_token(

@@ -277,10 +277,11 @@ class TestLandscapeRecorderArtifacts:
 
         # Create initial token and fork
         parent = recorder.create_token(row_id=row.row_id)
-        _children = recorder.fork_token(
+        _children, _fork_group_id = recorder.fork_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             branches=["a", "b"],
+            run_id=run.run_id,
         )
 
         tokens = recorder.get_tokens(row.row_id)

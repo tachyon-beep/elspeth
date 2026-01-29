@@ -149,6 +149,8 @@ token_outcomes_table = Table(
     Column("error_hash", String(64)),
     # Optional extended context
     Column("context_json", Text),
+    # Branch contract for FORKED/EXPANDED outcomes (enables recovery validation)
+    Column("expected_branches_json", Text),
 )
 
 # Partial unique index: exactly one terminal outcome per token

@@ -109,10 +109,11 @@ class TestCoalesceAuditGap1a:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept both tokens (triggers merge)
@@ -230,10 +231,11 @@ class TestCoalesceAuditGap1b:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only 2 of 3 (quorum not met)
@@ -371,10 +373,11 @@ class TestCoalesceAuditGap2:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate child A failing at transform (before coalesce)
@@ -527,10 +530,11 @@ class TestCoalesceTimeoutAuditGap:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Only path_a arrives (path_b is "slow")

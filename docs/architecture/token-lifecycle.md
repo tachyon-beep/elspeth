@@ -84,37 +84,70 @@ def is_terminal(self) -> bool:
 
 ## State Transition Diagram
 
+**CRITICAL DISTINCTION:** This diagram shows TWO different things:
+1. **State transitions** (solid arrows) = same token changes outcome
+2. **Lineage creation** (dashed arrows) = NEW tokens created from parent
+
+Only BUFFERED→terminal is a true state transition on the same token. All other "transitions" create new tokens.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Token: create_initial_token()
 
-    Token --> FORKED: Fork gate
-    FORKED --> ChildTokens: fork_token()
-    note right of FORKED: Parent delegates to children
+    state "Same Token" as SameToken {
+        Token --> BUFFERED: Aggregation buffers
+        BUFFERED --> COMPLETED: Batch flush (same token)
+        BUFFERED --> ROUTED: Batch flush (same token)
+        BUFFERED --> FAILED: Batch error (same token)
+    }
 
-    Token --> BUFFERED: Aggregation (passthrough)
-    BUFFERED --> COMPLETED: Batch flush to sink
-    BUFFERED --> ROUTED: Batch flush to named sink
-    BUFFERED --> FAILED: Batch flush error
+    state "Parent Terminal + Children Created" as Lineage {
+        Token --> FORKED: Fork gate
+        Token --> CONSUMED_IN_BATCH: Aggregation consumes
+        Token --> EXPANDED: Deaggregation (rare)
+    }
 
-    Token --> CONSUMED_IN_BATCH: Aggregation (single/transform)
-    CONSUMED_IN_BATCH --> EXPANDED: Deaggregation
-    EXPANDED --> ChildTokens: expand_token()
-    note right of EXPANDED: Parent delegates to children
-
-    ChildTokens --> COALESCED: Coalesce merge
-    COALESCED --> MergedToken: coalesce_tokens()
-
-    Token --> COMPLETED: Reaches default sink
-    Token --> ROUTED: Gate routes to named sink
-    Token --> QUARANTINED: Validation failure
-    Token --> FAILED: Processing error
+    state "Final Terminal States" as Final {
+        Token --> COMPLETED: Reaches sink
+        Token --> ROUTED: Gate routes to sink
+        Token --> QUARANTINED: Validation failure
+        Token --> FAILED: Processing error
+        Token --> COALESCED: Merged at join
+    }
 
     COMPLETED --> [*]
     ROUTED --> [*]
     QUARANTINED --> [*]
     FAILED --> [*]
+    FORKED --> [*]
+    CONSUMED_IN_BATCH --> [*]
+    EXPANDED --> [*]
+    COALESCED --> [*]
 ```
+
+### Lineage Creation (Parent → Children)
+
+When a token reaches FORKED, CONSUMED_IN_BATCH, or EXPANDED, **new child tokens** are created:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ PARENT TOKEN                          CHILD TOKENS                  │
+│                                                                     │
+│ tok-A ──[FORKED]──────────────────►  tok-B (branch: path_a)        │
+│                                       tok-C (branch: path_b)        │
+│                                       (linked via fork_group_id)    │
+│                                                                     │
+│ tok-D ──[CONSUMED_IN_BATCH]───────►  tok-E (expanded row 1)        │
+│                                       tok-F (expanded row 2)        │
+│                                       (linked via expand_group_id)  │
+│                                                                     │
+│ tok-G ──┐                                                           │
+│ tok-H ──┼─[COALESCED]─────────────►  tok-J (merged result)         │
+│ tok-I ──┘                             (linked via join_group_id)    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key invariant:** Parent and children are DIFFERENT tokens. Each gets exactly ONE terminal outcome.
 
 ---
 
@@ -157,7 +190,7 @@ def create_initial_token(
 ### 2. Fork Children
 
 **Method:** `TokenManager.fork_token()`
-**Location:** `src/elspeth/engine/tokens.py:121-163`
+**Location:** `src/elspeth/engine/tokens.py:121-169`
 
 ```python
 def fork_token(
@@ -165,15 +198,19 @@ def fork_token(
     parent_token: TokenInfo,
     branches: list[str],
     step_in_pipeline: int,
+    run_id: str,
     row_data: dict[str, Any] | None = None,
-) -> list[TokenInfo]:
+) -> tuple[list[TokenInfo], str]:  # Returns (children, fork_group_id)
 ```
 
-**Critical:** Uses `copy.deepcopy(row_data)` to prevent sibling mutation.
+**Critical:**
+- Uses `copy.deepcopy(row_data)` to prevent sibling mutation
+- **ATOMIC:** Creates children AND records parent FORKED outcome in single transaction
 
-**Creates:**
+**Creates (atomically):**
 - N `tokens` entries (one per branch)
 - N `token_parents` entries (linking children to parent)
+- 1 `token_outcomes` entry (FORKED outcome for parent with `expected_branches_json`)
 - All share same `fork_group_id`
 
 **Called by:** `GateExecutor.execute()` at `executors.py:598`
@@ -202,7 +239,7 @@ def coalesce_tokens(
 ### 4. Expanded Children (Deaggregation)
 
 **Method:** `TokenManager.expand_token()`
-**Location:** `src/elspeth/engine/tokens.py:221-262`
+**Location:** `src/elspeth/engine/tokens.py:227-279`
 
 ```python
 def expand_token(
@@ -210,17 +247,90 @@ def expand_token(
     parent_token: TokenInfo,
     expanded_rows: list[dict[str, Any]],
     step_in_pipeline: int,
-) -> list[TokenInfo]:
+    run_id: str,
+    record_parent_outcome: bool = True,
+) -> tuple[list[TokenInfo], str]:  # Returns (children, expand_group_id)
 ```
 
-**Critical:** Uses `copy.deepcopy()` for each expanded row.
+**Critical:**
+- Uses `copy.deepcopy()` for each expanded row
+- **ATOMIC (default):** Creates children AND records parent EXPANDED outcome in single transaction
+- Set `record_parent_outcome=False` for batch aggregation (parent gets CONSUMED_IN_BATCH instead)
 
-**Creates:**
+**Creates (atomically when record_parent_outcome=True):**
 - N `tokens` entries (one per output row)
 - N `token_parents` entries
+- 1 `token_outcomes` entry (EXPANDED outcome for parent with `expected_branches_json`)
 - All share same `expand_group_id`
 
-**Called by:** `RowProcessor.handle_timeout_flush()` at `processor.py:426, 531`
+**Called by:**
+- `RowProcessor.handle_timeout_flush()` at `processor.py:427, 534, 855`
+- `RowProcessor._handle_multi_row_transform()` at `processor.py:1577`
+
+---
+
+## Atomic Operations and Branch Contracts
+
+### Why Atomic?
+
+Before 2026-01-29, fork_token and expand_token had a **crash vulnerability**:
+
+```
+OLD (vulnerable):
+1. fork_token() creates children  <-- crash here = orphan children
+2. record_token_outcome(FORKED)   <-- never recorded, recovery fails
+```
+
+If crash occurred between steps 1 and 2:
+- Children exist but have no FORKED parent outcome
+- Recovery can't distinguish "partial fork" from "never forked"
+- **Data loss:** Children continue processing without proper audit trail
+
+### The Fix: Atomic Transactions
+
+Fork and expand now record parent outcomes **in the same transaction** as child creation:
+
+```python
+# Inside fork_token (LandscapeRecorder)
+with self._db.connection() as conn:
+    # 1. Create child tokens
+    for branch in branches:
+        conn.execute(tokens_table.insert()...)
+        conn.execute(token_parents_table.insert()...)
+
+    # 2. Record parent FORKED outcome (SAME TRANSACTION)
+    conn.execute(token_outcomes_table.insert().values(
+        outcome=RowOutcome.FORKED.value,
+        expected_branches_json=json.dumps(branches),  # Branch contract
+    ))
+# All or nothing: either both succeed or neither does
+```
+
+### Branch Contracts
+
+The `expected_branches_json` column stores what branches/children were **promised**:
+
+| Outcome | Contract Format | Purpose |
+|---------|-----------------|---------|
+| FORKED | `["path_a", "path_b"]` | List of branch names |
+| EXPANDED | `{"count": 3}` | Expected child count |
+
+This enables recovery validation: if expected != actual, something went wrong.
+
+**Schema location:** `src/elspeth/core/landscape/schema.py` (token_outcomes table)
+
+### Batch Aggregation Exception
+
+Batch aggregation uses `expand_token` to create children but the parent should get `CONSUMED_IN_BATCH`, not `EXPANDED`. The `record_parent_outcome=False` parameter handles this:
+
+```python
+# Batch aggregation: parent gets CONSUMED_IN_BATCH separately
+expand_token(..., record_parent_outcome=False)
+recorder.record_token_outcome(..., outcome=RowOutcome.CONSUMED_IN_BATCH)
+
+# Deaggregation: parent gets EXPANDED atomically (default)
+expand_token(...)  # record_parent_outcome=True by default
+```
 
 ---
 
@@ -236,10 +346,10 @@ def expand_token(
 | 858-863 | `handle_timeout_flush()` | CONSUMED_IN_BATCH | Timeout flush (triggering token) |
 | 920-925 | `_process_aggregation()` | BUFFERED | Aggregation passthrough buffering |
 | 936-941 | `_process_aggregation()` | CONSUMED_IN_BATCH | Non-passthrough aggregation |
-| 1452-1457 | `_execute_gate()` | FORKED | Gate fork execution |
+| (atomic) | `fork_token()` → `recorder.fork_token()` | FORKED | Gate fork execution (atomically in recorder) |
 | 1509-1514 | `_execute_transform()` | FAILED | Transform retry exhaustion |
 | 1531-1536 | `_execute_transform()` | QUARANTINED | Transform error with discard |
-| 1595-1600 | `handle_timeout_flush()` | EXPANDED | Timeout flush expansion |
+| (atomic) | `expand_token()` → `recorder.expand_token()` | EXPANDED | Deaggregation (atomically in recorder) |
 
 ### Executors (executors.py)
 

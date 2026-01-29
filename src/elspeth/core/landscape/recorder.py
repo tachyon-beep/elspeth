@@ -734,21 +734,23 @@ class LandscapeRecorder:
         row_id: str,
         branches: list[str],
         *,
+        run_id: str,
         step_in_pipeline: int | None = None,
-    ) -> list[Token]:
+    ) -> tuple[list[Token], str]:
         """Fork a token to multiple branches.
 
-        Creates child tokens for each branch, all sharing a fork_group_id.
-        Records parent relationships.
+        ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
+        Stores branch contract for recovery validation.
 
         Args:
             parent_token_id: Token being forked
             row_id: Row ID (same for all children)
             branches: List of branch names (must have at least one)
+            run_id: Run ID (required for outcome recording)
             step_in_pipeline: Step in the DAG where the fork occurs
 
         Returns:
-            List of child Token models
+            Tuple of (child Token models, fork_group_id)
 
         Raises:
             ValueError: If branches is empty (defense-in-depth for audit integrity)
@@ -763,6 +765,7 @@ class LandscapeRecorder:
         children = []
 
         with self._db.connection() as conn:
+            # 1. Create child tokens
             for ordinal, branch_name in enumerate(branches):
                 child_id = generate_id()
                 timestamp = now()
@@ -799,7 +802,22 @@ class LandscapeRecorder:
                     )
                 )
 
-        return children
+            # 2. Record parent FORKED outcome in SAME transaction (atomic)
+            outcome_id = f"out_{generate_id()[:12]}"
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=outcome_id,
+                    run_id=run_id,
+                    token_id=parent_token_id,
+                    outcome=RowOutcome.FORKED.value,
+                    is_terminal=1,
+                    recorded_at=now(),
+                    fork_group_id=fork_group_id,
+                    expected_branches_json=json.dumps(branches),
+                )
+            )
+
+        return children, fork_group_id
 
     def coalesce_tokens(
         self,
@@ -860,9 +878,15 @@ class LandscapeRecorder:
         parent_token_id: str,
         row_id: str,
         count: int,
-        step_in_pipeline: int,
-    ) -> list[Token]:
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+        record_parent_outcome: bool = True,
+    ) -> tuple[list[Token], str]:
         """Expand a token into multiple child tokens (deaggregation).
+
+        ATOMIC: Creates children AND optionally records parent EXPANDED outcome
+        in single transaction.
 
         Creates N child tokens from a single parent for 1->N expansion.
         All children share the same row_id (same source row) and are
@@ -875,10 +899,13 @@ class LandscapeRecorder:
             parent_token_id: Token being expanded
             row_id: Row ID (same for all children)
             count: Number of child tokens to create (must be >= 1)
-            step_in_pipeline: Step where expansion occurs
+            run_id: Run ID (required for atomic outcome recording)
+            step_in_pipeline: Step where expansion occurs (optional)
+            record_parent_outcome: If True (default), record EXPANDED outcome for parent.
+                Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
 
         Returns:
-            List of child Token models
+            Tuple of (child Token list, expand_group_id)
 
         Raises:
             ValueError: If count < 1
@@ -924,7 +951,29 @@ class LandscapeRecorder:
                     )
                 )
 
-        return children
+            # Optionally record parent EXPANDED outcome in SAME transaction (atomic)
+            # This eliminates the crash window where children exist but parent
+            # outcome is not yet recorded.
+            #
+            # Set record_parent_outcome=False for batch aggregation where the
+            # parent token gets CONSUMED_IN_BATCH instead of EXPANDED.
+            if record_parent_outcome:
+                outcome_id = f"out_{generate_id()[:12]}"
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=outcome_id,
+                        run_id=run_id,
+                        token_id=parent_token_id,
+                        outcome=RowOutcome.EXPANDED.value,
+                        is_terminal=1,
+                        recorded_at=now(),
+                        expand_group_id=expand_group_id,
+                        # Store expected count for recovery validation
+                        expected_branches_json=json.dumps({"count": count}),
+                    )
+                )
+
+        return children, expand_group_id
 
     # === Node State Recording ===
 
@@ -2155,6 +2204,7 @@ class LandscapeRecorder:
                 token_outcomes_table.c.expand_group_id,
                 token_outcomes_table.c.error_hash,
                 token_outcomes_table.c.context_json,
+                token_outcomes_table.c.expected_branches_json,
             )
             .join(
                 tokens_table,

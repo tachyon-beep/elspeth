@@ -553,3 +553,4 @@ class TokenOutcome:
     expand_group_id: str | None = None
     error_hash: str | None = None
     context_json: str | None = None
+    expected_branches_json: str | None = None  # Branch contract for FORKED/EXPANDED

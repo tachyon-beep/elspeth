@@ -243,10 +243,11 @@ class TestLandscapeExporterComplexRun:
         parent_token = recorder.create_token(row_id=row.row_id)
 
         # Use expand_token() to create tokens with expand_group_id set
-        expanded_tokens = recorder.expand_token(
+        expanded_tokens, _expand_group_id = recorder.expand_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             count=2,
+            run_id=run.run_id,
             step_in_pipeline=1,
         )
         recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
@@ -523,10 +524,11 @@ class TestLandscapeExporterComplexRun:
             data={},
         )
         parent_token = recorder.create_token(row_id=row.row_id)
-        _children = recorder.fork_token(
+        _children, _fork_group_id = recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             branches=["a", "b"],
+            run_id=run.run_id,
         )
         recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 

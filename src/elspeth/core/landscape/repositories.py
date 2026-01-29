@@ -484,6 +484,7 @@ class TokenOutcomeRepository:
             expand_group_id=row.expand_group_id,
             error_hash=row.error_hash,
             context_json=row.context_json,
+            expected_branches_json=row.expected_branches_json,
         )
 
 

@@ -126,10 +126,11 @@ class TestCoalesceExecutorRequireAll:
             row_data={"value": 42},
         )
         # Fork creates children with branch names
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
         token_a = children[0]  # path_a
 
@@ -200,10 +201,11 @@ class TestCoalesceExecutorRequireAll:
             row_index=0,
             row_data={"original": True},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate different processing on each branch
@@ -292,10 +294,11 @@ class TestCoalesceExecutorFirst:
             row_index=0,
             row_data={"original": True},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate slow arriving first (fast is delayed)
@@ -386,10 +389,11 @@ class TestCoalesceExecutorFirst:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Fast token arrives first - should merge immediately
@@ -482,10 +486,11 @@ class TestCoalesceExecutorQuorum:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["model_a", "model_b", "model_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         token_a = TokenInfo(
@@ -575,10 +580,11 @@ class TestCoalesceExecutorQuorum:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["model_a", "model_b", "model_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only ONE token (quorum needs 2)
@@ -669,10 +675,11 @@ class TestCoalesceExecutorQuorum:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only 2 of 3 tokens (quorum not met)
@@ -825,10 +832,11 @@ class TestCoalesceExecutorQuorum:
             row_index=0,
             row_data={"value": 100},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept first token - should be held
@@ -942,10 +950,11 @@ class TestCoalesceExecutorBestEffort:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         token_a = TokenInfo(
@@ -1051,10 +1060,11 @@ class TestCoalesceAuditMetadata:
             row_index=0,
             row_data={"original": True},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate different processing on each branch
@@ -1203,10 +1213,11 @@ class TestCoalesceIntegration:
         )
 
         # Simulate fork
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["sentiment", "entities"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate different processing on each branch
@@ -1302,10 +1313,11 @@ class TestFlushPending:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b", "path_c"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only 2 of 3 tokens
@@ -1392,10 +1404,11 @@ class TestFlushPending:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["model_a", "model_b", "model_c", "model_d"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only 1 token (quorum needs 3)
@@ -1471,10 +1484,11 @@ class TestFlushPending:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept only 1 of 2 tokens
@@ -1570,10 +1584,11 @@ class TestFlushPending:
             row_index=0,
             row_data={},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["model_a", "model_b", "model_c", "model_d"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Accept 2 tokens - quorum should be met and merge immediately

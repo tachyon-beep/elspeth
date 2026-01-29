@@ -112,10 +112,11 @@ class TestLandscapeRecorderQueryMethods:
 
         # Create parent token and fork
         parent = recorder.create_token(row_id=row.row_id)
-        children = recorder.fork_token(
+        children, _fork_group_id = recorder.fork_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             branches=["a", "b"],
+            run_id=run.run_id,
         )
 
         # Coalesce the children

@@ -554,11 +554,12 @@ class TestExplainFunction:
         # Create parent token
         parent_token = recorder.create_token(row_id=row.row_id)
 
-        # Create child token via fork
-        child_tokens = recorder.fork_token(
+        # Create child token via fork (also records parent FORKED outcome atomically)
+        child_tokens, _fork_group_id = recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             branches=["branch_a"],
+            run_id=run.run_id,
         )
         child_token = child_tokens[0]
 

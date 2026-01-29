@@ -35,11 +35,13 @@ from tests.property.conftest import (
 
 
 def _create_mock_recorder(branches: list[str]) -> MagicMock:
-    """Create a mock recorder that returns child tokens for fork operations."""
+    """Create a mock recorder that returns child tokens for fork operations.
+
+    Note: fork_token now returns tuple[list[Token], str] for atomic operation.
+    """
     mock_recorder = MagicMock()
-    mock_recorder.fork_token.return_value = [
-        MagicMock(token_id=f"child_{i}", branch_name=branch, fork_group_id="fork_1") for i, branch in enumerate(branches)
-    ]
+    children = [MagicMock(token_id=f"child_{i}", branch_name=branch, fork_group_id="fork_1") for i, branch in enumerate(branches)]
+    mock_recorder.fork_token.return_value = (children, "fork_1")
     return mock_recorder
 
 
@@ -66,10 +68,11 @@ class TestForkIsolationProperties:
             row_data=row_data,
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
         )
 
         assert len(children) == len(branches), "Wrong number of children"
@@ -122,10 +125,11 @@ class TestForkIsolationProperties:
             row_data=row_data,
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
         )
 
         # Store original state of all children
@@ -186,10 +190,11 @@ class TestForkParentPreservationProperties:
         # Deep copy parent data for comparison
         original_parent_data = copy.deepcopy(parent.row_data)
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
         )
 
         # Mutate all children
@@ -224,10 +229,11 @@ class TestForkParentPreservationProperties:
             row_data=row_data,
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
         )
 
         # Verify each child
@@ -275,10 +281,11 @@ class TestForkRowDataOverrideProperties:
             row_data=original_data,
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
             row_data=override_data,  # Explicit override
         )
 
@@ -311,10 +318,11 @@ class TestForkRowDataOverrideProperties:
             row_data=original_data,
         )
 
-        children = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent,
             branches=branches,
             step_in_pipeline=1,
+            run_id="test_run_1",
             # No row_data override
         )
 
