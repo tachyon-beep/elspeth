@@ -45,6 +45,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
+from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -1136,6 +1137,19 @@ class Orchestrator:
                                 source_node_id=source_id,
                                 row_index=row_index,
                                 row_data=source_item.row,
+                            )
+
+                            # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                            from elspeth.telemetry import RowCreated as TelemetryRowCreated
+
+                            self._emit_telemetry(
+                                TelemetryRowCreated(
+                                    timestamp=datetime.now(UTC),
+                                    run_id=run_id,
+                                    row_id=quarantine_token.row_id,
+                                    token_id=quarantine_token.token_id,
+                                    content_hash=stable_hash(source_item.row),
+                                )
                             )
 
                             # Record QUARANTINED outcome with error_hash for audit trail

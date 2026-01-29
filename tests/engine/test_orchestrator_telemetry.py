@@ -471,3 +471,148 @@ class TestTelemetryEventContent:
         run_ids = {e.run_id for e in exporter.events}
         assert len(run_ids) == 1
         assert next(iter(run_ids)) is not None
+
+
+# =============================================================================
+# RowCreated Event Tests
+# =============================================================================
+
+
+class TestRowCreatedTelemetry:
+    """Tests for RowCreated telemetry event emission.
+
+    RowCreated is emitted when a new row enters the pipeline:
+    - In Orchestrator: for quarantined source rows
+    - In RowProcessor: for normal rows (Task 2.2)
+
+    These tests verify the Orchestrator quarantine path.
+    """
+
+    def test_row_created_emitted_for_quarantined_row(self, landscape_db: LandscapeDB) -> None:
+        """RowCreated telemetry event is emitted for quarantined source rows.
+
+        When a source yields SourceRow.quarantined(), the Orchestrator:
+        1. Creates a token via create_initial_token()
+        2. Emits RowCreated telemetry AFTER Landscape recording succeeds
+        3. Records QUARANTINED outcome
+        """
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.canonical import stable_hash
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.telemetry.events import RowCreated
+        from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+        from tests.engine.orchestrator_test_helpers import build_production_graph
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class QuarantiningSource(_TestSourceBase):
+            """Source that yields one quarantined row."""
+
+            name = "quarantining_source"
+            output_schema = RowSchema
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # Quarantined row - simulates validation failure
+                yield SourceRow.quarantined(
+                    row={"id": 1, "name": "invalid", "extra": "bad_data"},
+                    error="Schema validation failed: unexpected field 'extra'",
+                    destination="quarantine",
+                )
+
+        class CollectSink(_TestSinkBase):
+            name = "collect_sink"
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = QuarantiningSource()
+        default_sink = CollectSink()
+        quarantine_sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "output": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        orchestrator.run(config, graph=build_production_graph(config))
+
+        # Verify RowCreated was emitted
+        row_created_events = [e for e in exporter.events if isinstance(e, RowCreated)]
+        assert len(row_created_events) == 1
+
+        event = row_created_events[0]
+        assert event.row_id is not None
+        assert event.token_id is not None
+        # Content hash should match the row data
+        expected_hash = stable_hash({"id": 1, "name": "invalid", "extra": "bad_data"})
+        assert event.content_hash == expected_hash
+
+    def test_row_created_not_emitted_without_telemetry_manager(self, landscape_db: LandscapeDB) -> None:
+        """No RowCreated event when telemetry manager is not configured."""
+        from collections.abc import Iterator
+
+        from elspeth.contracts import PluginSchema
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
+        from tests.engine.orchestrator_test_helpers import build_production_graph
+
+        class RowSchema(PluginSchema):
+            id: int
+
+        class QuarantiningSource(_TestSourceBase):
+            name = "quarantining_source"
+            output_schema = RowSchema
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.quarantined(
+                    row={"id": 1},
+                    error="Validation failed",
+                    destination="quarantine",
+                )
+
+        class CollectSink(_TestSinkBase):
+            name = "collect_sink"
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = QuarantiningSource()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "output": as_sink(CollectSink()),
+                "quarantine": as_sink(CollectSink()),
+            },
+        )
+
+        # No telemetry manager
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=None)
+        result = orchestrator.run(config, graph=build_production_graph(config))
+
+        # Should complete without error
+        assert result.status == RunStatus.COMPLETED
+        assert result.rows_quarantined == 1
