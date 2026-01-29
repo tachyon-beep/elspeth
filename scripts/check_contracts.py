@@ -4,6 +4,7 @@
 Scans the codebase for:
 1. dataclasses, TypedDicts, NamedTuples, and Enums used across module boundaries
 2. dict[str, Any] type hints that should be typed contracts
+3. Settings classes without Runtime counterparts (orphaned settings)
 
 Also validates that all whitelist entries are still valid (not stale).
 
@@ -64,6 +65,15 @@ class WhitelistEntry:
     value: str
     category: str
     matched: bool = field(default=False)
+
+
+@dataclass
+class SettingsViolation:
+    """A Settings class without a Runtime counterpart."""
+
+    class_name: str
+    file: str
+    line: int
 
 
 def load_whitelist(path: Path) -> tuple[dict[str, set[str]], list[WhitelistEntry]]:
@@ -508,6 +518,70 @@ def find_stale_entries(
     return stale
 
 
+def find_settings_classes(config_path: Path) -> list[tuple[str, int]]:
+    """Find all Settings classes in core/config.py.
+
+    A Settings class is identified by its name ending in 'Settings'.
+    These are Pydantic BaseModel classes that define configuration schemas.
+
+    Args:
+        config_path: Path to core/config.py
+
+    Returns:
+        List of (class_name, line_number) tuples
+    """
+    try:
+        source = config_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+
+    settings_classes = []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name.endswith("Settings"):
+            settings_classes.append((node.name, node.lineno))
+
+    return settings_classes
+
+
+def check_settings_alignment(config_path: Path) -> list[SettingsViolation]:
+    """Check that all Settings classes have Runtime counterparts or are exempt.
+
+    Uses SETTINGS_TO_RUNTIME and EXEMPT_SETTINGS from contracts/config/alignment.py
+    to determine which Settings classes need Runtime counterparts.
+
+    Args:
+        config_path: Path to core/config.py
+
+    Returns:
+        List of SettingsViolation for orphaned Settings classes
+    """
+    # Import alignment mappings
+    from elspeth.contracts.config.alignment import EXEMPT_SETTINGS, SETTINGS_TO_RUNTIME
+
+    settings_classes = find_settings_classes(config_path)
+    violations = []
+
+    for class_name, line_no in settings_classes:
+        # Check if exempt (doesn't need Runtime counterpart)
+        if class_name in EXEMPT_SETTINGS:
+            continue
+        # Check if has Runtime counterpart
+        if class_name in SETTINGS_TO_RUNTIME:
+            continue
+        # Orphaned - no Runtime counterpart and not exempt
+        violations.append(
+            SettingsViolation(
+                class_name=class_name,
+                file=str(config_path),
+                line=line_no,
+            )
+        )
+
+    return violations
+
+
 def main() -> int:
     """Run the contracts enforcement check."""
     parser = argparse.ArgumentParser(description="Check that cross-boundary types are in contracts/ and whitelist entries are valid")
@@ -561,6 +635,10 @@ def main() -> int:
     # Find stale whitelist entries
     stale_entries = find_stale_entries(all_entries, matched_dict_patterns, matched_type_patterns, src_dir)
 
+    # Check Settings → Runtime alignment
+    config_path = src_dir / "core" / "config.py"
+    settings_violations = check_settings_alignment(config_path)
+
     has_violations = False
     has_stale = False
 
@@ -579,6 +657,15 @@ def main() -> int:
         for dv in dict_violations:
             print(f"  {dv.file}:{dv.line}: {dv.context} - {dv.param_name}")
             print("    Fix: Use TypedDict/dataclass or add to allowed_dict_patterns\n")
+
+    if settings_violations:
+        has_violations = True
+        print("❌ Orphaned Settings classes found:\n")
+        print("  (Settings classes without Runtime counterparts)\n")
+        for sv in settings_violations:
+            print(f"  {sv.file}:{sv.line}: {sv.class_name}")
+            print("    Fix: Add to SETTINGS_TO_RUNTIME mapping in contracts/config/alignment.py")
+            print("    Or add to EXEMPT_SETTINGS if no Runtime counterpart is needed\n")
 
     if stale_entries:
         has_stale = True
@@ -602,6 +689,7 @@ def main() -> int:
     print("✅ All cross-boundary types are properly centralized in contracts/")
     if not stale_entries:
         print("✅ All whitelist entries are valid")
+    print("✅ All Settings classes have Runtime counterparts or are exempt")
     return 0
 
 
