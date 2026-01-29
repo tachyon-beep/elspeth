@@ -78,6 +78,8 @@ from hypothesis import Phase, Verbosity, settings
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.plugins.manager import PluginManager
+from tests.fixtures.chaosllm import ChaosLLMFixture, chaosllm_server
+from tests.fixtures.chaosllm import pytest_configure as _chaosllm_pytest_configure
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
@@ -582,9 +584,22 @@ def real_landscape_recorder_with_payload_store(real_landscape_db, tmp_path):
     return LandscapeRecorder(real_landscape_db, payload_store=payload_store)
 
 
+# =============================================================================
+# ChaosLLM Fixtures
+# =============================================================================
+# chaosllm_server fixture and ChaosLLMFixture are imported at top of file
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    # Register ChaosLLM marker
+    _chaosllm_pytest_configure(config)
+
+
 # Re-export for convenient import
 __all__ = [
     "CallbackSource",
+    "ChaosLLMFixture",
     "_TestSchema",
     "_TestSinkBase",
     "_TestSourceBase",
@@ -594,6 +609,7 @@ __all__ = [
     "as_source",
     "as_transform",
     "as_transform_result",
+    "chaosllm_server",
     "plugin_manager",
     "real_landscape_db",
     "real_landscape_recorder",

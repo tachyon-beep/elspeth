@@ -112,6 +112,8 @@ all = [
 [project.scripts]
 elspeth = "elspeth.cli:app"
 elspeth-mcp = "elspeth.mcp:main"
+chaosllm = "elspeth.testing.chaosllm.cli:main"
+chaosllm-mcp = "elspeth.testing.chaosllm.cli:mcp_main_entry"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
