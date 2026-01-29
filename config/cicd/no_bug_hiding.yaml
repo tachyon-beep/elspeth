@@ -848,3 +848,9 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): LLM provider prompt_tokens is informational in truncation error'
   safety: Default 0 in error metadata - does not affect control flow, just audit completeness
   expires: null
+# CLI Helpers - plugin boundary validation
+- key: cli_helpers.py:R2:instantiate_plugins_from_config:line=54
+  owner: architecture
+  reason: 'Plugin boundary: checking is_batch_aware on user-provided transform instance (Tier 2 data)'
+  safety: False default triggers ValueError with actionable message - fail-fast, not silent degradation
+  expires: null

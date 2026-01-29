@@ -42,10 +42,24 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
         transforms.append(transform_cls(dict(plugin_config.options)))
 
     # Instantiate aggregations
+    # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
+    # Non-batch-aware transforms process rows individually, ignoring aggregation
+    # triggers entirely - a silent misconfiguration that produces wrong results.
     aggregations = {}
     for agg_config in config.aggregations:
         transform_cls = manager.get_transform_by_name(agg_config.plugin)
         transform = transform_cls(dict(agg_config.options))
+
+        # Validate batch-aware requirement (fail-fast before graph construction)
+        if not getattr(transform, "is_batch_aware", False):
+            raise ValueError(
+                f"Aggregation '{agg_config.name}' uses transform '{agg_config.plugin}' "
+                f"which has is_batch_aware=False. Aggregations require batch-aware "
+                f"transforms that can process multiple rows at once. "
+                f"Use a batch-aware transform like 'azure_batch_llm', 'batch_stats', "
+                f"or 'batch_replicate', or set is_batch_aware=True on your custom transform."
+            )
+
         aggregations[agg_config.name] = (transform, agg_config)
 
     # Instantiate sinks
