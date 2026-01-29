@@ -833,3 +833,31 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 **Risk assessment:** Low - uses existing infrastructure, no schema changes
 
 **Key difference from original plan:** Records calls against existing batch state instead of creating new node_states. This is architecturally correct and uses existing schema.
+
+---
+
+## PLAN COMPLETION: 2026-01-29
+
+**Status:** COMPLETED
+
+**Implemented By:** Claude (with subagent-driven development + 4-specialist review)
+
+**Summary:**
+All 7 tasks completed successfully. The Azure batch LLM transform now records per-row LLM calls in the audit trail with full FK integrity.
+
+**Implementation Highlights:**
+1. ✅ Task 1: Requests stored in checkpoint (`requests_by_id` lookup)
+2. ✅ Task 2: LLM calls recorded via `ctx.record_call()` with auto-incrementing `call_index`
+3. ✅ Task 3: Error results handled with `CallStatus.ERROR`
+4. ✅ Task 5: Integration tests verify `explain()` returns full LLM details
+5. ✅ Task 6: Bug docs moved to `docs/bugs/closed/llm/` with CLOSURE sections
+6. ✅ Task 7: All 43 tests pass, mypy clean, ruff clean, pre-commit hooks pass
+
+**Notable Decisions:**
+- **No backwards compatibility guards** - Per No Legacy Code Policy, updated all test fixtures instead of adding version checks
+- **Tier 3 boundary validation** - Added at Azure response parse boundary (lines 707-727)
+- **Task 4 deleted** - Was a compat guard, forbidden by CLAUDE.md
+
+**Commit:** `ad8a368` - fix(llm): record Azure batch LLM calls in audit trail
+
+**Files Changed:** 7 files, +713 insertions, -25 deletions
