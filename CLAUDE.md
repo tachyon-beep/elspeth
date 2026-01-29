@@ -314,6 +314,81 @@ SENSE (Sources) → DECIDE (Transforms/Gates) → ACT (Sinks)
 | **Canonical** | Two-phase deterministic JSON canonicalization for hashing |
 | **Payload Store** | Separates large blobs from audit tables with retention policies |
 | **Configuration** | Dynaconf + Pydantic with multi-source precedence |
+| **Config Contracts** | Settings→Runtime protocol enforcement (see below) |
+
+### Settings→Runtime Configuration Pattern
+
+Configuration uses a two-layer pattern to prevent field orphaning:
+
+```text
+USER YAML → Settings (Pydantic) → Runtime*Config (dataclass) → Engine Components
+             validation            conversion                    runtime behavior
+```
+
+**Why two layers?**
+
+1. **Settings classes** (e.g., `RetrySettings`): Pydantic models for YAML validation
+2. **Runtime*Config classes** (e.g., `RuntimeRetryConfig`): Frozen dataclasses for engine use
+
+The P2-2026-01-21 bug showed the problem: `exponential_base` was added to `RetrySettings` but never mapped to the engine. Users configured it, Pydantic validated it, but it was silently ignored at runtime.
+
+**The solution: Protocol-based verification**
+
+```python
+# contracts/config/protocols.py
+@runtime_checkable
+class RuntimeRetryProtocol(Protocol):
+    """What RetryManager EXPECTS from retry config."""
+    @property
+    def max_attempts(self) -> int: ...
+    @property
+    def exponential_base(self) -> float: ...  # mypy catches if missing!
+
+# contracts/config/runtime.py
+@dataclass(frozen=True, slots=True)
+class RuntimeRetryConfig:
+    """Implements RuntimeRetryProtocol."""
+    max_attempts: int
+    exponential_base: float
+    # ... other fields
+
+    @classmethod
+    def from_settings(cls, settings: "RetrySettings") -> "RuntimeRetryConfig":
+        return cls(
+            max_attempts=settings.max_attempts,
+            exponential_base=settings.exponential_base,  # Explicit mapping!
+        )
+
+# engine/retry.py
+class RetryManager:
+    def __init__(self, config: RuntimeRetryProtocol):  # Accepts protocol
+        self._config = config
+```
+
+**Enforcement layers:**
+
+1. **mypy (structural typing)**: Verifies `RuntimeRetryConfig` satisfies `RuntimeRetryProtocol`
+2. **AST checker**: Verifies `from_settings()` uses all Settings fields (run: `.venv/bin/python -m scripts.check_contracts`)
+3. **Alignment tests**: Verifies field mappings are correct and complete
+
+**Key files:**
+
+| File | Purpose |
+| ---- | ------- |
+| `contracts/config/protocols.py` | Protocol definitions (what engine expects) |
+| `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
+| `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
+| `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
+| `tests/core/test_config_alignment.py` | Comprehensive alignment verification |
+
+**Adding a new Settings field (checklist):**
+
+1. Add to Settings class in `core/config.py` (Pydantic model)
+2. Add to Runtime*Config in `contracts/config/runtime.py` (dataclass field)
+3. Map in `from_settings()` method (explicit assignment)
+4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
+5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
+6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
 
 ### Composite Primary Key Pattern: nodes Table
 
@@ -548,6 +623,29 @@ Every row reaches exactly one terminal state - no silent drops:
 - `(run_id, row_id, transform_seq, attempt)` is unique
 - Each attempt recorded separately
 - Backoff metadata captured
+
+### Settings→Runtime Field Mapping
+
+**P2-2026-01-21 lesson:** Settings fields can be orphaned (validated but never used at runtime).
+
+```python
+# WRONG - Field exists in Settings but not wired to engine
+class RetrySettings(BaseModel):
+    exponential_base: float = 2.0  # Validated but ignored!
+
+# CORRECT - Explicit from_settings() mapping
+@dataclass
+class RuntimeRetryConfig:
+    exponential_base: float
+
+    @classmethod
+    def from_settings(cls, s: RetrySettings) -> "RuntimeRetryConfig":
+        return cls(exponential_base=s.exponential_base)  # Explicit!
+```
+
+**Verification:** Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`.
+
+See "Settings→Runtime Configuration Pattern" in Core Architecture for full documentation.
 
 ### Secret Handling
 

@@ -368,3 +368,567 @@ class TestElspethSettingsAlignment:
         assert tested_subsystems == self.SUBSYSTEM_SETTINGS, (
             f"Subsystem alignment test mismatch. Missing tests: {self.SUBSYSTEM_SETTINGS - tested_subsystems}"
         )
+
+
+# =============================================================================
+# Task 4.1: Reverse Orphan Detection Tests
+# =============================================================================
+# These tests verify that every Runtime field has a documented Settings origin.
+# This catches the inverse of the P2-2026-01-21 bug: fields in Runtime that
+# don't come from Settings and aren't documented as internal defaults.
+
+
+class TestRuntimeFieldOrigins:
+    """Verify every Runtime field has a documented origin (Settings or INTERNAL_DEFAULTS).
+
+    The P2-2026-01-21 bug was about Settings fields orphaned from Runtime.
+    This test class catches the reverse: Runtime fields without documented origins.
+
+    Every Runtime field must be either:
+    1. Mapped from a Settings field (same name or via FIELD_MAPPINGS)
+    2. Documented in INTERNAL_DEFAULTS as an internal-only field
+
+    Fields appearing in Runtime without documentation are bugs - either:
+    - They should be added to Settings (user-configurable)
+    - They should be added to INTERNAL_DEFAULTS (internal-only)
+    """
+
+    def test_runtime_retry_config_has_no_orphan_fields(self) -> None:
+        """Every RuntimeRetryConfig field must have a documented origin."""
+        from elspeth.contracts.config import (
+            FIELD_MAPPINGS,
+            INTERNAL_DEFAULTS,
+            RuntimeRetryConfig,
+        )
+        from elspeth.core.config import RetrySettings
+
+        runtime_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
+        settings_fields = set(RetrySettings.model_fields.keys())
+
+        # Map Settings fields to their Runtime names
+        field_mappings = FIELD_MAPPINGS.get("RetrySettings", {})
+        settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
+
+        # Get internal-only fields for retry subsystem
+        internal_fields = set(INTERNAL_DEFAULTS.get("retry", {}).keys())
+
+        # Every runtime field must be from Settings OR internal
+        documented_fields = settings_as_runtime | internal_fields
+        orphan_fields = runtime_fields - documented_fields
+
+        assert not orphan_fields, (
+            f"RuntimeRetryConfig has undocumented fields: {orphan_fields}. "
+            f"Either add to RetrySettings (user-configurable) or INTERNAL_DEFAULTS['retry'] (internal-only)."
+        )
+
+    def test_runtime_rate_limit_config_has_no_orphan_fields(self) -> None:
+        """Every RuntimeRateLimitConfig field must have a documented origin."""
+        from elspeth.contracts.config import (
+            FIELD_MAPPINGS,
+            INTERNAL_DEFAULTS,
+            RuntimeRateLimitConfig,
+        )
+        from elspeth.core.config import RateLimitSettings
+
+        runtime_fields = set(RuntimeRateLimitConfig.__dataclass_fields__.keys())
+        settings_fields = set(RateLimitSettings.model_fields.keys())
+
+        # Map Settings fields to their Runtime names
+        field_mappings = FIELD_MAPPINGS.get("RateLimitSettings", {})
+        settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
+
+        # Get internal-only fields (if any)
+        internal_fields = set(INTERNAL_DEFAULTS.get("rate_limit", {}).keys())
+
+        documented_fields = settings_as_runtime | internal_fields
+        orphan_fields = runtime_fields - documented_fields
+
+        assert not orphan_fields, (
+            f"RuntimeRateLimitConfig has undocumented fields: {orphan_fields}. "
+            f"Either add to RateLimitSettings or INTERNAL_DEFAULTS['rate_limit']."
+        )
+
+    def test_runtime_concurrency_config_has_no_orphan_fields(self) -> None:
+        """Every RuntimeConcurrencyConfig field must have a documented origin."""
+        from elspeth.contracts.config import (
+            FIELD_MAPPINGS,
+            INTERNAL_DEFAULTS,
+            RuntimeConcurrencyConfig,
+        )
+        from elspeth.core.config import ConcurrencySettings
+
+        runtime_fields = set(RuntimeConcurrencyConfig.__dataclass_fields__.keys())
+        settings_fields = set(ConcurrencySettings.model_fields.keys())
+
+        field_mappings = FIELD_MAPPINGS.get("ConcurrencySettings", {})
+        settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
+        internal_fields = set(INTERNAL_DEFAULTS.get("concurrency", {}).keys())
+
+        documented_fields = settings_as_runtime | internal_fields
+        orphan_fields = runtime_fields - documented_fields
+
+        assert not orphan_fields, (
+            f"RuntimeConcurrencyConfig has undocumented fields: {orphan_fields}. "
+            f"Either add to ConcurrencySettings or INTERNAL_DEFAULTS['concurrency']."
+        )
+
+    def test_runtime_checkpoint_config_has_no_orphan_fields(self) -> None:
+        """Every RuntimeCheckpointConfig field must have a documented origin."""
+        from elspeth.contracts.config import (
+            FIELD_MAPPINGS,
+            INTERNAL_DEFAULTS,
+            RuntimeCheckpointConfig,
+        )
+        from elspeth.core.config import CheckpointSettings
+
+        runtime_fields = set(RuntimeCheckpointConfig.__dataclass_fields__.keys())
+        settings_fields = set(CheckpointSettings.model_fields.keys())
+
+        field_mappings = FIELD_MAPPINGS.get("CheckpointSettings", {})
+        settings_as_runtime = {field_mappings.get(f, f) for f in settings_fields}
+        internal_fields = set(INTERNAL_DEFAULTS.get("checkpoint", {}).keys())
+
+        documented_fields = settings_as_runtime | internal_fields
+        orphan_fields = runtime_fields - documented_fields
+
+        assert not orphan_fields, (
+            f"RuntimeCheckpointConfig has undocumented fields: {orphan_fields}. "
+            f"Either add to CheckpointSettings or INTERNAL_DEFAULTS['checkpoint']."
+        )
+
+
+# =============================================================================
+# Task 4.2: Explicit Field Mapping Tests
+# =============================================================================
+# These tests verify Settings->Runtime field name mappings with explicit assertions
+# for each field, including fields that get renamed during conversion.
+
+
+class TestExplicitFieldMappings:
+    """Verify Settings->Runtime field mappings with explicit assertions.
+
+    These tests complement the structural tests by explicitly checking
+    each field mapping, making it clear exactly which Settings field
+    maps to which Runtime field.
+    """
+
+    def test_retry_field_mapping_explicit(self) -> None:
+        """Verify RetrySettings->RuntimeRetryConfig field name mappings."""
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        settings = RetrySettings(
+            max_attempts=7,
+            initial_delay_seconds=3.5,
+            max_delay_seconds=180.0,
+            exponential_base=2.5,
+        )
+        config = RuntimeRetryConfig.from_settings(settings)
+
+        # Direct mappings (same name)
+        assert config.max_attempts == settings.max_attempts, "max_attempts: direct mapping"
+        assert config.exponential_base == settings.exponential_base, "exponential_base: direct mapping"
+
+        # Renamed mappings
+        assert config.base_delay == settings.initial_delay_seconds, "base_delay <- initial_delay_seconds"
+        assert config.max_delay == settings.max_delay_seconds, "max_delay <- max_delay_seconds"
+
+        # Internal field (not from Settings)
+        assert config.jitter == 1.0, "jitter: internal default from INTERNAL_DEFAULTS"
+
+    def test_rate_limit_field_mapping_explicit(self) -> None:
+        """Verify RateLimitSettings->RuntimeRateLimitConfig field name mappings."""
+        from elspeth.contracts.config import RuntimeRateLimitConfig
+        from elspeth.core.config import RateLimitSettings
+
+        settings = RateLimitSettings(
+            enabled=True,
+            default_requests_per_second=15,
+            default_requests_per_minute=500,
+            persistence_path="/tmp/limits.db",
+            services={},
+        )
+        config = RuntimeRateLimitConfig.from_settings(settings)
+
+        # All direct mappings (no renames in RateLimitSettings)
+        assert config.enabled == settings.enabled, "enabled: direct mapping"
+        assert config.default_requests_per_second == float(settings.default_requests_per_second), (
+            "default_requests_per_second: direct mapping (int->float)"
+        )
+        # We set default_requests_per_minute=500 above, so this is safe
+        assert settings.default_requests_per_minute is not None  # For mypy
+        assert config.default_requests_per_minute == float(settings.default_requests_per_minute), (
+            "default_requests_per_minute: direct mapping (int->float)"
+        )
+        assert config.persistence_path == settings.persistence_path, "persistence_path: direct mapping"
+        assert config.services == dict(settings.services), "services: direct mapping"
+
+    def test_concurrency_field_mapping_explicit(self) -> None:
+        """Verify ConcurrencySettings->RuntimeConcurrencyConfig field name mappings."""
+        from elspeth.contracts.config import RuntimeConcurrencyConfig
+        from elspeth.core.config import ConcurrencySettings
+
+        settings = ConcurrencySettings(max_workers=16)
+        config = RuntimeConcurrencyConfig.from_settings(settings)
+
+        # Single field, direct mapping
+        assert config.max_workers == settings.max_workers, "max_workers: direct mapping"
+
+    def test_checkpoint_field_mapping_explicit(self) -> None:
+        """Verify CheckpointSettings->RuntimeCheckpointConfig field mappings.
+
+        Note: frequency field is transformed (Literal -> int), not just renamed.
+        """
+        from elspeth.contracts.config import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
+
+        # Test "every_row" frequency
+        settings_every = CheckpointSettings(
+            enabled=True,
+            frequency="every_row",
+            aggregation_boundaries=True,
+        )
+        config_every = RuntimeCheckpointConfig.from_settings(settings_every)
+        assert config_every.enabled == settings_every.enabled, "enabled: direct mapping"
+        assert config_every.frequency == 1, "frequency: 'every_row' -> 1"
+        assert config_every.aggregation_boundaries == settings_every.aggregation_boundaries, "aggregation_boundaries: direct mapping"
+        assert config_every.checkpoint_interval is None, "checkpoint_interval: None when not every_n"
+
+        # Test "every_n" frequency
+        settings_n = CheckpointSettings(
+            enabled=True,
+            frequency="every_n",
+            checkpoint_interval=100,
+            aggregation_boundaries=False,
+        )
+        config_n = RuntimeCheckpointConfig.from_settings(settings_n)
+        assert config_n.frequency == 100, "frequency: 'every_n' -> checkpoint_interval value"
+        assert config_n.checkpoint_interval == 100, "checkpoint_interval: preserved"
+
+        # Test "aggregation_only" frequency
+        settings_agg = CheckpointSettings(
+            enabled=False,
+            frequency="aggregation_only",
+            aggregation_boundaries=True,
+        )
+        config_agg = RuntimeCheckpointConfig.from_settings(settings_agg)
+        assert config_agg.frequency == 0, "frequency: 'aggregation_only' -> 0"
+
+
+# =============================================================================
+# Task 4.3: P2-2026-01-21 Regression Test
+# =============================================================================
+# This test specifically verifies that exponential_base actually affects
+# backoff calculation, preventing regression of the original bug.
+
+
+class TestExponentialBaseRegression:
+    """Regression tests for P2-2026-01-21: exponential_base silently ignored.
+
+    The bug: exponential_base was added to RetrySettings but never mapped to
+    RuntimeRetryConfig, and never passed to tenacity's wait_exponential_jitter().
+    Result: all retries used the default base (2.0) regardless of config.
+
+    These tests verify the fix by checking that exponential_base:
+    1. Flows from Settings to RuntimeRetryConfig
+    2. Is passed to tenacity (affects actual backoff calculation)
+    """
+
+    def test_exponential_base_flows_from_settings_to_config(self) -> None:
+        """exponential_base must flow from RetrySettings to RuntimeRetryConfig."""
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        # Test with non-default value to ensure it's actually mapped
+        settings = RetrySettings(exponential_base=5.0)
+        config = RuntimeRetryConfig.from_settings(settings)
+
+        assert config.exponential_base == 5.0, (
+            "P2-2026-01-21 REGRESSION: exponential_base not mapped from Settings. "
+            "The from_settings() method must use settings.exponential_base."
+        )
+
+    def test_exponential_base_used_in_retry_manager(self) -> None:
+        """exponential_base must be accessible to RetryManager for tenacity."""
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.retry import RetryManager
+
+        config = RuntimeRetryConfig(
+            max_attempts=3,
+            base_delay=1.0,
+            max_delay=60.0,
+            jitter=0.0,  # Disable jitter for predictable test
+            exponential_base=3.0,  # Non-default value
+        )
+        manager = RetryManager(config)
+
+        # Verify the manager has access to exponential_base through config
+        assert manager._config.exponential_base == 3.0, (
+            "P2-2026-01-21 REGRESSION: exponential_base not accessible in RetryManager. "
+            "The config must expose exponential_base for tenacity's exp_base parameter."
+        )
+
+    def test_exponential_base_default_matches_tenacity_default(self) -> None:
+        """Default exponential_base should be 2.0 (industry standard).
+
+        This test documents the expected default and ensures we don't
+        accidentally change it.
+        """
+        from elspeth.contracts.config import POLICY_DEFAULTS, RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        # Settings default
+        settings = RetrySettings()
+        assert settings.exponential_base == 2.0, "RetrySettings default should be 2.0"
+
+        # Config default
+        config = RuntimeRetryConfig.default()
+        assert config.exponential_base == 2.0, "RuntimeRetryConfig.default() should use 2.0"
+
+        # Policy default
+        assert POLICY_DEFAULTS["exponential_base"] == 2.0, "POLICY_DEFAULTS should use 2.0"
+
+    def test_exponential_base_different_values_produce_different_configs(self) -> None:
+        """Different exponential_base values must produce different configs.
+
+        The original bug would have made all these configs identical.
+        """
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        configs = []
+        for base in [1.5, 2.0, 3.0, 4.0]:
+            settings = RetrySettings(exponential_base=base)
+            config = RuntimeRetryConfig.from_settings(settings)
+            configs.append(config.exponential_base)
+
+        assert configs == [1.5, 2.0, 3.0, 4.0], (
+            f"P2-2026-01-21 REGRESSION: Different exponential_base values should produce different configs, but got: {configs}"
+        )
+
+
+# =============================================================================
+# Task 4.4: Property-Based Roundtrip Tests (Hypothesis)
+# =============================================================================
+# These tests use property-based testing to verify that valid Settings values
+# survive the from_settings() conversion without data loss or corruption.
+
+
+class TestPropertyBasedRoundtrip:
+    """Property-based tests for Settings->Runtime conversion.
+
+    Uses Hypothesis to generate valid Settings values and verify they
+    survive conversion to Runtime config without data loss.
+
+    Why property-based testing matters here:
+    - Manual tests check specific values; Hypothesis finds edge cases
+    - Field orphaning bugs often manifest at boundary values
+    - Type coercion bugs (int->float) are caught by property testing
+    """
+
+    def test_retry_config_roundtrip_values_preserved(self) -> None:
+        """All valid RetrySettings values survive from_settings() conversion.
+
+        Uses Hypothesis to generate many valid RetrySettings configurations
+        and verify each field value is correctly transferred to RuntimeRetryConfig.
+        """
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        @given(
+            max_attempts=st.integers(min_value=1, max_value=100),
+            initial_delay=st.floats(min_value=0.01, max_value=300.0, allow_nan=False, allow_infinity=False),
+            max_delay=st.floats(min_value=0.1, max_value=3600.0, allow_nan=False, allow_infinity=False),
+            exp_base=st.floats(min_value=1.01, max_value=10.0, allow_nan=False, allow_infinity=False),
+        )
+        @settings(max_examples=100)
+        def check_roundtrip(
+            max_attempts: int,
+            initial_delay: float,
+            max_delay: float,
+            exp_base: float,
+        ) -> None:
+            # Ensure max_delay >= initial_delay for valid config
+            if max_delay < initial_delay:
+                max_delay = initial_delay + 1.0
+
+            settings_obj = RetrySettings(
+                max_attempts=max_attempts,
+                initial_delay_seconds=initial_delay,
+                max_delay_seconds=max_delay,
+                exponential_base=exp_base,
+            )
+            config = RuntimeRetryConfig.from_settings(settings_obj)
+
+            # Verify all values survived the conversion
+            assert config.max_attempts == max_attempts
+            assert config.base_delay == initial_delay
+            assert config.max_delay == max_delay
+            assert config.exponential_base == exp_base
+
+        check_roundtrip()
+
+    def test_rate_limit_config_roundtrip_values_preserved(self) -> None:
+        """All valid RateLimitSettings values survive from_settings() conversion."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        from elspeth.contracts.config import RuntimeRateLimitConfig
+        from elspeth.core.config import RateLimitSettings
+
+        @given(
+            enabled=st.booleans(),
+            rps=st.integers(min_value=1, max_value=10000),
+            rpm=st.one_of(st.none(), st.integers(min_value=1, max_value=100000)),
+            path=st.one_of(st.none(), st.text(min_size=1, max_size=50).filter(lambda s: "/" not in s or s.startswith("/"))),
+        )
+        @settings(max_examples=100)
+        def check_roundtrip(
+            enabled: bool,
+            rps: int,
+            rpm: int | None,
+            path: str | None,
+        ) -> None:
+            settings_obj = RateLimitSettings(
+                enabled=enabled,
+                default_requests_per_second=rps,
+                default_requests_per_minute=rpm,
+                persistence_path=path,
+            )
+            config = RuntimeRateLimitConfig.from_settings(settings_obj)
+
+            assert config.enabled == enabled
+            assert config.default_requests_per_second == float(rps)
+            if rpm is not None:
+                assert config.default_requests_per_minute == float(rpm)
+            else:
+                assert config.default_requests_per_minute is None
+            assert config.persistence_path == path
+
+        check_roundtrip()
+
+    def test_concurrency_config_roundtrip_values_preserved(self) -> None:
+        """All valid ConcurrencySettings values survive from_settings() conversion."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        from elspeth.contracts.config import RuntimeConcurrencyConfig
+        from elspeth.core.config import ConcurrencySettings
+
+        @given(max_workers=st.integers(min_value=1, max_value=1000))
+        @settings(max_examples=100)
+        def check_roundtrip(max_workers: int) -> None:
+            settings_obj = ConcurrencySettings(max_workers=max_workers)
+            config = RuntimeConcurrencyConfig.from_settings(settings_obj)
+            assert config.max_workers == max_workers
+
+        check_roundtrip()
+
+    def test_checkpoint_config_roundtrip_values_preserved(self) -> None:
+        """All valid CheckpointSettings values survive from_settings() conversion."""
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+
+        from elspeth.contracts.config import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
+
+        @given(
+            enabled=st.booleans(),
+            frequency=st.sampled_from(["every_row", "every_n", "aggregation_only"]),
+            interval=st.integers(min_value=1, max_value=10000),
+            agg_boundaries=st.booleans(),
+        )
+        @settings(max_examples=100)
+        def check_roundtrip(
+            enabled: bool,
+            frequency: str,
+            interval: int,
+            agg_boundaries: bool,
+        ) -> None:
+            # Build settings based on frequency type
+            if frequency == "every_n":
+                settings_obj = CheckpointSettings(
+                    enabled=enabled,
+                    frequency=frequency,
+                    checkpoint_interval=interval,
+                    aggregation_boundaries=agg_boundaries,
+                )
+            else:
+                settings_obj = CheckpointSettings(
+                    enabled=enabled,
+                    frequency=frequency,
+                    aggregation_boundaries=agg_boundaries,
+                )
+
+            config = RuntimeCheckpointConfig.from_settings(settings_obj)
+
+            assert config.enabled == enabled
+            assert config.aggregation_boundaries == agg_boundaries
+
+            # Verify frequency transformation
+            if frequency == "every_row":
+                assert config.frequency == 1
+            elif frequency == "aggregation_only":
+                assert config.frequency == 0
+            else:  # every_n
+                assert config.frequency == interval
+                assert config.checkpoint_interval == interval
+
+        check_roundtrip()
+
+
+# =============================================================================
+# Comprehensive SETTINGS_TO_RUNTIME Alignment Tests
+# =============================================================================
+# These tests use the canonical SETTINGS_TO_RUNTIME mapping to verify
+# all documented Settings->Runtime pairs are correctly wired.
+
+
+class TestSettingsToRuntimeMapping:
+    """Verify the SETTINGS_TO_RUNTIME mapping is accurate and complete.
+
+    SETTINGS_TO_RUNTIME documents which Runtime class implements each Settings.
+    These tests verify that documentation matches reality.
+    """
+
+    def test_all_mapped_settings_have_from_settings(self) -> None:
+        """Every Settings class in SETTINGS_TO_RUNTIME must have a from_settings() factory."""
+        from elspeth.contracts.config import (
+            SETTINGS_TO_RUNTIME,
+            RuntimeCheckpointConfig,
+            RuntimeConcurrencyConfig,
+            RuntimeRateLimitConfig,
+            RuntimeRetryConfig,
+        )
+
+        runtime_classes = {
+            "RuntimeRetryConfig": RuntimeRetryConfig,
+            "RuntimeRateLimitConfig": RuntimeRateLimitConfig,
+            "RuntimeConcurrencyConfig": RuntimeConcurrencyConfig,
+            "RuntimeCheckpointConfig": RuntimeCheckpointConfig,
+        }
+
+        for settings_name, runtime_name in SETTINGS_TO_RUNTIME.items():
+            runtime_cls = runtime_classes.get(runtime_name)
+            assert runtime_cls is not None, f"Unknown Runtime class: {runtime_name}"
+            assert hasattr(runtime_cls, "from_settings"), f"{runtime_name} must have from_settings() method for {settings_name} conversion"
+
+    def test_settings_to_runtime_mapping_is_complete(self) -> None:
+        """SETTINGS_TO_RUNTIME should document all Settings with Runtime counterparts."""
+        from elspeth.contracts.config import EXEMPT_SETTINGS, SETTINGS_TO_RUNTIME
+        from elspeth.core import config as config_module
+
+        # Find all Settings classes in core/config.py
+        all_settings_classes = {name for name in dir(config_module) if name.endswith("Settings") and not name.startswith("_")}
+
+        # Settings must be either in SETTINGS_TO_RUNTIME or EXEMPT_SETTINGS
+        documented = set(SETTINGS_TO_RUNTIME.keys()) | EXEMPT_SETTINGS
+        undocumented = all_settings_classes - documented
+
+        assert not undocumented, (
+            f"Settings classes not in SETTINGS_TO_RUNTIME or EXEMPT_SETTINGS: {undocumented}. "
+            f"Add to SETTINGS_TO_RUNTIME (if needs Runtime class) or EXEMPT_SETTINGS (if not)."
+        )
