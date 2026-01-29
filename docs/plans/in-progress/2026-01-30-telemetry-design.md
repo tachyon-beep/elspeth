@@ -3,7 +3,8 @@
 > **Priority:** P2 (Operational visibility, complements audit trail)
 > **Effort:** Medium (2-3 sessions)
 > **Risk:** Low (additive feature, existing EventBus pattern, failure isolation)
-> **Status:** Design approved, ready for implementation
+> **Status:** Design reviewed by 4-perspective panel, changes incorporated
+> **Revision:** v2 - Incorporates Architecture, Python Engineering, QA, and Systems Thinking review feedback
 
 ## Executive Summary
 
@@ -12,7 +13,24 @@ ELSPETH needs operational visibility alongside its audit trail. This design intr
 1. **Global Telemetry (Tier 1)** — Framework-level audit events streamed to external observability platforms via pluggable exporters
 2. **Plugin Telemetry (Tier 2)** — Plugin-internal tracing handled autonomously by individual plugins (Azure AI, Langfuse, etc.)
 
-**Key principle:** Landscape remains the legal record. Telemetry is operational visibility — best-effort, not guaranteed.
+**Key principle:** Landscape remains the legal record. Telemetry is operational visibility.
+
+**Critical design decision (from Systems Thinking review):** Telemetry can be configured to either drop events under load OR apply backpressure. Silent failures are logged loudly, not hidden.
+
+---
+
+## Review Panel Summary
+
+This design was reviewed by a 4-perspective panel:
+
+| Reviewer | Verdict | Key Feedback |
+|----------|---------|--------------|
+| **Architecture Critic** | ✅ Approve | Design aligns with existing patterns (EventBus, Pluggy, Protocol contracts) |
+| **Python Engineering** | ⚠️ Request Changes | Fix `slots=True`, BoundedBuffer logic, Protocol `name` attribute |
+| **Quality Assurance** | ⚠️ Request Changes | Add property-based tests for circuit breaker, buffer, ordering |
+| **Systems Thinking** | ⚠️ Request Changes | Replace silent degradation, add backpressure option, prevent Trust Erosion |
+
+All critical issues from the review have been incorporated into this revision.
 
 ---
 
@@ -27,8 +45,16 @@ ELSPETH's Landscape audit trail provides complete, legally defensible records of
 ### What We're NOT Solving
 
 - Replacing Landscape (it remains the source of truth)
-- Providing guaranteed delivery of telemetry events
 - Managing plugin-internal tracing from the framework level
+
+### Design Philosophy (from Systems Thinking Review)
+
+**Avoiding "Shifting the Burden":** Telemetry complements Landscape query tooling, it doesn't replace it. Operators should learn to use `explain()` and Landscape queries for investigations; telemetry provides real-time dashboards and alerting.
+
+**Avoiding "Trust Erosion":** If telemetry drops events, operators lose trust and stop using it. Therefore:
+- Telemetry completeness is configurable (backpressure vs. drop)
+- Dropped events are logged loudly with metrics
+- Silent failures are prohibited
 
 ---
 
@@ -70,7 +96,8 @@ ELSPETH's Landscape audit trail provides complete, legally defensible records of
 2. **EventBus as integration point** — Reuses existing pattern from CLI observability
 3. **Exporters are pluggy plugins** — Same registration pattern as sources/transforms/sinks
 4. **Full fidelity, configurable filtering** — Capture everything, let operators dial down
-5. **Failure isolation** — Exporter failures don't crash pipeline
+5. **Configurable failure handling** — Operators choose: backpressure (complete) or drop (fast)
+6. **Loud failures** — No silent degradation; all failures logged with metrics
 
 ### Out of Scope for Framework
 
@@ -86,36 +113,37 @@ Events mirror what Landscape records, designed for streaming consumption.
 
 ```python
 # Base event - all telemetry events inherit from this
-@dataclass
+# NOTE: All events use frozen=True, slots=True for memory efficiency (Python Engineering review)
+@dataclass(frozen=True, slots=True)
 class TelemetryEvent:
     timestamp: datetime
     run_id: str
 
 # Lifecycle events (low volume)
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RunStarted(TelemetryEvent):
     config_hash: str
     source_plugin: str
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RunCompleted(TelemetryEvent):
     status: RunStatus
     row_count: int
     duration_ms: float
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PhaseChanged(TelemetryEvent):
     phase: PipelinePhase
     action: PhaseAction
 
 # Row-level events (medium volume)
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RowCreated(TelemetryEvent):
     row_id: str
     token_id: str
     content_hash: str
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TransformCompleted(TelemetryEvent):
     row_id: str
     token_id: str
@@ -126,7 +154,7 @@ class TransformCompleted(TelemetryEvent):
     input_hash: str
     output_hash: str
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GateEvaluated(TelemetryEvent):
     row_id: str
     token_id: str
@@ -135,15 +163,16 @@ class GateEvaluated(TelemetryEvent):
     routing_mode: RoutingMode
     destinations: tuple[str, ...]
 
-@dataclass
-class TokenOutcome(TelemetryEvent):
+# NOTE: Renamed from TokenOutcome to avoid collision with TokenOutcome enum (Python Engineering review)
+@dataclass(frozen=True, slots=True)
+class TokenCompleted(TelemetryEvent):
     row_id: str
     token_id: str
-    outcome: TokenOutcome
+    outcome: RowOutcome  # Using the enum, not a same-named class
     sink_name: str | None
 
 # External call events (high volume when enabled)
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ExternalCallCompleted(TelemetryEvent):
     state_id: str
     call_type: CallType  # LLM, HTTP, etc.
@@ -161,7 +190,7 @@ class ExternalCallCompleted(TelemetryEvent):
 | Level | Events Emitted | Typical Volume |
 |-------|----------------|----------------|
 | `lifecycle` | `RunStarted`, `RunCompleted`, `PhaseChanged` | ~10-20 per run |
-| `rows` | Above + `RowCreated`, `TransformCompleted`, `GateEvaluated`, `TokenOutcome` | N × M (rows × transforms) |
+| `rows` | Above + `RowCreated`, `TransformCompleted`, `GateEvaluated`, `TokenCompleted` | N × M (rows × transforms) |
 | `full` | Above + `ExternalCallCompleted` with all details | High (includes all external calls) |
 
 ---
@@ -177,16 +206,33 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class ExporterProtocol(Protocol):
-    """Protocol for telemetry exporters."""
+    """Protocol for telemetry exporters.
 
-    # Class attribute - exporter name for config reference
-    name: str
+    Note on 'name' attribute: Implementations MUST define a class attribute
+    'name: str' for configuration reference. This is enforced via @property
+    in the protocol since class attributes cannot be checked via Protocol.
+
+    Lifecycle:
+    - configure() is called once at startup. MUST raise on invalid config (fail fast).
+    - export() is called synchronously for each event. MUST NOT raise (log errors instead).
+    - flush() is called at run completion. SHOULD be blocking until buffer is empty.
+    - close() is called at shutdown. MUST release all resources.
+    """
+
+    @property
+    def name(self) -> str:
+        """Exporter name for configuration reference."""
+        ...
 
     def configure(self, config: dict[str, Any]) -> None:
         """Configure exporter with deployment-specific settings.
 
-        Called once at startup. Exporter should validate config
-        and establish connections (but not fail on transient errors).
+        Called once at startup. MUST raise on invalid config (fail fast).
+        MAY log warnings for transient connection issues.
+
+        Raises:
+            ValueError: If config is invalid or incomplete
+            ConnectionError: If endpoint is unreachable (optional - may defer)
         """
         ...
 
@@ -195,18 +241,19 @@ class ExporterProtocol(Protocol):
 
         Called synchronously from EventBus. Implementations should:
         - Buffer internally if needed for batching
-        - Handle failures gracefully (log, don't crash pipeline)
-        - Respect backpressure via internal queuing
+        - Log failures, NEVER raise (would break other exporters)
+        - Track metrics: events_exported, events_failed
 
-        Note: Telemetry is operational, not audit. Dropped events
-        are acceptable under load - Landscape has the legal record.
+        Thread safety: Assumes single-threaded EventBus dispatch.
+        If used in multithreaded context, implementation must add locking.
         """
         ...
 
     def flush(self) -> None:
         """Flush any buffered events.
 
-        Called at run completion and shutdown.
+        Called at run completion and shutdown. SHOULD block until
+        all buffered events are sent or timeout reached.
         """
         ...
 
@@ -214,6 +261,7 @@ class ExporterProtocol(Protocol):
         """Release resources.
 
         Called at shutdown. Close connections, stop background threads.
+        MUST be idempotent (safe to call multiple times).
         """
         ...
 ```
@@ -243,9 +291,16 @@ class ElspethTelemetrySpec:
 from elspeth.telemetry.hookspecs import hookimpl
 
 class OTLPExporter:
-    name = "otlp"
+    _name = "otlp"  # Class attribute for storage
+
+    @property
+    def name(self) -> str:
+        """Exporter name for configuration reference."""
+        return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
+        if "endpoint" not in config:
+            raise ValueError("OTLP exporter requires 'endpoint' in config")
         self._endpoint = config["endpoint"]
         self._headers = config.get("headers", {})
         # Initialize OTLP client...
@@ -267,6 +322,16 @@ class OTLPExporterPlugin:
 telemetry:
   enabled: true
   granularity: full  # lifecycle | rows | full
+
+  # Backpressure mode (Systems Thinking review recommendation)
+  # - drop: Drop oldest events when buffer full (fast, may lose events)
+  # - block: Block pipeline when buffer full (complete, may slow pipeline)
+  # - slow: Apply backpressure to slow pipeline (balanced)
+  backpressure_mode: drop  # drop | block | slow
+
+  # Failure handling
+  fail_on_total_exporter_failure: false  # If true, crash run when all exporters fail
+
   exporters:
     - name: otlp
       endpoint: "http://localhost:4317"
@@ -284,18 +349,26 @@ class RuntimeTelemetryProtocol(Protocol):
     """What TelemetryManager requires for event streaming."""
     enabled: bool
     granularity: TelemetryGranularity
+    backpressure_mode: BackpressureMode
+    fail_on_total_exporter_failure: bool
     exporter_configs: tuple[ExporterConfig, ...]
 ```
 
 ### Runtime Dataclass (contracts/config/runtime.py)
 
 ```python
-class TelemetryGranularity(Enum):
-    LIFECYCLE = 1
-    ROWS = 2
-    FULL = 3
+# NOTE: Use (str, Enum) for database/JSON serialization consistency (Python Engineering review)
+class TelemetryGranularity(str, Enum):
+    LIFECYCLE = "lifecycle"
+    ROWS = "rows"
+    FULL = "full"
 
-@dataclass(frozen=True)
+class BackpressureMode(str, Enum):
+    DROP = "drop"      # Drop oldest events when buffer full
+    BLOCK = "block"    # Block pipeline when buffer full
+    SLOW = "slow"      # Apply backpressure to slow emission rate
+
+@dataclass(frozen=True, slots=True)
 class ExporterConfig:
     """Configuration for a single exporter."""
     name: str
@@ -310,10 +383,14 @@ class RuntimeTelemetryConfig:
     Field Mappings (Settings → Runtime):
         enabled ← enabled
         granularity ← granularity (parsed to enum)
+        backpressure_mode ← backpressure_mode (parsed to enum)
+        fail_on_total_exporter_failure ← fail_on_total_exporter_failure
         exporter_configs ← exporters (converted to ExporterConfig tuple)
     """
     enabled: bool
     granularity: TelemetryGranularity
+    backpressure_mode: BackpressureMode
+    fail_on_total_exporter_failure: bool
     exporter_configs: tuple[ExporterConfig, ...]
 
     @classmethod
@@ -321,7 +398,9 @@ class RuntimeTelemetryConfig:
         """Convert user-facing Settings to runtime config."""
         return cls(
             enabled=settings.enabled,
-            granularity=TelemetryGranularity[settings.granularity.upper()],
+            granularity=TelemetryGranularity(settings.granularity.lower()),
+            backpressure_mode=BackpressureMode(settings.backpressure_mode.lower()),
+            fail_on_total_exporter_failure=settings.fail_on_total_exporter_failure,
             exporter_configs=tuple(
                 ExporterConfig(name=e.name, options=e.options)
                 for e in settings.exporters
@@ -334,6 +413,8 @@ class RuntimeTelemetryConfig:
         return cls(
             enabled=False,
             granularity=TelemetryGranularity.LIFECYCLE,
+            backpressure_mode=BackpressureMode.DROP,
+            fail_on_total_exporter_failure=False,
             exporter_configs=(),
         )
 ```
@@ -341,15 +422,18 @@ class RuntimeTelemetryConfig:
 ### Granularity Filtering
 
 ```python
+# NOTE: Use match statement for Python 3.10+ (Python Engineering review)
 def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> bool:
     """Filter events based on configured granularity."""
-    if isinstance(event, (RunStarted, RunCompleted, PhaseChanged)):
-        return True  # Always emit lifecycle
-    if isinstance(event, (RowCreated, TransformCompleted, GateEvaluated, TokenOutcome)):
-        return granularity.value >= TelemetryGranularity.ROWS.value
-    if isinstance(event, ExternalCallCompleted):
-        return granularity == TelemetryGranularity.FULL
-    return True  # Unknown events pass through
+    match event:
+        case RunStarted() | RunCompleted() | PhaseChanged():
+            return True  # Always emit lifecycle
+        case RowCreated() | TransformCompleted() | GateEvaluated() | TokenCompleted():
+            return granularity in (TelemetryGranularity.ROWS, TelemetryGranularity.FULL)
+        case ExternalCallCompleted():
+            return granularity == TelemetryGranularity.FULL
+        case _:
+            return True  # Unknown events pass through
 ```
 
 ---
@@ -365,7 +449,13 @@ class TelemetryManager:
     """Coordinates event emission to configured exporters.
 
     Subscribes to EventBus, filters by granularity, dispatches to exporters.
-    Failures are logged, not propagated — telemetry is operational.
+
+    Failure handling (per Systems Thinking review):
+    - Individual exporter failures: Log warning, continue to other exporters
+    - All exporters fail: Log ERROR, optionally crash run (configurable)
+    - NO silent degradation: All failures are visible in logs and metrics
+
+    Thread safety: Assumes single-threaded EventBus dispatch from Orchestrator.
     """
 
     def __init__(
@@ -376,9 +466,13 @@ class TelemetryManager:
     ) -> None:
         self._config = config
         self._exporters = exporters
-        self._disabled = False
-        self._consecutive_failures = 0
+        self._consecutive_total_failures = 0
         self._max_consecutive_failures = 10
+
+        # Telemetry health metrics (Systems Thinking review)
+        self._events_emitted = 0
+        self._events_dropped = 0
+        self._exporter_failures: dict[str, int] = {}
 
         if config.enabled:
             for event_type in TELEMETRY_EVENT_TYPES:
@@ -386,46 +480,103 @@ class TelemetryManager:
 
     def _handle_event(self, event: TelemetryEvent) -> None:
         """Filter and dispatch event to all exporters."""
-        if self._disabled or not should_emit(event, self._config.granularity):
+        if not should_emit(event, self._config.granularity):
             return
 
         failures = 0
         for exporter in self._exporters:
             try:
                 exporter.export(event)
-            except Exception:
+            except Exception as e:
                 failures += 1
+                self._exporter_failures[exporter.name] = (
+                    self._exporter_failures.get(exporter.name, 0) + 1
+                )
+                # Log with structured context for debugging
                 logger.warning(
-                    "Exporter failed",
+                    "Telemetry exporter failed",
                     exporter=exporter.name,
                     event_type=type(event).__name__,
-                    exc_info=True,
+                    error=str(e),
+                    total_failures=self._exporter_failures[exporter.name],
                 )
 
-        # Graceful degradation: disable after repeated total failures
-        if failures == len(self._exporters):
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self._max_consecutive_failures:
-                logger.error("All exporters failing, disabling telemetry")
-                self._disabled = True
+        if failures == 0:
+            self._events_emitted += 1
+            self._consecutive_total_failures = 0
+        elif failures == len(self._exporters):
+            # ALL exporters failed - this is serious (Systems Thinking review)
+            self._consecutive_total_failures += 1
+            self._events_dropped += 1
+
+            # Log ERROR, not warning - this should be visible
+            logger.error(
+                "ALL telemetry exporters failed",
+                event_type=type(event).__name__,
+                consecutive_failures=self._consecutive_total_failures,
+                exporter_failure_counts=self._exporter_failures,
+            )
+
+            if self._consecutive_total_failures >= self._max_consecutive_failures:
+                if self._config.fail_on_total_exporter_failure:
+                    # Crash loudly per Systems Thinking recommendation
+                    raise TelemetryExporterError(
+                        f"All {len(self._exporters)} exporters failed "
+                        f"{self._max_consecutive_failures} consecutive times. "
+                        f"Telemetry is broken. Check exporter configuration."
+                    )
+                else:
+                    # Log CRITICAL but continue - operator chose this mode
+                    logger.critical(
+                        "Telemetry disabled after repeated total failures",
+                        consecutive_failures=self._consecutive_total_failures,
+                        events_dropped=self._events_dropped,
+                        hint="Set fail_on_total_exporter_failure=true to crash instead",
+                    )
         else:
-            self._consecutive_failures = 0
+            # Partial success - some exporters worked
+            self._events_emitted += 1
+            self._consecutive_total_failures = 0
+
+    @property
+    def health_metrics(self) -> dict[str, Any]:
+        """Return telemetry health metrics for monitoring."""
+        return {
+            "events_emitted": self._events_emitted,
+            "events_dropped": self._events_dropped,
+            "exporter_failures": self._exporter_failures.copy(),
+            "consecutive_total_failures": self._consecutive_total_failures,
+        }
 
     def flush(self) -> None:
         """Flush all exporters."""
         for exporter in self._exporters:
             try:
                 exporter.flush()
-            except Exception:
-                logger.warning("Exporter flush failed", exporter=exporter.name)
+            except Exception as e:
+                logger.warning(
+                    "Telemetry exporter flush failed",
+                    exporter=exporter.name,
+                    error=str(e),
+                )
 
     def close(self) -> None:
-        """Close all exporters."""
+        """Close all exporters and log final metrics."""
+        # Log final health metrics
+        logger.info(
+            "Telemetry manager closing",
+            **self.health_metrics,
+        )
+
         for exporter in self._exporters:
             try:
                 exporter.close()
-            except Exception:
-                logger.warning("Exporter close failed", exporter=exporter.name)
+            except Exception as e:
+                logger.warning(
+                    "Telemetry exporter close failed",
+                    exporter=exporter.name,
+                    error=str(e),
+                )
 ```
 
 ### Emission Points in Orchestrator
@@ -439,7 +590,7 @@ Events are emitted AFTER successful Landscape recording:
 | `_process_source_row()` | `recorder.record_row()` | `RowCreated` |
 | `_execute_transform()` | `recorder.record_node_state()` | `TransformCompleted` |
 | `_execute_gate()` | `recorder.record_routing_event()` | `GateEvaluated` |
-| `_record_token_outcome()` | `recorder.record_token_outcome()` | `TokenOutcome` |
+| `_record_token_outcome()` | `recorder.record_token_outcome()` | `TokenCompleted` |
 
 ### Emission Points in AuditedLLMClient
 
@@ -485,10 +636,19 @@ class OTLPExporter:
 
     Converts ELSPETH TelemetryEvents to OTLP spans and ships
     to any OTLP-compatible backend (Jaeger, Tempo, Datadog, Honeycomb, etc.)
+
+    Thread safety: Assumes single-threaded access. Buffer is not thread-safe.
     """
-    name = "otlp"
+    _name = "otlp"
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
+        if "endpoint" not in config:
+            raise ValueError("OTLP exporter requires 'endpoint' in config")
+
         self._endpoint = config["endpoint"]
         self._headers = config.get("headers", {})
         self._batch_size = config.get("batch_size", 100)
@@ -513,6 +673,19 @@ class OTLPExporter:
         self._span_exporter.export(spans)
         self._buffer.clear()
 
+    def _event_to_span(self, event: TelemetryEvent) -> "Span":
+        """Convert TelemetryEvent to OpenTelemetry Span.
+
+        Mapping:
+        - span.name = event class name (e.g., "TransformCompleted")
+        - span.start_time = event.timestamp
+        - span.attributes = all event fields as attributes
+        - span.trace_id = derived from run_id (consistent within run)
+        - span.span_id = derived from event-specific IDs
+        """
+        # Implementation details...
+        ...
+
     def flush(self) -> None:
         self._flush_batch()
 
@@ -531,9 +704,16 @@ class AzureMonitorExporter:
 
     Uses azure-monitor-opentelemetry-exporter for native integration.
     """
-    name = "azure_monitor"
+    _name = "azure_monitor"
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
+        if "connection_string" not in config:
+            raise ValueError("Azure Monitor exporter requires 'connection_string' in config")
+
         self._connection_string = config["connection_string"]
 
         from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
@@ -556,10 +736,14 @@ class DatadogExporter:
 
     Uses ddtrace for native Datadog integration with full APM features.
     """
-    name = "datadog"
+    _name = "datadog"
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
-        self._api_key = config["api_key"]
+        self._api_key = config.get("api_key")  # Optional if agent is local
         self._service_name = config.get("service_name", "elspeth")
         self._env = config.get("env", "production")
 
@@ -578,7 +762,11 @@ class DatadogExporter:
 
 class ConsoleExporter:
     """Export telemetry events to stdout for testing/debugging."""
-    name = "console"
+    _name = "console"
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
         self._format = config.get("format", "json")  # json | pretty
@@ -586,18 +774,77 @@ class ConsoleExporter:
 
     def export(self, event: TelemetryEvent) -> None:
         if self._format == "json":
-            line = json.dumps(asdict(event), default=str)
+            # Custom serialization for datetime handling
+            line = json.dumps(self._serialize_event(event))
         else:
-            line = f"[{event.timestamp}] {type(event).__name__}: {event.run_id}"
+            line = f"[{event.timestamp.isoformat()}] {type(event).__name__}: {event.run_id}"
 
         stream = sys.stdout if self._output == "stdout" else sys.stderr
         print(line, file=stream)
+
+    def _serialize_event(self, event: TelemetryEvent) -> dict[str, Any]:
+        """Serialize event for JSON output with proper type handling."""
+        from dataclasses import asdict
+        data = asdict(event)
+        # Convert datetime to ISO format
+        for key, value in data.items():
+            if isinstance(value, datetime):
+                data[key] = value.isoformat()
+        return data
 
     def flush(self) -> None:
         pass
 
     def close(self) -> None:
         pass
+```
+
+---
+
+## Buffer Management
+
+### BoundedBuffer (Fixed per Python Engineering review)
+
+```python
+class BoundedBuffer:
+    """Ring buffer that drops oldest events on overflow.
+
+    NOTE: The overflow counting was fixed per Python Engineering review.
+    The deque automatically drops the oldest item when maxlen is reached,
+    so we detect drops by comparing length before and after append.
+    """
+
+    def __init__(self, max_size: int = 10_000) -> None:
+        self._buffer: deque[TelemetryEvent] = deque(maxlen=max_size)
+        self._dropped_count: int = 0
+
+    def append(self, event: TelemetryEvent) -> None:
+        """Append event to buffer, tracking drops correctly."""
+        was_full = len(self._buffer) == self._buffer.maxlen
+        self._buffer.append(event)
+        if was_full:
+            # deque auto-dropped the oldest item
+            self._dropped_count += 1
+            logger.warning(
+                "Telemetry buffer overflow, dropped oldest event",
+                dropped_total=self._dropped_count,
+                buffer_size=self._buffer.maxlen,
+            )
+
+    def pop_batch(self, max_count: int) -> list[TelemetryEvent]:
+        """Pop up to max_count events from the buffer."""
+        batch = []
+        for _ in range(min(max_count, len(self._buffer))):
+            batch.append(self._buffer.popleft())
+        return batch
+
+    @property
+    def dropped_count(self) -> int:
+        """Number of events dropped due to buffer overflow."""
+        return self._dropped_count
+
+    def __len__(self) -> int:
+        return len(self._buffer)
 ```
 
 ---
@@ -664,35 +911,29 @@ transforms:
 
 ## Error Handling & Failure Modes
 
-### Principle
+### Principle (Updated per Systems Thinking Review)
 
-**Telemetry is best-effort, Landscape is guaranteed.**
+**Telemetry completeness is configurable. Silent failures are prohibited.**
 
 ### Failure Behavior
 
 | Failure Mode | Behavior | Rationale |
 |--------------|----------|-----------|
-| Exporter throws exception | Log warning, continue pipeline | Telemetry is operational, not audit |
-| Exporter slow (backpressure) | Buffer internally, drop oldest on overflow | Avoid blocking pipeline |
-| All exporters fail repeatedly | Log error, disable telemetry for run | Don't retry endlessly |
+| Single exporter throws | Log WARNING, continue to other exporters | Partial success is acceptable |
+| All exporters fail once | Log ERROR with metrics, continue | Transient failures happen |
+| All exporters fail 10× consecutive | Log CRITICAL, optionally crash | Sustained failure = broken config |
+| Exporter slow (backpressure) | Per config: drop, block, or slow | Operator chooses tradeoff |
 | Invalid config | Fail fast at startup | Config errors should crash early |
-| EventBus subscription fails | Crash at startup | Framework bug, not runtime issue |
+| Buffer overflow | Log WARNING per event dropped | Operator sees backpressure |
 
-### Buffer Overflow Policy
+### No Silent Degradation
 
-```python
-class BoundedBuffer:
-    """Ring buffer that drops oldest events on overflow."""
+Per CLAUDE.md: "A defective plugin that silently produces wrong results is worse than a crash."
 
-    def __init__(self, max_size: int = 10_000) -> None:
-        self._buffer: deque[TelemetryEvent] = deque(maxlen=max_size)
-        self._dropped_count: int = 0
-
-    def append(self, event: TelemetryEvent) -> None:
-        if len(self._buffer) == self._buffer.maxlen:
-            self._dropped_count += 1
-        self._buffer.append(event)
-```
+The original design had "silent disable after 10 failures." This is replaced with:
+1. **Log CRITICAL** when reaching failure threshold
+2. **Optionally crash** (configurable via `fail_on_total_exporter_failure`)
+3. **Always report metrics** (`events_dropped`, `exporter_failures`)
 
 ---
 
@@ -706,6 +947,8 @@ src/elspeth/telemetry/
 ├── hookspecs.py          # elspeth_get_exporters hook
 ├── manager.py            # TelemetryManager (EventBus subscriber)
 ├── filtering.py          # Granularity filtering logic
+├── buffer.py             # BoundedBuffer implementation
+├── errors.py             # TelemetryExporterError
 └── exporters/
     ├── __init__.py       # Exporter plugin registration
     ├── otlp.py           # OTLP exporter
@@ -718,29 +961,43 @@ src/elspeth/telemetry/
 
 ## Implementation Tasks
 
+### Phase 0: Performance Baseline (NEW - per Systems Thinking review)
+
+**Task 0.1: Benchmark EventBus dispatch overhead**
+- Measure time for `event_bus.emit(event)` with 0, 1, 3 exporters
+- Measure impact on pipeline throughput (rows/sec) with telemetry enabled vs disabled
+- Document: "Telemetry adds X% overhead at granularity=full"
+- **Acceptance:** Overhead < 5% at granularity=rows, < 10% at granularity=full
+
 ### Phase 1: Core Infrastructure
 
 **Task 1.1: Create telemetry package structure**
 - Create `src/elspeth/telemetry/` directory
 - Create `__init__.py`, `events.py`, `protocols.py`, `hookspecs.py`
-- Define `TelemetryEvent` base class and event dataclasses
-- Define `ExporterProtocol`
+- Define `TelemetryEvent` base class and event dataclasses (with `frozen=True, slots=True`)
+- Define `ExporterProtocol` (with `@property name`)
 - Define `elspeth_get_exporters` hook specification
 
 **Task 1.2: Add configuration contracts**
-- Add `TelemetryGranularity` enum to `contracts/enums.py`
+- Add `TelemetryGranularity` enum to `contracts/enums.py` (as `str, Enum`)
+- Add `BackpressureMode` enum to `contracts/enums.py`
 - Add `RuntimeTelemetryProtocol` to `contracts/config/protocols.py`
 - Add `RuntimeTelemetryConfig` to `contracts/config/runtime.py`
 - Add `TelemetrySettings` to `core/config.py`
 - Update `ElspethSettings` to include telemetry settings
 
-**Task 1.3: Implement TelemetryManager**
+**Task 1.3: Implement BoundedBuffer**
+- Create `buffer.py` with corrected overflow counting
+- **Tests:** Property-based tests for buffer behavior (QA review)
+
+**Task 1.4: Implement TelemetryManager**
 - Create `manager.py` with `TelemetryManager` class
 - Implement EventBus subscription
-- Implement granularity filtering
-- Implement failure handling and graceful degradation
+- Implement granularity filtering (with `match` statement)
+- Implement failure handling with metrics (no silent degradation)
+- **Tests:** Property-based state machine tests for circuit breaker (QA review)
 
-**Task 1.4: Implement ConsoleExporter**
+**Task 1.5: Implement ConsoleExporter**
 - Create `exporters/console.py`
 - Implement JSON and pretty formats
 - Register via pluggy hook
@@ -753,12 +1010,14 @@ src/elspeth/telemetry/
 - Emit `RunStarted` after `recorder.begin_run()`
 - Emit `RunCompleted` after `recorder.complete_run()`
 - Emit `RowCreated` after `recorder.record_row()`
-- **Tests:** Integration test verifying events emitted
+- **Tests:**
+  - Integration test verifying events emitted
+  - Regression test for Landscape-first ordering (QA review)
 
 **Task 2.2: Add telemetry events to RowProcessor**
 - Emit `TransformCompleted` after transform execution
 - Emit `GateEvaluated` after gate evaluation
-- Emit `TokenOutcome` after token outcome recording
+- Emit `TokenCompleted` after token outcome recording
 - **Tests:** Integration test for row-level events
 
 **Task 2.3: Add telemetry events to AuditedLLMClient**
@@ -793,21 +1052,34 @@ src/elspeth/telemetry/
 
 ### Phase 4: Testing & Documentation
 
-**Task 4.1: Add integration tests**
+**Task 4.1: Add property-based tests (QA review requirements)**
+- Circuit breaker state machine test (Hypothesis RuleBasedStateMachine)
+- BoundedBuffer overflow behavior test
+- Granularity filtering correctness test (all granularity × event combinations)
+- Event ordering preservation test
+
+**Task 4.2: Add integration tests**
 - Test telemetry emitted alongside Landscape
+- Regression test: telemetry only after Landscape success
 - Test granularity filtering
 - Test exporter failure isolation
-- Test graceful degradation
+- Test loud failure on total exporter failure
+- High-volume flooding test (10k+ events)
 
-**Task 4.2: Add contract tests**
-- Test all exporters implement `ExporterProtocol`
+**Task 4.3: Add contract tests**
+- Test all exporters implement `ExporterProtocol` (including calling methods)
 - Test `RuntimeTelemetryConfig` implements protocol
 - Test config alignment (no orphaned fields)
+- Test all TelemetryEvent dataclasses are JSON-serializable
 
-**Task 4.3: Update documentation**
+**Task 4.4: Add EventBus tests (QA review)**
+- Re-entrance test: handler emitting same-type event doesn't cause stack overflow
+
+**Task 4.5: Update documentation**
 - Add telemetry section to CLAUDE.md
 - Create `docs/guides/telemetry.md` user guide
 - Document exporter configuration options
+- Document correlation workflow: "From Datadog Alert to Landscape Explain"
 
 ---
 
@@ -817,10 +1089,67 @@ src/elspeth/telemetry/
 
 | Component | Test Focus |
 |-----------|------------|
-| `TelemetryEvent` dataclasses | Serialization, field completeness |
-| `TelemetryManager` | Granularity filtering, exporter dispatch, failure handling |
+| `TelemetryEvent` dataclasses | Serialization, JSON roundtrip, field completeness |
+| `TelemetryManager` | Granularity filtering, exporter dispatch, failure handling, metrics |
+| `BoundedBuffer` | Overflow counting, FIFO behavior, property-based invariants |
 | `ConsoleExporter` | Output format, stream selection |
-| Granularity filtering | Event type → granularity level mapping |
+| Granularity filtering | Event type → granularity level mapping (all combinations) |
+
+### Property-Based Tests (NEW - per QA review)
+
+```python
+# Circuit breaker state machine
+class TelemetryManagerStateMachine(RuleBasedStateMachine):
+    """Stateful testing for TelemetryManager failure handling."""
+
+    @rule()
+    def emit_event_all_exporters_fail(self):
+        """Simulate all exporters failing on an event."""
+
+    @rule()
+    def emit_event_one_succeeds(self):
+        """Simulate at least one exporter succeeding."""
+
+    @invariant()
+    def consecutive_failures_tracked_correctly(self):
+        """Counter resets on partial success, increments on total failure."""
+
+
+# Buffer overflow behavior
+@given(
+    buffer_size=st.integers(min_value=5, max_value=50),
+    event_count=st.integers(min_value=10, max_value=200)
+)
+def test_buffer_drops_oldest_on_overflow(buffer_size, event_count):
+    """Property: Buffer drops oldest events when full, counts correctly."""
+    buffer = BoundedBuffer(max_size=buffer_size)
+
+    for i in range(event_count):
+        buffer.append(make_event(run_id=f"run_{i}"))
+
+    assert len(buffer) == buffer_size
+    expected_dropped = max(0, event_count - buffer_size)
+    assert buffer.dropped_count == expected_dropped
+
+
+# Granularity filtering correctness
+@given(
+    event_type=st.sampled_from([RunStarted, RowCreated, TransformCompleted, ExternalCallCompleted]),
+    granularity=st.sampled_from(list(TelemetryGranularity))
+)
+def test_granularity_filtering_correctness(event_type, granularity):
+    """Property: Filtering is consistent with granularity level."""
+    event = make_event_of_type(event_type)
+    result = should_emit(event, granularity)
+
+    # Verify against specification
+    if event_type in [RunStarted, RunCompleted, PhaseChanged]:
+        assert result is True  # Always emit lifecycle
+    elif event_type in [RowCreated, TransformCompleted]:
+        assert result == (granularity in (TelemetryGranularity.ROWS, TelemetryGranularity.FULL))
+    elif event_type == ExternalCallCompleted:
+        assert result == (granularity == TelemetryGranularity.FULL)
+```
 
 ### Integration Tests
 
@@ -837,57 +1166,122 @@ def test_telemetry_emitted_alongside_landscape():
     assert any(isinstance(e, RunCompleted) for e in captured_events)
 
 
-def test_telemetry_failure_does_not_crash_pipeline():
-    """Exporter failures are logged but don't stop processing."""
+def test_telemetry_only_emitted_after_landscape_success():
+    """Regression test: Telemetry emitted ONLY if Landscape recording succeeds."""
+    captured_events = []
+
+    # Mock recorder that fails on record_row()
+    recorder = Mock(spec=LandscapeRecorder)
+    recorder.record_row.side_effect = sqlite3.OperationalError("Disk full")
+
+    orchestrator = Orchestrator(recorder=recorder, event_bus=capturing_bus(captured_events))
+
+    with pytest.raises(sqlite3.OperationalError):
+        orchestrator._process_source_row(row_data={"id": 1})
+
+    # NO telemetry events should have been emitted (Landscape failed)
+    row_created_events = [e for e in captured_events if isinstance(e, RowCreated)]
+    assert len(row_created_events) == 0, "Telemetry emitted before Landscape commit!"
+
+
+def test_telemetry_failure_logged_loudly():
+    """Exporter failures are logged as ERROR when all fail."""
     failing_exporter = AlwaysFailsExporter()
 
-    result = run_pipeline_with_telemetry(failing_exporter)
+    with capture_logs() as logs:
+        result = run_pipeline_with_telemetry(failing_exporter)
 
     assert result.status == RunStatus.COMPLETED
+    assert any("ALL telemetry exporters failed" in log for log in logs)
+    assert any(log.level == "ERROR" for log in logs)
 
 
-def test_granularity_filtering():
-    """Events are filtered based on configured granularity."""
-    captured: list[TelemetryEvent] = []
+def test_high_volume_event_flooding():
+    """10k+ events don't overflow or block pipeline."""
+    captured_events = []
+    exporter = CapturingExporter(captured_events)
 
-    run_pipeline_with_granularity(TelemetryGranularity.LIFECYCLE, captured)
+    # Run pipeline with 10k rows
+    result = run_pipeline_with_rows(10_000, exporter)
 
-    assert any(isinstance(e, RunStarted) for e in captured)
-    assert not any(isinstance(e, RowCreated) for e in captured)
+    assert result.status == RunStatus.COMPLETED
+    # Should have emitted events for all rows (at rows granularity)
+    row_events = [e for e in captured_events if isinstance(e, RowCreated)]
+    assert len(row_events) == 10_000
 ```
 
 ### Contract Tests
 
 ```python
 def test_exporter_protocol_compliance():
-    """All shipped exporters implement ExporterProtocol."""
+    """All shipped exporters implement ExporterProtocol with correct behavior."""
     for exporter_cls in [OTLPExporter, AzureMonitorExporter, DatadogExporter, ConsoleExporter]:
         instance = exporter_cls()
-        assert hasattr(instance, 'name')
-        assert hasattr(instance, 'configure')
-        assert hasattr(instance, 'export')
-        assert hasattr(instance, 'flush')
-        assert hasattr(instance, 'close')
+
+        # Test Protocol compliance
+        assert isinstance(instance, ExporterProtocol)
+
+        # Test name property works
+        assert isinstance(instance.name, str)
+        assert len(instance.name) > 0
+
+        # Test configure accepts dict (use minimal valid config)
+        instance.configure(get_minimal_config(instance.name))
+
+        # Test export accepts event without raising
+        dummy_event = RunStarted(
+            timestamp=datetime.now(),
+            run_id="test",
+            config_hash="hash",
+            source_plugin="csv"
+        )
+        instance.export(dummy_event)  # Should not raise
+
+        instance.flush()
+        instance.close()
+
+
+def test_telemetry_events_json_serializable():
+    """All TelemetryEvent dataclasses can be serialized to JSON."""
+    for event_cls in TELEMETRY_EVENT_TYPES:
+        event = make_event_of_type(event_cls)
+
+        # Should serialize without error
+        json_str = json.dumps(asdict(event), default=str)
+
+        # Should deserialize back
+        data = json.loads(json_str)
+        assert "run_id" in data
+        assert "timestamp" in data
 ```
 
 ---
 
 ## Success Criteria
 
+### Phase 0 Complete (NEW)
+
+- [ ] EventBus dispatch overhead measured and documented
+- [ ] Overhead acceptable: < 5% at rows, < 10% at full
+
 ### Phase 1-2 Complete
 
-- [ ] Telemetry events defined for all Landscape recording points
+- [ ] Telemetry events defined for all Landscape recording points (with `frozen=True, slots=True`)
 - [ ] `TelemetryManager` subscribes to EventBus and dispatches to exporters
-- [ ] Granularity filtering works correctly
+- [ ] Granularity filtering works correctly (using `match` statement)
 - [ ] `ConsoleExporter` works for local testing
-- [ ] Exporter failures don't crash pipeline
+- [ ] Exporter failures logged loudly with metrics (no silent degradation)
+- [ ] `fail_on_total_exporter_failure` option works
+- [ ] BoundedBuffer correctly counts dropped events
 
 ### Phase 3-4 Complete
 
 - [ ] OTLP, Azure Monitor, Datadog exporters ship
-- [ ] All exporters implement `ExporterProtocol`
+- [ ] All exporters implement `ExporterProtocol` (verified by calling methods)
 - [ ] Configuration follows contracts pattern
-- [ ] Integration tests pass
+- [ ] Property-based tests pass (circuit breaker, buffer, filtering)
+- [ ] Regression test for Landscape-first ordering passes
+- [ ] Integration tests pass including high-volume (10k+)
 - [ ] Documentation complete
 
 ---
@@ -900,14 +1294,15 @@ def test_exporter_protocol_compliance():
 
 ---
 
-## Risks and Mitigations
+## Risks and Mitigations (Updated per Review)
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Telemetry overhead impacts pipeline performance | Low | Medium | Async buffering, granularity filtering |
-| Exporter failures cause cascading issues | Low | Low | Failure isolation, graceful degradation |
-| EventBus becomes bottleneck | Very Low | Medium | Synchronous dispatch is fast, can add async if needed |
-| Optional deps not installed | Medium | Low | Graceful handling, clear error messages |
+| Hot path overhead > 10% | Medium | High | Phase 0 benchmark; async dispatch option if needed |
+| Trust Erosion from dropped events | Medium | Critical | Backpressure mode option; loud logging; health metrics |
+| Schema drift (telemetry ↔ Landscape) | High | Medium | Automated alignment tests in CI (future work) |
+| Exporter config complexity | Medium | Medium | Fail fast on invalid config; clear error messages |
+| Silent failures hide problems | Low | High | No silent degradation; CRITICAL logging; optional crash |
 
 ---
 
@@ -918,3 +1313,4 @@ def test_exporter_protocol_compliance():
 - **Config contracts refactor:** `docs/plans/in-progress/2026-01-29-config-contracts-refactor.md`
 - **Plugin hookspecs:** `src/elspeth/plugins/hookspecs.py`
 - **AuditedLLMClient:** `src/elspeth/plugins/clients/llm.py`
+- **CLAUDE.md:** Three-Tier Trust Model, No Bug-Hiding Patterns
