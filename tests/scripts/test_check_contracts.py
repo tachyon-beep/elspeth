@@ -5,11 +5,15 @@ from unittest.mock import patch
 
 from scripts.check_contracts import (
     FieldCoverageViolation,
+    FieldMappingViolation,
+    FieldMappingVisitor,
     SettingsAccessVisitor,
     SettingsViolation,
+    check_field_name_mappings,
     check_from_settings_coverage,
     check_settings_alignment,
     extract_from_settings_accesses,
+    extract_from_settings_field_mappings,
     find_settings_classes,
     find_type_definitions,
     get_settings_class_fields,
@@ -719,5 +723,381 @@ def test_field_coverage_violation_dataclass() -> None:
     assert violation.settings_class == "TestSettings"
     assert violation.runtime_class == "RuntimeTestConfig"
     assert violation.orphaned_field == "orphaned"
+    assert violation.file == "/path/to/runtime.py"
+    assert violation.line == 42
+
+
+# =============================================================================
+# Field Mapping Validation Tests (check_field_name_mappings)
+# =============================================================================
+
+
+def test_field_mapping_visitor_finds_direct_mappings() -> None:
+    """FieldMappingVisitor finds runtime_field=settings.settings_field patterns."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        field_a=settings.field_a,
+        field_b=settings.field_b,
+    )
+"""
+    tree = ast.parse(code)
+    visitor = FieldMappingVisitor("settings")
+    visitor.visit(tree)
+
+    assert len(visitor.field_mappings) == 2
+    assert ("field_a", "field_a") in visitor.field_mappings
+    assert ("field_b", "field_b") in visitor.field_mappings
+
+
+def test_field_mapping_visitor_finds_renamed_mappings() -> None:
+    """FieldMappingVisitor captures renamed field mappings."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        base_delay=settings.initial_delay_seconds,
+        max_delay=settings.max_delay_seconds,
+    )
+"""
+    tree = ast.parse(code)
+    visitor = FieldMappingVisitor("settings")
+    visitor.visit(tree)
+
+    assert len(visitor.field_mappings) == 2
+    assert ("base_delay", "initial_delay_seconds") in visitor.field_mappings
+    assert ("max_delay", "max_delay_seconds") in visitor.field_mappings
+
+
+def test_field_mapping_visitor_ignores_non_settings_values() -> None:
+    """FieldMappingVisitor ignores values that aren't settings.X."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        field_a=settings.field_a,
+        field_b=42,  # Not settings.X
+        field_c="constant",  # Not settings.X
+        field_d=some_func(),  # Not settings.X
+    )
+"""
+    tree = ast.parse(code)
+    visitor = FieldMappingVisitor("settings")
+    visitor.visit(tree)
+
+    # Only field_a should be captured
+    assert len(visitor.field_mappings) == 1
+    assert ("field_a", "field_a") in visitor.field_mappings
+
+
+def test_field_mapping_visitor_handles_different_param_names() -> None:
+    """FieldMappingVisitor works with different parameter names."""
+    import ast
+
+    code = """
+def from_settings(cls, config):
+    return cls(field=config.field)
+"""
+    tree = ast.parse(code)
+    visitor = FieldMappingVisitor("config")
+    visitor.visit(tree)
+
+    assert visitor.field_mappings == [("field", "field")]
+
+
+def test_extract_from_settings_field_mappings_finds_method(tmp_path: Path) -> None:
+    """extract_from_settings_field_mappings finds mappings in from_settings method."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    field_a: int
+    field_b: str
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            field_a=settings.field_a,
+            field_b=settings.field_b,
+        )
+""")
+
+    result = extract_from_settings_field_mappings(runtime_file)
+
+    assert "RuntimeTestConfig" in result
+    assert ("field_a", "field_a") in result["RuntimeTestConfig"]
+    assert ("field_b", "field_b") in result["RuntimeTestConfig"]
+
+
+def test_extract_from_settings_field_mappings_finds_renames(tmp_path: Path) -> None:
+    """extract_from_settings_field_mappings captures renamed fields."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    base_delay: float
+    max_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            base_delay=settings.initial_delay_seconds,
+            max_delay=settings.max_delay_seconds,
+        )
+""")
+
+    result = extract_from_settings_field_mappings(runtime_file)
+
+    assert "RuntimeRetryConfig" in result
+    mappings = result["RuntimeRetryConfig"]
+    assert ("base_delay", "initial_delay_seconds") in mappings
+    assert ("max_delay", "max_delay_seconds") in mappings
+
+
+def test_check_field_name_mappings_passes_correct_mapping(tmp_path: Path) -> None:
+    """check_field_name_mappings passes when mappings match FIELD_MAPPINGS."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    base_delay: float
+    max_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            base_delay=settings.initial_delay_seconds,
+            max_delay=settings.max_delay_seconds,
+        )
+""")
+
+    with (
+        patch(
+            "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+            {"TestSettings": "RuntimeTestConfig"},
+        ),
+        patch(
+            "elspeth.contracts.config.alignment.FIELD_MAPPINGS",
+            {
+                "TestSettings": {
+                    "initial_delay_seconds": "base_delay",
+                    "max_delay_seconds": "max_delay",
+                }
+            },
+        ),
+    ):
+        violations = check_field_name_mappings(runtime_file)
+
+    assert violations == []
+
+
+def test_check_field_name_mappings_detects_misroute(tmp_path: Path) -> None:
+    """check_field_name_mappings detects when settings field maps to wrong runtime field.
+
+    This is the key test case: catching "misrouted" fields where code
+    maps a settings field to the wrong runtime field.
+
+    Example: FIELD_MAPPINGS says initial_delay_seconds -> base_delay
+    But code has: base_delay=settings.max_delay_seconds (WRONG!)
+    """
+    runtime_file = tmp_path / "runtime.py"
+    # INTENTIONAL MISROUTE: base_delay uses max_delay_seconds instead of initial_delay_seconds
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    base_delay: float
+    max_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            base_delay=settings.max_delay_seconds,  # WRONG! Should be initial_delay_seconds
+            max_delay=settings.max_delay_seconds,   # Correct
+        )
+""")
+
+    with (
+        patch(
+            "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+            {"TestSettings": "RuntimeTestConfig"},
+        ),
+        patch(
+            "elspeth.contracts.config.alignment.FIELD_MAPPINGS",
+            {
+                "TestSettings": {
+                    "initial_delay_seconds": "base_delay",
+                    "max_delay_seconds": "max_delay",
+                }
+            },
+        ),
+    ):
+        violations = check_field_name_mappings(runtime_file)
+
+    assert len(violations) == 1
+    v = violations[0]
+    assert v.runtime_class == "RuntimeTestConfig"
+    assert v.runtime_field == "base_delay"
+    assert v.settings_field == "max_delay_seconds"  # What code has (wrong)
+    assert v.expected_settings_field == "initial_delay_seconds"  # What it should be
+
+
+def test_check_field_name_mappings_detects_swapped_fields(tmp_path: Path) -> None:
+    """check_field_name_mappings detects when two fields are swapped."""
+    runtime_file = tmp_path / "runtime.py"
+    # INTENTIONAL BUG: fields are swapped
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    base_delay: float
+    max_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            base_delay=settings.max_delay_seconds,      # WRONG! Should be initial_delay_seconds
+            max_delay=settings.initial_delay_seconds,   # WRONG! Should be max_delay_seconds
+        )
+""")
+
+    with (
+        patch(
+            "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+            {"TestSettings": "RuntimeTestConfig"},
+        ),
+        patch(
+            "elspeth.contracts.config.alignment.FIELD_MAPPINGS",
+            {
+                "TestSettings": {
+                    "initial_delay_seconds": "base_delay",
+                    "max_delay_seconds": "max_delay",
+                }
+            },
+        ),
+    ):
+        violations = check_field_name_mappings(runtime_file)
+
+    # Both fields are misrouted
+    assert len(violations) == 2
+    violations_by_field = {v.runtime_field: v for v in violations}
+
+    assert violations_by_field["base_delay"].settings_field == "max_delay_seconds"
+    assert violations_by_field["base_delay"].expected_settings_field == "initial_delay_seconds"
+
+    assert violations_by_field["max_delay"].settings_field == "initial_delay_seconds"
+    assert violations_by_field["max_delay"].expected_settings_field == "max_delay_seconds"
+
+
+def test_check_field_name_mappings_ignores_unmapped_classes(tmp_path: Path) -> None:
+    """check_field_name_mappings ignores classes not in FIELD_MAPPINGS."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeConcurrencyConfig:
+    max_workers: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(max_workers=settings.max_workers)
+""")
+
+    with (
+        patch(
+            "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+            {"ConcurrencySettings": "RuntimeConcurrencyConfig"},
+        ),
+        patch(
+            "elspeth.contracts.config.alignment.FIELD_MAPPINGS",
+            {},  # No field mappings for this class
+        ),
+    ):
+        violations = check_field_name_mappings(runtime_file)
+
+    # No violations - class has no renamed fields in FIELD_MAPPINGS
+    assert violations == []
+
+
+def test_check_field_name_mappings_ignores_direct_name_fields(tmp_path: Path) -> None:
+    """check_field_name_mappings ignores fields that aren't in FIELD_MAPPINGS.
+
+    Fields with matching names (e.g., max_attempts=settings.max_attempts)
+    don't need to be in FIELD_MAPPINGS and should not cause violations.
+    """
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+    base_delay: float
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            max_attempts=settings.max_attempts,          # Direct mapping - not in FIELD_MAPPINGS
+            base_delay=settings.initial_delay_seconds,   # Renamed - in FIELD_MAPPINGS
+        )
+""")
+
+    with (
+        patch(
+            "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+            {"RetrySettings": "RuntimeRetryConfig"},
+        ),
+        patch(
+            "elspeth.contracts.config.alignment.FIELD_MAPPINGS",
+            {
+                "RetrySettings": {
+                    "initial_delay_seconds": "base_delay",
+                    # max_attempts is NOT in FIELD_MAPPINGS (same name)
+                }
+            },
+        ),
+    ):
+        violations = check_field_name_mappings(runtime_file)
+
+    # No violations - base_delay correctly uses initial_delay_seconds
+    # max_attempts is not in FIELD_MAPPINGS so not checked
+    assert violations == []
+
+
+def test_check_field_name_mappings_real_codebase() -> None:
+    """Integration test: actual codebase has correct field mappings.
+
+    This verifies that the current codebase passes the check.
+    If this fails, a field mapping in from_settings() doesn't match
+    the documented mapping in FIELD_MAPPINGS.
+    """
+    import pytest
+
+    runtime_path = Path("src/elspeth/contracts/config/runtime.py")
+
+    if not runtime_path.exists():
+        pytest.skip("Running from different directory - required files not found")
+
+    violations = check_field_name_mappings(runtime_path)
+    assert violations == [], (
+        f"Field mapping violations found: "
+        f"{[(v.runtime_field, v.settings_field, v.expected_settings_field) for v in violations]}. "
+        f"Fix the mapping in from_settings() or update FIELD_MAPPINGS."
+    )
+
+
+def test_field_mapping_violation_dataclass() -> None:
+    """FieldMappingViolation dataclass holds expected fields."""
+    violation = FieldMappingViolation(
+        runtime_class="RuntimeTestConfig",
+        runtime_field="base_delay",
+        settings_field="max_delay_seconds",
+        expected_settings_field="initial_delay_seconds",
+        file="/path/to/runtime.py",
+        line=42,
+    )
+    assert violation.runtime_class == "RuntimeTestConfig"
+    assert violation.runtime_field == "base_delay"
+    assert violation.settings_field == "max_delay_seconds"
+    assert violation.expected_settings_field == "initial_delay_seconds"
     assert violation.file == "/path/to/runtime.py"
     assert violation.line == 42

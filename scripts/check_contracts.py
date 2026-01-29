@@ -78,11 +78,34 @@ class SettingsViolation:
 
 @dataclass
 class FieldCoverageViolation:
-    """A Settings field not accessed in from_settings() method."""
+    """A Settings field not accessed in from_settings() method.
+
+    Note: line is always 0 because tracking exact line numbers for Settings
+    fields would require significant AST complexity. The settings_class +
+    orphaned_field combination is sufficient for locating the issue - users
+    can search for "class {settings_class}" and find the field definition.
+    """
 
     settings_class: str
     runtime_class: str
     orphaned_field: str
+    file: str
+    line: int  # Always 0 - see docstring
+
+
+@dataclass
+class FieldMappingViolation:
+    """A field mapping that doesn't match FIELD_MAPPINGS.
+
+    This catches "misrouted" fields where code maps a settings field to
+    the wrong runtime field. For example:
+        base_delay=settings.max_delay_seconds  # Wrong! Should be initial_delay_seconds
+    """
+
+    runtime_class: str
+    runtime_field: str
+    settings_field: str
+    expected_settings_field: str
     file: str
     line: int
 
@@ -551,6 +574,42 @@ class SettingsAccessVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+class FieldMappingVisitor(ast.NodeVisitor):
+    """Extract runtime_field=settings.settings_field mappings from AST.
+
+    Used to validate that field mappings in from_settings() match FIELD_MAPPINGS.
+    Looks for keyword arguments in constructor calls like:
+        cls(
+            base_delay=settings.initial_delay_seconds,
+            max_delay=settings.max_delay_seconds,
+        )
+
+    Captures tuples of (runtime_field, settings_field).
+    """
+
+    def __init__(self, param_name: str = "settings") -> None:
+        self.param_name = param_name
+        self.field_mappings: list[tuple[str, str]] = []  # (runtime_field, settings_field)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Capture keyword arguments that map settings fields to runtime fields."""
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                # **kwargs - skip
+                continue
+            runtime_field = keyword.arg
+            # Check if value is settings.X
+            if (
+                isinstance(keyword.value, ast.Attribute)
+                and isinstance(keyword.value.value, ast.Name)
+                and keyword.value.value.id == self.param_name
+            ):
+                settings_field = keyword.value.attr
+                self.field_mappings.append((runtime_field, settings_field))
+        # Continue visiting children (nested calls)
+        self.generic_visit(node)
+
+
 def extract_from_settings_accesses(runtime_path: Path) -> dict[str, set[str]]:
     """Extract all settings.X accesses from from_settings() methods in a file.
 
@@ -591,6 +650,114 @@ def extract_from_settings_accesses(runtime_path: Path) -> dict[str, set[str]]:
                     break
 
     return result
+
+
+def extract_from_settings_field_mappings(runtime_path: Path) -> dict[str, list[tuple[str, str]]]:
+    """Extract runtime_field=settings.settings_field mappings from from_settings() methods.
+
+    Parses the runtime.py file and finds all Runtime*Config classes with
+    from_settings() methods. For each, extracts the field mappings.
+
+    Args:
+        runtime_path: Path to contracts/config/runtime.py
+
+    Returns:
+        Dict mapping RuntimeClassName -> list of (runtime_field, settings_field) tuples
+    """
+    try:
+        source = runtime_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return {}
+
+    result: dict[str, list[tuple[str, str]]] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Runtime") and node.name.endswith("Config"):
+            # Find from_settings() method in this class
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "from_settings":
+                    # Get the parameter name (first param after cls)
+                    param_name = "settings"  # default
+                    if len(item.args.args) > 1:
+                        param_name = item.args.args[1].arg
+
+                    # Visit the method body to find runtime_field=settings.X mappings
+                    visitor = FieldMappingVisitor(param_name)
+                    for stmt in item.body:
+                        visitor.visit(stmt)
+
+                    result[node.name] = visitor.field_mappings
+                    break
+
+    return result
+
+
+def check_field_name_mappings(runtime_path: Path) -> list[FieldMappingViolation]:
+    """Check that field mappings in from_settings() match FIELD_MAPPINGS.
+
+    For each Runtime*Config class with a from_settings() method:
+    1. Extract all runtime_field=settings.settings_field assignments
+    2. For each renamed field (in FIELD_MAPPINGS), verify the mapping is correct
+    3. Report violations where settings field is mapped to wrong runtime field
+
+    Example violation (misrouted field):
+        If FIELD_MAPPINGS says initial_delay_seconds -> base_delay but code has:
+            base_delay=settings.max_delay_seconds
+        This is a misroute - max_delay_seconds should map to max_delay, not base_delay.
+
+    Args:
+        runtime_path: Path to contracts/config/runtime.py (Runtime classes)
+
+    Returns:
+        List of FieldMappingViolation for misrouted fields
+    """
+    from elspeth.contracts.config.alignment import FIELD_MAPPINGS, SETTINGS_TO_RUNTIME
+
+    # Get all runtime_field=settings.X mappings from from_settings() methods
+    runtime_mappings = extract_from_settings_field_mappings(runtime_path)
+
+    violations: list[FieldMappingViolation] = []
+
+    # For each Settings -> Runtime mapping that has field renames
+    for settings_class, runtime_class in SETTINGS_TO_RUNTIME.items():
+        if settings_class not in FIELD_MAPPINGS:
+            # No renamed fields for this class - skip
+            continue
+
+        if runtime_class not in runtime_mappings:
+            # No from_settings() method found - skip (different check handles this)
+            continue
+
+        field_renames = FIELD_MAPPINGS[settings_class]
+        actual_mappings = runtime_mappings[runtime_class]
+
+        # Build reverse lookup: for each runtime_field that's a rename target,
+        # what settings_field SHOULD map to it?
+        # field_renames: {settings_field: runtime_field}
+        # We need: {runtime_field: expected_settings_field}
+        expected_for_runtime: dict[str, str] = {
+            runtime_field: settings_field for settings_field, runtime_field in field_renames.items()
+        }
+
+        # Check each actual mapping
+        for runtime_field, actual_settings_field in actual_mappings:
+            # Is this runtime_field one that requires a specific settings_field?
+            if runtime_field in expected_for_runtime:
+                expected_settings_field = expected_for_runtime[runtime_field]
+                if actual_settings_field != expected_settings_field:
+                    violations.append(
+                        FieldMappingViolation(
+                            runtime_class=runtime_class,
+                            runtime_field=runtime_field,
+                            settings_field=actual_settings_field,
+                            expected_settings_field=expected_settings_field,
+                            file=str(runtime_path),
+                            line=0,  # Line number would require more complex tracking
+                        )
+                    )
+
+    return violations
 
 
 def get_settings_class_fields(config_path: Path, class_name: str) -> set[str]:
@@ -635,9 +802,13 @@ def check_from_settings_coverage(
     2. Get the corresponding Settings class fields
     3. Report any Settings field NOT accessed (potential orphan)
 
-    Exemptions:
-    - Fields can be exempt via special patterns (e.g., computed from other fields)
-    - This is caught by documenting legitimate skip patterns
+    Why no exemption mechanism for Settings fields:
+        If a Settings field exists, it SHOULD be used. Orphaned Settings fields
+        are always bugs (like the P2-2026-01-21 exponential_base bug), never
+        intentional. The INTERNAL exemption in FIELD_MAPPINGS is for *Runtime*
+        fields that don't come from Settings (like `jitter`), not for Settings
+        fields to skip. If a field shouldn't be mapped to Runtime, it shouldn't
+        be in the Settings class at all.
 
     Args:
         config_path: Path to core/config.py (Settings classes)
@@ -804,6 +975,9 @@ def main() -> int:
     # Check from_settings() field coverage
     coverage_violations = check_from_settings_coverage(config_path, runtime_path)
 
+    # Check from_settings() field name mappings match FIELD_MAPPINGS
+    mapping_violations = check_field_name_mappings(runtime_path)
+
     has_violations = False
     has_stale = False
 
@@ -841,6 +1015,16 @@ def main() -> int:
             print("    Fix: Access the field in from_settings() and map it to a Runtime field")
             print("    Or document why the field is unused\n")
 
+    if mapping_violations:
+        has_violations = True
+        print("❌ Field mapping violations found:\n")
+        print("  (Settings fields mapped to wrong Runtime fields - misrouted)\n")
+        for mv in mapping_violations:
+            print(f"  {mv.runtime_class}: {mv.runtime_field}=settings.{mv.settings_field}")
+            print(f"    Expected: {mv.runtime_field}=settings.{mv.expected_settings_field}")
+            print(f"    Fix: Update from_settings() to use settings.{mv.expected_settings_field}")
+            print("    Or update FIELD_MAPPINGS in contracts/config/alignment.py\n")
+
     if stale_entries:
         has_stale = True
         print("❌ Stale whitelist entries found:\n")
@@ -865,6 +1049,7 @@ def main() -> int:
         print("✅ All whitelist entries are valid")
     print("✅ All Settings classes have Runtime counterparts or are exempt")
     print("✅ All Settings fields are accessed in from_settings() methods")
+    print("✅ All field name mappings match FIELD_MAPPINGS")
     return 0
 
 
