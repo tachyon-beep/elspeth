@@ -690,17 +690,8 @@ class Orchestrator:
 
             if run_completed:
                 # Export failed after successful run - emit PARTIAL status
-                # Emit telemetry for PARTIAL status (run succeeded, export failed)
-                self._emit_telemetry(
-                    TelemetryRunCompleted(
-                        timestamp=datetime.now(UTC),
-                        run_id=run.run_id,
-                        status=RunStatus.COMPLETED,  # Landscape status is COMPLETED
-                        row_count=result.rows_processed,
-                        duration_ms=total_duration * 1000,
-                    )
-                )
-
+                # NOTE: TelemetryRunCompleted was already emitted at lines 604-612
+                # before the export attempt, so we only emit the EventBus event here
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,

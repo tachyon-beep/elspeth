@@ -685,7 +685,7 @@ class TestTelemetryPartialStatus:
         # Verify TelemetryRunCompleted was emitted with COMPLETED status
         # This is the key assertion: even though export failed, the run itself completed
         run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
-        assert len(run_completed_events) >= 1  # At least one emitted
+        assert len(run_completed_events) == 1  # Exactly one emitted (no duplicates)
 
         # All RunCompleted events should have status=COMPLETED (Landscape status)
         # and correct row count
