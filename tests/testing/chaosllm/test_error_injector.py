@@ -2,8 +2,6 @@
 """Tests for ChaosLLM error injector."""
 
 import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -611,12 +609,12 @@ class TestConstants:
             "forbidden": 403,
             "not_found": 404,
         }
-        assert HTTP_ERRORS == expected
+        assert expected == HTTP_ERRORS
 
     def test_connection_errors_set(self) -> None:
         """CONNECTION_ERRORS contains all expected types."""
         expected = {"timeout", "connection_reset", "slow_response"}
-        assert CONNECTION_ERRORS == expected
+        assert expected == CONNECTION_ERRORS
 
     def test_malformed_types_set(self) -> None:
         """MALFORMED_TYPES contains all expected types."""
@@ -627,4 +625,4 @@ class TestConstants:
             "missing_fields",
             "wrong_content_type",
         }
-        assert MALFORMED_TYPES == expected
+        assert expected == MALFORMED_TYPES
