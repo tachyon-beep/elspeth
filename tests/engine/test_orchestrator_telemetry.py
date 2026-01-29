@@ -639,11 +639,10 @@ class TestTelemetryPartialStatus:
         export outcome. This test verifies that export failure doesn't prevent
         telemetry emission.
 
-        Note: The current implementation emits TelemetryRunCompleted twice when
-        export fails - once when the run completes (before export) and once in
-        the exception handler. Both events have status=COMPLETED because that
-        reflects the Landscape status. This test verifies at least one event
-        is emitted with the correct status and metrics.
+        The implementation correctly emits exactly one TelemetryRunCompleted
+        event before the export attempt. If export fails, the EventBus receives
+        a separate PARTIAL status event for CLI observability, but telemetry
+        is not duplicated.
         """
         from unittest.mock import patch
 
