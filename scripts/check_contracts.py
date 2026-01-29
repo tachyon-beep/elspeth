@@ -736,9 +736,7 @@ def check_field_name_mappings(runtime_path: Path) -> list[FieldMappingViolation]
         # what settings_field SHOULD map to it?
         # field_renames: {settings_field: runtime_field}
         # We need: {runtime_field: expected_settings_field}
-        expected_for_runtime: dict[str, str] = {
-            runtime_field: settings_field for settings_field, runtime_field in field_renames.items()
-        }
+        expected_for_runtime: dict[str, str] = {runtime_field: settings_field for settings_field, runtime_field in field_renames.items()}
 
         # Check each actual mapping
         for runtime_field, actual_settings_field in actual_mappings:
