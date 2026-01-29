@@ -345,12 +345,14 @@ telemetry:
   granularity: full  # lifecycle | rows | full
 
   # Backpressure mode (Systems Thinking review recommendation)
-  # - block: Block pipeline when buffer full (complete, may slow pipeline) [DEFAULT]
+  # - block: Pause pipeline when buffer full until exporter catches up [DEFAULT]
+  #          (run completes, but may be slower under high telemetry load)
   # - drop: Drop oldest events when buffer full (fast, may lose events)
-  # - slow: Apply backpressure to slow pipeline (balanced) [NOT YET IMPLEMENTED]
+  # - slow: Apply gradual backpressure to slow emission rate [NOT YET IMPLEMENTED]
   #
   # NOTE: Default is 'block' to ensure completeness. Data loss is opt-in.
   # NOTE: 'slow' mode not yet implemented - will fail fast at startup if selected.
+  # IMPORTANT: 'block' pauses processing temporarily - it does NOT terminate the run.
   backpressure_mode: block  # block | drop | slow
 
   # Failure handling
@@ -388,9 +390,9 @@ class TelemetryGranularity(str, Enum):
     FULL = "full"
 
 class BackpressureMode(str, Enum):
-    BLOCK = "block"    # Block pipeline when buffer full [DEFAULT]
-    DROP = "drop"      # Drop oldest events when buffer full
-    SLOW = "slow"      # Apply backpressure to slow emission rate [NOT IMPLEMENTED]
+    BLOCK = "block"    # Pause pipeline until buffer drains [DEFAULT] (run continues, just slower)
+    DROP = "drop"      # Drop oldest events when buffer full (fast, events lost)
+    SLOW = "slow"      # Gradual backpressure on emission rate [NOT IMPLEMENTED]
 
 # Modes that are implemented
 _IMPLEMENTED_MODES = {BackpressureMode.BLOCK, BackpressureMode.DROP}
@@ -1005,7 +1007,7 @@ transforms:
 | Single exporter throws | Log WARNING, continue to other exporters | Partial success is acceptable |
 | All exporters fail once | Log ERROR with metrics, continue | Transient failures happen |
 | All exporters fail 10× consecutive | Log CRITICAL, optionally crash | Sustained failure = broken config |
-| Exporter slow (backpressure) | Per config: drop, block, or slow | Operator chooses tradeoff |
+| Exporter slow (backpressure) | Per config: block (pause), drop (discard), or slow | Operator chooses tradeoff |
 | Invalid config | Fail fast at startup | Config errors should crash early |
 | Buffer overflow | Log WARNING per event dropped | Operator sees backpressure |
 
