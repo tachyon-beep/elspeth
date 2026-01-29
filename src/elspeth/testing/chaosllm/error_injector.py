@@ -93,6 +93,16 @@ class ErrorDecision:
         """Return True if an error should be injected."""
         return self.error_type is not None
 
+    @property
+    def is_connection_level(self) -> bool:
+        """Return True if error is a connection-level error (spec compatibility)."""
+        return self.category == ErrorCategory.CONNECTION
+
+    @property
+    def is_malformed(self) -> bool:
+        """Return True if error is a malformed response (spec compatibility)."""
+        return self.category == ErrorCategory.MALFORMED
+
 
 # HTTP error types with their status codes
 HTTP_ERRORS: dict[str, int] = {

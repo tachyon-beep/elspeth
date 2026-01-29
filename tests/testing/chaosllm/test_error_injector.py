@@ -69,6 +69,62 @@ class TestErrorDecision:
         assert decision.malformed_type == "invalid_json"
         assert decision.should_inject is True
 
+    def test_is_connection_level_property(self) -> None:
+        """is_connection_level property returns True for CONNECTION errors."""
+        # Connection error
+        decision = ErrorDecision.connection_error("timeout", delay_sec=5.0)
+        assert decision.is_connection_level is True
+
+        # HTTP error
+        decision = ErrorDecision.http_error("rate_limit", 429)
+        assert decision.is_connection_level is False
+
+        # Malformed response
+        decision = ErrorDecision.malformed_response("invalid_json")
+        assert decision.is_connection_level is False
+
+        # Success
+        decision = ErrorDecision.success()
+        assert decision.is_connection_level is False
+
+    def test_is_malformed_property(self) -> None:
+        """is_malformed property returns True for MALFORMED errors."""
+        # Malformed response
+        decision = ErrorDecision.malformed_response("invalid_json")
+        assert decision.is_malformed is True
+
+        # HTTP error
+        decision = ErrorDecision.http_error("rate_limit", 429)
+        assert decision.is_malformed is False
+
+        # Connection error
+        decision = ErrorDecision.connection_error("timeout", delay_sec=5.0)
+        assert decision.is_malformed is False
+
+        # Success
+        decision = ErrorDecision.success()
+        assert decision.is_malformed is False
+
+    def test_compatibility_properties_all_error_types(self) -> None:
+        """Compatibility properties work for all error types."""
+        # HTTP errors
+        for error_type, status_code in [("rate_limit", 429), ("internal_error", 500)]:
+            decision = ErrorDecision.http_error(error_type, status_code)
+            assert decision.is_connection_level is False
+            assert decision.is_malformed is False
+
+        # Connection errors
+        for error_type in ["timeout", "connection_reset", "slow_response"]:
+            decision = ErrorDecision.connection_error(error_type)
+            assert decision.is_connection_level is True
+            assert decision.is_malformed is False
+
+        # Malformed types
+        for malformed_type in ["invalid_json", "truncated", "empty_body"]:
+            decision = ErrorDecision.malformed_response(malformed_type)
+            assert decision.is_connection_level is False
+            assert decision.is_malformed is True
+
 
 class TestErrorInjectorBasic:
     """Basic tests for ErrorInjector."""
