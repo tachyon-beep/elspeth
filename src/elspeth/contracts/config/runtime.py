@@ -24,7 +24,7 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 
 if TYPE_CHECKING:
-    from elspeth.core.config import RateLimitSettings, RetrySettings, ServiceRateLimit
+    from elspeth.core.config import ConcurrencySettings, RateLimitSettings, RetrySettings, ServiceRateLimit
 
 
 def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
@@ -240,3 +240,50 @@ class RuntimeRateLimitConfig:
             persistence_path=settings.persistence_path,
             services=dict(settings.services),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeConcurrencyConfig:
+    """Runtime configuration for concurrency/parallelism.
+
+    Implements RuntimeConcurrencyProtocol for structural typing verification.
+
+    Field Origins (all from ConcurrencySettings, direct mapping):
+        - max_workers: ConcurrencySettings.max_workers
+
+    This is the simplest runtime config - just one field controlling
+    the maximum number of parallel workers for thread pool execution.
+
+    Note: Unlike RetryConfig, there are no plugin-level concurrency overrides.
+    Concurrency is configured globally in Settings only.
+    """
+
+    max_workers: int
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.max_workers < 1:
+            raise ValueError("max_workers must be >= 1")
+
+    @classmethod
+    def default(cls) -> "RuntimeConcurrencyConfig":
+        """Factory for default concurrency configuration.
+
+        Returns config with max_workers=4 (same as ConcurrencySettings default).
+        """
+        return cls(max_workers=4)
+
+    @classmethod
+    def from_settings(cls, settings: "ConcurrencySettings") -> "RuntimeConcurrencyConfig":
+        """Factory from ConcurrencySettings config model.
+
+        Field Mapping (direct, no renames):
+            settings.max_workers -> max_workers
+
+        Args:
+            settings: Validated Pydantic settings model
+
+        Returns:
+            RuntimeConcurrencyConfig with mapped values
+        """
+        return cls(max_workers=settings.max_workers)
