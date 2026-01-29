@@ -84,7 +84,7 @@ class RuntimeRateLimitProtocol(Protocol):
         ...
 
     @property
-    def default_requests_per_second(self) -> float:
+    def default_requests_per_second(self) -> float | None:
         """Default requests per second for unconfigured services."""
         ...
 
