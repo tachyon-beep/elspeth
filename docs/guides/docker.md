@@ -364,28 +364,10 @@ FROM python:3.11-slim AS runtime
 
 For general ELSPETH troubleshooting (API errors, configuration issues, etc.), see the [Troubleshooting Guide](troubleshooting.md). Below are Docker-specific issues.
 
-### "File not found" errors
+### Common Docker Errors
 
-**Symptom:** `FileNotFoundError: /app/input/data.csv`
-
-**Cause:** Volume not mounted or wrong path in config.
-
-**Fix:**
-1. Verify volume mount: `docker run --rm -v $(pwd)/input:/app/input:ro elspeth:local ls /app/input`
-2. Check pipeline config uses container paths (`/app/input/...`)
-
-### Permission denied on output
-
-**Symptom:** `PermissionError: [Errno 13] Permission denied: '/app/output/results.csv'`
-
-**Cause:** Output directory doesn't exist or wrong permissions.
-
-**Fix:**
-```bash
-# Create output directory with correct permissions
-mkdir -p ./output
-chmod 777 ./output  # Or use appropriate UID/GID
-```
+- **"File not found"** - See [File Not Found Errors](troubleshooting.md#file-not-found-errors) (verify volume mounts and container paths)
+- **"Permission denied"** - See [Permission Denied on Output](troubleshooting.md#permission-denied-on-output) (create output dir with `mkdir -p ./output && chmod 777 ./output`)
 
 ### Database connection refused
 

@@ -13,7 +13,7 @@ docs/plans/
 ├── cancelled/                   # 1 cancelled plan
 ├── superseded/                  # 14 superseded plans
 │   └── schema-validation-attempts-jan24/
-├── *.md                         # 4 plans at root level (various states)
+├── *.md                         # 3 plans at root level (various states)
 └── README.md                    # This file
 ```
 
@@ -26,7 +26,7 @@ Plans actively being worked on:
 | `in-progress/2026-01-29-config-contracts-refactor.md` | Configuration and contracts refactoring |
 | `in-progress/2026-01-30-telemetry-design.md` | Telemetry system design |
 
-## Root-Level Plans (4)
+## Root-Level Plans (3)
 
 Plans at the root level in various states:
 
@@ -34,7 +34,6 @@ Plans at the root level in various states:
 |------|-------------|
 | `2026-01-26-recorder-refactoring.md` | Recorder subsystem refactoring |
 | `2026-01-29-verifier-ignore-order-config.md` | Verifier configuration for order-independent checks |
-| `2026-01-30-documentation-cleanup.md` | Documentation organization and cleanup |
 | `RC1-remediation.md` | RC-1 release remediation tracking |
 
 ## Paused Plans (3)
