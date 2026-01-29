@@ -24,7 +24,7 @@ from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 
 if TYPE_CHECKING:
-    from elspeth.core.config import ConcurrencySettings, RateLimitSettings, RetrySettings, ServiceRateLimit
+    from elspeth.core.config import CheckpointSettings, ConcurrencySettings, RateLimitSettings, RetrySettings, ServiceRateLimit
 
 
 def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
@@ -287,3 +287,96 @@ class RuntimeConcurrencyConfig:
             RuntimeConcurrencyConfig with mapped values
         """
         return cls(max_workers=settings.max_workers)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeCheckpointConfig:
+    """Runtime configuration for crash recovery checkpointing.
+
+    Implements RuntimeCheckpointProtocol for structural typing verification.
+
+    Field Origins (all from CheckpointSettings):
+        - enabled: CheckpointSettings.enabled (direct mapping)
+        - frequency: Computed from CheckpointSettings.frequency + checkpoint_interval
+          - "every_row" -> 1
+          - "every_n" -> checkpoint_interval value
+          - "aggregation_only" -> 0
+        - checkpoint_interval: CheckpointSettings.checkpoint_interval (direct mapping)
+        - aggregation_boundaries: CheckpointSettings.aggregation_boundaries (direct mapping)
+
+    Protocol Coverage:
+        RuntimeCheckpointProtocol requires: enabled, frequency, aggregation_boundaries.
+        The additional field (checkpoint_interval) is preserved for full Settings
+        fidelity but not part of the protocol.
+
+    Note on frequency type transformation:
+        CheckpointSettings.frequency is a Literal["every_row", "every_n", "aggregation_only"].
+        RuntimeCheckpointConfig.frequency is an int (checkpoint every N rows).
+        This transformation happens in from_settings(), not through field name mapping.
+    """
+
+    enabled: bool
+    frequency: int  # checkpoint every N rows (1=every_row, 0=aggregation_only)
+    checkpoint_interval: int | None  # preserved from Settings for reference
+    aggregation_boundaries: bool  # whether to checkpoint at aggregation flush
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.frequency < 0:
+            raise ValueError("frequency must be >= 0")
+
+    @classmethod
+    def default(cls) -> "RuntimeCheckpointConfig":
+        """Factory for default checkpoint configuration.
+
+        Returns config matching CheckpointSettings defaults:
+        - enabled=True
+        - frequency=1 (every_row)
+        - checkpoint_interval=None
+        - aggregation_boundaries=True
+        """
+        return cls(
+            enabled=True,
+            frequency=1,  # every_row
+            checkpoint_interval=None,
+            aggregation_boundaries=True,
+        )
+
+    @classmethod
+    def from_settings(cls, settings: "CheckpointSettings") -> "RuntimeCheckpointConfig":
+        """Factory from CheckpointSettings config model.
+
+        Field Mapping:
+            settings.enabled -> enabled (direct)
+            settings.frequency + checkpoint_interval -> frequency (computed):
+                - "every_row" -> 1
+                - "every_n" -> checkpoint_interval value
+                - "aggregation_only" -> 0
+            settings.checkpoint_interval -> checkpoint_interval (direct)
+            settings.aggregation_boundaries -> aggregation_boundaries (direct)
+
+        Args:
+            settings: Validated Pydantic settings model
+
+        Returns:
+            RuntimeCheckpointConfig with mapped values
+        """
+        # Map Literal frequency to int
+        frequency: int
+        if settings.frequency == "every_row":
+            frequency = 1
+        elif settings.frequency == "aggregation_only":
+            frequency = 0
+        else:
+            # every_n uses checkpoint_interval
+            # Settings validator ensures checkpoint_interval is set when frequency="every_n"
+            # This assert is for static type checking - at runtime it's always true
+            assert settings.checkpoint_interval is not None
+            frequency = settings.checkpoint_interval
+
+        return cls(
+            enabled=settings.enabled,
+            frequency=frequency,
+            checkpoint_interval=settings.checkpoint_interval,
+            aggregation_boundaries=settings.aggregation_boundaries,
+        )

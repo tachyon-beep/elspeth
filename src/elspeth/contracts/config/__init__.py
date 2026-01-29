@@ -67,7 +67,12 @@ from elspeth.contracts.config.protocols import (
 # Runtime configuration dataclasses
 # =============================================================================
 # Concrete implementations of Runtime*Protocol interfaces.
-from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig, RuntimeRateLimitConfig, RuntimeRetryConfig
+from elspeth.contracts.config.runtime import (
+    RuntimeCheckpointConfig,
+    RuntimeConcurrencyConfig,
+    RuntimeRateLimitConfig,
+    RuntimeRetryConfig,
+)
 from elspeth.core.config import (
     AggregationSettings,
     CheckpointSettings,
@@ -106,6 +111,7 @@ __all__ = [
     "PayloadStoreSettings",
     "RateLimitSettings",
     "RetrySettings",
+    "RuntimeCheckpointConfig",
     "RuntimeCheckpointProtocol",
     "RuntimeConcurrencyConfig",
     "RuntimeConcurrencyProtocol",

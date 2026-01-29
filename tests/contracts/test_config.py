@@ -34,6 +34,7 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
     # Runtime configuration dataclasses
+    "RuntimeCheckpointConfig",
     "RuntimeConcurrencyConfig",
     "RuntimeRateLimitConfig",
     "RuntimeRetryConfig",
