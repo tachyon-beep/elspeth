@@ -181,7 +181,9 @@ def check_compatibility(
 
     # Check for extra fields when consumer forbids them
     extra: list[str] = []
-    consumer_forbids_extras = consumer_schema.model_config.get("extra") == "forbid"
+    # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+    # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+    consumer_forbids_extras = consumer_schema.model_config["extra"] == "forbid"
     if consumer_forbids_extras:
         producer_field_names = set(producer_fields.keys())
         consumer_field_names = set(consumer_fields.keys())

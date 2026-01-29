@@ -17,6 +17,7 @@ Correctness Properties:
 
 from __future__ import annotations
 
+import keyword
 from typing import Any
 
 import pytest
@@ -162,7 +163,8 @@ class TestSecurityProperties:
     @settings(max_examples=100)
     def test_arbitrary_names_rejected(self, name: str) -> None:
         """Property: Arbitrary names (not row/True/False/None) are rejected."""
-        if name in ("row", "True", "False", "None"):
+        # Skip allowed names and Python keywords (keywords cause SyntaxError, not SecurityError)
+        if name in ("row", "True", "False", "None") or keyword.iskeyword(name):
             assume(False)
             return
 

@@ -50,6 +50,9 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+                return None  # No field normalization
+
         source = MySource({"path": "test.csv"})
 
         # IMPORTANT: Verify protocol conformance at runtime
@@ -115,6 +118,9 @@ class TestSourceProtocol:
 
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
+
+            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+                return None  # No field normalization
 
         source = MetadataSource({})
         assert isinstance(source, SourceProtocol)  # type: ignore[unreachable]

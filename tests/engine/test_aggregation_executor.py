@@ -775,6 +775,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": "batch-123",
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 
@@ -852,6 +853,7 @@ class TestAggregationExecutorCheckpoint:
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 
@@ -1008,6 +1010,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": batch.batch_id,
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 

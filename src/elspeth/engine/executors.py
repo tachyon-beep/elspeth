@@ -1427,7 +1427,9 @@ class AggregationExecutor:
                 # The checkpoint stores how much time had elapsed before the crash.
                 # We adjust _first_accept_time backwards so batch_age_seconds
                 # reflects the true elapsed time (not reset to zero).
-                elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
+                # NOTE: elapsed_age_seconds is REQUIRED in checkpoint format v1.0
+                # No migration needed - all v1.0 checkpoints have this field.
+                elapsed_seconds = node_state["elapsed_age_seconds"]
                 if elapsed_seconds > 0.0:
                     # Adjust timer: make it think first accept was N seconds ago
                     evaluator._first_accept_time = self._clock.monotonic() - elapsed_seconds

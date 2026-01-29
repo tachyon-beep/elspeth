@@ -300,7 +300,8 @@ class AuditedLLMClient(AuditedClientBase):
 
             # Capture full raw response for audit completeness
             # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
-            raw_response = response.model_dump() if hasattr(response, "model_dump") else None
+            # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
+            raw_response = response.model_dump()
 
             self._recorder.record_call(
                 state_id=self._state_id,

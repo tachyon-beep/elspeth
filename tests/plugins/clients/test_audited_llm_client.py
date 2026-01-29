@@ -327,43 +327,9 @@ class TestAuditedLLMClient:
         assert call_kwargs["request_data"]["top_p"] == 0.9
         assert call_kwargs["request_data"]["presence_penalty"] == 0.5
 
-    def test_response_without_model_dump(self) -> None:
-        """Handles responses without model_dump method."""
-        recorder = self._create_mock_recorder()
-
-        # Create response without model_dump
-        message = Mock()
-        message.content = "Hello!"
-
-        choice = Mock()
-        choice.message = message
-
-        usage = Mock()
-        usage.prompt_tokens = 10
-        usage.completion_tokens = 5
-
-        response = Mock(spec=["choices", "model", "usage"])  # No model_dump
-        response.choices = [choice]
-        response.model = "gpt-4"
-        response.usage = usage
-
-        openai_client = MagicMock()
-        openai_client.chat.completions.create.return_value = response
-
-        client = AuditedLLMClient(
-            recorder=recorder,
-            state_id="state_123",
-            underlying_client=openai_client,
-        )
-
-        result = client.chat_completion(
-            model="gpt-4",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-        # Should work without raw_response
-        assert result.content == "Hello!"
-        assert result.raw_response is None
+    # NOTE: test_response_without_model_dump was removed because we require
+    # openai>=2.15 which guarantees model_dump() exists on all responses.
+    # Per CLAUDE.md "No Legacy Code Policy" - no backwards compatibility code.
 
     def test_empty_content_handled(self) -> None:
         """Handles responses with None content."""
@@ -628,45 +594,9 @@ class TestAuditedLLMClient:
         assert tool_calls[0]["function"]["name"] == "get_weather"
         assert tool_calls[1]["function"]["name"] == "get_time"
 
-    def test_raw_response_none_when_model_dump_unavailable(self) -> None:
-        """raw_response is None when response lacks model_dump method."""
-        recorder = self._create_mock_recorder()
-
-        message = Mock()
-        message.content = "Hello!"
-
-        choice = Mock()
-        choice.message = message
-
-        usage = Mock()
-        usage.prompt_tokens = 10
-        usage.completion_tokens = 5
-
-        # Response without model_dump method
-        response = Mock(spec=["choices", "model", "usage"])
-        response.choices = [choice]
-        response.model = "gpt-4"
-        response.usage = usage
-
-        openai_client = MagicMock()
-        openai_client.chat.completions.create.return_value = response
-
-        client = AuditedLLMClient(
-            recorder=recorder,
-            state_id="state_123",
-            underlying_client=openai_client,
-        )
-
-        client.chat_completion(
-            model="gpt-4",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-        # raw_response should be None, not crash
-        call_kwargs = recorder.record_call.call_args[1]
-        assert call_kwargs["response_data"]["raw_response"] is None
-        # Summary fields still present
-        assert call_kwargs["response_data"]["content"] == "Hello!"
+    # NOTE: test_raw_response_none_when_model_dump_unavailable was removed because
+    # we require openai>=2.15 which guarantees model_dump() exists on all responses.
+    # Per CLAUDE.md "No Legacy Code Policy" - no backwards compatibility code.
 
     def test_successful_call_with_missing_usage(self) -> None:
         """LLM call succeeds when provider returns no usage data.

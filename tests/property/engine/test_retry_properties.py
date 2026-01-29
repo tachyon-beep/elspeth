@@ -17,7 +17,7 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from elspeth.engine.retry import RetryConfig
+from elspeth.engine.retry import MaxRetriesExceeded, RetryConfig, RetryManager
 from tests.property.conftest import valid_delays, valid_jitter, valid_max_attempts
 
 
@@ -215,3 +215,218 @@ class TestRetryConfigCoercionProperties:
         config = RetryConfig.from_policy(policy)
 
         assert config.jitter >= 0.0, f"Bad jitter {bad_jitter} should coerce to >= 0.0, got {config.jitter}"
+
+
+# =============================================================================
+# RetryManager Execution Property Tests
+# =============================================================================
+
+
+class TestRetryManagerExecutionProperties:
+    """Property tests for RetryManager.execute_with_retry() behavior."""
+
+    @given(success_on_attempt=st.integers(min_value=1, max_value=5))
+    @settings(max_examples=30)
+    def test_callback_invoked_exactly_attempts_minus_one_times(self, success_on_attempt: int) -> None:
+        """Property: on_retry called exactly (attempt - 1) times before success.
+
+        If success happens on attempt N, on_retry is called for attempts 1..(N-1).
+        """
+        max_attempts = success_on_attempt + 2  # Ensure we have room to succeed
+
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_delay=0.001,  # Minimal delay for fast tests
+            max_delay=0.01,
+            jitter=0.0,
+        )
+        manager = RetryManager(config)
+
+        callback_attempts: list[int] = []
+        call_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < success_on_attempt:
+                raise ValueError(f"Fail on attempt {call_count}")
+            return "success"
+
+        def on_retry(attempt: int, error: BaseException) -> None:
+            callback_attempts.append(attempt)
+
+        result = manager.execute_with_retry(
+            operation=operation,
+            is_retryable=lambda e: isinstance(e, ValueError),
+            on_retry=on_retry,
+        )
+
+        assert result == "success"
+        assert len(callback_attempts) == success_on_attempt - 1, (
+            f"Expected {success_on_attempt - 1} callbacks, got {len(callback_attempts)}"
+        )
+
+    @given(max_attempts=st.integers(min_value=1, max_value=5))
+    @settings(max_examples=30)
+    def test_non_retryable_error_fails_immediately(self, max_attempts: int) -> None:
+        """Property: Non-retryable error causes immediate failure (no retries)."""
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_delay=0.001,
+            max_delay=0.01,
+            jitter=0.0,
+        )
+        manager = RetryManager(config)
+
+        call_count = 0
+        callback_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("Non-retryable error")
+
+        def on_retry(attempt: int, error: BaseException) -> None:
+            nonlocal callback_count
+            callback_count += 1
+
+        with pytest.raises(RuntimeError, match="Non-retryable error"):
+            manager.execute_with_retry(
+                operation=operation,
+                is_retryable=lambda e: isinstance(e, ValueError),  # Only ValueError is retryable
+                on_retry=on_retry,
+            )
+
+        assert call_count == 1, "Non-retryable should fail on first attempt"
+        assert callback_count == 0, "on_retry should not be called for non-retryable"
+
+    @given(max_attempts=st.integers(min_value=2, max_value=5))
+    @settings(max_examples=30)
+    def test_max_attempts_respected(self, max_attempts: int) -> None:
+        """Property: Exactly max_attempts tries before MaxRetriesExceeded."""
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_delay=0.001,
+            max_delay=0.01,
+            jitter=0.0,
+        )
+        manager = RetryManager(config)
+
+        call_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise ValueError(f"Always fail - attempt {call_count}")
+
+        with pytest.raises(MaxRetriesExceeded) as exc_info:
+            manager.execute_with_retry(
+                operation=operation,
+                is_retryable=lambda e: isinstance(e, ValueError),
+            )
+
+        assert call_count == max_attempts, f"Expected exactly {max_attempts} attempts, got {call_count}"
+        assert exc_info.value.attempts == max_attempts
+
+    def test_single_attempt_no_retry(self) -> None:
+        """Property: max_attempts=1 means single attempt, no retries."""
+        config = RetryConfig.no_retry()  # max_attempts=1
+        manager = RetryManager(config)
+
+        call_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Fail")
+
+        with pytest.raises(MaxRetriesExceeded):
+            manager.execute_with_retry(
+                operation=operation,
+                is_retryable=lambda e: isinstance(e, ValueError),
+            )
+
+        assert call_count == 1, "no_retry() should mean single attempt"
+
+    @given(max_attempts=st.integers(min_value=1, max_value=5))
+    @settings(max_examples=20)
+    def test_success_on_first_attempt_no_callbacks(self, max_attempts: int) -> None:
+        """Property: Success on first attempt means no on_retry callbacks."""
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_delay=0.001,
+            max_delay=0.01,
+            jitter=0.0,
+        )
+        manager = RetryManager(config)
+
+        callback_count = 0
+
+        def on_retry(attempt: int, error: BaseException) -> None:
+            nonlocal callback_count
+            callback_count += 1
+
+        result = manager.execute_with_retry(
+            operation=lambda: "immediate success",
+            is_retryable=lambda e: True,
+            on_retry=on_retry,
+        )
+
+        assert result == "immediate success"
+        assert callback_count == 0, "No callbacks for immediate success"
+
+
+class TestRetryManagerErrorHandlingProperties:
+    """Property tests for error handling in RetryManager."""
+
+    @given(max_attempts=st.integers(min_value=2, max_value=4))
+    @settings(max_examples=20)
+    def test_last_error_preserved_in_max_retries_exceeded(self, max_attempts: int) -> None:
+        """Property: MaxRetriesExceeded contains the last error."""
+        config = RetryConfig(
+            max_attempts=max_attempts,
+            base_delay=0.001,
+            max_delay=0.01,
+            jitter=0.0,
+        )
+        manager = RetryManager(config)
+
+        call_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise ValueError(f"Error on attempt {call_count}")
+
+        with pytest.raises(MaxRetriesExceeded) as exc_info:
+            manager.execute_with_retry(
+                operation=operation,
+                is_retryable=lambda e: isinstance(e, ValueError),
+            )
+
+        # Last error should be from the final attempt
+        assert f"Error on attempt {max_attempts}" in str(exc_info.value.last_error)
+
+    def test_none_callback_allowed(self) -> None:
+        """Property: on_retry=None is allowed and works correctly."""
+        config = RetryConfig(max_attempts=3, base_delay=0.001, max_delay=0.01, jitter=0.0)
+        manager = RetryManager(config)
+
+        call_count = 0
+
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ValueError("Retry me")
+            return "success"
+
+        # Should not raise even without callback
+        result = manager.execute_with_retry(
+            operation=operation,
+            is_retryable=lambda e: isinstance(e, ValueError),
+            on_retry=None,
+        )
+
+        assert result == "success"
+        assert call_count == 2

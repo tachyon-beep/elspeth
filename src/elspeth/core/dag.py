@@ -972,8 +972,10 @@ class ExecutionGraph:
 
         # Handle dynamic schemas (no explicit fields + extra='allow')
         # These are created by _create_dynamic_schema and accept anything
-        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
-        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+        # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+        # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config["extra"] == "allow"
+        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config["extra"] == "allow"
         if producer_is_dynamic or consumer_is_dynamic:
             return  # Dynamic schemas bypass static type validation
 
