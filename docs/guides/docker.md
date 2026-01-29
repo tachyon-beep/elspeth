@@ -63,7 +63,7 @@ docker run --rm \
 
 ## Environment Variables
 
-Pass secrets and configuration via environment variables:
+Pass secrets and configuration via environment variables. See the [Environment Variables Reference](../reference/environment-variables.md) for the complete list.
 
 ```bash
 docker run --rm \
@@ -78,20 +78,13 @@ docker run --rm \
   run --settings /app/config/pipeline.yaml --execute
 ```
 
-### Required Variables
+**Key variables for Docker:**
 
-| Variable | Purpose | Required When |
-|----------|---------|---------------|
-| `ELSPETH_FINGERPRINT_KEY` | Secret fingerprinting | Config contains API keys or passwords |
-| `OPENROUTER_API_KEY` | LLM provider | Using LLM plugins |
-| `DATABASE_URL` | Audit database | Using PostgreSQL (default: SQLite) |
-
-### Optional Variables
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `ELSPETH_SIGNING_KEY` | Signed audit exports | None (unsigned) |
-| `ELSPETH_ALLOW_RAW_SECRETS` | Dev mode (redact secrets) | false |
+| Variable | Purpose |
+|----------|---------|
+| `ELSPETH_FINGERPRINT_KEY` | Secret fingerprinting (required if config contains API keys) |
+| `OPENROUTER_API_KEY` | LLM provider API key |
+| `DATABASE_URL` | Audit database (default: SQLite) |
 
 ---
 

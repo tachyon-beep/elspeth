@@ -606,24 +606,19 @@ payload_store:
 
 ## Environment Variables
 
-### Required Variables
+See the [Environment Variables Reference](environment-variables.md) for the complete list of supported environment variables, including:
 
-| Variable | Purpose | When Required |
-|----------|---------|---------------|
-| `ELSPETH_FINGERPRINT_KEY` | Secret fingerprinting | Config contains API keys or passwords |
-| `ELSPETH_SIGNING_KEY` | Signed audit exports | `landscape.export.sign: true` |
+- **Security variables:** `ELSPETH_FINGERPRINT_KEY`, `ELSPETH_SIGNING_KEY`
+- **LLM provider keys:** `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY`
+- **Azure service credentials:** Content Safety, Prompt Shield, Blob Storage
+- **Secret field detection patterns**
 
-### Optional Variables
+Configuration is loaded with this precedence (highest first):
+1. Environment variables (`ELSPETH_*`)
+2. Config file (settings.yaml)
+3. Pydantic schema defaults
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `ELSPETH_ALLOW_RAW_SECRETS` | Skip fingerprinting (dev only) | `false` |
-
-### Secret Field Detection
-
-Fields with these names are automatically fingerprinted:
-- Exact matches: `api_key`, `token`, `password`, `secret`, `credential`
-- Suffixes: `_secret`, `_key`, `_token`, `_password`, `_credential`
+Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 
 ---
 
