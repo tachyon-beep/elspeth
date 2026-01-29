@@ -239,3 +239,11 @@ If these return strings instead of enums, downstream code that expects enums wil
 
 **Tier 1 crash policy:**
 Per CLAUDE.md, invalid data in the audit database should crash immediately. If someone manually inserted `call_type="bogus"` into the calls table, `CallType("bogus")` will raise `ValueError` - this is correct behavior.
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Fixed get_calls() to properly coerce call_type and status from raw strings to their respective enum types, maintaining consistency with the audit contract.

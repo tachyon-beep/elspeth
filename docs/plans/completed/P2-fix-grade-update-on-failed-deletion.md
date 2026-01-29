@@ -106,3 +106,11 @@ Per CLAUDE.md, ELSPETH must never misrepresent what it knows. Claiming a run is 
 **Why partial success still downgrades:**
 
 If a run has multiple payloads (source data, LLM responses, routing reasons) and ANY are deleted, replay is incomplete. Conservative downgrade is correct - we don't claim replayability we can't deliver.
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Fixed purge_payloads() to only update reproducibility grades for runs whose payloads were actually deleted, not for runs where deletion failed.

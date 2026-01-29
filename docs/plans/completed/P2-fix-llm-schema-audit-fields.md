@@ -952,3 +952,11 @@ if __name__ == "__main__":
 
 6. **Do we need checkpoint backward compatibility?**
    - **Decision:** No. Pre-production with no users means no in-flight batches to migrate. Clean break to new `row_mapping` format.
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Introduced audit_fields category in SchemaConfig to distinguish contract-stable guaranteed_fields from provenance metadata, with DAG integration and LLM transform updates.

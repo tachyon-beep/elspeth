@@ -237,3 +237,11 @@ Reusing the existing exception type keeps error handling consistent. The error m
 
 **Why validate at startup:**
 LLM transforms fail frequently (rate limits, content filters, timeouts). If error routing is misconfigured, you want to know immediately, not after processing 1000 rows.
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Added startup validation for transform on_error sink destinations, following the existing pattern for gate route validation.

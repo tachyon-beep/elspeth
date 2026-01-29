@@ -420,3 +420,11 @@ This is a correctness improvement, not a breaking change in behavior.
 - A checkpoint should represent a verifiable, durable state
 - Checkpointing before sink write creates "false completeness" - audit says done, but output doesn't exist
 - This fix ensures checkpoints only exist for actually-persisted data
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Checkpoint semantics corrected to create checkpoints after successful sink writes, ensuring crash recovery correctly identifies unwritten rows.

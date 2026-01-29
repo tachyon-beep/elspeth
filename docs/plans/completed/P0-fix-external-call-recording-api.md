@@ -384,3 +384,11 @@ def record_external_call(
 - Add call recording to HTTP client wrapper
 - Add payload store integration for large request/response bodies
 - Add `record_external_call()` convenience method to PluginContext (see deferred Step 5)
+
+---
+
+## Implementation Summary
+
+**Status:** Completed
+**Commits:** See git history for this feature
+**Notes:** Added record_call() method to LandscapeRecorder, completing the external call recording API for audit trail purposes.
