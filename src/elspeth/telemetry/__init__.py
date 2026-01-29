@@ -10,6 +10,7 @@ replace the Landscape audit trail:
 
 Components:
 - events: TelemetryEvent base and all event dataclasses
+- buffer: BoundedBuffer for event batching with overflow tracking
 - protocols: ExporterProtocol for implementing exporters
 - hookspecs: pluggy hooks for exporter discovery
 - errors: TelemetryExporterError for configuration failures
@@ -26,6 +27,8 @@ Usage:
         GateEvaluated,
         TokenCompleted,
         ExternalCallCompleted,
+        # Buffer
+        BoundedBuffer,
         # Protocol
         ExporterProtocol,
         # Errors
@@ -33,6 +36,7 @@ Usage:
     )
 """
 
+from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     ExternalCallCompleted,
@@ -48,6 +52,7 @@ from elspeth.telemetry.events import (
 from elspeth.telemetry.protocols import ExporterProtocol
 
 __all__ = [
+    "BoundedBuffer",
     "ExporterProtocol",
     "ExternalCallCompleted",
     "GateEvaluated",
