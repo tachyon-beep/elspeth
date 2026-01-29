@@ -362,15 +362,25 @@ class Checkpoint:
     node_id: str
     sequence_number: int
     created_at: datetime  # Required - schema enforces NOT NULL (Tier 1 audit data)
-    # Topology validation fields (added for checkpoint compatibility checking)
-    # Bug #7 fix: These are REQUIRED for NEW checkpoints (NOT NULL in schema for new data)
-    # Legacy checkpoints (pre-topology) have None - handled by rejecting resume
-    upstream_topology_hash: str | None  # Hash of nodes + edges upstream of checkpoint
-    checkpoint_node_config_hash: str | None  # Hash of checkpoint node config only
+    # Topology validation fields - REQUIRED for checkpoint compatibility checking
+    # Schema enforces NOT NULL - these are audit-critical for resume validation
+    upstream_topology_hash: str  # Hash of ALL nodes + edges in DAG (full topology)
+    checkpoint_node_config_hash: str  # Hash of checkpoint node config only
     # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
-    # Format version for compatibility checking (None = legacy checkpoint pre-versioning)
+    # Format version for compatibility checking
     format_version: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate required fields - Tier 1 crash on invalid data.
+
+        Per Data Manifesto: Audit data is OUR data. If we receive None
+        for required hash fields, that's a bug in our code - crash immediately.
+        """
+        if not self.upstream_topology_hash:
+            raise ValueError("upstream_topology_hash is required and cannot be empty")
+        if not self.checkpoint_node_config_hash:
+            raise ValueError("checkpoint_node_config_hash is required and cannot be empty")
 
 
 @dataclass
