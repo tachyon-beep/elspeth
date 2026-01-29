@@ -3,8 +3,8 @@
 > **Priority:** P2 (Operational visibility, complements audit trail)
 > **Effort:** Medium (2-3 sessions)
 > **Risk:** Low (additive feature, existing EventBus pattern, failure isolation)
-> **Status:** Design reviewed by 4-perspective panel, changes incorporated
-> **Revision:** v2 - Incorporates Architecture, Python Engineering, QA, and Systems Thinking review feedback
+> **Status:** Design approved by 4-perspective panel
+> **Revision:** v3 - Final revision incorporating re-review feedback (Warning Fatigue fix, default change)
 
 ## Executive Summary
 
@@ -21,16 +21,31 @@ ELSPETH needs operational visibility alongside its audit trail. This design intr
 
 ## Review Panel Summary
 
-This design was reviewed by a 4-perspective panel:
+This design was reviewed by a 4-perspective panel across two review rounds:
 
+### Round 1 (v1 → v2)
 | Reviewer | Verdict | Key Feedback |
 |----------|---------|--------------|
-| **Architecture Critic** | ✅ Approve | Design aligns with existing patterns (EventBus, Pluggy, Protocol contracts) |
+| **Architecture Critic** | ✅ Approve | Design aligns with existing patterns |
 | **Python Engineering** | ⚠️ Request Changes | Fix `slots=True`, BoundedBuffer logic, Protocol `name` attribute |
 | **Quality Assurance** | ⚠️ Request Changes | Add property-based tests for circuit breaker, buffer, ordering |
-| **Systems Thinking** | ⚠️ Request Changes | Replace silent degradation, add backpressure option, prevent Trust Erosion |
+| **Systems Thinking** | ⚠️ Request Changes | Replace silent degradation, add backpressure option |
 
-All critical issues from the review have been incorporated into this revision.
+### Round 2 (v2 → v3)
+| Reviewer | Verdict | Key Feedback |
+|----------|---------|--------------|
+| **Architecture Critic** | ⚠️ Request Changes | Backpressure modes `block`/`slow` not implemented - fail fast |
+| **Python Engineering** | ✅ Approve | All critical issues fixed |
+| **Quality Assurance** | ✅ Approve | All test gaps addressed |
+| **Systems Thinking** | ⚠️ Request Changes | Default should be `block`; per-event logging creates Warning Fatigue |
+
+### Final Resolution (v3)
+All issues addressed:
+- ✅ Python patterns correct (`frozen=True, slots=True`, BoundedBuffer, Protocol)
+- ✅ Test strategy comprehensive (property-based, regression, contract tests)
+- ✅ Backpressure modes: fail fast at startup if mode != `drop` (until implemented)
+- ✅ Default changed to `block` (completeness by default, data loss opt-in)
+- ✅ Warning Fatigue fixed: aggregate logging instead of per-event
 
 ---
 
@@ -52,9 +67,15 @@ ELSPETH's Landscape audit trail provides complete, legally defensible records of
 **Avoiding "Shifting the Burden":** Telemetry complements Landscape query tooling, it doesn't replace it. Operators should learn to use `explain()` and Landscape queries for investigations; telemetry provides real-time dashboards and alerting.
 
 **Avoiding "Trust Erosion":** If telemetry drops events, operators lose trust and stop using it. Therefore:
+- **Default is `block` mode** — completeness by default, data loss is opt-in
 - Telemetry completeness is configurable (backpressure vs. drop)
-- Dropped events are logged loudly with metrics
+- Dropped events are logged with aggregate metrics (not per-event to avoid Warning Fatigue)
 - Silent failures are prohibited
+
+**Avoiding "Warning Fatigue":** Per-event logging of dropped events creates noise that operators tune out. Therefore:
+- Aggregate logging: log every 100 drops, not every single drop
+- Include drop rate trends, not just counts
+- CRITICAL alerts only for sustained total failures
 
 ---
 
@@ -324,10 +345,13 @@ telemetry:
   granularity: full  # lifecycle | rows | full
 
   # Backpressure mode (Systems Thinking review recommendation)
+  # - block: Block pipeline when buffer full (complete, may slow pipeline) [DEFAULT]
   # - drop: Drop oldest events when buffer full (fast, may lose events)
-  # - block: Block pipeline when buffer full (complete, may slow pipeline)
-  # - slow: Apply backpressure to slow pipeline (balanced)
-  backpressure_mode: drop  # drop | block | slow
+  # - slow: Apply backpressure to slow pipeline (balanced) [NOT YET IMPLEMENTED]
+  #
+  # NOTE: Default is 'block' to ensure completeness. Data loss is opt-in.
+  # NOTE: 'slow' mode not yet implemented - will fail fast at startup if selected.
+  backpressure_mode: block  # block | drop | slow
 
   # Failure handling
   fail_on_total_exporter_failure: false  # If true, crash run when all exporters fail
@@ -364,9 +388,12 @@ class TelemetryGranularity(str, Enum):
     FULL = "full"
 
 class BackpressureMode(str, Enum):
+    BLOCK = "block"    # Block pipeline when buffer full [DEFAULT]
     DROP = "drop"      # Drop oldest events when buffer full
-    BLOCK = "block"    # Block pipeline when buffer full
-    SLOW = "slow"      # Apply backpressure to slow emission rate
+    SLOW = "slow"      # Apply backpressure to slow emission rate [NOT IMPLEMENTED]
+
+# Modes that are implemented
+_IMPLEMENTED_MODES = {BackpressureMode.BLOCK, BackpressureMode.DROP}
 
 @dataclass(frozen=True, slots=True)
 class ExporterConfig:
@@ -395,11 +422,33 @@ class RuntimeTelemetryConfig:
 
     @classmethod
     def from_settings(cls, settings: "TelemetrySettings") -> "RuntimeTelemetryConfig":
-        """Convert user-facing Settings to runtime config."""
+        """Convert user-facing Settings to runtime config.
+
+        Raises:
+            NotImplementedError: If backpressure_mode is not yet implemented (e.g., 'slow')
+            ValueError: If granularity or backpressure_mode is invalid
+        """
+        try:
+            granularity = TelemetryGranularity(settings.granularity.lower())
+            backpressure_mode = BackpressureMode(settings.backpressure_mode.lower())
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid telemetry configuration: {e}. "
+                f"granularity must be one of {[g.value for g in TelemetryGranularity]}, "
+                f"backpressure_mode must be one of {[b.value for b in BackpressureMode]}"
+            ) from e
+
+        # Fail fast on unimplemented modes (Architecture review requirement)
+        if backpressure_mode not in _IMPLEMENTED_MODES:
+            raise NotImplementedError(
+                f"backpressure_mode='{backpressure_mode.value}' is not yet implemented. "
+                f"Use one of: {[m.value for m in _IMPLEMENTED_MODES]}"
+            )
+
         return cls(
             enabled=settings.enabled,
-            granularity=TelemetryGranularity(settings.granularity.lower()),
-            backpressure_mode=BackpressureMode(settings.backpressure_mode.lower()),
+            granularity=granularity,
+            backpressure_mode=backpressure_mode,
             fail_on_total_exporter_failure=settings.fail_on_total_exporter_failure,
             exporter_configs=tuple(
                 ExporterConfig(name=e.name, options=e.options)
@@ -413,7 +462,7 @@ class RuntimeTelemetryConfig:
         return cls(
             enabled=False,
             granularity=TelemetryGranularity.LIFECYCLE,
-            backpressure_mode=BackpressureMode.DROP,
+            backpressure_mode=BackpressureMode.BLOCK,  # Default is block (completeness)
             fail_on_total_exporter_failure=False,
             exporter_configs=(),
         )
@@ -452,11 +501,15 @@ class TelemetryManager:
 
     Failure handling (per Systems Thinking review):
     - Individual exporter failures: Log warning, continue to other exporters
-    - All exporters fail: Log ERROR, optionally crash run (configurable)
+    - All exporters fail: Log ERROR (aggregate), optionally crash run (configurable)
     - NO silent degradation: All failures are visible in logs and metrics
+    - WARNING FATIGUE PREVENTION: Aggregate logging every 100 total failures
 
     Thread safety: Assumes single-threaded EventBus dispatch from Orchestrator.
     """
+
+    # Log aggregate metrics every N total failures to avoid Warning Fatigue
+    _LOG_INTERVAL = 100
 
     def __init__(
         self,
@@ -473,13 +526,20 @@ class TelemetryManager:
         self._events_emitted = 0
         self._events_dropped = 0
         self._exporter_failures: dict[str, int] = {}
+        self._last_logged_drop_count: int = 0  # For aggregate logging
 
         if config.enabled:
             for event_type in TELEMETRY_EVENT_TYPES:
                 event_bus.subscribe(event_type, self._handle_event)
 
     def _handle_event(self, event: TelemetryEvent) -> None:
-        """Filter and dispatch event to all exporters."""
+        """Filter and dispatch event to all exporters.
+
+        Logging strategy (Warning Fatigue prevention):
+        - Individual exporter failures: Log immediately (actionable per-exporter)
+        - All-exporter total failures: Log every 100 drops (aggregate)
+        - Threshold breaches: Log CRITICAL immediately (rare, critical)
+        """
         if not should_emit(event, self._config.granularity):
             return
 
@@ -492,7 +552,8 @@ class TelemetryManager:
                 self._exporter_failures[exporter.name] = (
                     self._exporter_failures.get(exporter.name, 0) + 1
                 )
-                # Log with structured context for debugging
+                # Log individual exporter failures at WARNING
+                # (These are actionable - operator can check specific exporter)
                 logger.warning(
                     "Telemetry exporter failed",
                     exporter=exporter.name,
@@ -509,13 +570,17 @@ class TelemetryManager:
             self._consecutive_total_failures += 1
             self._events_dropped += 1
 
-            # Log ERROR, not warning - this should be visible
-            logger.error(
-                "ALL telemetry exporters failed",
-                event_type=type(event).__name__,
-                consecutive_failures=self._consecutive_total_failures,
-                exporter_failure_counts=self._exporter_failures,
-            )
+            # Aggregate logging: log every _LOG_INTERVAL drops to avoid Warning Fatigue
+            # (Per-event ERROR logging creates noise that operators tune out)
+            if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                logger.error(
+                    "ALL telemetry exporters failing - events dropped",
+                    dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
+                    dropped_total=self._events_dropped,
+                    consecutive_failures=self._consecutive_total_failures,
+                    exporter_failure_counts=self._exporter_failures,
+                )
+                self._last_logged_drop_count = self._events_dropped
 
             if self._consecutive_total_failures >= self._max_consecutive_failures:
                 if self._config.fail_on_total_exporter_failure:
@@ -526,7 +591,7 @@ class TelemetryManager:
                         f"Telemetry is broken. Check exporter configuration."
                     )
                 else:
-                    # Log CRITICAL but continue - operator chose this mode
+                    # Log CRITICAL immediately (this is rare and actionable)
                     logger.critical(
                         "Telemetry disabled after repeated total failures",
                         consecutive_failures=self._consecutive_total_failures,
@@ -803,7 +868,7 @@ class ConsoleExporter:
 
 ## Buffer Management
 
-### BoundedBuffer (Fixed per Python Engineering review)
+### BoundedBuffer (Fixed per Python Engineering + Systems Thinking reviews)
 
 ```python
 class BoundedBuffer:
@@ -812,24 +877,42 @@ class BoundedBuffer:
     NOTE: The overflow counting was fixed per Python Engineering review.
     The deque automatically drops the oldest item when maxlen is reached,
     so we detect drops by comparing length before and after append.
+
+    NOTE: Aggregate logging per Systems Thinking review - logs every 100 drops
+    instead of per-event to avoid Warning Fatigue.
     """
+
+    # Log aggregate metrics every N drops to avoid Warning Fatigue
+    _LOG_INTERVAL = 100
 
     def __init__(self, max_size: int = 10_000) -> None:
         self._buffer: deque[TelemetryEvent] = deque(maxlen=max_size)
         self._dropped_count: int = 0
+        self._last_logged_drop_count: int = 0
 
     def append(self, event: TelemetryEvent) -> None:
-        """Append event to buffer, tracking drops correctly."""
+        """Append event to buffer, tracking drops correctly.
+
+        Logging strategy (Warning Fatigue prevention):
+        - Logs every 100 drops, not every single drop
+        - Includes drop rate trend information
+        """
         was_full = len(self._buffer) == self._buffer.maxlen
         self._buffer.append(event)
         if was_full:
             # deque auto-dropped the oldest item
             self._dropped_count += 1
-            logger.warning(
-                "Telemetry buffer overflow, dropped oldest event",
-                dropped_total=self._dropped_count,
-                buffer_size=self._buffer.maxlen,
-            )
+
+            # Aggregate logging: log every _LOG_INTERVAL drops
+            if self._dropped_count - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                logger.warning(
+                    "Telemetry buffer overflow - events dropped",
+                    dropped_since_last_log=self._LOG_INTERVAL,
+                    dropped_total=self._dropped_count,
+                    buffer_size=self._buffer.maxlen,
+                    hint="Consider increasing buffer size or reducing granularity",
+                )
+                self._last_logged_drop_count = self._dropped_count
 
     def pop_batch(self, max_count: int) -> list[TelemetryEvent]:
         """Pop up to max_count events from the buffer."""
@@ -1303,6 +1386,73 @@ def test_telemetry_events_json_serializable():
 | Schema drift (telemetry ↔ Landscape) | High | Medium | Automated alignment tests in CI (future work) |
 | Exporter config complexity | Medium | Medium | Fail fast on invalid config; clear error messages |
 | Silent failures hide problems | Low | High | No silent degradation; CRITICAL logging; optional crash |
+
+---
+
+## Operational Guidance
+
+### Monitoring Telemetry Health
+
+The telemetry system exposes health metrics via `TelemetryManager.health_metrics`. Operators should monitor:
+
+| Metric | Warning Threshold | Critical Threshold | Action |
+|--------|-------------------|-------------------|--------|
+| `events_dropped` | > 0 (any drops) | > 1000 in 5 min | Increase buffer or reduce granularity |
+| `consecutive_total_failures` | > 5 | > 10 | Check exporter endpoints, credentials |
+| `exporter_failures[name]` | Trend ↑ | > 100 per exporter | Check specific exporter config |
+
+### Recommended Alerting
+
+```yaml
+# Example Datadog monitor
+monitors:
+  - name: "ELSPETH Telemetry - Events Dropped"
+    query: "sum:elspeth.telemetry.events_dropped{*}.as_count() > 100"
+    alert: "Telemetry dropping events - check buffer size or export latency"
+
+  - name: "ELSPETH Telemetry - Total Exporter Failure"
+    query: "max:elspeth.telemetry.consecutive_total_failures{*} >= 10"
+    alert: "All telemetry exporters failing - check configuration immediately"
+```
+
+### Log Patterns to Watch
+
+| Log Level | Message Pattern | Meaning |
+|-----------|-----------------|---------|
+| WARNING | "Telemetry buffer overflow" | Buffer full, events being dropped (every 100 drops) |
+| WARNING | "Telemetry exporter failed" | Single exporter failed (per-failure, actionable) |
+| ERROR | "ALL telemetry exporters failing" | No events reaching any backend (every 100 drops) |
+| CRITICAL | "Telemetry disabled after repeated total failures" | System gave up (immediate, once) |
+
+### Troubleshooting Decision Tree
+
+```
+Events not appearing in observability platform?
+├── Check TelemetryManager.health_metrics
+│   ├── events_emitted > 0? → Events flowing, check exporter
+│   └── events_emitted = 0? → Check granularity filtering
+│
+├── events_dropped > 0?
+│   ├── Buffer overflow → Increase buffer_size or reduce granularity
+│   └── Exporter failures → Check exporter_failures dict
+│
+├── exporter_failures[name] high?
+│   ├── OTLP → Check endpoint reachability, headers
+│   ├── Azure Monitor → Check connection_string
+│   └── Datadog → Check agent connectivity
+│
+└── No obvious issues?
+    └── Enable console exporter to verify events are being emitted
+```
+
+### Performance Tuning
+
+| Scenario | Recommended Settings |
+|----------|---------------------|
+| Development/debugging | `granularity: full`, `console` exporter |
+| Production (low volume) | `granularity: rows`, OTLP with batching |
+| Production (high volume) | `granularity: lifecycle`, increase `buffer_size` |
+| CI/CD pipelines | `enabled: false` (or `lifecycle` only) |
 
 ---
 
