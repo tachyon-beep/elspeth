@@ -65,7 +65,7 @@ class RateLimitRegistry:
         registry.close()
     """
 
-    def __init__(self, config: "RuntimeRateLimitConfig") -> None:
+    def __init__(self, config: RuntimeRateLimitConfig) -> None:
         """Initialize registry with rate limit configuration.
 
         Args:

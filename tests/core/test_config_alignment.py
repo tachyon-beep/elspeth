@@ -26,8 +26,6 @@ If a test fails after adding a new field to a Settings class:
 
 from typing import ClassVar
 
-import pytest
-
 
 class TestRetryConfigAlignment:
     """Verify RetrySettings ↔ RetryConfig ↔ RetryPolicy alignment.
@@ -276,9 +274,7 @@ class TestCheckpointSettingsAlignment:
 
         actual_fields = set(CheckpointSettings.model_fields.keys())
 
-        assert actual_fields == self.WIRED_FIELDS, (
-            f"Uncategorized fields: {actual_fields - self.WIRED_FIELDS}. Add to WIRED_FIELDS."
-        )
+        assert actual_fields == self.WIRED_FIELDS, f"Uncategorized fields: {actual_fields - self.WIRED_FIELDS}. Add to WIRED_FIELDS."
 
     def test_checkpoint_config_passed_to_orchestrator(self) -> None:
         """RuntimeCheckpointConfig is passed to Orchestrator for normal runs.

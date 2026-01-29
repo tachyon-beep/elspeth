@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
-
 from elspeth.core.config import ServiceRateLimit
 
 if TYPE_CHECKING:
