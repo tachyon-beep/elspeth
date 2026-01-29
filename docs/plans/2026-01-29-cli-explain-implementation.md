@@ -11,6 +11,8 @@
 
 **Tech Stack:** Typer CLI, SQLAlchemy, existing `LandscapeDB`/`LandscapeRecorder`/`explain()` infrastructure
 
+**Review Status:** Passed 4-perspective review (Architecture, Python Engineering, QA, Systems Thinking) with requested changes incorporated.
+
 ---
 
 ## Architecture Decisions
@@ -32,6 +34,20 @@ The MCP server (`src/elspeth/mcp/server.py:37-73`) has working serialization hel
 
 These will be moved to `formatters.py` as public functions with proper names.
 
+### Review Feedback Incorporated
+
+| Issue | Source | Resolution |
+|-------|--------|------------|
+| Use `is_dataclass()` instead of `hasattr` | Python Review | Task 1 updated |
+| Remove defensive `hasattr` on Enum values | Python Review | Task 2 updated - Tier 1 trust |
+| Don't silently swallow exceptions | Python Review | Task 3 updated |
+| Database existence check | Systems Review | Task 3 updated |
+| Initialize `db = None` for cleanup | Python Review | Task 4 updated |
+| Add NaN/Infinity rejection test | QA Review | Task 1 updated |
+| Add ambiguous row CLI test | QA Review | Task 4 updated |
+| Add round-trip integration test | QA Review | Task 4 updated |
+| Expose detail panel publicly | Architecture Review | Task 6 updated (add property to ExplainScreen) |
+
 ---
 
 ## Task 1: Move Serialization Utilities to Formatters
@@ -48,8 +64,12 @@ These will be moved to `formatters.py` as public functions with proper names.
 # tests/core/landscape/test_formatters.py
 """Tests for Landscape formatters."""
 
-from datetime import UTC, datetime
+import math
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+
+import pytest
 
 
 class TestSerializeDatetime:
@@ -95,6 +115,33 @@ class TestSerializeDatetime:
         assert result[1] == "string"
         assert result[2]["time"] == "2026-01-29T12:00:00+00:00"
 
+    def test_rejects_nan(self) -> None:
+        """NaN values are rejected per CLAUDE.md audit integrity requirements."""
+        from elspeth.core.landscape.formatters import serialize_datetime
+
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime(float("nan"))
+
+    def test_rejects_infinity(self) -> None:
+        """Infinity values are rejected per CLAUDE.md audit integrity requirements."""
+        from elspeth.core.landscape.formatters import serialize_datetime
+
+        with pytest.raises(ValueError, match="Infinity"):
+            serialize_datetime(float("inf"))
+
+        with pytest.raises(ValueError, match="Infinity"):
+            serialize_datetime(float("-inf"))
+
+    def test_rejects_nan_in_nested_structure(self) -> None:
+        """NaN in nested structures is also rejected."""
+        from elspeth.core.landscape.formatters import serialize_datetime
+
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime({"nested": {"value": float("nan")}})
+
+        with pytest.raises(ValueError, match="NaN"):
+            serialize_datetime([1, 2, float("nan")])
+
 
 class TestDataclassToDict:
     """Tests for dataclass_to_dict utility."""
@@ -133,8 +180,6 @@ class TestDataclassToDict:
 
     def test_handles_enum_values(self) -> None:
         """Enum values are converted to their string value."""
-        from enum import Enum
-
         from elspeth.core.landscape.formatters import dataclass_to_dict
 
         class Status(Enum):
@@ -206,7 +251,10 @@ Expected: FAIL with `cannot import name 'serialize_datetime' from 'elspeth.core.
 Add to `src/elspeth/core/landscape/formatters.py`:
 
 ```python
+import math
+from dataclasses import is_dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 
@@ -214,13 +262,24 @@ def serialize_datetime(obj: Any) -> Any:
     """Convert datetime objects to ISO format strings for JSON serialization.
 
     Recursively processes dicts and lists to convert all datetime values.
+    Rejects NaN and Infinity per CLAUDE.md audit integrity requirements.
 
     Args:
         obj: Any value - datetime, dict, list, or other
 
     Returns:
         The same structure with datetime objects replaced by ISO strings
+
+    Raises:
+        ValueError: If NaN or Infinity values are encountered
     """
+    # Reject NaN and Infinity - audit trail must be pristine
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            raise ValueError("NaN values are not allowed in audit data (violates audit integrity)")
+        if math.isinf(obj):
+            raise ValueError("Infinity values are not allowed in audit data (violates audit integrity)")
+
     if isinstance(obj, datetime):
         return obj.isoformat()
     if isinstance(obj, dict):
@@ -241,6 +300,9 @@ def dataclass_to_dict(obj: Any) -> Any:
     - None (returns empty dict)
     - Plain values (pass through)
 
+    Uses stdlib is_dataclass() and isinstance(Enum) for explicit type checking
+    rather than hasattr() checks (clearer intent, better for maintenance).
+
     Args:
         obj: Dataclass instance, list, or primitive value
 
@@ -251,16 +313,18 @@ def dataclass_to_dict(obj: Any) -> Any:
         return {}
     if isinstance(obj, list):
         return [dataclass_to_dict(item) for item in obj]
-    if hasattr(obj, "__dataclass_fields__"):
+    if is_dataclass(obj) and not isinstance(obj, type):
+        # is_dataclass returns True for both instances and classes
+        # We only want instances, not the class itself
         result: dict[str, Any] = {}
         for field_name in obj.__dataclass_fields__:
             value = getattr(obj, field_name)
-            if hasattr(value, "__dataclass_fields__"):
+            if is_dataclass(value) and not isinstance(value, type):
                 result[field_name] = dataclass_to_dict(value)
             elif isinstance(value, list):
                 result[field_name] = [dataclass_to_dict(item) for item in value]
-            elif hasattr(value, "value"):
-                # Enum - get string value
+            elif isinstance(value, Enum):
+                # Explicit Enum check instead of hasattr(value, "value")
                 result[field_name] = value.value
             else:
                 result[field_name] = serialize_datetime(value)
@@ -312,6 +376,8 @@ refactor(formatters): move serialization utilities from MCP to landscape.formatt
 
 - Add serialize_datetime() for datetime → ISO string conversion
 - Add dataclass_to_dict() for dataclass → dict conversion
+- Use is_dataclass() and isinstance(Enum) for explicit type checks
+- Reject NaN/Infinity per CLAUDE.md audit integrity requirements
 - MCP server now imports from shared module
 - Enables CLI explain command to reuse same serialization
 
@@ -479,6 +545,8 @@ class LineageTextFormatter:
         # Outcome
         if result.outcome:
             lines.append("--- Outcome ---")
+            # Direct access to .value - Tier 1 trust (our audit data)
+            # If outcome.outcome is not an Enum, that's a bug we want to crash on
             lines.append(f"Outcome: {result.outcome.outcome.value}")
             if result.outcome.sink_name:
                 lines.append(f"Sink: {result.outcome.sink_name}")
@@ -489,17 +557,17 @@ class LineageTextFormatter:
         if result.node_states:
             lines.append("--- Node States ---")
             for state in result.node_states:
-                status = state.status.value if hasattr(state.status, "value") else state.status
-                lines.append(f"  [{state.step_index}] {state.node_id}: {status}")
+                # Direct access to .value - Tier 1 trust (our audit data)
+                # No defensive hasattr - if status isn't an Enum, crash
+                lines.append(f"  [{state.step_index}] {state.node_id}: {state.status.value}")
             lines.append("")
 
         # Calls
         if result.calls:
             lines.append("--- External Calls ---")
             for call in result.calls:
-                call_type = call.call_type.value if hasattr(call.call_type, "value") else call.call_type
-                status = call.status.value if hasattr(call.status, "value") else call.status
-                lines.append(f"  {call_type}: {status} ({call.latency_ms:.1f}ms)")
+                # Direct access to .value - Tier 1 trust (our audit data)
+                lines.append(f"  {call.call_type.value}: {call.status.value} ({call.latency_ms:.1f}ms)")
             lines.append("")
 
         # Errors
@@ -554,6 +622,8 @@ feat(formatters): add LineageTextFormatter for CLI text output
 Human-readable lineage output showing token, source, outcome,
 node states, external calls, and errors.
 
+Uses direct Enum.value access (Tier 1 trust) - no defensive hasattr.
+
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
 )"
@@ -592,6 +662,15 @@ class TestResolveDatabaseUrl:
 
         assert url == f"sqlite:///{db_path.resolve()}"
 
+    def test_raises_when_database_file_not_found(self, tmp_path: Path) -> None:
+        """Raises ValueError when --database points to nonexistent file."""
+        from elspeth.cli_helpers import resolve_database_url
+
+        nonexistent = tmp_path / "nonexistent.db"
+
+        with pytest.raises(ValueError, match="not found"):
+            resolve_database_url(database=str(nonexistent), settings_path=None)
+
     def test_loads_from_settings_yaml(self, tmp_path: Path) -> None:
         """Falls back to settings.yaml landscape.url."""
         from elspeth.cli_helpers import resolve_database_url
@@ -615,6 +694,26 @@ sinks:
 
         assert url == "sqlite:///./state/audit.db"
 
+    def test_raises_when_settings_missing_landscape_url(self, tmp_path: Path) -> None:
+        """Raises ValueError when settings.yaml exists but missing landscape.url."""
+        from elspeth.cli_helpers import resolve_database_url
+
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+source:
+  plugin: csv
+  options:
+    path: input.csv
+sinks:
+  - name: output
+    plugin: csv
+    options:
+      path: output.csv
+""")
+
+        with pytest.raises(ValueError, match="landscape"):
+            resolve_database_url(database=None, settings_path=settings_file)
+
     def test_raises_when_no_database_and_no_settings(self, tmp_path: Path) -> None:
         """Raises ValueError when neither database nor settings provided."""
         from elspeth.cli_helpers import resolve_database_url
@@ -623,6 +722,18 @@ sinks:
 
         with pytest.raises(ValueError, match="database"):
             resolve_database_url(database=None, settings_path=nonexistent)
+
+    def test_raises_when_default_settings_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raises ValueError with context when default settings.yaml fails to load."""
+        from elspeth.cli_helpers import resolve_database_url
+
+        # Create invalid settings file in current directory
+        monkeypatch.chdir(tmp_path)
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("invalid: yaml: content: [")
+
+        with pytest.raises(ValueError, match="settings.yaml"):
+            resolve_database_url(database=None, settings_path=None)
 
 
 class TestResolveLatestRunId:
@@ -717,17 +828,20 @@ def resolve_database_url(
         Tuple of (database_url, config_or_none)
 
     Raises:
-        ValueError: If neither database nor valid settings provided
+        ValueError: If database file not found, settings invalid, or neither provided
     """
     from elspeth.core.config import load_settings
 
     config: "ElspethSettings | None" = None
 
     if database:
-        db_path = Path(database).expanduser()
-        return f"sqlite:///{db_path.resolve()}", None
+        db_path = Path(database).expanduser().resolve()
+        # Fail fast with clear error if file doesn't exist
+        if not db_path.exists():
+            raise ValueError(f"Database file not found: {db_path}")
+        return f"sqlite:///{db_path}", None
 
-    # Try settings file
+    # Try explicit settings file
     if settings_path and settings_path.exists():
         try:
             config = load_settings(settings_path)
@@ -735,14 +849,15 @@ def resolve_database_url(
         except Exception as e:
             raise ValueError(f"Error loading settings from {settings_path}: {e}") from e
 
-    # Try default settings.yaml
+    # Try default settings.yaml - DO NOT silently swallow errors
     default_settings = Path("settings.yaml")
     if default_settings.exists():
         try:
             config = load_settings(default_settings)
             return config.landscape.url, config
-        except Exception:
-            pass  # Fall through to error
+        except Exception as e:
+            # Don't silently fall through - user should know why settings.yaml failed
+            raise ValueError(f"Error loading default settings.yaml: {e}") from e
 
     raise ValueError(
         "No database specified. Provide --database or ensure settings.yaml exists "
@@ -796,6 +911,8 @@ feat(cli): add database resolution helpers
 - resolve_database_url(): CLI --database > settings.yaml
 - resolve_latest_run_id(): get most recent run
 - resolve_run_id(): handle 'latest' keyword
+- Fail fast if database file doesn't exist
+- Don't silently swallow settings.yaml errors
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -826,7 +943,7 @@ from typer.testing import CliRunner
 from elspeth.cli import app
 from elspeth.contracts import NodeType, RowOutcome, RunStatus
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder, dataclass_to_dict, explain as explain_lineage
 
 runner = CliRunner()
 
@@ -883,6 +1000,53 @@ class TestExplainJsonMode:
         db.close()
 
         return db_path, run.run_id, token.token_id
+
+    @pytest.fixture
+    def db_with_forked_row(self, tmp_path: Path) -> tuple[Path, str, str]:
+        """Create database with a row that forked to multiple sinks.
+
+        Returns (db_path, run_id, row_id)
+        """
+        db_path = tmp_path / "audit.db"
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            data={"id": 1},
+        )
+
+        # Fork to two different sinks
+        token_a = recorder.create_token(row_id=row.row_id)
+        token_b = recorder.create_token(row_id=row.row_id)
+
+        recorder.record_token_outcome(
+            token_id=token_a.token_id,
+            run_id=run.run_id,
+            outcome=RowOutcome.ROUTED,
+            sink_name="sink_a",
+        )
+        recorder.record_token_outcome(
+            token_id=token_b.token_id,
+            run_id=run.run_id,
+            outcome=RowOutcome.ROUTED,
+            sink_name="sink_b",
+        )
+        recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
+        db.close()
+
+        return db_path, run.run_id, row.row_id
 
     def test_json_output_returns_lineage(self, db_with_run: tuple[Path, str, str]) -> None:
         """--json returns real lineage data."""
@@ -941,6 +1105,40 @@ class TestExplainJsonMode:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["token"]["token_id"] == token_id
+
+    def test_json_output_ambiguous_row_without_sink(self, db_with_forked_row: tuple[Path, str, str]) -> None:
+        """--json with ambiguous row (multiple tokens) returns helpful error."""
+        db_path, run_id, row_id = db_with_forked_row
+
+        result = runner.invoke(
+            app, ["explain", "--run", run_id, "--row", row_id, "--database", str(db_path), "--json"]
+        )
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+        assert "terminal tokens" in data["error"] or "sink" in data["error"].lower()
+
+    def test_json_output_matches_backend_explain(self, db_with_run: tuple[Path, str, str]) -> None:
+        """CLI JSON output should match direct explain() call (round-trip test)."""
+        db_path, run_id, token_id = db_with_run
+
+        # Get backend result
+        db = LandscapeDB.from_url(f"sqlite:///{db_path}")
+        recorder = LandscapeRecorder(db)
+        backend_result = explain_lineage(recorder, run_id=run_id, token_id=token_id)
+        backend_json = dataclass_to_dict(backend_result)
+        db.close()
+
+        # Get CLI result
+        result = runner.invoke(
+            app, ["explain", "--run", run_id, "--token", token_id, "--database", str(db_path), "--json"]
+        )
+        assert result.exit_code == 0
+        cli_json = json.loads(result.output)
+
+        # Should be identical (deep comparison)
+        assert cli_json == backend_json, "CLI JSON output differs from backend explain() result"
 ```
 
 **Step 2: Run test to verify it fails**
@@ -1035,6 +1233,8 @@ def explain(
         raise typer.Exit(1) from None
 
     # Connect to database
+    # Initialize db = None for proper cleanup in finally block
+    db: LandscapeDB | None = None
     try:
         db = LandscapeDB.from_url(db_url, create_tables=False)
     except Exception as e:
@@ -1110,7 +1310,8 @@ def explain(
         tui_app.run()
 
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 ```
 
 **Step 4: Run test to verify it passes**
@@ -1130,6 +1331,8 @@ feat(cli): implement explain --json mode with real lineage data
 - Resolve 'latest' run_id to most recent run
 - Call explain() from lineage module
 - Format output using dataclass_to_dict
+- Initialize db = None for guaranteed cleanup
+- Add round-trip test comparing CLI to backend
 
 Closes: docs/bugs/open/cli/P1-2026-01-20-cli-explain-is-placeholder.md (JSON mode)
 
@@ -1236,10 +1439,28 @@ EOF
 ## Task 6: Wire ExplainApp to ExplainScreen
 
 **Files:**
+- Modify: `src/elspeth/tui/screens/explain_screen.py` (add public property)
 - Modify: `src/elspeth/tui/explain_app.py`
 - Modify: `tests/tui/test_explain_app.py`
 
-**Step 1: Write failing test**
+**Step 1: Add public property to ExplainScreen**
+
+First, add a public property to ExplainScreen so ExplainApp doesn't access private `_detail_panel`:
+
+Add to `src/elspeth/tui/screens/explain_screen.py`:
+
+```python
+@property
+def detail_panel(self) -> "NodeDetailPanel":
+    """Get the detail panel widget for composition.
+
+    This is a public interface for ExplainApp to access the detail panel
+    without directly accessing the private _detail_panel attribute.
+    """
+    return self._detail_panel
+```
+
+**Step 2: Write failing test**
 
 Add to `tests/tui/test_explain_app.py`:
 
@@ -1289,12 +1510,12 @@ class TestExplainAppWithData:
         assert app._run_id == "test-run"
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 3: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/tui/test_explain_app.py::TestExplainAppWithData -v`
 Expected: FAIL (ExplainApp doesn't accept db parameter)
 
-**Step 3: Update ExplainApp to use ExplainScreen**
+**Step 4: Update ExplainApp to use ExplainScreen**
 
 Rewrite `src/elspeth/tui/explain_app.py`:
 
@@ -1309,10 +1530,15 @@ from typing import Any, ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Static
 
 from elspeth.core.landscape import LandscapeDB
-from elspeth.tui.screens.explain_screen import ExplainScreen, LoadedState
+from elspeth.tui.screens.explain_screen import (
+    ExplainScreen,
+    LoadedState,
+    LoadingFailedState,
+    UninitializedState,
+)
 
 
 class ExplainApp(App[None]):
@@ -1370,25 +1596,27 @@ class ExplainApp(App[None]):
         if self._db is not None and self._run_id is not None:
             self._screen = ExplainScreen(db=self._db, run_id=self._run_id)
 
-            # If in LoadedState, yield the tree and detail widgets
-            if isinstance(self._screen.state, LoadedState):
-                yield self._screen.state.tree
-                yield self._screen._detail_panel
-            else:
-                # Show error or loading state
-                from textual.widgets import Static
-
-                yield Static(f"Loading failed: {getattr(self._screen.state, 'error', 'Unknown error')}")
+            # Handle state explicitly - no defensive fallback
+            match self._screen.state:
+                case LoadedState():
+                    yield self._screen.state.tree
+                    yield self._screen.detail_panel  # Use public property
+                case LoadingFailedState(error=err):
+                    yield Static(f"Loading failed: {err or 'Unknown error'}")
+                case UninitializedState():
+                    yield Static("Screen not initialized. This should not happen.")
         else:
             # No data - show placeholder
-            from textual.widgets import Static
-
             yield Static("No database connection. Use --database option.")
 
         yield Footer()
 
     def action_refresh(self) -> None:
-        """Refresh lineage data."""
+        """Refresh lineage data.
+
+        Note: This clears and reloads the screen state but does not remount
+        widgets. For a full refresh, the app would need to be restarted.
+        """
         if self._screen is not None:
             # Clear and reload
             self._screen.clear()
@@ -1401,22 +1629,23 @@ class ExplainApp(App[None]):
         self.notify("Press q to quit, r to refresh, arrow keys to navigate")
 ```
 
-**Step 4: Run test to verify it passes**
+**Step 5: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/tui/test_explain_app.py -v`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
-git add src/elspeth/tui/explain_app.py tests/tui/test_explain_app.py
+git add src/elspeth/tui/screens/explain_screen.py src/elspeth/tui/explain_app.py tests/tui/test_explain_app.py
 git commit -m "$(cat <<'EOF'
 feat(tui): wire ExplainApp to ExplainScreen with real data
 
-- Accept db and run_id parameters
+- Add detail_panel public property to ExplainScreen
+- Accept db and run_id parameters in ExplainApp
 - Create ExplainScreen with database connection
 - Display tree and detail widgets from LoadedState
-- Handle loading errors gracefully
+- Handle all state types explicitly (no defensive fallback)
 
 Closes: docs/bugs/open/cli/P1-2026-01-20-cli-explain-is-placeholder.md (TUI mode)
 
@@ -1439,12 +1668,12 @@ Expected: ALL PASS
 
 **Step 2: Run type checking**
 
-Run: `.venv/bin/python -m mypy src/elspeth/cli.py src/elspeth/tui/explain_app.py src/elspeth/core/landscape/formatters.py`
+Run: `.venv/bin/python -m mypy src/elspeth/cli.py src/elspeth/tui/explain_app.py src/elspeth/core/landscape/formatters.py src/elspeth/cli_helpers.py`
 Expected: No errors
 
 **Step 3: Run linting**
 
-Run: `.venv/bin/python -m ruff check src/elspeth/cli.py src/elspeth/tui/explain_app.py src/elspeth/core/landscape/formatters.py`
+Run: `.venv/bin/python -m ruff check src/elspeth/cli.py src/elspeth/tui/explain_app.py src/elspeth/core/landscape/formatters.py src/elspeth/cli_helpers.py`
 Expected: No errors (or fix any found)
 
 **Step 4: Manual smoke test**
@@ -1494,15 +1723,15 @@ EOF
 
 ## Summary
 
-| Task | Description | Files |
-|------|-------------|-------|
-| 1 | Move serialization utilities to formatters | formatters.py, mcp/server.py |
-| 2 | Add LineageTextFormatter | formatters.py |
-| 3 | Add CLI database resolution helpers | cli_helpers.py |
-| 4 | Implement explain --json mode | cli.py |
-| 5 | Test explain --no-tui mode | test_explain_command.py |
-| 6 | Wire ExplainApp to ExplainScreen | explain_app.py |
-| 7 | Full test suite and close bug | All |
+| Task | Description | Files | Review Fixes Incorporated |
+|------|-------------|-------|---------------------------|
+| 1 | Move serialization utilities to formatters | formatters.py, mcp/server.py | `is_dataclass()`, NaN/Infinity rejection |
+| 2 | Add LineageTextFormatter | formatters.py | Remove defensive `hasattr` on Enum |
+| 3 | Add CLI database resolution helpers | cli_helpers.py | Don't swallow exceptions, file existence check |
+| 4 | Implement explain --json mode | cli.py | `db = None` init, ambiguous row test, round-trip test |
+| 5 | Test explain --no-tui mode | test_explain_command.py | - |
+| 6 | Wire ExplainApp to ExplainScreen | explain_app.py, explain_screen.py | Public `detail_panel` property |
+| 7 | Full test suite and close bug | All | - |
 
 **Total estimated time:** 2-3 hours (as bug report predicted)
 
@@ -1511,3 +1740,14 @@ EOF
 - Database resolution helpers live in `cli_helpers.py` (shared pattern)
 - ExplainApp wraps ExplainScreen (existing, tested infrastructure)
 - No new modules created - everything extends existing homes
+
+**Review feedback addressed:**
+- ✅ Use `is_dataclass()` instead of `hasattr` (Python Review)
+- ✅ Remove defensive `hasattr` on Enum values (Python Review - Tier 1 trust)
+- ✅ Don't silently swallow exceptions (Python Review)
+- ✅ Database file existence check (Systems Review)
+- ✅ Initialize `db = None` for cleanup (Python Review)
+- ✅ Add NaN/Infinity rejection test (QA Review)
+- ✅ Add ambiguous row CLI test (QA Review)
+- ✅ Add round-trip integration test (QA Review)
+- ✅ Expose `detail_panel` publicly (Architecture Review)
