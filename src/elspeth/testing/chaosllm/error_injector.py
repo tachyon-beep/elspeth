@@ -7,7 +7,7 @@ failures, and malformed responses. A burst state machine elevates error
 rates periodically to simulate real-world LLM provider stress.
 """
 
-import random
+import random as random_module
 import threading
 import time
 from collections.abc import Callable
@@ -104,7 +104,8 @@ class ErrorDecision:
         return self.category == ErrorCategory.MALFORMED
 
 
-# HTTP error types with their status codes
+# HTTP error types with their status codes.
+# Exported for external consumers (e.g., response generators, test assertions).
 HTTP_ERRORS: dict[str, int] = {
     "rate_limit": 429,
     "capacity_529": 529,
@@ -116,10 +117,12 @@ HTTP_ERRORS: dict[str, int] = {
     "not_found": 404,
 }
 
-# Connection-level error types
+# Connection-level error types.
+# Exported for external consumers (e.g., response generators, test assertions).
 CONNECTION_ERRORS: set[str] = {"timeout", "connection_reset", "slow_response"}
 
-# Malformed response types
+# Malformed response types.
+# Exported for external consumers (e.g., response generators, test assertions).
 MALFORMED_TYPES: set[str] = {
     "invalid_json",
     "truncated",
@@ -149,18 +152,19 @@ class ErrorInjector:
         config: ErrorInjectionConfig,
         *,
         time_func: Callable[[], float] | None = None,
-        random_func: Callable[[], float] | None = None,
+        rng: random_module.Random | None = None,
     ) -> None:
         """Initialize the error injector.
 
         Args:
             config: Error injection configuration
             time_func: Time function for testing (default: time.monotonic)
-            random_func: Random function for testing (default: random.random)
+            rng: Random instance for testing (default: module-level random).
+                 Inject a seeded random.Random() for deterministic testing.
         """
         self._config = config
         self._time_func = time_func if time_func is not None else time.monotonic
-        self._random_func = random_func if random_func is not None else random.random
+        self._rng = rng if rng is not None else random_module.Random()
 
         # Burst state machine
         self._lock = threading.Lock()
@@ -193,16 +197,6 @@ class ErrorInjector:
         # We're in burst if we're within the first `duration` seconds of each interval
         return position_in_interval < duration
 
-    def _get_effective_rate(self, base_rate: float, elapsed: float) -> float:
-        """Get the effective error rate, accounting for burst mode.
-
-        During burst mode, rate_limit_pct and capacity_529_pct are overridden
-        with burst-specific elevated rates.
-        """
-        if not self._is_in_burst(elapsed):
-            return base_rate
-        return base_rate  # Non-burst-affected errors use their base rate
-
     def _get_burst_rate_limit_pct(self, elapsed: float) -> float:
         """Get rate limit percentage, using burst rate if in burst mode."""
         if self._is_in_burst(elapsed):
@@ -218,17 +212,17 @@ class ErrorInjector:
     def _pick_retry_after(self) -> int:
         """Pick a random Retry-After value from the configured range."""
         min_sec, max_sec = self._config.retry_after_sec
-        return random.randint(min_sec, max_sec)
+        return self._rng.randint(min_sec, max_sec)
 
     def _pick_timeout_delay(self) -> float:
         """Pick a random timeout delay from the configured range."""
         min_sec, max_sec = self._config.timeout_sec
-        return random.uniform(min_sec, max_sec)
+        return self._rng.uniform(min_sec, max_sec)
 
     def _pick_slow_response_delay(self) -> float:
         """Pick a random slow response delay from the configured range."""
         min_sec, max_sec = self._config.slow_response_sec
-        return random.uniform(min_sec, max_sec)
+        return self._rng.uniform(min_sec, max_sec)
 
     def _should_trigger(self, percentage: float) -> bool:
         """Determine if an error should trigger based on percentage.
@@ -241,7 +235,7 @@ class ErrorInjector:
         """
         if percentage <= 0:
             return False
-        return self._random_func() * 100 < percentage
+        return self._rng.random() * 100 < percentage
 
     def decide(self) -> ErrorDecision:
         """Decide whether to inject an error for this request.

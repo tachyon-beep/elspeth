@@ -1,6 +1,7 @@
 # tests/testing/chaosllm/test_error_injector.py
 """Tests for ChaosLLM error injector."""
 
+import random
 import threading
 
 import pytest
@@ -14,6 +15,17 @@ from elspeth.testing.chaosllm.error_injector import (
     ErrorDecision,
     ErrorInjector,
 )
+
+
+class FixedRandom(random.Random):
+    """A Random instance that returns a fixed value for testing."""
+
+    def __init__(self, value: float) -> None:
+        super().__init__()
+        self._fixed_value = value
+
+    def random(self) -> float:
+        return self._fixed_value
 
 
 class TestErrorDecision:
@@ -482,18 +494,18 @@ class TestRandomDecisions:
         # Allow reasonable variance - should be between 40-60%
         assert 400 <= errors <= 600
 
-    def test_deterministic_with_mock_random(self) -> None:
-        """Can use mock random for deterministic testing."""
+    def test_deterministic_with_seeded_random(self) -> None:
+        """Can use seeded random for deterministic testing."""
         config = ErrorInjectionConfig(rate_limit_pct=50.0)
 
-        # Mock random that always returns 0.3 (30%)
+        # FixedRandom that always returns 0.3 (30%)
         # 30% * 100 = 30 < 50% threshold, so should trigger
-        injector = ErrorInjector(config, random_func=lambda: 0.3)
+        injector = ErrorInjector(config, rng=FixedRandom(0.3))
         assert injector.decide().should_inject is True
 
-        # Mock random that returns 0.6 (60%)
+        # FixedRandom that returns 0.6 (60%)
         # 60% * 100 = 60 >= 50% threshold, so should NOT trigger
-        injector = ErrorInjector(config, random_func=lambda: 0.6)
+        injector = ErrorInjector(config, rng=FixedRandom(0.6))
         assert injector.decide().should_inject is False
 
     def test_zero_percent_never_triggers(self) -> None:
@@ -503,6 +515,58 @@ class TestRandomDecisions:
 
         for _ in range(100):
             assert injector.decide().should_inject is False
+
+    def test_seeded_random_deterministic_retry_after(self) -> None:
+        """Retry-After values are deterministic with seeded random."""
+        config = ErrorInjectionConfig(
+            rate_limit_pct=100.0,
+            retry_after_sec=(1, 10),
+        )
+        # Same seed should produce same sequence
+        rng1 = random.Random(42)
+        rng2 = random.Random(42)
+
+        injector1 = ErrorInjector(config, rng=rng1)
+        injector2 = ErrorInjector(config, rng=rng2)
+
+        for _ in range(10):
+            d1 = injector1.decide()
+            d2 = injector2.decide()
+            assert d1.retry_after_sec == d2.retry_after_sec
+
+    def test_seeded_random_deterministic_timeout_delay(self) -> None:
+        """Timeout delay values are deterministic with seeded random."""
+        config = ErrorInjectionConfig(
+            timeout_pct=100.0,
+            timeout_sec=(5.0, 30.0),
+        )
+        rng1 = random.Random(42)
+        rng2 = random.Random(42)
+
+        injector1 = ErrorInjector(config, rng=rng1)
+        injector2 = ErrorInjector(config, rng=rng2)
+
+        for _ in range(10):
+            d1 = injector1.decide()
+            d2 = injector2.decide()
+            assert d1.delay_sec == d2.delay_sec
+
+    def test_seeded_random_deterministic_slow_response_delay(self) -> None:
+        """Slow response delay values are deterministic with seeded random."""
+        config = ErrorInjectionConfig(
+            slow_response_pct=100.0,
+            slow_response_sec=(1.0, 5.0),
+        )
+        rng1 = random.Random(42)
+        rng2 = random.Random(42)
+
+        injector1 = ErrorInjector(config, rng=rng1)
+        injector2 = ErrorInjector(config, rng=rng2)
+
+        for _ in range(10):
+            d1 = injector1.decide()
+            d2 = injector2.decide()
+            assert d1.delay_sec == d2.delay_sec
 
 
 class TestErrorPriority:
