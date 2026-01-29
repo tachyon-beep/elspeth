@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -434,7 +434,7 @@ class MetricsRecorder:
         """
         # Get the bucket boundaries for querying requests
         bucket_dt = datetime.fromisoformat(bucket)
-        bucket_end_dt = bucket_dt.replace(second=bucket_dt.second + self._config.timeseries_bucket_sec)
+        bucket_end_dt = bucket_dt + timedelta(seconds=self._config.timeseries_bucket_sec)
         bucket_end = bucket_end_dt.isoformat()
 
         # Query latencies for this bucket
@@ -493,7 +493,7 @@ class MetricsRecorder:
 
             # Get bucket boundaries
             bucket_dt = datetime.fromisoformat(bucket)
-            bucket_end_dt = bucket_dt.replace(second=bucket_dt.second + self._config.timeseries_bucket_sec)
+            bucket_end_dt = bucket_dt + timedelta(seconds=self._config.timeseries_bucket_sec)
             bucket_end = bucket_end_dt.isoformat()
 
             # Query all requests in this bucket

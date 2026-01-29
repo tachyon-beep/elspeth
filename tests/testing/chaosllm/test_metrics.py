@@ -1058,3 +1058,61 @@ class TestEdgeCases:
         assert timeseries[0]["requests_total"] == 3
 
         recorder.close()
+
+    def test_bucket_boundary_overflow_update_bucket_latency(self, tmp_path: Path) -> None:
+        """Tests bucket boundary calculation with 10-second buckets at :55 seconds.
+
+        This is a regression test for a bug where adding seconds to a datetime using
+        replace() would overflow (e.g., second=55 + 10 = 65, which is invalid).
+        The fix uses timedelta arithmetic instead.
+        """
+        db_path = tmp_path / "metrics.db"
+        config = MetricsConfig(database=str(db_path), timeseries_bucket_sec=10)
+        recorder = MetricsRecorder(config)
+
+        # Record a request at :55 seconds with a 10-second bucket
+        # The bucket would be at :50, and bucket_end should be :00 of next minute
+        recorder.record_request(
+            request_id="req1",
+            timestamp_utc="2024-01-15T10:30:55.500+00:00",
+            endpoint="/test",
+            outcome="success",
+            latency_ms=100.0,
+        )
+
+        # Verify that timeseries was created without ValueError
+        timeseries = recorder.get_timeseries()
+        assert len(timeseries) == 1
+        assert timeseries[0]["requests_total"] == 1
+
+        recorder.close()
+
+    def test_bucket_boundary_overflow_update_timeseries(self, tmp_path: Path) -> None:
+        """Tests update_timeseries() bucket boundary calculation with overflow.
+
+        Similar to above but exercises the update_timeseries() method which
+        also had the same bug in bucket_end_dt calculation.
+        """
+        db_path = tmp_path / "metrics.db"
+        config = MetricsConfig(database=str(db_path), timeseries_bucket_sec=10)
+        recorder = MetricsRecorder(config)
+
+        # Record requests at :55 seconds boundary
+        for i in range(3):
+            recorder.record_request(
+                request_id=f"req{i}",
+                timestamp_utc=f"2024-01-15T10:30:55.{i:03d}+00:00",
+                endpoint="/test",
+                outcome="success",
+                latency_ms=100.0 + i,
+            )
+
+        # Call update_timeseries which rebuilds from raw data
+        # This should not raise ValueError on bucket boundary arithmetic
+        recorder.update_timeseries()
+
+        timeseries = recorder.get_timeseries()
+        assert len(timeseries) == 1
+        assert timeseries[0]["requests_total"] == 3
+
+        recorder.close()
