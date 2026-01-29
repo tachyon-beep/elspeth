@@ -336,6 +336,27 @@ class OTLPExporterPlugin:
 
 ## Configuration
 
+### Secrets Handling
+
+**All secrets MUST come from environment variables, never hardcoded in config files.**
+
+ELSPETH uses Dynaconf's `${ENV_VAR}` substitution pattern. Secrets are resolved at runtime from:
+1. **Environment variables** (highest priority)
+2. **`.env` file** in project root (development convenience)
+3. **`.secrets.yaml`** (optional, gitignored)
+
+| Secret Type | Environment Variable | Example |
+|-------------|---------------------|---------|
+| OTLP auth token | `OTEL_TOKEN` | `Authorization: "Bearer ${OTEL_TOKEN}"` |
+| Azure Monitor | `APPLICATIONINSIGHTS_CONNECTION_STRING` | `connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}` |
+| Datadog API key | `DD_API_KEY` | `api_key: ${DD_API_KEY}` |
+
+**Security rules:**
+- Config files (`.yaml`) go in git — they contain structure, not secrets
+- `.env` files are gitignored — they contain secrets for local dev
+- Production secrets come from environment (injected by deployment system)
+- Never log secrets — use HMAC fingerprints per CLAUDE.md
+
 ### User-Facing Settings
 
 ```yaml
@@ -360,11 +381,19 @@ telemetry:
 
   exporters:
     - name: otlp
-      endpoint: "http://localhost:4317"
+      endpoint: ${OTEL_ENDPOINT}  # e.g., "http://localhost:4317"
       headers:
         Authorization: "Bearer ${OTEL_TOKEN}"
+
+    - name: azure_monitor
+      connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+
+    - name: datadog
+      api_key: ${DD_API_KEY}  # Optional if local agent
+      service_name: "elspeth-pipeline"
+
     - name: console
-      format: json  # json | pretty
+      format: json  # json | pretty (for local debugging)
 ```
 
 ### Protocol (contracts/config/protocols.py)
@@ -802,6 +831,8 @@ class DatadogExporter:
     """Export telemetry to Datadog via native API.
 
     Uses ddtrace for native Datadog integration with full APM features.
+
+    Config values come pre-resolved by Dynaconf (${DD_API_KEY} → actual value).
     """
     _name = "datadog"
 
@@ -810,7 +841,9 @@ class DatadogExporter:
         return self._name
 
     def configure(self, config: dict[str, Any]) -> None:
-        self._api_key = config.get("api_key")  # Optional if agent is local
+        # api_key is optional if using local Datadog agent
+        # Value comes from config after Dynaconf resolves ${DD_API_KEY}
+        self._api_key = config.get("api_key")
         self._service_name = config.get("service_name", "elspeth")
         self._env = config.get("env", "production")
 
