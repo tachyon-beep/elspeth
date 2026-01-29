@@ -677,11 +677,7 @@ class MetricsRecorder:
         # Count non-success requests (all outcomes that aren't "success")
         error_rate = 0.0
         if total_requests > 0:
-            error_count = sum(
-                count
-                for outcome, count in requests_by_outcome.items()
-                if outcome != "success"
-            )
+            error_count = sum(count for outcome, count in requests_by_outcome.items() if outcome != "success")
             error_rate = (error_count / total_requests) * 100
 
         return {
