@@ -544,8 +544,13 @@ class TestOpenRouterBatchSharedClient:
 class TestOpenRouterBatchAllRowsFail:
     """Tests for when all rows in a batch fail."""
 
-    def test_all_rows_fail_returns_error(self) -> None:
-        """When all rows fail, TransformResult.error() is returned."""
+    def test_all_rows_fail_returns_success_with_error_markers(self) -> None:
+        """When all rows fail, success_multi returns rows with error markers.
+
+        Batch processing never returns TransformResult.error() - every row gets
+        processed and included in output, even if all fail. Failed rows have
+        their error details in the {response_field}_error field.
+        """
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         rows = [{"text": "Row 1"}, {"text": "Row 2"}]
@@ -562,8 +567,8 @@ class TestOpenRouterBatchAllRowsFail:
         with mock_httpx_client(side_effect=error):
             result = transform.process(rows, ctx)
 
-        # When ALL rows fail, we still get success_multi with error rows
-        # (not TransformResult.error()) because each row is processed
+        # All rows processed - success_multi with error markers on each row
         assert result.status == "success"
         assert result.rows is not None
+        assert len(result.rows) == 2
         assert all(r.get("llm_response_error") is not None for r in result.rows)

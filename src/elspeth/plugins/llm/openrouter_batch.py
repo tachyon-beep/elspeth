@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 from pydantic import Field
@@ -32,9 +32,6 @@ from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import is_capacity_error
 from elspeth.plugins.schema_factory import create_schema_from_config
-
-if TYPE_CHECKING:
-    pass  # No type-only imports needed currently
 
 
 class OpenRouterBatchConfig(LLMConfig):
@@ -122,8 +119,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         self._timeout = cfg.timeout_seconds
 
         # Store common LLM settings
+        # Note: max_capacity_retry_seconds not stored - this plugin uses simple
+        # ThreadPoolExecutor, not PooledExecutor with AIMD retry. Row-level retries
+        # are handled by the engine's RetryManager based on retryable error flags.
         self._pool_size = cfg.pool_size
-        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
         self._model = cfg.model
         self._template = PromptTemplate(
             cfg.template,
@@ -257,8 +256,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     results[idx] = e
 
         # Assemble output rows in original order
+        # Every row gets an output (success or with error markers) - no rows are dropped
         output_rows: list[dict[str, Any]] = []
-        row_errors: list[dict[str, Any]] = []
 
         for idx in range(len(rows)):
             result = results.get(idx)
@@ -269,7 +268,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {"reason": "result_missing"}
                 output_rows.append(output_row)
-                row_errors.append({"row_index": idx, "reason": "result_missing"})
                 # Record to audit trail - "I don't know what happened" is never acceptable
                 ctx.record_call(
                     call_type=CallType.LLM,
@@ -281,7 +279,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 )
 
             elif isinstance(result, Exception):
-                # Unexpected exception
+                # Unexpected exception (httpx transport errors caught in as_completed loop)
                 output_row = dict(rows[idx])
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
@@ -290,7 +288,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     "error_type": type(result).__name__,
                 }
                 output_rows.append(output_row)
-                row_errors.append({"row_index": idx, "reason": "exception", "error": str(result)})
 
             elif "error" in result:
                 # Row-level error from _process_single_row
@@ -298,15 +295,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = result["error"]
                 output_rows.append(output_row)
-                row_errors.append({"row_index": idx, **result["error"]})
 
             else:
                 # Success
                 output_rows.append(result)
-
-        # Return results
-        if not output_rows:
-            return TransformResult.error({"reason": "all_rows_failed", "row_errors": row_errors})
 
         return TransformResult.success_multi(output_rows)
 
@@ -483,12 +475,16 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             }
 
         # Record successful call
+        # Note: "usage" and "model" are optional in OpenAI/OpenRouter API responses
+        # (e.g., streaming responses may omit usage). The .get() here handles a valid
+        # API variation, not a bug - this is Tier 3 external data normalization.
         usage = data.get("usage") or {}
+        response_model = data.get("model", self._model)
         ctx.record_call(
             call_type=CallType.LLM,
             status=CallStatus.SUCCESS,
             request_data={"row_index": idx, **request_body},
-            response_data={"content": content, "usage": usage, "model": data.get("model")},
+            response_data={"content": content, "usage": usage, "model": response_model},
             latency_ms=latency_ms,
         )
 
@@ -502,7 +498,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-        output[f"{self._response_field}_model"] = data.get("model", self._model)
+        output[f"{self._response_field}_model"] = response_model
 
         return output
 
