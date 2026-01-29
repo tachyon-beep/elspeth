@@ -169,3 +169,30 @@ The bug remains as described:
 ### Recommendation
 
 This is a valid P3 bug. The behavior is intentional (as evidenced by tests and design docs) but limits verification effectiveness for order-sensitive responses. The proposed fix (make `ignore_order` configurable with sensible defaults) is appropriate and low-risk.
+
+## Phase 1 Implementation (2026-01-30)
+
+**Status: IMPLEMENTED**
+
+Phase 1 adds the `ignore_order` parameter to `CallVerifier` with default `True` (non-breaking).
+
+### Changes Made
+
+1. Added `ignore_order: bool = True` parameter to `CallVerifier.__init__()`
+2. Parameter passes through to DeepDiff comparison
+3. Default preserves existing behavior (order-independent)
+4. Users can now set `ignore_order=False` for order-sensitive verification
+
+### Test Coverage Added
+
+- `test_verify_order_sensitive_when_configured` - explicit False behavior
+- `test_ignore_order_handles_duplicate_elements` - multiset semantics
+- `test_ignore_order_applies_recursively_to_nested_lists` - recursive behavior
+- `test_ignore_order_does_not_affect_dict_keys` - dict key ordering unaffected
+- `test_empty_lists_always_match` - edge case
+- `test_order_sensitivity_with_realistic_llm_response` - practical LLM example
+- `test_verify_order_independent_with_default_config` - renamed from original
+
+### Next Steps
+
+Phase 2 (P3-2026-01-29-verifier-field-level-order-config.md) will add field-level configuration to allow mixed semantics within a single verification session.
