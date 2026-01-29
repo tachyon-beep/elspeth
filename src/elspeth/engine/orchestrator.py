@@ -537,6 +537,17 @@ class Orchestrator:
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
 
+        # Local imports for telemetry events - consolidated here to avoid repeated imports
+        from elspeth.telemetry import (
+            PhaseChanged as TelemetryPhaseChanged,
+        )
+        from elspeth.telemetry import (
+            RunCompleted as TelemetryRunCompleted,
+        )
+        from elspeth.telemetry import (
+            RunStarted as TelemetryRunStarted,
+        )
+
         # DATABASE phase - create recorder and begin run
         phase_start = time.perf_counter()
         try:
@@ -555,8 +566,6 @@ class Orchestrator:
             )
 
             # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record
-            from elspeth.telemetry import RunStarted as TelemetryRunStarted
-
             self._emit_telemetry(
                 TelemetryRunStarted(
                     timestamp=datetime.now(UTC),
@@ -591,8 +600,6 @@ class Orchestrator:
             run_completed = True
 
             # Emit telemetry AFTER Landscape finalize succeeds
-            from elspeth.telemetry import RunCompleted as TelemetryRunCompleted
-
             run_duration_ms = (time.perf_counter() - run_start_time) * 1000
             self._emit_telemetry(
                 TelemetryRunCompleted(
@@ -623,8 +630,6 @@ class Orchestrator:
                     self._events.emit(PhaseStarted(phase=PipelinePhase.EXPORT, action=PhaseAction.EXPORTING, target=export_config.sink))
 
                     # Emit telemetry PhaseChanged for EXPORT
-                    from elspeth.telemetry import PhaseChanged as TelemetryPhaseChanged
-
                     self._emit_telemetry(
                         TelemetryPhaseChanged(
                             timestamp=datetime.now(UTC),
@@ -685,6 +690,17 @@ class Orchestrator:
 
             if run_completed:
                 # Export failed after successful run - emit PARTIAL status
+                # Emit telemetry for PARTIAL status (run succeeded, export failed)
+                self._emit_telemetry(
+                    TelemetryRunCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=run.run_id,
+                        status=RunStatus.COMPLETED,  # Landscape status is COMPLETED
+                        row_count=result.rows_processed,
+                        duration_ms=total_duration * 1000,
+                    )
+                )
+
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -704,8 +720,6 @@ class Orchestrator:
                 recorder.finalize_run(run.run_id, status=RunStatus.FAILED)
 
                 # Emit telemetry AFTER Landscape finalize succeeds
-                from elspeth.telemetry import RunCompleted as TelemetryRunCompleted
-
                 self._emit_telemetry(
                     TelemetryRunCompleted(
                         timestamp=datetime.now(UTC),
@@ -765,6 +779,14 @@ class Orchestrator:
         # Store graph for checkpointing during execution
         self._current_graph = graph
 
+        # Local imports for telemetry events - consolidated here to avoid repeated imports
+        from elspeth.telemetry import (
+            PhaseChanged as TelemetryPhaseChanged,
+        )
+        from elspeth.telemetry import (
+            RowCreated as TelemetryRowCreated,
+        )
+
         # Get execution order from graph
         execution_order = graph.topological_order()
 
@@ -805,8 +827,6 @@ class Orchestrator:
             self._events.emit(PhaseStarted(phase=PipelinePhase.GRAPH, action=PhaseAction.BUILDING))
 
             # Emit telemetry PhaseChanged - we now have run_id from begin_run
-            from elspeth.telemetry import PhaseChanged as TelemetryPhaseChanged
-
             self._emit_telemetry(
                 TelemetryPhaseChanged(
                     timestamp=datetime.now(UTC),
@@ -1062,8 +1082,6 @@ class Orchestrator:
         self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
 
         # Emit telemetry PhaseChanged for SOURCE
-        from elspeth.telemetry import PhaseChanged as TelemetryPhaseChanged
-
         self._emit_telemetry(
             TelemetryPhaseChanged(
                 timestamp=datetime.now(UTC),
@@ -1094,8 +1112,6 @@ class Orchestrator:
             self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
 
             # Emit telemetry PhaseChanged for PROCESS
-            from elspeth.telemetry import PhaseChanged as TelemetryPhaseChanged
-
             self._emit_telemetry(
                 TelemetryPhaseChanged(
                     timestamp=datetime.now(UTC),
@@ -1140,8 +1156,6 @@ class Orchestrator:
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
-                            from elspeth.telemetry import RowCreated as TelemetryRowCreated
-
                             self._emit_telemetry(
                                 TelemetryRowCreated(
                                     timestamp=datetime.now(UTC),
