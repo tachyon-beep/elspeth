@@ -362,6 +362,8 @@ FROM python:3.11-slim AS runtime
 
 ## Troubleshooting
 
+For general ELSPETH troubleshooting (API errors, configuration issues, etc.), see the [Troubleshooting Guide](troubleshooting.md). Below are Docker-specific issues.
+
 ### "File not found" errors
 
 **Symptom:** `FileNotFoundError: /app/input/data.csv`

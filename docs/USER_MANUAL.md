@@ -417,61 +417,20 @@ landscape:
 
 ## Troubleshooting
 
-### "Secret field found but ELSPETH_FINGERPRINT_KEY is not set"
+For comprehensive troubleshooting, see the [Troubleshooting Guide](guides/troubleshooting.md).
 
-Your configuration contains API keys but the fingerprint key isn't set:
+### Quick Fixes
 
+**"ELSPETH_FINGERPRINT_KEY is not set"** - Set the key or allow raw secrets for development:
 ```bash
-# Option 1: Set fingerprint key (production)
 export ELSPETH_FINGERPRINT_KEY="your-key"
-
-# Option 2: Allow raw secrets (development only)
+# OR for development only:
 export ELSPETH_ALLOW_RAW_SECRETS=true
 ```
 
-Or add to `.env`:
-```bash
-ELSPETH_FINGERPRINT_KEY=your-key
-```
+**"Unknown plugin: xyz"** - Check available plugins with `elspeth plugins list` (names are case-sensitive).
 
-### "Unknown plugin: xyz"
-
-Check available plugins:
-```bash
-elspeth plugins list
-```
-
-Plugin names are case-sensitive and must match exactly.
-
-### API Authentication Errors (401/403)
-
-1. Check your `.env` file has the correct API key
-2. Verify the key is valid and not expired
-3. Ensure `.env` is in the current directory or a parent
-
-```bash
-# Debug: Check if .env is being loaded
-echo $OPENROUTER_API_KEY  # Should be empty before running
-elspeth run -s settings.yaml --execute  # .env loads here
-```
-
-### Pipeline Hangs or Times Out
-
-Check rate limiting and timeout configuration:
-```yaml
-concurrency:
-  max_workers: 4
-  rate_limit:
-    calls_per_minute: 60
-```
-
-For LLM transforms, increase timeout:
-```yaml
-row_plugins:
-  - plugin: azure_llm
-    options:
-      timeout: 120  # seconds
-```
+**Pipeline hangs** - Run with `--verbose` to identify the bottleneck and check your rate limit configuration.
 
 ---
 
