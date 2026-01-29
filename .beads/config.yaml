@@ -61,6 +61,7 @@ sync-branch: "beads-sync"
 # - github.org
 # - github.repo
 
-daemon.auto-commit: true
-
-daemon.auto-push: true
+# Daemon settings
+daemon:
+  auto-commit: true
+  auto-push: true
