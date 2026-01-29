@@ -874,3 +874,67 @@ allow_hits:
   reason: 'Plugin boundary: checking is_batch_aware on user-provided transform instance (Tier 2 data)'
   safety: False default triggers ValueError with actionable message - fail-fast, not silent degradation
   expires: null
+# ChaosLLM ResponseGenerator - external HTTP request data (Tier 3 trust boundary)
+# These .get() calls are on the request dict from external HTTP clients, which is
+# zero-trust data. The OpenAI API spec makes many fields optional (messages can be
+# empty, model can be omitted in some configurations, etc.)
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=485
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  safety: Empty list default is safe - template receives empty messages array
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=486
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  safety: Default "unknown" is safe - used for template context only
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=491
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  safety: Empty list default triggers "(no messages provided)" response
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=496
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
+  safety: Empty string default means message is not matched as "user" role
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=498
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  safety: 'Empty string default produces "Echo:" response'
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=501
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  safety: 'Empty string default produces "Echo:" response'
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=537
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  safety: Empty list default produces empty prompt text for token estimation
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=540
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
+  safety: Empty string default is safe for token estimation formatting
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=541
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  safety: Empty string default is safe for token estimation
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=574
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  safety: Empty list default is safe for template rendering with override
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=575
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  safety: Default "unknown" is safe for template context
+  expires: null
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=597
+  owner: chaosllm
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  safety: Default "gpt-4" is safe for response metadata
+  expires: null
