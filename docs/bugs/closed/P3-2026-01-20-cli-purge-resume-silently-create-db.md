@@ -1,5 +1,22 @@
 # Bug Report: `purge`/`resume` can silently create a new empty Landscape DB on typoed `--database` paths
 
+**Status: CLOSED (Fixed 2026-01-29)**
+
+## Resolution
+
+**Root Cause:** Both `purge` and `resume` bypassed the `resolve_database_url()` helper (which checks file existence) and built the DB URL directly without validation. Combined with `LandscapeDB.from_url()` defaulting to `create_tables=True`, this silently created empty databases.
+
+**Fix Applied:**
+1. Added `db_path.exists()` check to both `purge` and `resume` commands in `cli.py`
+2. Commands now fail with clear error: "Database file not found: /path/to/db"
+3. No database file is created on typoed paths
+4. Added explicit tests for missing database behavior
+5. Updated existing tests to pre-create databases (they relied on auto-create)
+
+**Files Changed:**
+- `src/elspeth/cli.py` - Added existence checks for `--database` paths
+- `tests/cli/test_cli.py` - Added 2 new tests, updated 3 existing tests
+
 ## Summary
 
 - `elspeth purge` and `elspeth resume` accept `--database` as a SQLite database file path, but do not check that the file exists.

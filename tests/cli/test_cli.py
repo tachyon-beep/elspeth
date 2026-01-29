@@ -258,9 +258,34 @@ class TestPurgeCommand:
         assert result.exit_code == 0
         assert "retention" in result.stdout.lower() or "days" in result.stdout.lower()
 
+    def test_purge_fails_on_missing_database(self, tmp_path: Path) -> None:
+        """purge fails with clear error when database file doesn't exist.
+
+        Prevents silent creation of empty DB on typoed --database paths.
+        See: BUG-AUDIT-01 / P3-cli-purge-resume-silently-create-db
+        """
+        from elspeth.cli import app
+
+        nonexistent_db = tmp_path / "does-not-exist.db"
+
+        result = runner.invoke(
+            app,
+            ["purge", "--dry-run", "--database", str(nonexistent_db)],
+        )
+
+        assert result.exit_code == 1
+        assert "database file not found" in result.output.lower()
+        # Verify no file was created
+        assert not nonexistent_db.exists(), "Should not create database file on missing path"
+
     def test_purge_dry_run(self, tmp_path: Path) -> None:
         """purge --dry-run shows what would be deleted or that nothing expired."""
         from elspeth.cli import app
+        from elspeth.core.landscape import LandscapeDB
+
+        # Pre-create database (purge requires existing DB, doesn't auto-create)
+        db_file = tmp_path / "test.db"
+        LandscapeDB.from_url(f"sqlite:///{db_file}")
 
         result = runner.invoke(
             app,
@@ -268,7 +293,7 @@ class TestPurgeCommand:
                 "purge",
                 "--dry-run",
                 "--database",
-                str(tmp_path / "test.db"),
+                str(db_file),
             ],
         )
 
@@ -282,6 +307,11 @@ class TestPurgeCommand:
     def test_purge_with_retention_override(self, tmp_path: Path) -> None:
         """purge --retention-days overrides default."""
         from elspeth.cli import app
+        from elspeth.core.landscape import LandscapeDB
+
+        # Pre-create database (purge requires existing DB, doesn't auto-create)
+        db_file = tmp_path / "test.db"
+        LandscapeDB.from_url(f"sqlite:///{db_file}")
 
         result = runner.invoke(
             app,
@@ -291,7 +321,7 @@ class TestPurgeCommand:
                 "--retention-days",
                 "30",
                 "--database",
-                str(tmp_path / "test.db"),
+                str(db_file),
             ],
         )
 
@@ -370,6 +400,11 @@ class TestPurgeCommand:
     def test_purge_with_yes_flag_skips_confirmation(self, tmp_path: Path) -> None:
         """purge --yes skips confirmation prompt."""
         from elspeth.cli import app
+        from elspeth.core.landscape import LandscapeDB
+
+        # Pre-create database (purge requires existing DB, doesn't auto-create)
+        db_file = tmp_path / "test.db"
+        LandscapeDB.from_url(f"sqlite:///{db_file}")
 
         result = runner.invoke(
             app,
@@ -377,7 +412,7 @@ class TestPurgeCommand:
                 "purge",
                 "--yes",
                 "--database",
-                str(tmp_path / "test.db"),
+                str(db_file),
             ],
         )
 
@@ -563,6 +598,52 @@ class TestResumeCommand:
 
         assert result.exit_code == 0
         assert "run" in result.stdout.lower()
+
+    def test_resume_fails_on_missing_database(self, tmp_path: Path) -> None:
+        """resume fails with clear error when database file doesn't exist.
+
+        Prevents silent creation of empty DB on typoed --database paths.
+        See: BUG-AUDIT-01 / P3-cli-purge-resume-silently-create-db
+        """
+        from elspeth.cli import app
+
+        nonexistent_db = tmp_path / "does-not-exist.db"
+
+        # Create a minimal settings file (resume requires settings)
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+source:
+  plugin: csv
+  options:
+    path: dummy.csv
+    schema:
+      mode: free
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+default_sink: output
+landscape:
+  url: sqlite:///./runs/audit.db
+""")
+
+        result = runner.invoke(
+            app,
+            [
+                "resume",
+                "some-run-id",
+                "--database",
+                str(nonexistent_db),
+                "--settings",
+                str(settings_file),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "database file not found" in result.output.lower()
+        # Verify no file was created
+        assert not nonexistent_db.exists(), "Should not create database file on missing path"
 
     def test_resume_nonexistent_run(self, tmp_path: Path) -> None:
         """resume fails gracefully for nonexistent run."""

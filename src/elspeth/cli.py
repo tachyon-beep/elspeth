@@ -1175,8 +1175,13 @@ def purge(
             typer.echo(f"Warning: Could not load settings.yaml: {e}", err=True)
 
     if database:
-        db_path = Path(database).expanduser()
-        db_url = f"sqlite:///{db_path.resolve()}"
+        db_path = Path(database).expanduser().resolve()
+        # Fail fast with clear error if file doesn't exist
+        # (prevents silent creation of empty DB on typoed paths)
+        if not db_path.exists():
+            typer.echo(f"Error: Database file not found: {db_path}", err=True)
+            raise typer.Exit(1) from None
+        db_url = f"sqlite:///{db_path}"
     elif config:
         db_url = config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
@@ -1521,8 +1526,13 @@ def resume(
 
     # Resolve database URL
     if database:
-        db_path = Path(database).expanduser()
-        db_url = f"sqlite:///{db_path.resolve()}"
+        db_path = Path(database).expanduser().resolve()
+        # Fail fast with clear error if file doesn't exist
+        # (prevents silent creation of empty DB on typoed paths)
+        if not db_path.exists():
+            typer.echo(f"Error: Database file not found: {db_path}", err=True)
+            raise typer.Exit(1) from None
+        db_url = f"sqlite:///{db_path}"
     else:
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
