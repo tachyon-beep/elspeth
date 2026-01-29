@@ -585,6 +585,40 @@ The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` d
 | LLM | LiteLLM | 100+ LLM providers unified |
 | ML | scikit-learn, ONNX | Traditional ML inference |
 | Azure | azure-storage-blob | Azure cloud integration |
+| Telemetry | OpenTelemetry, ddtrace | Observability platform integration |
+
+## Telemetry (Operational Visibility)
+
+Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
+
+**Key distinction:**
+- **Landscape**: Legal record, complete lineage, persisted forever, source of truth
+- **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
+
+**Available exporters:** Console (debugging), OTLP (Jaeger/Tempo/Honeycomb), Azure Monitor, Datadog
+
+**Basic configuration:**
+
+```yaml
+telemetry:
+  enabled: true
+  granularity: rows  # lifecycle | rows | full
+  backpressure_mode: block  # block (complete) | drop (fast)
+  exporters:
+    - name: console
+      format: pretty
+    - name: otlp
+      endpoint: ${OTEL_ENDPOINT}
+```
+
+**Granularity levels:**
+- `lifecycle`: Run start/complete, phase transitions (~10-20 events/run)
+- `rows`: Above + row creation, transform completion, gate routing (N x M events)
+- `full`: Above + external call details (LLM, HTTP, SQL)
+
+**Correlation workflow:** Telemetry events include `run_id` and `token_id`. When an alert fires in Datadog/Grafana, use the `run_id` to investigate with `elspeth explain` or the Landscape MCP server.
+
+**Full documentation:** See `docs/guides/telemetry.md` for exporter configuration, troubleshooting, and operational guidance.
 
 ## Critical Implementation Patterns
 
