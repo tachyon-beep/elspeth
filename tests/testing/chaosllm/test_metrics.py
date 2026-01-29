@@ -202,9 +202,7 @@ class TestMetricsRecorderBasic:
 
         # Verify tables exist
         conn = sqlite3.connect(str(db_path))
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row[0] for row in cursor.fetchall()}
         conn.close()
 
@@ -931,11 +929,7 @@ class TestThreadSafety:
                 with lock:
                     errors.append(e)
 
-        threads = [
-            threading.Thread(target=writer) for _ in range(5)
-        ] + [
-            threading.Thread(target=resetter) for _ in range(2)
-        ]
+        threads = [threading.Thread(target=writer) for _ in range(5)] + [threading.Thread(target=resetter) for _ in range(2)]
 
         for t in threads:
             t.start()

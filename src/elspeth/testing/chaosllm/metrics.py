@@ -225,8 +225,18 @@ class MetricsRecorder:
 
         Returns:
             SQLite connection for the current thread
+
+        Note:
+            Uses try/except because threading.local() raises AttributeError
+            when the attribute doesn't exist yet for this thread. This is
+            the canonical pattern for thread-local storage initialization.
         """
-        if not hasattr(self._local, "connection"):
+        try:
+            # threading.local() returns Any for attributes, but we know the type
+            connection: sqlite3.Connection = self._local.connection
+            return connection
+        except AttributeError:
+            # First access in this thread - create new connection
             conn = sqlite3.connect(
                 self._config.database,
                 check_same_thread=False,
@@ -237,9 +247,7 @@ class MetricsRecorder:
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.row_factory = sqlite3.Row
             self._local.connection = conn
-        # threading.local() returns Any for attributes, but we know the type
-        connection: sqlite3.Connection = self._local.connection
-        return connection
+            return conn
 
     def _init_schema(self) -> None:
         """Initialize database schema."""
@@ -426,9 +434,7 @@ class MetricsRecorder:
         """
         # Get the bucket boundaries for querying requests
         bucket_dt = datetime.fromisoformat(bucket)
-        bucket_end_dt = bucket_dt.replace(
-            second=bucket_dt.second + self._config.timeseries_bucket_sec
-        )
+        bucket_end_dt = bucket_dt.replace(second=bucket_dt.second + self._config.timeseries_bucket_sec)
         bucket_end = bucket_end_dt.isoformat()
 
         # Query latencies for this bucket
@@ -487,9 +493,7 @@ class MetricsRecorder:
 
             # Get bucket boundaries
             bucket_dt = datetime.fromisoformat(bucket)
-            bucket_end_dt = bucket_dt.replace(
-                second=bucket_dt.second + self._config.timeseries_bucket_sec
-            )
+            bucket_end_dt = bucket_dt.replace(second=bucket_dt.second + self._config.timeseries_bucket_sec)
             bucket_end = bucket_end_dt.isoformat()
 
             # Query all requests in this bucket
@@ -617,15 +621,11 @@ class MetricsRecorder:
         total_requests = cursor.fetchone()[0]
 
         # Requests by outcome
-        cursor = conn.execute(
-            "SELECT outcome, COUNT(*) FROM requests GROUP BY outcome"
-        )
+        cursor = conn.execute("SELECT outcome, COUNT(*) FROM requests GROUP BY outcome")
         requests_by_outcome = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Requests by status code
-        cursor = conn.execute(
-            "SELECT status_code, COUNT(*) FROM requests WHERE status_code IS NOT NULL GROUP BY status_code"
-        )
+        cursor = conn.execute("SELECT status_code, COUNT(*) FROM requests WHERE status_code IS NOT NULL GROUP BY status_code")
         requests_by_status_code = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Latency statistics
@@ -642,9 +642,7 @@ class MetricsRecorder:
         max_latency = row[1]
 
         # Percentiles require sorting
-        cursor = conn.execute(
-            "SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms"
-        )
+        cursor = conn.execute("SELECT latency_ms FROM requests WHERE latency_ms IS NOT NULL ORDER BY latency_ms")
         latencies = [r[0] for r in cursor.fetchall()]
 
         p50_latency = None
@@ -675,11 +673,16 @@ class MetricsRecorder:
             "max_ms": max_latency,
         }
 
-        # Error rate
-        success_count = requests_by_outcome.get("success", 0)
+        # Error rate calculation
+        # Count non-success requests (all outcomes that aren't "success")
         error_rate = 0.0
         if total_requests > 0:
-            error_rate = ((total_requests - success_count) / total_requests) * 100
+            error_count = sum(
+                count
+                for outcome, count in requests_by_outcome.items()
+                if outcome != "success"
+            )
+            error_rate = (error_count / total_requests) * 100
 
         return {
             "run_id": self._run_id,
@@ -784,6 +787,10 @@ class MetricsRecorder:
 
         Call this when shutting down to ensure clean disconnection.
         """
-        if hasattr(self._local, "connection"):
-            self._local.connection.close()
+        try:
+            connection: sqlite3.Connection = self._local.connection
+            connection.close()
             del self._local.connection
+        except AttributeError:
+            # No connection was created for this thread - nothing to close
+            pass
