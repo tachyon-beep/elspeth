@@ -748,3 +748,34 @@ class TestCallVerifier:
             live_response=live_response,
         )
         assert result_strict.is_match is False
+
+    def test_ignore_order_does_not_affect_dict_keys(self) -> None:
+        """Dict key ordering is always ignored (JSON semantics)."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        # Python dicts maintain insertion order, but JSON treats them as unordered
+        recorded_response = {"z": 1, "a": 2, "m": 3}
+        live_response = {"a": 2, "m": 3, "z": 1}  # Same keys/values, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # Both with and without ignore_order: dicts should match
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is True
