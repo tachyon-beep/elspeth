@@ -676,3 +676,34 @@ class TestCallVerifier:
         assert result.has_differences is True
         # DeepDiff reports position changes as values_changed
         assert "values_changed" in result.differences
+
+    def test_ignore_order_handles_duplicate_elements(self) -> None:
+        """List comparisons treat lists as multisets when ignore_order=True."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"tags": ["a", "a", "b"]}
+        live_response = {"tags": ["b", "a", "a"]}  # Same multiset, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True (default): should match (same multiset)
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: should NOT match (different positions)
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False
