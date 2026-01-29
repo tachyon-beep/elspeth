@@ -16,6 +16,7 @@ Components:
 - protocols: ExporterProtocol for implementing exporters
 - hookspecs: pluggy hooks for exporter discovery
 - errors: TelemetryExporterError for configuration failures
+- exporters: Built-in exporters (ConsoleExporter)
 
 Usage:
     from elspeth.telemetry import (
@@ -36,6 +37,8 @@ Usage:
         should_emit,
         # Protocol
         ExporterProtocol,
+        # Exporters
+        ConsoleExporter,
         # Errors
         TelemetryExporterError,
     )
@@ -43,6 +46,7 @@ Usage:
 
 from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
+from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.events import (
     ExternalCallCompleted,
     GateEvaluated,
@@ -60,6 +64,7 @@ from elspeth.telemetry.protocols import ExporterProtocol
 
 __all__ = [
     "BoundedBuffer",
+    "ConsoleExporter",
     "ExporterProtocol",
     "ExternalCallCompleted",
     "GateEvaluated",
