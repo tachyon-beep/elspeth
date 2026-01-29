@@ -119,6 +119,13 @@ class TestBoundedBufferBasics:
         # Access internal deque's maxlen to verify default
         assert buffer._buffer.maxlen == 10_000
 
+    def test_max_size_must_be_positive(self) -> None:
+        """max_size < 1 raises ValueError."""
+        with pytest.raises(ValueError, match="max_size must be >= 1"):
+            BoundedBuffer(max_size=0)
+        with pytest.raises(ValueError, match="max_size must be >= 1"):
+            BoundedBuffer(max_size=-1)
+
 
 # =============================================================================
 # Overflow Counting Tests

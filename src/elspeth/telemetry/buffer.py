@@ -26,6 +26,11 @@ class BoundedBuffer:
     NOTE: Aggregate logging per Systems Thinking review - logs every 100 drops
     instead of per-event to avoid Warning Fatigue.
 
+    Thread Safety:
+        NOT thread-safe. External synchronization required if used from
+        multiple threads. The TelemetryManager is responsible for
+        serializing access when using background export threads.
+
     Attributes:
         dropped_count: Total number of events dropped due to buffer overflow.
 
@@ -44,7 +49,12 @@ class BoundedBuffer:
         Args:
             max_size: Maximum number of events to buffer. When full, oldest
                 events are automatically evicted on append. Defaults to 10,000.
+
+        Raises:
+            ValueError: If max_size < 1.
         """
+        if max_size < 1:
+            raise ValueError(f"max_size must be >= 1, got {max_size}")
         self._buffer: deque[TelemetryEvent] = deque(maxlen=max_size)
         self._dropped_count: int = 0
         self._last_logged_drop_count: int = 0
