@@ -1,0 +1,496 @@
+# src/elspeth/plugins/llm/openrouter_batch.py
+"""OpenRouter batch LLM transform for aggregation pipelines.
+
+Batch-aware transform that processes multiple rows in parallel via OpenRouter API.
+Unlike azure_batch_llm (which uses Azure's async batch API with checkpointing),
+this plugin processes rows synchronously in parallel using concurrent HTTP requests.
+
+Use this plugin in aggregation nodes where the engine buffers rows until a trigger
+fires, then calls process() with the entire batch.
+
+Benefits:
+- Parallel processing of buffered rows
+- Simple synchronous model (no checkpointing needed)
+- Works with any OpenRouter-supported model
+"""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import TYPE_CHECKING, Any
+
+import httpx
+from pydantic import Field
+
+from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm.base import LLMConfig
+from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.pooling import is_capacity_error
+from elspeth.plugins.schema_factory import create_schema_from_config
+
+if TYPE_CHECKING:
+    pass  # No type-only imports needed currently
+
+
+class OpenRouterBatchConfig(LLMConfig):
+    """OpenRouter batch-specific configuration.
+
+    Extends LLMConfig with OpenRouter API settings and batch processing options.
+
+    Required fields:
+        api_key: OpenRouter API key
+        model: Model identifier (e.g., "openai/gpt-4o-mini")
+        template: Jinja2 prompt template
+
+    Optional fields:
+        base_url: API base URL (default: https://openrouter.ai/api/v1)
+        timeout_seconds: Request timeout (default: 60.0)
+        pool_size: Number of parallel workers (default: 5)
+        system_prompt: Optional system message
+        temperature: Sampling temperature (default: 0.0)
+        max_tokens: Maximum response tokens
+        response_field: Output field name (default: llm_response)
+    """
+
+    api_key: str = Field(..., description="OpenRouter API key")
+    base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="OpenRouter API base URL",
+    )
+    timeout_seconds: float = Field(default=60.0, gt=0, description="Request timeout")
+
+
+class OpenRouterBatchLLMTransform(BaseTransform):
+    """Batch-aware LLM transform using OpenRouter API.
+
+    Processes batches of rows in parallel via concurrent HTTP requests to OpenRouter.
+    Designed for use in aggregation nodes where the engine buffers rows until a
+    trigger fires.
+
+    Unlike azure_batch_llm which uses Azure's async batch API:
+    - No checkpointing needed (synchronous processing)
+    - Parallel HTTP requests within a single process() call
+    - Immediate results (no polling)
+
+    Architecture:
+        Engine buffers rows → trigger fires → process(rows: list[dict]) called
+        → ThreadPoolExecutor makes parallel HTTP calls → results assembled
+        → TransformResult.success_multi(output_rows)
+
+    Configuration example:
+        aggregations:
+          - name: sentiment_batch
+            plugin: openrouter_batch_llm
+            trigger:
+              count: 10  # Process every 10 rows
+            output_mode: passthrough
+            options:
+              api_key: "${OPENROUTER_API_KEY}"
+              model: "openai/gpt-4o-mini"
+              template: |
+                Analyze: {{ row.text }}
+              pool_size: 5  # Parallel workers
+              schema:
+                fields: dynamic
+    """
+
+    name = "openrouter_batch_llm"
+    is_batch_aware = True  # Engine passes list[dict] for batch processing
+
+    # LLM transforms are non-deterministic by nature
+    determinism: Determinism = Determinism.NON_DETERMINISTIC
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize OpenRouter batch LLM transform.
+
+        Args:
+            config: Transform configuration dictionary
+        """
+        super().__init__(config)
+
+        # Parse OpenRouter-specific config
+        cfg = OpenRouterBatchConfig.from_dict(config)
+
+        # Store OpenRouter-specific settings
+        self._api_key = cfg.api_key
+        self._base_url = cfg.base_url
+        self._timeout = cfg.timeout_seconds
+
+        # Store common LLM settings
+        self._pool_size = cfg.pool_size
+        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
+        self._model = cfg.model
+        self._template = PromptTemplate(
+            cfg.template,
+            template_source=cfg.template_source,
+            lookup_data=cfg.lookup,
+            lookup_source=cfg.lookup_source,
+        )
+        self._system_prompt = cfg.system_prompt
+        self._system_prompt_source = cfg.system_prompt_source
+        self._temperature = cfg.temperature
+        self._max_tokens = cfg.max_tokens
+        self._response_field = cfg.response_field
+        self._on_error = cfg.on_error
+
+        # Schema from config
+        assert cfg.schema_config is not None
+        schema = create_schema_from_config(
+            cfg.schema_config,
+            f"{self.name}Schema",
+            allow_coercion=False,  # Transforms do NOT coerce
+        )
+        self.input_schema = schema
+        self.output_schema = schema
+
+        # Build output schema config with field categorization
+        guaranteed = get_llm_guaranteed_fields(self._response_field)
+        audit = get_llm_audit_fields(self._response_field)
+
+        # Merge with any existing fields from base schema
+        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
+        base_audit = cfg.schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            is_dynamic=cfg.schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+            audit_fields=tuple(set(base_audit) | set(audit)),
+            required_fields=cfg.schema_config.required_fields,
+        )
+
+    def process(
+        self,
+        row: dict[str, Any] | list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Process batch of rows in parallel.
+
+        When is_batch_aware=True, the engine passes list[dict].
+        For single-row fallback, the engine passes dict.
+
+        Args:
+            row: Single row dict OR list of row dicts (batch)
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with processed rows
+        """
+        if isinstance(row, list):
+            return self._process_batch(row, ctx)
+        else:
+            # Single row fallback - wrap in list and process
+            return self._process_single(row, ctx)
+
+    def _process_single(
+        self,
+        row: dict[str, Any],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Process a single row (fallback for non-batch mode).
+
+        Args:
+            row: Single row dict
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with processed row
+        """
+        result = self._process_batch([row], ctx)
+
+        # Convert multi-row result back to single-row
+        if result.status == "success" and result.rows:
+            return TransformResult.success(result.rows[0])
+        elif result.status == "error":
+            return result
+        else:
+            return TransformResult.success(row)
+
+    def _process_batch(
+        self,
+        rows: list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Process batch of rows in parallel via ThreadPoolExecutor.
+
+        Args:
+            rows: List of row dicts to process
+            ctx: Plugin context
+
+        Returns:
+            TransformResult with all processed rows
+        """
+        if not rows:
+            return TransformResult.success({"batch_empty": True, "row_count": 0})
+
+        # Process rows in parallel
+        results: dict[int, dict[str, Any] | Exception] = {}
+
+        with ThreadPoolExecutor(max_workers=self._pool_size) as executor:
+            # Submit all rows
+            futures = {executor.submit(self._process_single_row, idx, row, ctx): idx for idx, row in enumerate(rows)}
+
+            # Collect results
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    results[idx] = e
+
+        # Assemble output rows in original order
+        output_rows: list[dict[str, Any]] = []
+        row_errors: list[dict[str, Any]] = []
+
+        for idx in range(len(rows)):
+            result = results.get(idx)
+
+            if result is None:
+                # Should not happen
+                output_row = dict(rows[idx])
+                output_row[self._response_field] = None
+                output_row[f"{self._response_field}_error"] = {"reason": "result_missing"}
+                output_rows.append(output_row)
+                row_errors.append({"row_index": idx, "reason": "result_missing"})
+
+            elif isinstance(result, Exception):
+                # Unexpected exception
+                output_row = dict(rows[idx])
+                output_row[self._response_field] = None
+                output_row[f"{self._response_field}_error"] = {
+                    "reason": "unexpected_exception",
+                    "error": str(result),
+                    "error_type": type(result).__name__,
+                }
+                output_rows.append(output_row)
+                row_errors.append({"row_index": idx, "reason": "exception", "error": str(result)})
+
+            elif "error" in result:
+                # Row-level error from _process_single_row
+                output_row = dict(rows[idx])
+                output_row[self._response_field] = None
+                output_row[f"{self._response_field}_error"] = result["error"]
+                output_rows.append(output_row)
+                row_errors.append({"row_index": idx, **result["error"]})
+
+            else:
+                # Success
+                output_rows.append(result)
+
+        # Return results
+        if not output_rows:
+            return TransformResult.error({"reason": "all_rows_failed", "row_errors": row_errors})
+
+        return TransformResult.success_multi(output_rows)
+
+    def _process_single_row(
+        self,
+        idx: int,
+        row: dict[str, Any],
+        ctx: PluginContext,
+    ) -> dict[str, Any]:
+        """Process a single row through OpenRouter API.
+
+        Called by worker threads. Returns either the processed row dict
+        or a dict with an "error" key.
+
+        Args:
+            idx: Row index in batch
+            row: Row to process
+            ctx: Plugin context
+
+        Returns:
+            Processed row dict or {"error": {...}} on failure
+        """
+        # 1. Render template (THEIR DATA - wrap)
+        try:
+            rendered = self._template.render_with_metadata(row)
+        except TemplateError as e:
+            return {
+                "error": {
+                    "reason": "template_rendering_failed",
+                    "error": str(e),
+                    "template_hash": self._template.template_hash,
+                }
+            }
+
+        # 2. Build request
+        messages: list[dict[str, str]] = []
+        if self._system_prompt:
+            messages.append({"role": "system", "content": self._system_prompt})
+        messages.append({"role": "user", "content": rendered.prompt})
+
+        request_body: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+        }
+        if self._max_tokens:
+            request_body["max_tokens"] = self._max_tokens
+
+        # 3. Make HTTP request (EXTERNAL - wrap)
+        # Use the actual batch state_id, not synthetic per-row IDs
+        # (synthetic IDs would fail foreign key constraints in calls table)
+        state_id = ctx.state_id
+        if state_id is None:
+            return {"error": {"reason": "missing_state_id"}}
+
+        start = time.perf_counter()
+        try:
+            # Use a simple httpx client for the request (no auditing through AuditedHTTPClient
+            # since we'll record via ctx.record_call with proper state_id)
+            with httpx.Client(
+                base_url=self._base_url,
+                timeout=self._timeout,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "HTTP-Referer": "https://github.com/elspeth-rapid",
+                },
+            ) as client:
+                response = client.post(
+                    "/chat/completions",
+                    json=request_body,
+                    headers={"Content-Type": "application/json"},
+                )
+                response.raise_for_status()
+            latency_ms = (time.perf_counter() - start) * 1000
+
+        except httpx.HTTPStatusError as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={"row_index": idx, **request_body},
+                response_data=None,
+                error={"status_code": e.response.status_code, "error": str(e)},
+                latency_ms=latency_ms,
+            )
+            return {
+                "error": {
+                    "reason": "api_call_failed",
+                    "error": str(e),
+                    "status_code": e.response.status_code,
+                    "retryable": is_capacity_error(e.response.status_code),
+                }
+            }
+        except httpx.RequestError as e:
+            latency_ms = (time.perf_counter() - start) * 1000
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={"row_index": idx, **request_body},
+                response_data=None,
+                error={"error": str(e), "error_type": type(e).__name__},
+                latency_ms=latency_ms,
+            )
+            return {
+                "error": {
+                    "reason": "api_call_failed",
+                    "error": str(e),
+                    "retryable": False,
+                }
+            }
+
+        # 4. Parse JSON response (EXTERNAL DATA - wrap)
+        try:
+            data = response.json()
+        except (ValueError, TypeError) as e:
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={"row_index": idx, **request_body},
+                response_data=None,
+                error={"reason": "invalid_json", "error": str(e)},
+                latency_ms=latency_ms,
+            )
+            return {
+                "error": {
+                    "reason": "invalid_json_response",
+                    "error": str(e),
+                    "body_preview": response.text[:500] if response.text else None,
+                }
+            }
+
+        # 5. Validate response structure (EXTERNAL DATA - validate at boundary)
+        if not isinstance(data, dict):
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={"row_index": idx, **request_body},
+                response_data=None,
+                error={"reason": "invalid_json_type", "actual": type(data).__name__},
+                latency_ms=latency_ms,
+            )
+            return {
+                "error": {
+                    "reason": "invalid_json_type",
+                    "expected": "object",
+                    "actual": type(data).__name__,
+                }
+            }
+
+        # 6. Extract content (EXTERNAL DATA - wrap)
+        try:
+            choices = data["choices"]
+            if not choices:
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data={"row_index": idx, **request_body},
+                    response_data=data,
+                    error={"reason": "empty_choices"},
+                    latency_ms=latency_ms,
+                )
+                return {"error": {"reason": "empty_choices", "response": data}}
+
+            content = choices[0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={"row_index": idx, **request_body},
+                response_data=data,
+                error={"reason": "malformed_response", "error": str(e)},
+                latency_ms=latency_ms,
+            )
+            return {
+                "error": {
+                    "reason": "malformed_response",
+                    "error": f"{type(e).__name__}: {e}",
+                    "response_keys": list(data.keys()) if isinstance(data, dict) else None,
+                }
+            }
+
+        # Record successful call
+        usage = data.get("usage") or {}
+        ctx.record_call(
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data={"row_index": idx, **request_body},
+            response_data={"content": content, "usage": usage, "model": data.get("model")},
+            latency_ms=latency_ms,
+        )
+
+        # 7. Build output row (OUR CODE - let exceptions crash)
+        output = dict(row)
+        output[self._response_field] = content
+        output[f"{self._response_field}_usage"] = usage
+        output[f"{self._response_field}_template_hash"] = rendered.template_hash
+        output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
+        output[f"{self._response_field}_template_source"] = rendered.template_source
+        output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
+        output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
+        output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+        output[f"{self._response_field}_model"] = data.get("model", self._model)
+
+        return output
+
+    def close(self) -> None:
+        """Release resources."""
+        pass  # No persistent resources to clean up
