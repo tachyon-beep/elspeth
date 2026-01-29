@@ -123,6 +123,7 @@ class CallVerifier:
         source_run_id: str,
         *,
         ignore_paths: list[str] | None = None,
+        ignore_order: bool = True,
     ) -> None:
         """Initialize verifier.
 
@@ -131,10 +132,14 @@ class CallVerifier:
             source_run_id: The run_id containing baseline recordings
             ignore_paths: Paths to ignore in comparison (e.g., ["root['latency']"])
                          These paths will be excluded from DeepDiff comparison.
+            ignore_order: If True (default), list ordering differences are ignored.
+                         If False, list elements must appear in the same order to match.
+                         Set to False for order-sensitive data like ranked results.
         """
         self._recorder = recorder
         self._source_run_id = source_run_id
         self._ignore_paths = ignore_paths or []
+        self._ignore_order = ignore_order
         self._report = VerificationReport()
         # Sequence counter: (call_type, request_hash) -> next_index
         # Tracks how many times we've seen each unique request
@@ -220,7 +225,7 @@ class CallVerifier:
         diff = DeepDiff(
             recorded_response,
             live_response,
-            ignore_order=True,
+            ignore_order=self._ignore_order,
             exclude_paths=self._ignore_paths,
         )
 

@@ -650,3 +650,29 @@ class TestCallVerifier:
         assert report.total_calls == 3
         assert report.matches == 2
         assert report.mismatches == 1
+
+    def test_verify_order_sensitive_when_configured(self) -> None:
+        """Verifier detects order changes when ignore_order=False."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"items": ["a", "b", "c"]}
+        live_response = {"items": ["c", "b", "a"]}  # Same items, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+
+        # Should NOT match because ignore_order=False
+        assert result.is_match is False
+        assert result.has_differences is True
+        # DeepDiff reports position changes as values_changed
+        assert "values_changed" in result.differences
