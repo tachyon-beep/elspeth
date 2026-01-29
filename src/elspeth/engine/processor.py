@@ -18,8 +18,11 @@ from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
+    from elspeth.contracts.enums import RoutingMode
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.executors import GateOutcome
+    from elspeth.telemetry import TelemetryEvent, TelemetryManager
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
 from elspeth.contracts.results import FailureInfo
@@ -103,6 +106,7 @@ class RowProcessor:
         payload_store: Any = None,
         clock: "Clock | None" = None,
         max_workers: int | None = None,
+        telemetry_manager: "TelemetryManager | None" = None,
     ) -> None:
         """Initialize processor.
 
@@ -126,6 +130,8 @@ class RowProcessor:
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
             max_workers: Maximum concurrent workers for transform execution (None = no limit)
+            telemetry_manager: Optional TelemetryManager for emitting telemetry events.
+                               If None, telemetry emission is disabled.
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -147,6 +153,7 @@ class RowProcessor:
         self._aggregation_executor = AggregationExecutor(
             recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
         )
+        self._telemetry_manager = telemetry_manager
 
         # Restore aggregation state if provided (crash recovery)
         if restored_aggregation_state:
@@ -157,6 +164,148 @@ class RowProcessor:
     def token_manager(self) -> TokenManager:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
+
+    def _emit_telemetry(self, event: "TelemetryEvent") -> None:
+        """Emit telemetry event if manager is configured.
+
+        Telemetry is emitted AFTER Landscape recording succeeds. Landscape is
+        the legal record; telemetry is operational visibility.
+
+        Args:
+            event: The telemetry event to emit
+        """
+        if self._telemetry_manager is not None:
+            self._telemetry_manager.handle_event(event)
+
+    def _emit_transform_completed(
+        self,
+        token: TokenInfo,
+        transform: TransformProtocol,
+        transform_result: TransformResult,
+    ) -> None:
+        """Emit TransformCompleted telemetry event.
+
+        Called AFTER Landscape recording succeeds in TransformExecutor.
+
+        Args:
+            token: Token that was processed
+            transform: Transform that was executed
+            transform_result: Result from the transform execution
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.contracts.enums import NodeStateStatus
+        from elspeth.telemetry.events import TransformCompleted
+
+        status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
+
+        self._emit_telemetry(
+            TransformCompleted(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                node_id=transform.node_id,  # type: ignore[arg-type]
+                plugin_name=transform.name,
+                status=status,
+                duration_ms=transform_result.duration_ms or 0.0,
+                input_hash=transform_result.input_hash or "",
+                output_hash=transform_result.output_hash or "",
+            )
+        )
+
+    def _emit_gate_evaluated(
+        self,
+        token: TokenInfo,
+        gate_name: str,
+        gate_node_id: str,
+        routing_mode: "RoutingMode",
+        destinations: tuple[str, ...],
+    ) -> None:
+        """Emit GateEvaluated telemetry event.
+
+        Called AFTER Landscape recording succeeds in GateExecutor.
+
+        Args:
+            token: Token that was routed
+            gate_name: Name of the gate plugin
+            gate_node_id: Node ID of the gate
+            routing_mode: How routing was performed (move, copy)
+            destinations: Destination node/sink names
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.telemetry.events import GateEvaluated
+
+        self._emit_telemetry(
+            GateEvaluated(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                node_id=gate_node_id,
+                plugin_name=gate_name,
+                routing_mode=routing_mode,
+                destinations=destinations,
+            )
+        )
+
+    def _emit_token_completed(
+        self,
+        token: TokenInfo,
+        outcome: RowOutcome,
+        sink_name: str | None = None,
+    ) -> None:
+        """Emit TokenCompleted telemetry event.
+
+        Called AFTER Landscape recording succeeds (record_token_outcome).
+
+        Args:
+            token: Token that reached terminal state
+            outcome: Terminal outcome (completed, routed, failed, etc.)
+            sink_name: Destination sink if applicable
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.telemetry.events import TokenCompleted
+
+        self._emit_telemetry(
+            TokenCompleted(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                outcome=outcome,
+                sink_name=sink_name,
+            )
+        )
+
+    def _get_gate_destinations(self, outcome: "GateOutcome") -> tuple[str, ...]:
+        """Extract destination names from gate outcome for telemetry.
+
+        Args:
+            outcome: The gate outcome containing routing information
+
+        Returns:
+            Tuple of destination names (sink names or path names for forks)
+        """
+        if outcome.sink_name is not None:
+            return (outcome.sink_name,)
+        elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+            # For forks, return the branch names of child tokens
+            return tuple(child.branch_name for child in outcome.child_tokens if child.branch_name)
+        else:
+            # Continue routing - destination is "continue"
+            return ("continue",)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public facade for aggregation timeout checking
@@ -364,6 +513,8 @@ class RowProcessor:
                         outcome=RowOutcome.FAILED,
                         error_hash=error_hash,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(token, RowOutcome.FAILED)
                     results.append(
                         RowResult(
                             token=token,
@@ -661,6 +812,8 @@ class RowProcessor:
                             outcome=RowOutcome.FAILED,
                             error_hash=error_hash,
                         )
+                        # Emit TokenCompleted telemetry AFTER Landscape recording
+                        self._emit_token_completed(token, RowOutcome.FAILED)
                         results.append(
                             RowResult(
                                 token=token,
@@ -689,6 +842,8 @@ class RowProcessor:
                         outcome=RowOutcome.CONSUMED_IN_BATCH,
                         batch_id=batch_id,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
                     for token in buffered_tokens:
                         results.append(
                             RowResult(
@@ -872,6 +1027,8 @@ class RowProcessor:
                     outcome=RowOutcome.CONSUMED_IN_BATCH,
                     batch_id=batch_id,
                 )
+                # Emit TokenCompleted telemetry AFTER Landscape recording
+                self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
                 triggering_result = RowResult(
                     token=current_token,
                     final_data=current_token.row_data,
@@ -950,6 +1107,9 @@ class RowProcessor:
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
                 batch_id=nf_batch_id,
             )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            # (CONSUMED_IN_BATCH is terminal - token won't reappear)
+            self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
             return (
                 RowResult(
                     token=current_token,
@@ -1347,6 +1507,8 @@ class RowProcessor:
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
             )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.FAILED)
 
             return (
                 True,
@@ -1419,6 +1581,16 @@ class RowProcessor:
                     token_manager=self._token_manager,
                 )
                 current_token = outcome.updated_token
+
+                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+                # (Landscape recording happens inside execute_gate)
+                self._emit_gate_evaluated(
+                    token=current_token,
+                    gate_name=transform.name,
+                    gate_node_id=transform.node_id,  # type: ignore[arg-type]
+                    routing_mode=outcome.result.action.mode,
+                    destinations=self._get_gate_destinations(outcome),
+                )
 
                 # Check if gate routed to a sink (sink_name set by executor)
                 if outcome.sink_name is not None:
@@ -1508,6 +1680,13 @@ class RowProcessor:
                         ctx=ctx,
                         step=step,
                     )
+                    # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
+                    # (Landscape recording happens inside _execute_transform_with_retry)
+                    self._emit_transform_completed(
+                        token=current_token,
+                        transform=transform,
+                        transform_result=transform_result,
+                    )
                 except MaxRetriesExceeded as e:
                     # All retries exhausted - return FAILED outcome
                     error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
@@ -1517,6 +1696,8 @@ class RowProcessor:
                         outcome=RowOutcome.FAILED,
                         error_hash=error_hash,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(current_token, RowOutcome.FAILED)
                     return (
                         RowResult(
                             token=current_token,
@@ -1539,6 +1720,8 @@ class RowProcessor:
                             outcome=RowOutcome.QUARANTINED,
                             error_hash=quarantine_error_hash,
                         )
+                        # Emit TokenCompleted telemetry AFTER Landscape recording
+                        self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
                         return (
                             RowResult(
                                 token=current_token,
@@ -1647,6 +1830,16 @@ class RowProcessor:
                 token_manager=self._token_manager,
             )
             current_token = outcome.updated_token
+
+            # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+            # (Landscape recording happens inside execute_config_gate)
+            self._emit_gate_evaluated(
+                token=current_token,
+                gate_name=gate_config.name,
+                gate_node_id=node_id,
+                routing_mode=outcome.result.action.mode,
+                destinations=self._get_gate_destinations(outcome),
+            )
 
             # Check if gate routed to a sink
             if outcome.sink_name is not None:
