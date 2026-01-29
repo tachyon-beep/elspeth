@@ -685,7 +685,7 @@ class TestAzureBatchLLMTransformResume:
             {
                 "batch_id": "batch-456",
                 "input_file_id": "file-123",
-                "row_mapping": {"row-0-abc12345": 0},
+                "row_mapping": {"row-0-abc12345": {"index": 0, "variables_hash": "hash0"}},
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 1,
@@ -985,9 +985,9 @@ class TestAzureBatchLLMTransformResultAssembly:
                 "batch_id": "batch-456",
                 "input_file_id": "file-123",
                 "row_mapping": {
-                    "row-0-aaa": 0,
-                    "row-1-bbb": 1,
-                    "row-2-ccc": 2,
+                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
+                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
+                    "row-2-ccc": {"index": 2, "variables_hash": "hash2"},
                 },
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
@@ -1072,7 +1072,7 @@ class TestAzureBatchLLMTransformResultAssembly:
             {
                 "batch_id": "batch-456",
                 "input_file_id": "file-123",
-                "row_mapping": {"row-0-aaa": 0, "row-1-bbb": 1},
+                "row_mapping": {"row-0-aaa": {"index": 0, "variables_hash": "hash0"}, "row-1-bbb": {"index": 1, "variables_hash": "hash1"}},
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 2,
@@ -1156,7 +1156,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.record_call = capture_call
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
-            "row_mapping": {"row-0-abc": 0, "row-1-def": 1},
+            "row_mapping": {"row-0-abc": {"index": 0, "variables_hash": "hash0"}, "row-1-def": {"index": 1, "variables_hash": "hash1"}},
             "requests": {
                 "row-0-abc": {
                     "messages": [{"role": "user", "content": "Analyze: Hello"}],
@@ -1234,7 +1234,7 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.record_call = capture_call
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
-            "row_mapping": {"row-0-abc": 0, "row-1-def": 1},
+            "row_mapping": {"row-0-abc": {"index": 0, "variables_hash": "hash0"}, "row-1-def": {"index": 1, "variables_hash": "hash1"}},
             "requests": {
                 "row-0-abc": {"messages": [{"role": "user", "content": "Good"}], "model": "gpt-4o-batch"},
                 "row-1-def": {"messages": [{"role": "user", "content": "Bad"}], "model": "gpt-4o-batch"},

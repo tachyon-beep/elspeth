@@ -457,6 +457,10 @@ class ExecutionGraph:
                 if gate.fork_to is not None:
                     node_config["fork_to"] = list(gate.fork_to)
 
+            # Extract computed output schema config if available (e.g., LLM transforms
+            # compute guaranteed_fields and audit_fields from their configuration)
+            output_schema_config = getattr(transform, "_output_schema_config", None)
+
             graph.add_node(
                 tid,
                 node_type=node_type,
@@ -464,6 +468,7 @@ class ExecutionGraph:
                 config=node_config,
                 input_schema=transform.input_schema,  # TransformProtocol requires this
                 output_schema=transform.output_schema,  # TransformProtocol requires this
+                output_schema_config=output_schema_config,
             )
 
             graph.add_edge(prev_node_id, tid, label="continue", mode=RoutingMode.MOVE)
@@ -514,6 +519,10 @@ class ExecutionGraph:
             aid = node_id("aggregation", agg_name, agg_node_config)
             aggregation_ids[AggregationName(agg_name)] = aid
 
+            # Extract computed output schema config if available (e.g., LLM aggregations
+            # compute guaranteed_fields and audit_fields from their configuration)
+            agg_output_schema_config = getattr(transform, "_output_schema_config", None)
+
             graph.add_node(
                 aid,
                 node_type="aggregation",
@@ -521,6 +530,7 @@ class ExecutionGraph:
                 config=agg_node_config,
                 input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
                 output_schema=transform.output_schema,  # TransformProtocol requires this (aggregations use transforms)
+                output_schema_config=agg_output_schema_config,
             )
 
             graph.add_edge(prev_node_id, aid, label="continue", mode=RoutingMode.MOVE)
@@ -1076,10 +1086,16 @@ class ExecutionGraph:
     # ===== CONTRACT VALIDATION HELPERS =====
 
     def _get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
-        """Extract SchemaConfig from node's config dict.
+        """Extract SchemaConfig from node.
 
-        The config dict contains the raw "schema" key from plugin configuration.
-        This method parses it into a SchemaConfig for contract validation.
+        Priority:
+        1. output_schema_config from NodeInfo (computed by transform)
+        2. schema from config dict (raw config)
+
+        Transforms may compute their schema config dynamically (e.g., LLM transforms
+        determine guaranteed_fields and audit_fields from their configuration). When
+        this computed schema config is available in NodeInfo, it takes precedence
+        over the raw config dict.
 
         Args:
             node_id: Node ID to get schema config from
@@ -1089,11 +1105,12 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # First check if we have the parsed schema config in NodeInfo
-        # (output for producers, input for consumers)
-        # These are populated by add_node when available
+        # First check if we have computed schema config in NodeInfo
+        # (populated by from_plugin_instances when transform has _output_schema_config)
+        if node_info.output_schema_config is not None:
+            return node_info.output_schema_config
 
-        # Check raw config dict for schema
+        # Fall back to parsing from raw config dict
         schema_dict = node_info.config.get("schema")
         if schema_dict is None:
             return None

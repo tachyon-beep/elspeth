@@ -25,9 +25,11 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -160,10 +162,25 @@ class AzureBatchLLMTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
+        # Build output schema config with field categorization
+        guaranteed = get_llm_guaranteed_fields(self._response_field)
+        audit = get_llm_audit_fields(self._response_field)
+
+        # Merge with any existing fields from base schema
+        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
+        base_audit = cfg.schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            is_dynamic=cfg.schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+            audit_fields=tuple(set(base_audit) | set(audit)),
+            required_fields=cfg.schema_config.required_fields,
+        )
+
         # Azure OpenAI client (lazy init)
         self._client: Any = None
-
-        # PHASE 1: Validate self-consistency
 
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
@@ -340,7 +357,7 @@ class AzureBatchLLMTransform(BaseTransform):
         """
         # 1. Render templates for all rows, track failures
         requests: list[dict[str, Any]] = []
-        row_mapping: dict[str, int] = {}  # custom_id -> row index
+        row_mapping: dict[str, dict[str, Any]] = {}  # custom_id -> {index, variables_hash}
         template_errors: list[tuple[int, str]] = []  # (index, error)
 
         for idx, row in enumerate(rows):
@@ -373,7 +390,10 @@ class AzureBatchLLMTransform(BaseTransform):
                 request["body"]["max_tokens"] = self._max_tokens
 
             requests.append(request)
-            row_mapping[custom_id] = idx
+            row_mapping[custom_id] = {
+                "index": idx,
+                "variables_hash": rendered.variables_hash,
+            }
 
         # Build request lookup for audit recording (custom_id -> request body)
         # This allows the audit trail to record exactly what was sent to the LLM
@@ -641,7 +661,7 @@ class AzureBatchLLMTransform(BaseTransform):
             TransformResult with all processed rows
         """
         client = self._get_client()
-        row_mapping: dict[str, int] = checkpoint.get("row_mapping", {})
+        row_mapping: dict[str, dict[str, Any]] = checkpoint.get("row_mapping", {})
         template_errors: list[tuple[int, str]] = checkpoint.get("template_errors", [])
 
         # Download output file (with audit recording)
@@ -749,7 +769,7 @@ class AzureBatchLLMTransform(BaseTransform):
         template_error_indices = {idx for idx, _ in template_errors}
 
         # Build reverse mapping once (O(n) instead of O(n^2) lookup per row)
-        idx_to_custom_id: dict[int, str] = {ridx: cid for cid, ridx in row_mapping.items()}
+        idx_to_custom_id: dict[int, str] = {info["index"]: cid for cid, info in row_mapping.items()}
 
         for idx, row in enumerate(rows):
             if idx in template_error_indices:
@@ -803,9 +823,23 @@ class AzureBatchLLMTransform(BaseTransform):
 
                     output_row = dict(row)
                     output_row[self._response_field] = content
+
+                    # Retrieve variables_hash from checkpoint
+                    row_info = row_mapping[custom_id]
+                    variables_hash = row_info["variables_hash"]
+
+                    # Guaranteed fields (contract-stable)
                     output_row[f"{self._response_field}_usage"] = usage
-                    # Add template hash for audit
+                    output_row[f"{self._response_field}_model"] = body.get("model", self._deployment_name)
+
+                    # Audit fields (provenance metadata)
                     output_row[f"{self._response_field}_template_hash"] = self._template.template_hash
+                    output_row[f"{self._response_field}_variables_hash"] = variables_hash
+                    output_row[f"{self._response_field}_template_source"] = self._template.template_source
+                    output_row[f"{self._response_field}_lookup_hash"] = self._template.lookup_hash
+                    output_row[f"{self._response_field}_lookup_source"] = self._template.lookup_source
+                    output_row[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+
                     output_rows.append(output_row)
                 else:
                     # No choices in response
@@ -824,7 +858,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         for custom_id, result in results_by_id.items():
             original_request = requests_data[custom_id]
-            row_index = row_mapping[custom_id]
+            row_index = row_mapping[custom_id]["index"]
 
             # Determine call status from result (Tier 2 - validated at boundary)
             if "error" in result:

@@ -14,10 +14,12 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
     OutputFieldConfig,
@@ -149,8 +151,28 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
 
-        # Schema from config
+        # Schema from config - must have schema_config for transform
         assert cfg.schema_config is not None
+
+        # Build output schema config with field categorization
+        # Multi-query: collect fields from all query specs
+        all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
+        all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
+
+        # Merge with base schema
+        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
+        base_audit = cfg.schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            is_dynamic=cfg.schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
+            audit_fields=tuple(set(base_audit) | all_audit),
+            required_fields=cfg.schema_config.required_fields,
+        )
+
+        # Create schema from config
         schema = create_schema_from_config(
             cfg.schema_config,
             f"{self.name}Schema",

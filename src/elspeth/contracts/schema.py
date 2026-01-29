@@ -220,8 +220,12 @@ class SchemaConfig:
     (validate against specified fields).
 
     Schema Contracts (for DAG validation):
-        - guaranteed_fields: Fields the producer GUARANTEES will exist in output
-        - required_fields: Fields the consumer REQUIRES in input
+        - guaranteed_fields: Fields the producer GUARANTEES will exist AND are
+          part of the stable API contract. Downstream can safely depend on these.
+        - required_fields: Fields the consumer REQUIRES in input.
+        - audit_fields: Fields that exist in output but are NOT part of the
+          stability contract. These are for audit trail reconstruction and may
+          change between versions. DAG validation does NOT enforce these.
 
     For explicit schemas (mode='strict' or 'free'), the declared fields are
     implicitly guaranteed. Use guaranteed_fields/required_fields to express
@@ -236,12 +240,18 @@ class SchemaConfig:
           fields: dynamic
           required_fields: [customer_id, amount]  # Consumer requires these
 
+        schema:
+          fields: dynamic
+          guaranteed_fields: [response, response_usage]  # Stable API
+          audit_fields: [response_template_hash]  # May change between versions
+
     Attributes:
         mode: "strict" (exact fields), "free" (at least these), or None (dynamic)
         fields: List of FieldDefinitions, or None if dynamic
         is_dynamic: True if schema accepts any fields
         guaranteed_fields: Field names the producer guarantees (for dynamic schemas)
         required_fields: Field names the consumer requires (for dynamic schemas)
+        audit_fields: Field names that exist but are not part of stability contract
     """
 
     mode: Literal["strict", "free"] | None
@@ -249,6 +259,7 @@ class SchemaConfig:
     is_dynamic: bool
     guaranteed_fields: tuple[str, ...] | None = None
     required_fields: tuple[str, ...] | None = None
+    audit_fields: tuple[str, ...] | None = None
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> SchemaConfig:
@@ -270,6 +281,7 @@ class SchemaConfig:
         # Parse contract fields (valid for both dynamic and explicit schemas)
         guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
         required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")
+        audit_fields = _parse_field_names_list(config.get("audit_fields"), "audit_fields")
 
         # Handle serialized dynamic schema (mode="dynamic" from to_dict())
         if config.get("mode") == "dynamic":
@@ -279,6 +291,7 @@ class SchemaConfig:
                 is_dynamic=True,
                 guaranteed_fields=guaranteed_fields,
                 required_fields=required_fields,
+                audit_fields=audit_fields,
             )
 
         fields_value = config["fields"]
@@ -291,6 +304,7 @@ class SchemaConfig:
                 is_dynamic=True,
                 guaranteed_fields=guaranteed_fields,
                 required_fields=required_fields,
+                audit_fields=audit_fields,
             )
 
         # Explicit schema - requires mode
@@ -332,6 +346,7 @@ class SchemaConfig:
             is_dynamic=False,
             guaranteed_fields=guaranteed_fields,
             required_fields=required_fields,
+            audit_fields=audit_fields,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -359,6 +374,8 @@ class SchemaConfig:
             result["guaranteed_fields"] = list(self.guaranteed_fields)
         if self.required_fields is not None:
             result["required_fields"] = list(self.required_fields)
+        if self.audit_fields is not None:
+            result["audit_fields"] = list(self.audit_fields)
 
         return result
 

@@ -118,19 +118,24 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict may not have ''input'' key'
   safety: Graceful handling - validation error message still produced
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=275
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=287
   owner: architecture
   reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict() must accept it'
   safety: Explicit check for serialized form before standard parsing - enables audit trail storage
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=271
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=282
   owner: architecture
   reason: 'Optional field: guaranteed_fields is not present in all schema configs'
   safety: _parse_field_names_list handles None correctly - returns None
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=272
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=283
   owner: architecture
   reason: 'Optional field: required_fields is not present in all schema configs'
+  safety: _parse_field_names_list handles None correctly - returns None
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=284
+  owner: architecture
+  reason: 'Optional field: audit_fields is not present in all schema configs'
   safety: _parse_field_names_list handles None correctly - returns None
   expires: null
 - key: contracts/data.py:R3:_type_name:line=214
@@ -182,110 +187,115 @@ allow_hits:
   reason: 'Trust boundary: HTTP response headers from external server may lack content-type'
   safety: Graceful default to empty string - treats as non-JSON, still records body
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=284
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=301
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:line=301
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:line=318
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:line=317
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:line=334
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:line=265
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:line=282
   owner: architecture
   reason: Checkpoint may be None or empty dict - checking for batch_id existence
   safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=419
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=439
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=458
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=478
   owner: architecture
   reason: 'Trust boundary: Azure batches.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=539
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=559
   owner: architecture
   reason: 'Trust boundary: Azure batches.retrieve API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=667
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=687
   owner: architecture
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=535
+- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=555
   owner: architecture
   reason: 'Trust boundary: Azure batch.output_file_id only exists on completed batches'
   safety: Recorded as None in audit trail - field is informational only
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=571
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=591
   owner: architecture
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=599
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=619
   owner: architecture
   reason: submitted_at may not exist in old checkpoint format
   safety: Missing submitted_at skips timeout check - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=644
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=664
   owner: architecture
   reason: row_mapping may not exist in corrupted checkpoint
   safety: Empty dict default allows graceful recovery - rows return with error
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=645
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=665
   owner: architecture
   reason: template_errors may not exist in old checkpoint format
   safety: Empty list default means no template errors tracked - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=703
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=723
   owner: architecture
   reason: 'Trust boundary: Azure JSONL result custom_id field validated as external data'
   safety: None check follows on next line - returns error row if missing
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=768
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=788
   owner: architecture
   reason: 'Intentional Optional API: rows with template errors aren''t in mapping'
   safety: None is checked explicitly on next line with 'if custom_id is None'
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=784
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=804
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''error'' field is optional'
   safety: Graceful handling - checks for error before extracting response
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=796
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=816
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=797
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=817
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''body'' field may be missing'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=798
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=818
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''choices'' field may be missing'
   safety: Graceful default to [] - explicit check for empty choices follows
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=801
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=821
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=802
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=822
   owner: architecture
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical
+  expires: null
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=833
+  owner: architecture
+  reason: 'Trust boundary: Azure batch response may return different model'
+  safety: Graceful fallback to deployment name - audit still captures actual value
   expires: null
 - key: plugins/discovery.py:R2:_discover_in_file:line=135
   owner: architecture
@@ -347,22 +357,32 @@ allow_hits:
 # REMOVED: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=975
 # REMOVED: core/dag.py:R1:ExecutionGraph:_validate_single_edge:line=976
 # Reason: Changed to direct access per Tier 1 trust model - we control all schemas
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:line=1097
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=462
+  owner: architecture
+  reason: 'Optional protocol extension: transforms may optionally define _output_schema_config'
+  safety: None default when attribute missing - schema falls back to config dict parsing
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=524
+  owner: architecture
+  reason: 'Optional protocol extension: aggregation transforms may optionally define _output_schema_config'
+  safety: None default when attribute missing - schema falls back to config dict parsing
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:line=1114
   owner: architecture
   reason: 'Trust boundary: not all node configs have schema field (depends on node type)'
   safety: Returns None when schema not present - calling code handles None appropriately
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1158
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1175
   owner: architecture
   reason: 'Optional field: required_input_fields is not present in all transform configs'
   safety: Returns None when not present, then checks options dict for aggregations
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1164
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1181
   owner: architecture
   reason: 'Aggregation config structure: options is nested dict for aggregation nodes'
   safety: Default {} when options missing - then checks for required_input_fields inside
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1166
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1183
   owner: architecture
   reason: 'Optional field: required_input_fields may not be in aggregation options'
   safety: Returns frozenset of fields if present, falls through to schema check if not
@@ -512,17 +532,17 @@ allow_hits:
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=301
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=320
   owner: architecture
   reason: 'Trust boundary (Tier 3): HTTP response headers may not include content-type'
   safety: Graceful default to 'unknown' - used for error reporting only
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=328
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=347
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=340
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=359
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to requested model - audit still captures actual value
@@ -697,27 +717,27 @@ allow_hits:
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # OpenRouter multi-query external API responses (Tier 3 trust boundary)
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=533
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=555
   owner: architecture
   reason: 'Trust boundary (Tier 3): HTTP response headers from external server may lack content-type'
   safety: Graceful default to 'unknown' - used for error reporting only
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=566
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=588
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=571
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=593
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API completion_tokens may be missing in usage dict'
   safety: Default 0 skips truncation check - truncation detected later via JSON parse failure
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=584
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=606
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API prompt_tokens is informational in error response'
   safety: Default 0 in error metadata - does not affect control flow
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=659
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=681
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit still captures actual value
@@ -838,12 +858,12 @@ allow_hits:
 # REMOVED: mcp/server.py:R1:main:line=1756
 # Reason: Code refactored to use 'in os.environ' check instead of .get() - no longer matches pattern
 # Azure Multi-Query LLM Transform - external LLM API responses (Tier 3)
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=373
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=395
   owner: architecture
   reason: 'Trust boundary (Tier 3): LLM provider may omit usage data (streaming, certain configs)'
   safety: Default 0 skips truncation check when usage unavailable; truncation detected via JSON parse failure
   expires: null
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=386
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=408
   owner: architecture
   reason: 'Trust boundary (Tier 3): LLM provider prompt_tokens is informational in truncation error'
   safety: Default 0 in error metadata - does not affect control flow, just audit completeness

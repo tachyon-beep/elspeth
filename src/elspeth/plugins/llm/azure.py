@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import Field, model_validator
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -156,6 +158,23 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         )
         self.input_schema = schema
         self.output_schema = schema
+
+        # Build output schema config with field categorization
+        guaranteed = get_llm_guaranteed_fields(self._response_field)
+        audit = get_llm_audit_fields(self._response_field)
+
+        # Merge with any existing fields from base schema
+        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
+        base_audit = cfg.schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            is_dynamic=cfg.schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+            audit_fields=tuple(set(base_audit) | set(audit)),
+            required_fields=cfg.schema_config.required_fields,
+        )
 
         # Recorder reference (set in on_start or first accept)
         self._recorder: LandscapeRecorder | None = None

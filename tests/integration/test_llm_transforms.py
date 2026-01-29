@@ -659,13 +659,18 @@ class TestAzureBatchLLMTransformIntegration:
                 "batch_id": "batch-xyz789",
                 "input_file_id": "file-abc123",
                 "row_mapping": {
-                    "row-0-aaa": 0,
-                    "row-1-bbb": 1,
-                    "row-2-ccc": 2,
+                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
+                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
+                    "row-2-ccc": {"index": 2, "variables_hash": "hash2"},
                 },
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 3,
+                "requests": {
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "test-model"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "test-model"},
+                    "row-2-ccc": {"messages": [{"role": "user", "content": "c"}], "model": "test-model"},
+                },
             }
         )
 
@@ -789,12 +794,16 @@ class TestAzureBatchLLMTransformIntegration:
                 "batch_id": "batch-xyz789",
                 "input_file_id": "file-abc123",
                 "row_mapping": {
-                    "row-0-aaa": 0,
-                    "row-1-bbb": 1,
+                    "row-0-aaa": {"index": 0, "variables_hash": "hash0"},
+                    "row-1-bbb": {"index": 1, "variables_hash": "hash1"},
                 },
                 "template_errors": [],
                 "submitted_at": recent_timestamp,
                 "row_count": 2,
+                "requests": {
+                    "row-0-aaa": {"messages": [{"role": "user", "content": "a"}], "model": "test-model"},
+                    "row-1-bbb": {"messages": [{"role": "user", "content": "b"}], "model": "test-model"},
+                },
             }
         )
 
