@@ -38,29 +38,11 @@ from elspeth.core.checkpoint import CheckpointCompatibilityValidator, Checkpoint
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table, tokens_table
+from tests.property.conftest import json_primitives, json_values
 
 # =============================================================================
 # Strategies for checkpoint testing
 # =============================================================================
-
-# JSON-safe values for aggregation state (RFC 8785 compliant)
-json_primitives = st.one_of(
-    st.none(),
-    st.booleans(),
-    st.integers(min_value=-(2**53) + 1, max_value=(2**53) - 1),  # Safe integers
-    st.floats(min_value=-1e10, max_value=1e10, allow_nan=False, allow_infinity=False),
-    st.text(min_size=0, max_size=50),
-)
-
-# Recursive JSON structure for aggregation state
-json_values = st.recursive(
-    json_primitives,
-    lambda children: st.one_of(
-        st.lists(children, max_size=5),
-        st.dictionaries(st.text(min_size=1, max_size=10), children, max_size=5),
-    ),
-    max_leaves=20,
-)
 
 # Aggregation state: dict with string keys
 aggregation_states = st.dictionaries(

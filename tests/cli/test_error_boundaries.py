@@ -377,21 +377,20 @@ default_sink: output
 
         assert result.exit_code == 1
 
-    def test_exit_code_two_for_not_implemented(self) -> None:
-        """explain --json returns exit code 2 (not implemented).
+    def test_exit_code_one_for_missing_database(self) -> None:
+        """explain --json returns exit code 1 when database can't be resolved.
 
-        Exit code 2 is reserved for "not implemented" functionality,
-        distinct from errors (1) and success (0).
+        Without a --database or settings.yaml, the command returns an error.
         """
-        result = runner.invoke(app, ["explain", "--run", "test-run", "--json"])
+        result = runner.invoke(app, ["explain", "--run", "test-run", "--token", "tok-abc", "--json"])
 
-        assert result.exit_code == 2
+        assert result.exit_code == 1
 
-    def test_exit_code_two_for_explain_no_tui(self) -> None:
-        """explain --no-tui returns exit code 2 (not implemented)."""
-        result = runner.invoke(app, ["explain", "--run", "test-run", "--no-tui"])
+    def test_exit_code_one_for_explain_no_tui_missing_database(self) -> None:
+        """explain --no-tui returns exit code 1 when database can't be resolved."""
+        result = runner.invoke(app, ["explain", "--run", "test-run", "--token", "tok-abc", "--no-tui"])
 
-        assert result.exit_code == 2
+        assert result.exit_code == 1
 
 
 class TestJsonModeErrors:
@@ -444,14 +443,14 @@ class TestJsonModeErrors:
                     assert "error" in error_obj
                     break
 
-    def test_explain_json_returns_valid_json(self) -> None:
-        """explain --json returns valid JSON even for not-implemented response."""
-        result = runner.invoke(app, ["explain", "--run", "test-run", "--json"])
+    def test_explain_json_returns_valid_json_on_error(self) -> None:
+        """explain --json returns valid JSON even for error responses."""
+        result = runner.invoke(app, ["explain", "--run", "test-run", "--token", "tok-abc", "--json"])
 
-        assert result.exit_code == 2
-        # Output should be valid JSON
+        assert result.exit_code == 1
+        # Output should be valid JSON with error key
         response = json.loads(result.output)
-        assert response["status"] == "not_implemented"
+        assert "error" in response
 
 
 class TestValidateCommandErrorBoundaries:

@@ -34,6 +34,7 @@ from elspeth.contracts import TokenInfo
 from elspeth.core.config import CoalesceSettings
 from elspeth.engine.clock import MockClock
 from elspeth.engine.coalesce_executor import CoalesceExecutor
+from tests.property.conftest import row_data
 
 # =============================================================================
 # Strategies for generating coalesce configurations
@@ -56,22 +57,6 @@ def branch_lists(draw: st.DrawFn, min_size: int = 2, max_size: int = 5) -> list[
     for i in range(size):
         branches.append(f"branch_{i}")
     return branches
-
-
-# Row data for tokens
-row_data_values = st.one_of(
-    st.integers(min_value=-1000, max_value=1000),
-    st.text(min_size=0, max_size=20, alphabet="abcdefghijklmnopqrstuvwxyz"),
-    st.booleans(),
-    st.none(),
-)
-
-row_data = st.dictionaries(
-    keys=st.text(min_size=1, max_size=10, alphabet="abcdefghijklmnopqrstuvwxyz"),
-    values=row_data_values,
-    min_size=0,
-    max_size=5,
-)
 
 
 def make_token(

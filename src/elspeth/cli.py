@@ -306,13 +306,30 @@ def explain(
     row: str | None = typer.Option(
         None,
         "--row",
-        help="Row ID or index to explain.",
+        help="Row ID to explain.",
     ),
     token: str | None = typer.Option(
         None,
         "--token",
         "-t",
         help="Token ID for precise lineage.",
+    ),
+    database: str | None = typer.Option(
+        None,
+        "--database",
+        "-d",
+        help="Path to Landscape database file (SQLite).",
+    ),
+    settings: str | None = typer.Option(
+        None,
+        "--settings",
+        "-s",
+        help="Path to settings YAML file.",
+    ),
+    sink: str | None = typer.Option(
+        None,
+        "--sink",
+        help="Sink name to disambiguate when row has multiple terminal tokens.",
     ),
     no_tui: bool = typer.Option(
         False,
@@ -330,46 +347,119 @@ def explain(
     Use --no-tui for text output or --json for JSON output.
     Without these flags, launches an interactive TUI.
 
-    NOTE: This command is not yet implemented. JSON and text output modes
-    will return proper lineage data in a future release.
+    Examples:
+
+        # JSON output for a specific token
+        elspeth explain --run latest --token tok-abc --json --database ./audit.db
+
+        # Text output for a row
+        elspeth explain --run run-123 --row row-456 --no-tui --database ./audit.db
+
+        # Interactive TUI
+        elspeth explain --run latest --database ./audit.db
     """
     import json as json_module
 
-    from elspeth.tui.explain_app import ExplainApp
-
-    # Explain command is not yet fully implemented (Phase 4+ work)
-    # See: docs/bugs/open/P1-2026-01-20-cli-explain-is-placeholder.md
-
-    if json_output:
-        # JSON output mode - not implemented yet
-        result = {
-            "run_id": run_id,
-            "row": row,
-            "token": token,
-            "status": "not_implemented",
-            "message": "The explain --json command is not yet implemented. "
-            "Lineage query support is planned for Phase 4. "
-            "Use the TUI mode (without --json or --no-tui) for a preview.",
-        }
-        typer.echo(json_module.dumps(result, indent=2))
-        raise typer.Exit(2)  # Exit code 2 = not implemented (distinct from error)
-
-    if no_tui:
-        # Text output mode - not implemented yet
-        typer.echo("Note: The explain --no-tui command is not yet implemented.", err=True)
-        typer.echo("", err=True)
-        typer.echo("Lineage query support is planned for Phase 4.", err=True)
-        typer.echo("Use the TUI mode (without --no-tui) for a preview.", err=True)
-        raise typer.Exit(2)  # Exit code 2 = not implemented
-
-    # TUI mode - launches placeholder app
-    typer.echo("Note: TUI explain is a preview. Full lineage queries are planned for Phase 4.")
-    tui_app = ExplainApp(
-        run_id=run_id if run_id != "latest" else None,
-        token_id=token,
-        row_id=row,
+    from elspeth.cli_helpers import resolve_database_url, resolve_run_id
+    from elspeth.core.landscape import (
+        LandscapeDB,
+        LandscapeRecorder,
+        LineageTextFormatter,
+        dataclass_to_dict,
     )
-    tui_app.run()
+    from elspeth.core.landscape import explain as explain_lineage
+
+    # Resolve database URL
+    settings_path = Path(settings) if settings else None
+    try:
+        db_url, _ = resolve_database_url(database, settings_path)
+    except ValueError as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": str(e)}))
+        else:
+            typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Connect to database
+    # Initialize db = None for proper cleanup in finally block
+    db: LandscapeDB | None = None
+    try:
+        db = LandscapeDB.from_url(db_url, create_tables=False)
+    except Exception as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": f"Database connection failed: {e}"}))
+        else:
+            typer.echo(f"Error connecting to database: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    try:
+        recorder = LandscapeRecorder(db)
+
+        # Resolve 'latest' run_id
+        resolved_run_id = resolve_run_id(run_id, recorder)
+        if resolved_run_id is None:
+            if json_output:
+                typer.echo(json_module.dumps({"error": "No runs found in database"}))
+            else:
+                typer.echo("Error: No runs found in database", err=True)
+            raise typer.Exit(1) from None
+
+        # Must provide either token or row for JSON/no-tui modes
+        if (json_output or no_tui) and token is None and row is None:
+            if json_output:
+                typer.echo(json_module.dumps({"error": "Must provide either --token or --row"}))
+            else:
+                typer.echo("Error: Must provide either --token or --row", err=True)
+            raise typer.Exit(1) from None
+
+        # Query lineage (only for JSON/no-tui modes)
+        if json_output or no_tui:
+            try:
+                lineage_result = explain_lineage(
+                    recorder,
+                    run_id=resolved_run_id,
+                    token_id=token,
+                    row_id=row,
+                    sink=sink,
+                )
+            except ValueError as e:
+                # Ambiguous row (multiple tokens) or invalid args
+                if json_output:
+                    typer.echo(json_module.dumps({"error": str(e)}))
+                else:
+                    typer.echo(f"Error: {e}", err=True)
+                raise typer.Exit(1) from None
+
+            if lineage_result is None:
+                if json_output:
+                    typer.echo(json_module.dumps({"error": "Token or row not found, or no terminal tokens exist yet"}))
+                else:
+                    typer.echo("Token or row not found, or no terminal tokens exist yet.", err=True)
+                raise typer.Exit(1) from None
+
+            # Output based on mode
+            if json_output:
+                typer.echo(json_module.dumps(dataclass_to_dict(lineage_result), indent=2))
+                raise typer.Exit(0)
+
+            if no_tui:
+                formatter = LineageTextFormatter()
+                typer.echo(formatter.format(lineage_result))
+                raise typer.Exit(0)
+
+        # TUI mode
+        from elspeth.tui.explain_app import ExplainApp
+
+        tui_app = ExplainApp(
+            run_id=resolved_run_id,
+            token_id=token,
+            row_id=row,
+        )
+        tui_app.run()
+
+    finally:
+        if db is not None:
+            db.close()
 
 
 def _execute_pipeline(
