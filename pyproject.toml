@@ -193,6 +193,7 @@ module = [
     "hypothesis.*",
     "azure.*",
     "mcp.*",
+    "ddtrace.*",
 ]
 ignore_missing_imports = true
 
