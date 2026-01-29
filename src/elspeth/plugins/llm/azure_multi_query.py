@@ -368,9 +368,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # 6. Check for response truncation BEFORE parsing
         # If completion_tokens equals max_tokens, the response was likely truncated
-        # usage dict is created by AuditedLLMClient - keys are always present (OUR data)
-        completion_tokens = response.usage["completion_tokens"]
-        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
+        # Note: usage dict may be empty if provider omits usage (streaming, certain configs)
+        # See AuditedLLMClient.chat_completion() lines 292-299 for details.
+        completion_tokens = response.usage.get("completion_tokens", 0)
+        if effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens:
             return TransformResult.error(
                 {
                     "reason": "response_truncated",
@@ -382,7 +383,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                     "query": spec.output_prefix,
                     "max_tokens": effective_max_tokens,
                     "completion_tokens": completion_tokens,
-                    "prompt_tokens": response.usage["prompt_tokens"],
+                    "prompt_tokens": response.usage.get("prompt_tokens", 0),
                     "raw_response_preview": response.content[:500] if response.content else None,
                 }
             )
@@ -458,7 +459,16 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             output[output_key] = value
 
         # 9. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = response.usage
+        # Usage may be empty dict {} if provider omits usage data.
+        # Store consistent structure with defaults to prevent downstream KeyErrors.
+        output[f"{spec.output_prefix}_usage"] = (
+            response.usage
+            if response.usage
+            else {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+            }
+        )
         output[f"{spec.output_prefix}_model"] = response.model
         # Template metadata for reproducibility
         output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash

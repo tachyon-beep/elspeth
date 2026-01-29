@@ -873,3 +873,14 @@ allow_hits:
   reason: 'Trust boundary: environment variable ELSPETH_DATABASE_URL is optional external input'
   safety: Explicit check follows - exits with error message if neither arg nor env var provided
   expires: null
+# Azure Multi-Query LLM Transform - external LLM API responses (Tier 3)
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=373
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): LLM provider may omit usage data (streaming, certain configs)'
+  safety: Default 0 skips truncation check when usage unavailable; truncation detected via JSON parse failure
+  expires: null
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=386
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): LLM provider prompt_tokens is informational in truncation error'
+  safety: Default 0 in error metadata - does not affect control flow, just audit completeness
+  expires: null
