@@ -485,8 +485,8 @@ class TestCallVerifier:
         # Should not increment mismatches
         assert verifier.get_report().mismatches == 0
 
-    def test_verify_order_independent_comparison(self) -> None:
-        """Verifier ignores order in list comparisons."""
+    def test_verify_order_independent_with_default_config(self) -> None:
+        """Default configuration (ignore_order=True) ignores list ordering."""
         recorder = self._create_mock_recorder()
         request_data = {"id": 1}
         request_hash = stable_hash(request_data)
@@ -505,7 +505,7 @@ class TestCallVerifier:
             live_response=live_response,
         )
 
-        # Should match because ignore_order=True
+        # Should match because ignore_order=True by default
         assert result.is_match is True
 
     def test_verify_nested_differences(self) -> None:
