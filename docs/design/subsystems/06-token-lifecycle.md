@@ -4,9 +4,9 @@
 **Audience:** Developers working with ELSPETH's audit system
 
 **Related Documentation:**
-- [CLAUDE.md Audit Section](../../CLAUDE.md) - Trust model and audit principles
-- [Landscape MCP Guide](../guides/landscape-mcp-analysis.md) - MCP server for audit queries
-- [Token Outcome Contract](../audit/tokens/00-token-outcome-contract.md) - Formal outcome requirements
+- [CLAUDE.md Audit Section](../../../CLAUDE.md) - Trust model and audit principles
+- [Landscape MCP Guide](../../guides/landscape-mcp-analysis.md) - MCP server for audit queries
+- [Token Outcome Contract](../../audit/tokens/00-token-outcome-contract.md) - Formal outcome requirements
 
 ---
 
