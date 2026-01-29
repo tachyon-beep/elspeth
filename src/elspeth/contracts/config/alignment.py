@@ -4,7 +4,7 @@
 This module provides machine-readable documentation of how Settings fields
 map to runtime config. Used by:
 
-1. AST checker (future) - Verify all Settings fields are documented
+1. AST checker - Verify all Settings fields are documented
 2. Tests - Verify mappings are accurate
 3. Humans - Understand the field flow
 
@@ -15,6 +15,7 @@ Categories:
 - FIELD_MAPPINGS: Settings field -> Runtime field (when names differ)
 - SETTINGS_TO_RUNTIME: Settings class -> Runtime class mapping
 - EXEMPT_SETTINGS: Settings classes that don't need Runtime counterparts
+- RUNTIME_TO_SUBSYSTEM: Runtime class -> INTERNAL_DEFAULTS subsystem key
 """
 
 from typing import Final
@@ -86,6 +87,25 @@ EXEMPT_SETTINGS: Final[set[str]] = {
     "ServiceRateLimit",
     # Top-level container
     "ElspethSettings",
+}
+
+
+# =============================================================================
+# RUNTIME_TO_SUBSYSTEM - Which INTERNAL_DEFAULTS subsystem each Runtime uses
+# =============================================================================
+#
+# Format: {RuntimeClassName: subsystem_key}
+# Maps Runtime*Config classes to their INTERNAL_DEFAULTS subsystem key.
+#
+# Used by the AST checker to validate that hardcoded literals in from_settings()
+# methods are documented in INTERNAL_DEFAULTS[subsystem][field].
+#
+# Only classes with hardcoded internal defaults need entries here.
+# Classes that only use settings.X values don't need a mapping.
+
+RUNTIME_TO_SUBSYSTEM: Final[dict[str, str]] = {
+    "RuntimeRetryConfig": "retry",
+    # Future: "RuntimeCheckpointConfig": "checkpoint",
 }
 
 

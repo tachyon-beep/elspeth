@@ -890,13 +890,6 @@ def extract_from_settings_hardcodes(runtime_path: Path) -> dict[str, list[tuple[
     return result
 
 
-# Mapping from Runtime class name to INTERNAL_DEFAULTS subsystem key
-RUNTIME_TO_SUBSYSTEM: dict[str, str] = {
-    "RuntimeRetryConfig": "retry",
-    # Future: "RuntimeCheckpointConfig": "checkpoint",
-}
-
-
 def check_hardcode_documentation(runtime_path: Path) -> list[HardcodeViolation]:
     """Check that hardcoded literals in from_settings() are documented in INTERNAL_DEFAULTS.
 
@@ -923,6 +916,7 @@ def check_hardcode_documentation(runtime_path: Path) -> list[HardcodeViolation]:
     Returns:
         List of HardcodeViolation for undocumented hardcodes
     """
+    from elspeth.contracts.config.alignment import RUNTIME_TO_SUBSYSTEM
     from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 
     # Get all hardcoded literals from from_settings() methods
