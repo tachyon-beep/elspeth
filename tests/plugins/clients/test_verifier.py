@@ -779,3 +779,26 @@ class TestCallVerifier:
             live_response=live_response,
         )
         assert result_strict.is_match is True
+
+    def test_empty_lists_always_match(self) -> None:
+        """Empty lists match regardless of ignore_order setting."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"items": []}
+        live_response = {"items": []}
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # Both settings should match
+        for ignore_order in [True, False]:
+            verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=ignore_order)
+            result = verifier.verify(
+                call_type="llm",
+                request_data=request_data,
+                live_response=live_response,
+            )
+            assert result.is_match is True, f"Failed with ignore_order={ignore_order}"
