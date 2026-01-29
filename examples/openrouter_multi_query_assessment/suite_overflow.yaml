@@ -67,6 +67,9 @@ transforms:
 
         Respond with JSON containing these exact values.
 
+      # Multi-query plugin generates input_1/2/3 and criterion from case_studies × criteria
+      required_input_fields: []  # Opt-out: fields are generated dynamically by plugin
+
       case_studies:
         - name: cs1
           input_fields: [cs1_word, cs1_number, cs1_color]
@@ -90,14 +93,26 @@ transforms:
           code: CRIT-E
           description: "Fifth criterion"
 
-      response_format: json
+      response_format: standard
       output_mapping:
-        echo_row: echo_row
-        echo_case: echo_case
-        echo_criterion: echo_criterion
-        echo_word: echo_word
-        echo_number: echo_number
-        echo_color: echo_color
+        echo_row:
+          suffix: echo_row
+          type: string
+        echo_case:
+          suffix: echo_case
+          type: string
+        echo_criterion:
+          suffix: echo_criterion
+          type: string
+        echo_word:
+          suffix: echo_word
+          type: string
+        echo_number:
+          suffix: echo_number
+          type: string
+        echo_color:
+          suffix: echo_color
+          type: string
 
       # STRESS TEST: pool_size (5) < queries per row (10)
       # This forces overflow and tests backpressure handling
