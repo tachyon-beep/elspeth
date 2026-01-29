@@ -76,6 +76,17 @@ class SettingsViolation:
     line: int
 
 
+@dataclass
+class FieldCoverageViolation:
+    """A Settings field not accessed in from_settings() method."""
+
+    settings_class: str
+    runtime_class: str
+    orphaned_field: str
+    file: str
+    line: int
+
+
 def load_whitelist(path: Path) -> tuple[dict[str, set[str]], list[WhitelistEntry]]:
     """Load whitelisted type definitions and dict patterns.
 
@@ -518,6 +529,156 @@ def find_stale_entries(
     return stale
 
 
+class SettingsAccessVisitor(ast.NodeVisitor):
+    """Extract all `settings.X` attribute accesses from AST.
+
+    Used to find which Settings fields are accessed in from_settings() methods.
+    Looks for patterns like:
+        - settings.field_name
+        - settings.field_name.nested (captures just field_name)
+    """
+
+    def __init__(self, param_name: str = "settings") -> None:
+        self.param_name = param_name
+        self.accessed_fields: set[str] = set()
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        """Capture attribute access on the settings parameter."""
+        # Check if this is `settings.X` - direct attribute access on the parameter
+        if isinstance(node.value, ast.Name) and node.value.id == self.param_name:
+            self.accessed_fields.add(node.attr)
+        # Continue visiting children
+        self.generic_visit(node)
+
+
+def extract_from_settings_accesses(runtime_path: Path) -> dict[str, set[str]]:
+    """Extract all settings.X accesses from from_settings() methods in a file.
+
+    Parses the runtime.py file and finds all Runtime*Config classes with
+    from_settings() methods. For each, extracts which settings fields are accessed.
+
+    Args:
+        runtime_path: Path to contracts/config/runtime.py
+
+    Returns:
+        Dict mapping RuntimeClassName -> set of accessed settings fields
+    """
+    try:
+        source = runtime_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return {}
+
+    result: dict[str, set[str]] = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Runtime") and node.name.endswith("Config"):
+            # Find from_settings() method in this class
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "from_settings":
+                    # Get the parameter name (first param after cls)
+                    # from_settings(cls, settings: "RetrySettings") -> settings
+                    param_name = "settings"  # default
+                    if len(item.args.args) > 1:
+                        param_name = item.args.args[1].arg
+
+                    # Visit the method body to find settings.X accesses
+                    visitor = SettingsAccessVisitor(param_name)
+                    for stmt in item.body:
+                        visitor.visit(stmt)
+
+                    result[node.name] = visitor.accessed_fields
+                    break
+
+    return result
+
+
+def get_settings_class_fields(config_path: Path, class_name: str) -> set[str]:
+    """Get all field names from a Settings class using AST.
+
+    Parses the config.py file to find the Settings class and extracts
+    field definitions. Handles both Pydantic Field() and simple annotations.
+
+    Args:
+        config_path: Path to core/config.py
+        class_name: Name of the Settings class (e.g., "RetrySettings")
+
+    Returns:
+        Set of field names defined in the class
+    """
+    try:
+        source = config_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            fields: set[str] = set()
+            for item in node.body:
+                # Look for annotated assignments: field: Type = ...
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    fields.add(item.target.id)
+            return fields
+
+    return set()
+
+
+def check_from_settings_coverage(
+    config_path: Path,
+    runtime_path: Path,
+) -> list[FieldCoverageViolation]:
+    """Check that from_settings() methods access all Settings fields.
+
+    For each Runtime*Config class with a from_settings() method:
+    1. Parse the method body to find all settings.X accesses
+    2. Get the corresponding Settings class fields
+    3. Report any Settings field NOT accessed (potential orphan)
+
+    Exemptions:
+    - Fields can be exempt via special patterns (e.g., computed from other fields)
+    - This is caught by documenting legitimate skip patterns
+
+    Args:
+        config_path: Path to core/config.py (Settings classes)
+        runtime_path: Path to contracts/config/runtime.py (Runtime classes)
+
+    Returns:
+        List of FieldCoverageViolation for orphaned fields
+    """
+    from elspeth.contracts.config.alignment import SETTINGS_TO_RUNTIME
+
+    # Get all settings.X accesses from from_settings() methods
+    runtime_accesses = extract_from_settings_accesses(runtime_path)
+
+    violations: list[FieldCoverageViolation] = []
+
+    # For each Settings -> Runtime mapping, check coverage
+    for settings_class, runtime_class in SETTINGS_TO_RUNTIME.items():
+        if runtime_class not in runtime_accesses:
+            # No from_settings() method found - skip (different check handles this)
+            continue
+
+        accessed_fields = runtime_accesses[runtime_class]
+        settings_fields = get_settings_class_fields(config_path, settings_class)
+
+        # Find orphaned fields (in Settings but not accessed in from_settings)
+        orphaned = settings_fields - accessed_fields
+
+        for field_name in sorted(orphaned):
+            violations.append(
+                FieldCoverageViolation(
+                    settings_class=settings_class,
+                    runtime_class=runtime_class,
+                    orphaned_field=field_name,
+                    file=str(runtime_path),
+                    line=0,  # Line number would require more complex tracking
+                )
+            )
+
+    return violations
+
+
 def find_settings_classes(config_path: Path) -> list[tuple[str, int]]:
     """Find all Settings classes in core/config.py.
 
@@ -637,7 +798,11 @@ def main() -> int:
 
     # Check Settings → Runtime alignment
     config_path = src_dir / "core" / "config.py"
+    runtime_path = contracts_dir / "config" / "runtime.py"
     settings_violations = check_settings_alignment(config_path)
+
+    # Check from_settings() field coverage
+    coverage_violations = check_from_settings_coverage(config_path, runtime_path)
 
     has_violations = False
     has_stale = False
@@ -667,6 +832,15 @@ def main() -> int:
             print("    Fix: Add to SETTINGS_TO_RUNTIME mapping in contracts/config/alignment.py")
             print("    Or add to EXEMPT_SETTINGS if no Runtime counterpart is needed\n")
 
+    if coverage_violations:
+        has_violations = True
+        print("❌ Settings field coverage violations found:\n")
+        print("  (Settings fields not accessed in from_settings() methods)\n")
+        for cv in coverage_violations:
+            print(f"  {cv.settings_class}.{cv.orphaned_field} not accessed in {cv.runtime_class}.from_settings()")
+            print("    Fix: Access the field in from_settings() and map it to a Runtime field")
+            print("    Or document why the field is unused\n")
+
     if stale_entries:
         has_stale = True
         print("❌ Stale whitelist entries found:\n")
@@ -690,6 +864,7 @@ def main() -> int:
     if not stale_entries:
         print("✅ All whitelist entries are valid")
     print("✅ All Settings classes have Runtime counterparts or are exempt")
+    print("✅ All Settings fields are accessed in from_settings() methods")
     return 0
 
 

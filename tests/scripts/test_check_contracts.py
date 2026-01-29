@@ -4,10 +4,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.check_contracts import (
+    FieldCoverageViolation,
+    SettingsAccessVisitor,
     SettingsViolation,
+    check_from_settings_coverage,
     check_settings_alignment,
+    extract_from_settings_accesses,
     find_settings_classes,
     find_type_definitions,
+    get_settings_class_fields,
     load_whitelist,
 )
 
@@ -373,12 +378,11 @@ def test_check_settings_alignment_uses_real_mappings() -> None:
     If this fails, a new Settings class was added without updating
     SETTINGS_TO_RUNTIME or EXEMPT_SETTINGS in alignment.py.
     """
-    from pathlib import Path
+    import pytest
 
     config_path = Path("src/elspeth/core/config.py")
     if not config_path.exists():
-        # Skip if running from different directory
-        return
+        pytest.skip("Running from different directory - core/config.py not found")
 
     violations = check_settings_alignment(config_path)
     assert violations == [], (
@@ -396,4 +400,324 @@ def test_settings_violation_dataclass() -> None:
     )
     assert violation.class_name == "TestSettings"
     assert violation.file == "/path/to/config.py"
+    assert violation.line == 42
+
+
+# =============================================================================
+# Field Coverage Tests (from_settings() method checks)
+# =============================================================================
+
+
+def test_settings_access_visitor_finds_direct_access() -> None:
+    """SettingsAccessVisitor finds settings.X accesses."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    return cls(
+        field_a=settings.field_a,
+        field_b=settings.field_b,
+    )
+"""
+    tree = ast.parse(code)
+    visitor = SettingsAccessVisitor("settings")
+    visitor.visit(tree)
+
+    assert visitor.accessed_fields == {"field_a", "field_b"}
+
+
+def test_settings_access_visitor_finds_chained_access() -> None:
+    """SettingsAccessVisitor finds nested access like settings.field.method()."""
+    import ast
+
+    code = """
+def from_settings(cls, settings):
+    # Access settings.nested_field and call a method on it
+    value = settings.nested_field.some_method()
+    return cls(value=value)
+"""
+    tree = ast.parse(code)
+    visitor = SettingsAccessVisitor("settings")
+    visitor.visit(tree)
+
+    # Should capture just the direct attribute, not the chained ones
+    assert "nested_field" in visitor.accessed_fields
+
+
+def test_settings_access_visitor_handles_different_param_names() -> None:
+    """SettingsAccessVisitor works with different parameter names."""
+    import ast
+
+    code = """
+def from_settings(cls, config):
+    return cls(field=config.field)
+"""
+    tree = ast.parse(code)
+    visitor = SettingsAccessVisitor("config")
+    visitor.visit(tree)
+
+    assert visitor.accessed_fields == {"field"}
+
+
+def test_extract_from_settings_accesses_finds_method(tmp_path: Path) -> None:
+    """extract_from_settings_accesses finds from_settings method."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    field_a: int
+    field_b: str
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            field_a=settings.field_a,
+            field_b=settings.field_b,
+        )
+""")
+
+    result = extract_from_settings_accesses(runtime_file)
+
+    assert "RuntimeTestConfig" in result
+    assert result["RuntimeTestConfig"] == {"field_a", "field_b"}
+
+
+def test_extract_from_settings_accesses_handles_no_method(tmp_path: Path) -> None:
+    """extract_from_settings_accesses handles classes without from_settings."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeTestConfig:
+    field_a: int
+
+    @classmethod
+    def default(cls):
+        return cls(field_a=1)
+""")
+
+    result = extract_from_settings_accesses(runtime_file)
+
+    # Class exists but has no from_settings, so not in result
+    assert "RuntimeTestConfig" not in result
+
+
+def test_extract_from_settings_accesses_multiple_classes(tmp_path: Path) -> None:
+    """extract_from_settings_accesses handles multiple Runtime classes."""
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+@dataclass
+class RuntimeRetryConfig:
+    max_attempts: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(max_attempts=settings.max_attempts)
+
+
+@dataclass
+class RuntimeCheckpointConfig:
+    enabled: bool
+    frequency: int
+
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            enabled=settings.enabled,
+            frequency=settings.frequency,
+        )
+""")
+
+    result = extract_from_settings_accesses(runtime_file)
+
+    assert len(result) == 2
+    assert result["RuntimeRetryConfig"] == {"max_attempts"}
+    assert result["RuntimeCheckpointConfig"] == {"enabled", "frequency"}
+
+
+def test_get_settings_class_fields_extracts_fields(tmp_path: Path) -> None:
+    """get_settings_class_fields extracts field names from Settings class."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+from pydantic import BaseModel, Field
+
+class TestSettings(BaseModel):
+    field_a: int = Field(default=1)
+    field_b: str = "default"
+    field_c: bool
+""")
+
+    fields = get_settings_class_fields(config_file, "TestSettings")
+
+    assert fields == {"field_a", "field_b", "field_c"}
+
+
+def test_get_settings_class_fields_returns_empty_for_missing_class(tmp_path: Path) -> None:
+    """get_settings_class_fields returns empty set for non-existent class."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+class OtherClass:
+    pass
+""")
+
+    fields = get_settings_class_fields(config_file, "TestSettings")
+
+    assert fields == set()
+
+
+def test_check_from_settings_coverage_passes_full_coverage(tmp_path: Path) -> None:
+    """check_from_settings_coverage passes when all fields are accessed."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+class TestSettings:
+    field_a: int
+    field_b: str
+""")
+
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+class RuntimeTestConfig:
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            field_a=settings.field_a,
+            field_b=settings.field_b,
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+        {"TestSettings": "RuntimeTestConfig"},
+    ):
+        violations = check_from_settings_coverage(config_file, runtime_file)
+
+    assert violations == []
+
+
+def test_check_from_settings_coverage_detects_orphan(tmp_path: Path) -> None:
+    """check_from_settings_coverage detects orphaned Settings fields."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+class TestSettings:
+    field_a: int
+    field_b: str
+    orphaned_field: float
+""")
+
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+class RuntimeTestConfig:
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(
+            field_a=settings.field_a,
+            field_b=settings.field_b,
+            # orphaned_field is NOT accessed!
+        )
+""")
+
+    with patch(
+        "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+        {"TestSettings": "RuntimeTestConfig"},
+    ):
+        violations = check_from_settings_coverage(config_file, runtime_file)
+
+    assert len(violations) == 1
+    assert violations[0].settings_class == "TestSettings"
+    assert violations[0].runtime_class == "RuntimeTestConfig"
+    assert violations[0].orphaned_field == "orphaned_field"
+
+
+def test_check_from_settings_coverage_detects_multiple_orphans(tmp_path: Path) -> None:
+    """check_from_settings_coverage detects multiple orphaned fields."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+class TestSettings:
+    used_field: int
+    orphan_a: str
+    orphan_b: float
+""")
+
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+class RuntimeTestConfig:
+    @classmethod
+    def from_settings(cls, settings):
+        return cls(used_field=settings.used_field)
+""")
+
+    with patch(
+        "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+        {"TestSettings": "RuntimeTestConfig"},
+    ):
+        violations = check_from_settings_coverage(config_file, runtime_file)
+
+    assert len(violations) == 2
+    orphan_names = {v.orphaned_field for v in violations}
+    assert orphan_names == {"orphan_a", "orphan_b"}
+
+
+def test_check_from_settings_coverage_skips_unmapped_classes(tmp_path: Path) -> None:
+    """check_from_settings_coverage skips classes not in SETTINGS_TO_RUNTIME."""
+    config_file = tmp_path / "config.py"
+    config_file.write_text("""
+class UnmappedSettings:
+    some_field: int
+""")
+
+    runtime_file = tmp_path / "runtime.py"
+    runtime_file.write_text("""
+class RuntimeUnmappedConfig:
+    @classmethod
+    def from_settings(cls, settings):
+        # Doesn't access any fields
+        return cls()
+""")
+
+    # Empty mapping - no Settings classes are mapped
+    with patch(
+        "elspeth.contracts.config.alignment.SETTINGS_TO_RUNTIME",
+        {},
+    ):
+        violations = check_from_settings_coverage(config_file, runtime_file)
+
+    # No violations because the class isn't in the mapping
+    assert violations == []
+
+
+def test_check_from_settings_coverage_real_codebase() -> None:
+    """Integration test: actual codebase has full field coverage.
+
+    This verifies that the current codebase passes the check.
+    If this fails, a Settings field was added but not accessed
+    in the corresponding from_settings() method.
+    """
+    import pytest
+
+    config_path = Path("src/elspeth/core/config.py")
+    runtime_path = Path("src/elspeth/contracts/config/runtime.py")
+
+    if not config_path.exists() or not runtime_path.exists():
+        pytest.skip("Running from different directory - required files not found")
+
+    violations = check_from_settings_coverage(config_path, runtime_path)
+    assert violations == [], (
+        f"Settings field coverage violations found: "
+        f"{[(v.settings_class, v.orphaned_field) for v in violations]}. "
+        f"Access these fields in from_settings() or remove them from the Settings class."
+    )
+
+
+def test_field_coverage_violation_dataclass() -> None:
+    """FieldCoverageViolation dataclass holds expected fields."""
+    violation = FieldCoverageViolation(
+        settings_class="TestSettings",
+        runtime_class="RuntimeTestConfig",
+        orphaned_field="orphaned",
+        file="/path/to/runtime.py",
+        line=42,
+    )
+    assert violation.settings_class == "TestSettings"
+    assert violation.runtime_class == "RuntimeTestConfig"
+    assert violation.orphaned_field == "orphaned"
+    assert violation.file == "/path/to/runtime.py"
     assert violation.line == 42
