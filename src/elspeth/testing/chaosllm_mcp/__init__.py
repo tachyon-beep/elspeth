@@ -11,3 +11,17 @@ Provides Claude-optimized analysis tools:
 Usage:
     elspeth chaosllm-mcp --database=./chaosllm-metrics.db
 """
+
+from elspeth.testing.chaosllm_mcp.server import (
+    ChaosLLMAnalyzer,
+    create_server,
+    main,
+    run_server,
+)
+
+__all__ = [
+    "ChaosLLMAnalyzer",
+    "create_server",
+    "main",
+    "run_server",
+]
