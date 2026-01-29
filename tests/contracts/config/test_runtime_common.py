@@ -31,6 +31,7 @@ RUNTIME_CONFIGS = [
     ("RuntimeConcurrencyConfig", "RuntimeConcurrencyProtocol", "ConcurrencySettings", None),
     ("RuntimeRateLimitConfig", "RuntimeRateLimitProtocol", "RateLimitSettings", None),
     ("RuntimeCheckpointConfig", "RuntimeCheckpointProtocol", "CheckpointSettings", None),
+    ("RuntimeTelemetryConfig", "RuntimeTelemetryProtocol", "TelemetrySettings", None),
 ]
 
 
