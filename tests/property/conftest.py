@@ -21,8 +21,16 @@ Usage:
 from __future__ import annotations
 
 import keyword
+from collections.abc import Iterator
+from typing import Any
 
 from hypothesis import strategies as st
+
+from elspeth.contracts import SourceRow
+from elspeth.engine.artifacts import ArtifactDescriptor
+from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.results import TransformResult
+from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase
 
 # =============================================================================
 # RFC 8785 / JSON Canonicalization Scheme Constraints
@@ -181,3 +189,97 @@ unique_branches = st.lists(branch_names, min_size=1, max_size=5, unique=True)
 
 # Multiple branches (at least 2, for testing fork behavior)
 multiple_branches = st.lists(branch_names, min_size=2, max_size=5, unique=True)
+
+
+# =============================================================================
+# Shared Test Fixtures (for integration/audit property tests)
+# =============================================================================
+
+
+class PropertyTestSchema(_TestSchema):
+    """Schema for property tests - accepts any dict with dynamic fields."""
+
+    pass
+
+
+class ListSource(_TestSourceBase):
+    """Source that emits rows from a provided list."""
+
+    name = "property_list_source"
+    output_schema = PropertyTestSchema
+
+    def __init__(self, data: list[dict[str, Any]]) -> None:
+        self._data = data
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for row in self._data:
+            yield SourceRow.valid(row)
+
+    def close(self) -> None:
+        pass
+
+
+class PassTransform(BaseTransform):
+    """Transform that passes rows through unchanged."""
+
+    name = "property_pass_transform"
+    input_schema = PropertyTestSchema
+    output_schema = PropertyTestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"fields": "dynamic"}})
+
+    def process(self, row: Any, ctx: Any) -> TransformResult:
+        return TransformResult.success(row)
+
+
+class ConditionalErrorTransform(BaseTransform):
+    """Transform that errors on rows where 'fail' key is truthy.
+
+    IMPORTANT: Uses direct key access per CLAUDE.md - if 'fail' key is
+    missing, that's a test authoring bug that should crash.
+    """
+
+    name = "property_conditional_error"
+    input_schema = PropertyTestSchema
+    output_schema = PropertyTestSchema
+    _on_error = "discard"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"fields": "dynamic"}})
+
+    def process(self, row: Any, ctx: Any) -> TransformResult:
+        # Direct access - no defensive .get() per CLAUDE.md
+        if row["fail"]:
+            return TransformResult.error({"reason": "property_test_error"})
+        return TransformResult.success(row)
+
+
+class CollectSink(_TestSinkBase):
+    """Sink that collects written rows in memory."""
+
+    name = "property_collect_sink"
+
+    def __init__(self, sink_name: str = "default") -> None:
+        self.name = sink_name
+        self.results: list[dict[str, Any]] = []
+
+    def on_start(self, ctx: Any) -> None:
+        self.results = []
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        self.results.extend(rows)
+        return ArtifactDescriptor.for_file(
+            path=f"memory://{self.name}",
+            size_bytes=len(str(rows)),
+            content_hash="test_hash",
+        )
+
+    def close(self) -> None:
+        pass

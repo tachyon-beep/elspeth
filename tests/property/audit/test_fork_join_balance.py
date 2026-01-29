@@ -20,36 +20,28 @@ Fork terminology:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
-
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import RoutingAction, SourceRow
+from elspeth.contracts import RoutingAction
 from elspeth.contracts.enums import RowOutcome
 from elspeth.core.config import CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
 from tests.conftest import (
-    _TestSchema,
-    _TestSinkBase,
-    _TestSourceBase,
     as_sink,
     as_source,
     as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_production_graph
-
-if TYPE_CHECKING:
-    pass
-
+from tests.property.conftest import (
+    CollectSink,
+    ListSource,
+    PassTransform,
+)
 
 # =============================================================================
 # Audit Verification Helpers
@@ -158,78 +150,6 @@ def get_fork_group_stats(db: LandscapeDB, run_id: str) -> dict[str, int]:
 
 
 # =============================================================================
-# Test Fixtures
-# =============================================================================
-
-
-class _ForkTestSchema(_TestSchema):
-    """Schema for fork tests."""
-
-    value: int
-
-
-class _ListSource(_TestSourceBase):
-    """Source that emits rows from a list."""
-
-    name = "fork_test_source"
-    output_schema = _ForkTestSchema
-
-    def __init__(self, data: list[dict[str, Any]]) -> None:
-        self._data = data
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
-
-    def close(self) -> None:
-        pass
-
-
-class _PassTransform(BaseTransform):
-    """Transform that passes rows through unchanged."""
-
-    name = "fork_pass_transform"
-    input_schema = _ForkTestSchema
-    output_schema = _ForkTestSchema
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
-
-
-class _CollectSink(_TestSinkBase):
-    """Sink that collects written rows."""
-
-    name = "fork_test_sink"
-
-    def __init__(self, sink_name: str = "default") -> None:
-        self.name = sink_name
-        self.results: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        self.results = []
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path=f"memory://{self.name}",
-            size_bytes=len(str(rows)),
-            content_hash="test_hash",
-        )
-
-    def close(self) -> None:
-        pass
-
-
-# =============================================================================
 # Hypothesis Strategies
 # =============================================================================
 
@@ -265,8 +185,8 @@ class TestDagForkBranchValidation:
             fork_to=["unknown_branch"],  # No coalesce or sink with this name
         )
 
-        source = _ListSource([{"value": 1}])
-        sink = _CollectSink()
+        source = ListSource([{"value": 1}])
+        sink = CollectSink()
 
         # This should fail at graph construction
         with pytest.raises(GraphValidationError, match="unknown_branch"):
@@ -289,9 +209,9 @@ class TestDagForkBranchValidation:
             fork_to=["sink_a", "sink_b"],
         )
 
-        source = _ListSource([{"value": 1}])
-        sink_a = _CollectSink("sink_a")
-        sink_b = _CollectSink("sink_b")
+        source = ListSource([{"value": 1}])
+        sink_a = CollectSink("sink_a")
+        sink_b = CollectSink("sink_b")
 
         # This should succeed - branches match sink names
         graph = ExecutionGraph.from_plugin_instances(
@@ -320,8 +240,8 @@ class TestDagForkBranchValidation:
             branches=["branch_a", "branch_b"],
         )
 
-        source = _ListSource([{"value": 1}])
-        sink = _CollectSink()
+        source = ListSource([{"value": 1}])
+        sink = CollectSink()
 
         # This should succeed - branches match coalesce branches
         graph = ExecutionGraph.from_plugin_instances(
@@ -348,8 +268,8 @@ class TestDagForkBranchValidation:
             fork_to=["branch_a", "branch_a"],  # Duplicate!
         )
 
-        source = _ListSource([{"value": 1}])
-        sink = _CollectSink()
+        source = ListSource([{"value": 1}])
+        sink = CollectSink()
 
         # RoutingAction.fork_to_paths() validates uniqueness
         with pytest.raises((GraphValidationError, ValueError), match=r"[Dd]uplicate"):
@@ -378,8 +298,8 @@ class TestDagForkBranchValidation:
             branches=["branch_a", "branch_b"],  # Expects branch_b too!
         )
 
-        source = _ListSource([{"value": 1}])
-        sink = _CollectSink()
+        source = ListSource([{"value": 1}])
+        sink = CollectSink()
 
         with pytest.raises(GraphValidationError, match="branch_b"):
             ExecutionGraph.from_plugin_instances(
@@ -413,9 +333,9 @@ class TestForkJoinRuntimeBalance:
         db = LandscapeDB.in_memory()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = _ListSource(rows)
-        sink_a = _CollectSink("sink_a")
-        sink_b = _CollectSink("sink_b")
+        source = ListSource(rows)
+        sink_a = CollectSink("sink_a")
+        sink_b = CollectSink("sink_b")
 
         # Gate that forks all rows to both sinks
         gate = GateSettings(
@@ -499,9 +419,9 @@ class TestForkJoinEdgeCases:
         """Pipeline without forks should have no fork groups."""
         db = LandscapeDB.in_memory()
 
-        source = _ListSource([{"value": 1}, {"value": 2}])
-        transform = _PassTransform()
-        sink = _CollectSink()
+        source = ListSource([{"value": 1}, {"value": 2}])
+        transform = PassTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -520,9 +440,9 @@ class TestForkJoinEdgeCases:
         """Empty source with fork config should not cause issues."""
         db = LandscapeDB.in_memory()
 
-        source = _ListSource([])  # Empty
-        sink_a = _CollectSink("sink_a")
-        sink_b = _CollectSink("sink_b")
+        source = ListSource([])  # Empty
+        sink_a = CollectSink("sink_a")
+        sink_b = CollectSink("sink_b")
 
         gate = GateSettings(
             name="fork_gate",
@@ -593,9 +513,9 @@ class TestForkRecoveryInvariant:
         db = LandscapeDB.in_memory()
 
         rows = [{"value": i} for i in range(n_rows)]
-        source = _ListSource(rows)
-        sink_a = _CollectSink("sink_a")
-        sink_b = _CollectSink("sink_b")
+        source = ListSource(rows)
+        sink_a = CollectSink("sink_a")
+        sink_b = CollectSink("sink_b")
 
         # Gate that forks all rows to both sinks
         gate = GateSettings(

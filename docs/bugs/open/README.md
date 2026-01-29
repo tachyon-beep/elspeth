@@ -9,8 +9,8 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── cli/                  # Command-line interface (1 P1, 2 P3)
-├── core-config/          # Configuration system (4 P2, 6 P3)
+├── cli/                  # Command-line interface (1 P1, 1 P3)
+├── core-config/          # Configuration system (4 P2, 5 P3)
 ├── core-dag/             # DAG validation, graph construction (1 P1)
 ├── core-landscape/       # Audit trail, recovery, run repository (4 P1, 5 P2, 3 P3)
 ├── cross-cutting/        # Schema validation, multi-subsystem (1 P1, 3 P2, 1 P3)
@@ -34,7 +34,7 @@ open/
 | **engine-orchestrator** | 6 | 8 | 4 | 18 | Aggregations, routing, quarantine ⚠️ LARGEST HOTSPOT |
 | **llm-azure** | 3 | 8 | 1 | 12 | Azure integration, error handling ⚠️ HOTSPOT |
 | **core-landscape** | 4 | 5 | 3 | 12 | Audit trail, recovery, verifier ⚠️ HOTSPOT |
-| **core-config** | 0 | 4 | 6 | 10 | Expression validation, config contracts |
+| **core-config** | 0 | 4 | 5 | 9 | Expression validation, config contracts |
 | **engine-coalesce** | 3 | 4 | 0 | 7 | Fork/join semantics, timeouts |
 | **plugins-llm** | 4 | 1 | 2 | 7 | Client infrastructure, audit recording |
 | **plugins-sinks** | 3 | 2 | 1 | 6 | Schema validation, mode handling |
@@ -43,11 +43,11 @@ open/
 | **engine-retry** | 0 | 3 | 2 | 5 | Retry logic, backoff, audit |
 | **cross-cutting** | 1 | 3 | 1 | 5 | Schema architecture, code quality |
 | **plugins-transforms** | 2 | 2 | 0 | 4 | Type coercion, batch operations |
-| **cli** | 1 | 0 | 2 | 3 | Command-line UX, explain command |
+| **cli** | 1 | 0 | 1 | 2 | Command-line UX, explain command |
 | **engine-spans** | 0 | 2 | 1 | 3 | Observability, tracing |
 | **plugins-sources** | 0 | 2 | 1 | 3 | JSON parsing, validation |
 | **core-dag** | 1 | 0 | 0 | 1 | Branch name validation |
-| **TOTAL** | **30** | **49** | **27** | **106** | All bugs organized |
+| **TOTAL** | **30** | **49** | **25** | **104** | All bugs organized |
 
 **Note:** Total includes bugs from both original triage (73) and pending verification (33 STILL VALID).
 
@@ -110,9 +110,9 @@ open/
 
 ## Verification Status
 
-**All bugs (30 P1, 49 P2, 27 P3 = 106 total) verified and organized by subsystem (2026-01-25):**
-- ✅ **93% STILL VALID** (99/107 bugs) - Real technical debt, accurate triage
-- 🔄 **5 OBE** - Fixed by refactors or documentation-only
+**All bugs (30 P1, 49 P2, 25 P3 = 104 total) verified and organized by subsystem (2026-01-29):**
+- ✅ **93% STILL VALID** (97/104 bugs) - Real technical debt, accurate triage
+- 🔄 **7 OBE** - Fixed by refactors or documentation-only
 - ❌ **0 LOST** - No bugs invalidated by code changes
 - ✅ **Detailed verification reports** - Each bug has comprehensive code analysis
 - ✅ **Fix guidance** - Each bug has recommended fix with examples
@@ -120,12 +120,12 @@ open/
 **Verification Sources:**
 - **Original triage (73 bugs):** 66 STILL VALID, 4 OBE (94% validation rate)
 - **Pending triage (34 bugs):** 33 STILL VALID, 1 OBE (97% validation rate)
-- **Combined:** 99 STILL VALID, 5 OBE (93% validation rate)
+- **Combined:** 97 STILL VALID, 7 OBE (93% validation rate)
 
 **Results by Priority:**
 - **P1:** 29/30 STILL VALID (97%) - Nearly all critical bugs remain unfixed
 - **P2:** 46/49 STILL VALID (94%) - High validation rate
-- **P3:** 24/27 STILL VALID (89%) - Quality/enhancement issues
+- **P3:** 22/25 STILL VALID (88%) - Quality/enhancement issues
 
 **Reports:**
 - Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`

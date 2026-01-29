@@ -2,7 +2,18 @@
 """Base classes for plugin implementations.
 
 These provide common functionality and ensure proper interface compliance.
-Plugins can subclass these for convenience, or implement protocols directly.
+Plugins MUST subclass these base classes (BaseSource, BaseTransform, BaseSink).
+
+Why base class inheritance is required:
+- Plugin discovery uses issubclass() checks against base classes
+- Python's Protocol with non-method members (name, determinism, etc.) cannot
+  support issubclass() - only isinstance() on already-instantiated objects
+- Base classes enforce self-consistency via __init_subclass__ hooks
+- Per CLAUDE.md "Plugin Ownership", all plugins are system code, not user extensions
+
+The protocol definitions (SourceProtocol, TransformProtocol, SinkProtocol) exist
+for type-checking purposes only - they define the interface contract but cannot
+be used for runtime discovery.
 
 Phase 3 Integration:
 - Lifecycle hooks (on_start, on_complete) are called by engine

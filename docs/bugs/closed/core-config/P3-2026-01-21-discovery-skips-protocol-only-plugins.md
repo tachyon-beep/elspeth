@@ -183,3 +183,48 @@ Yes, the bug is confirmed and has two dimensions:
 5. **Alignment with architecture:** Per CLAUDE.md, plugins are "system-owned code, not user-provided extensions." Requiring base class inheritance is appropriate enforcement.
 
 **Suggested action:** Update documentation to remove the misleading claim, then close the bug. This is a documentation defect, not a code defect.
+
+---
+
+## CLOSURE: 2026-01-29
+
+**Status:** FIXED (Documentation)
+
+**Fixed By:** Claude Opus 4.5
+
+**Resolution:**
+
+Updated the module docstring in `src/elspeth/plugins/base.py` to:
+
+1. **Remove the misleading claim** that plugins can "implement protocols directly"
+2. **Explain why base class inheritance is required:**
+   - Plugin discovery uses `issubclass()` checks against base classes
+   - Python's `Protocol` with non-method members cannot support `issubclass()`
+   - Base classes enforce self-consistency via `__init_subclass__` hooks
+   - Aligns with CLAUDE.md "Plugin Ownership" principle
+
+**Updated docstring:**
+
+```python
+"""Base classes for plugin implementations.
+
+These provide common functionality and ensure proper interface compliance.
+Plugins MUST subclass these base classes (BaseSource, BaseTransform, BaseSink).
+
+Why base class inheritance is required:
+- Plugin discovery uses issubclass() checks against base classes
+- Python's Protocol with non-method members (name, determinism, etc.) cannot
+  support issubclass() - only isinstance() on already-instantiated objects
+- Base classes enforce self-consistency via __init_subclass__ hooks
+- Per CLAUDE.md "Plugin Ownership", all plugins are system code, not user extensions
+
+The protocol definitions (SourceProtocol, TransformProtocol, SinkProtocol) exist
+for type-checking purposes only - they define the interface contract but cannot
+be used for runtime discovery.
+...
+"""
+```
+
+**Classification:** This was a documentation defect, not a code defect. The implementation correctly requires base class inheritance; only the documentation was misleading.
+
+**Verified By:** Claude Opus 4.5 (2026-01-29)

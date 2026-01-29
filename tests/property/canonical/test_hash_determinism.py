@@ -26,40 +26,14 @@ from elspeth.core.canonical import (
     canonical_json,
     stable_hash,
 )
-from tests.property.conftest import MAX_SAFE_INT, MIN_SAFE_INT
-
-# =============================================================================
-# Strategies for generating test data
-# =============================================================================
-
-# JSON-safe primitives (excluding NaN/Infinity which are rejected)
-# Using safe integer bounds for RFC 8785 compatibility
-json_primitives = (
-    st.none()
-    | st.booleans()
-    | st.integers(min_value=MIN_SAFE_INT, max_value=MAX_SAFE_INT)
-    | st.floats(allow_nan=False, allow_infinity=False)
-    | st.text(max_size=100)
-)
-
-# Recursive strategy for nested JSON structures
-json_values = st.recursive(
+from tests.property.conftest import (
+    MAX_SAFE_INT,
+    MIN_SAFE_INT,
+    dict_keys,
     json_primitives,
-    lambda children: (st.lists(children, max_size=10) | st.dictionaries(st.text(max_size=20), children, max_size=10)),
-    max_leaves=50,
+    json_values,
+    row_data,
 )
-
-# Strategy for valid dict keys (strings only in JSON)
-dict_keys = st.text(min_size=1, max_size=50)
-
-# Strategy for row-like data (what transforms actually process)
-row_data = st.dictionaries(
-    keys=dict_keys,
-    values=json_primitives,
-    min_size=1,
-    max_size=20,
-)
-
 
 # =============================================================================
 # Core Determinism Properties
