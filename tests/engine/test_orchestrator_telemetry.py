@@ -616,3 +616,79 @@ class TestRowCreatedTelemetry:
         # Should complete without error
         assert result.status == RunStatus.COMPLETED
         assert result.rows_quarantined == 1
+
+
+# =============================================================================
+# PARTIAL Status Tests
+# =============================================================================
+
+
+class TestTelemetryPartialStatus:
+    """Tests for telemetry emission when export fails after successful run.
+
+    When a run completes successfully but export fails:
+    - Landscape status is COMPLETED (processing succeeded)
+    - CLI EventBus gets PARTIAL status (export failed)
+    - TelemetryRunCompleted should be emitted with status=COMPLETED
+    """
+
+    def test_telemetry_run_completed_emitted_when_export_fails(self, landscape_db: LandscapeDB) -> None:
+        """TelemetryRunCompleted is emitted with COMPLETED status even when export fails.
+
+        The telemetry event reflects the Landscape status (COMPLETED), not the
+        export outcome. This test verifies that export failure doesn't prevent
+        telemetry emission.
+
+        Note: The current implementation emits TelemetryRunCompleted twice when
+        export fails - once when the run completes (before export) and once in
+        the exception handler. Both events have status=COMPLETED because that
+        reflects the Landscape status. This test verifies at least one event
+        is emitted with the correct status and metrics.
+        """
+        from unittest.mock import patch
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+
+        config = PipelineConfig(
+            source=create_mock_source([{"id": 1}, {"id": 2}]),
+            transforms=[PassthroughTransform()],
+            sinks={"output": create_mock_sink()},
+        )
+
+        # Create mock settings that enable export
+        # Use MagicMock to provide all required attributes
+        mock_settings = MagicMock()
+        mock_settings.landscape.export.enabled = True
+        mock_settings.landscape.export.format = "json"
+        mock_settings.landscape.export.sink = "output"
+        mock_settings.landscape.export.sign = False
+        # Retry settings - return object with required attributes
+        mock_settings.retry.max_attempts = 3
+        mock_settings.retry.initial_delay_seconds = 1.0
+        mock_settings.retry.max_delay_seconds = 60.0
+        mock_settings.retry.exponential_base = 2.0
+
+        # Patch _export_landscape to raise an exception
+        with (
+            patch.object(orchestrator, "_export_landscape", side_effect=RuntimeError("Simulated export failure")),
+            pytest.raises(RuntimeError, match="Simulated export failure"),
+        ):
+            orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings)
+
+        # Verify RunStarted was emitted (before failure)
+        run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
+        assert len(run_started_events) == 1
+
+        # Verify TelemetryRunCompleted was emitted with COMPLETED status
+        # This is the key assertion: even though export failed, the run itself completed
+        run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        assert len(run_completed_events) >= 1  # At least one emitted
+
+        # All RunCompleted events should have status=COMPLETED (Landscape status)
+        # and correct row count
+        for event in run_completed_events:
+            assert event.status == RunStatus.COMPLETED  # Landscape status, not PARTIAL
+            assert event.row_count == 2  # Both rows were processed successfully
