@@ -50,6 +50,7 @@ from tests.conftest import (
     as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_production_graph
+from tests.property.conftest import MAX_SAFE_INT
 
 if TYPE_CHECKING:
     pass
@@ -220,10 +221,6 @@ class _CollectSink(_TestSinkBase):
 # Hypothesis Strategies
 # =============================================================================
 
-# RFC 8785 (JCS) uses JavaScript-safe integers: -(2^53-1) to (2^53-1)
-# Values outside this range cause serialization issues
-_MAX_SAFE_INT = 2**53 - 1
-
 # Strategy for row data - simple key-value pairs (RFC 8785 safe)
 row_value = st.one_of(
     st.integers(min_value=-1000, max_value=1000),
@@ -234,13 +231,13 @@ row_value = st.one_of(
 
 # Strategy for a single row - dict with string keys (RFC 8785 safe integers)
 single_row = st.fixed_dictionaries(
-    {"id": st.integers(min_value=0, max_value=_MAX_SAFE_INT)},
+    {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT)},
     optional={"value": row_value, "name": st.text(max_size=20), "flag": st.booleans()},
 )
 
 # Strategy for row that might trigger errors (RFC 8785 safe integers)
 row_with_possible_error = st.fixed_dictionaries(
-    {"id": st.integers(min_value=0, max_value=_MAX_SAFE_INT), "fail": st.booleans()},
+    {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT), "fail": st.booleans()},
     optional={"value": row_value},
 )
 

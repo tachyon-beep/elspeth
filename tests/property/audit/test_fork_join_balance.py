@@ -233,9 +233,6 @@ class _CollectSink(_TestSinkBase):
 # Hypothesis Strategies
 # =============================================================================
 
-# RFC 8785 safe integers
-_MAX_SAFE_INT = 2**53 - 1
-
 # Strategy for row values
 row_for_fork = st.fixed_dictionaries(
     {"value": st.integers(min_value=0, max_value=1000)},

@@ -26,22 +26,18 @@ from elspeth.core.canonical import (
     canonical_json,
     stable_hash,
 )
+from tests.property.conftest import MAX_SAFE_INT, MIN_SAFE_INT
 
 # =============================================================================
 # Strategies for generating test data
 # =============================================================================
-
-# RFC 8785 (JCS) uses JavaScript-safe integers: -(2^53-1) to (2^53-1)
-# Values outside this range cause serialization issues
-_MAX_SAFE_INT = 2**53 - 1
-_MIN_SAFE_INT = -(2**53 - 1)
 
 # JSON-safe primitives (excluding NaN/Infinity which are rejected)
 # Using safe integer bounds for RFC 8785 compatibility
 json_primitives = (
     st.none()
     | st.booleans()
-    | st.integers(min_value=_MIN_SAFE_INT, max_value=_MAX_SAFE_INT)
+    | st.integers(min_value=MIN_SAFE_INT, max_value=MAX_SAFE_INT)
     | st.floats(allow_nan=False, allow_infinity=False)
     | st.text(max_size=100)
 )
@@ -188,7 +184,7 @@ class TestStableHashDeterminism:
 class TestPandasNumpyNormalization:
     """Property tests for pandas/numpy type normalization."""
 
-    @given(value=st.integers(min_value=_MIN_SAFE_INT, max_value=_MAX_SAFE_INT))
+    @given(value=st.integers(min_value=MIN_SAFE_INT, max_value=MAX_SAFE_INT))
     @settings(max_examples=200)
     def test_numpy_int64_deterministic(self, value: int) -> None:
         """Property: numpy.int64 values hash deterministically.
@@ -200,7 +196,7 @@ class TestPandasNumpyNormalization:
         hash2 = stable_hash({"value": np_value})
         assert hash1 == hash2
 
-    @given(value=st.integers(min_value=_MIN_SAFE_INT, max_value=_MAX_SAFE_INT))
+    @given(value=st.integers(min_value=MIN_SAFE_INT, max_value=MAX_SAFE_INT))
     @settings(max_examples=200)
     def test_numpy_int64_same_as_python_int(self, value: int) -> None:
         """Property: numpy.int64 produces same hash as equivalent Python int.
