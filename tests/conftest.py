@@ -243,6 +243,13 @@ class _TestSourceBase:
         """Cleanup - no-op for tests."""
         pass
 
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping for audit trail.
+
+        Test sources don't do field normalization, so return None.
+        """
+        return None
+
 
 class CallbackSource(_TestSourceBase):
     """Source with callbacks for deterministic MockClock testing.

@@ -335,8 +335,11 @@ class RecoveryManager:
             # - Case 1: No tokens at all
             # - Case 2: Has non-delegation token without terminal outcome
             # - Case 3: Has tokens but none have terminal outcomes (delegation only)
+            #
+            # NOTE: PostgreSQL requires ORDER BY columns to be in SELECT when using DISTINCT.
+            # We select both row_id and row_index, then extract just row_id from results.
             query = (
-                select(rows_table.c.row_id)
+                select(rows_table.c.row_id, rows_table.c.row_index)
                 .select_from(rows_table)
                 .outerjoin(
                     tokens_table,

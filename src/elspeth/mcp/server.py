@@ -1392,7 +1392,7 @@ def create_server(database_url: str) -> Server:
                         "status": {
                             "type": "string",
                             "description": "Filter by status",
-                            "enum": ["PENDING", "RUNNING", "COMPLETED", "FAILED"],
+                            "enum": ["running", "completed", "failed"],
                         },
                     },
                 },
@@ -1499,7 +1499,7 @@ def create_server(database_url: str) -> Server:
                         "status": {
                             "type": "string",
                             "description": "Optional status filter",
-                            "enum": ["PENDING", "RUNNING", "COMPLETED", "FAILED"],
+                            "enum": ["open", "pending", "completed", "failed"],
                         },
                         "limit": {"type": "integer", "description": "Max states (default 100)", "default": 100},
                     },

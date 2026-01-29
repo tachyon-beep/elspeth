@@ -40,6 +40,9 @@ runs_table = Table(
     # Stores serialized PluginSchema class info to enable proper type coercion
     # when resuming from payloads (datetime/Decimal string -> typed values)
     Column("source_schema_json", Text),  # Nullable for backward compatibility
+    # Field resolution mapping from source.load() - captures original→final header mapping
+    # when normalize_fields or field_mapping is used. Stored at run level since one source per run.
+    Column("source_field_resolution_json", Text),  # Nullable for backward compatibility
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures
     # don't mask successful pipeline completion

@@ -980,6 +980,19 @@ class Orchestrator:
                 self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
                 raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
 
+            # Record field resolution mapping if source computed one during load()
+            # This captures original→final header mappings for audit trail (e.g., when
+            # normalize_fields is used). Must happen after load() but before processing.
+            # Explicitly check for tuple type to handle MagicMock in tests gracefully.
+            field_resolution = config.source.get_field_resolution()
+            if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                resolution_mapping, normalization_version = field_resolution
+                recorder.record_source_field_resolution(
+                    run_id=run_id,
+                    resolution_mapping=resolution_mapping,
+                    normalization_version=normalization_version,
+                )
+
             self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
 
             # PROCESS phase - iterate through rows

@@ -253,3 +253,22 @@ class CSVSource(BaseSource):
     def close(self) -> None:
         """Release resources (no-op for CSV source)."""
         pass
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping for audit trail.
+
+        Returns the mapping from original CSV headers to final field names,
+        computed during load() when normalize_fields or field_mapping is used.
+
+        Returns:
+            Tuple of (resolution_mapping, normalization_version) if field resolution
+            was computed, or None if load() hasn't been called yet or no normalization
+            was needed.
+        """
+        if self._field_resolution is None:
+            return None
+
+        return (
+            self._field_resolution.resolution_mapping,
+            self._field_resolution.normalization_version,
+        )

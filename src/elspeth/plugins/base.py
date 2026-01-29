@@ -394,3 +394,22 @@ class BaseSource(ABC):
     def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
         """Called after load() completes (before close)."""
         pass
+
+    # === Audit Trail Metadata ===
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping computed during load().
+
+        Sources that perform field normalization (e.g., CSVSource with normalize_fields)
+        should override this to return the mapping from original header names to final
+        field names. This enables audit trail to recover original headers.
+
+        Must be called AFTER load() has been invoked (resolution is computed lazily
+        when file headers are read).
+
+        Returns:
+            Tuple of (resolution_mapping, normalization_version) if field resolution
+            was performed, or None if no normalization occurred. The resolution_mapping
+            is a dict mapping original header name → final field name.
+        """
+        return None  # Default: no field resolution metadata

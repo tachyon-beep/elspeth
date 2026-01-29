@@ -285,6 +285,39 @@ class LandscapeRecorder:
 
         return str(source_schema_json)
 
+    def record_source_field_resolution(
+        self,
+        run_id: str,
+        resolution_mapping: dict[str, str],
+        normalization_version: str | None,
+    ) -> None:
+        """Record field resolution mapping computed during source.load().
+
+        This captures the mapping from original header names (as read from the file)
+        to final field names (after normalization and/or field_mapping applied).
+        Must be called after source.load() completes but before processing begins.
+
+        Args:
+            run_id: Run to update
+            resolution_mapping: Dict mapping original header name → final field name
+            normalization_version: Algorithm version used for normalization, or None if
+                                   no normalization was applied (passthrough or explicit columns)
+
+        Note:
+            This is necessary because field resolution depends on actual file headers
+            which are only known after load() runs, but node config is registered
+            before load(). Without this, audit trail cannot recover original headers.
+        """
+        resolution_data = {
+            "resolution_mapping": resolution_mapping,
+            "normalization_version": normalization_version,
+        }
+        resolution_json = canonical_json(resolution_data)
+
+        self._ops.execute_update(
+            runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
+        )
+
     def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
         """Get edge mapping for a run (from_node_id, label) -> edge_id.
 
