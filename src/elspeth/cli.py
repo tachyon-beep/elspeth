@@ -714,16 +714,31 @@ def _execute_pipeline(
             event_bus.subscribe(RunCompleted, _format_run_completed)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
-        # Create rate limit registry for external calls
+        # Create runtime configs for external calls and checkpointing
+        from elspeth.contracts.config.runtime import (
+            RuntimeCheckpointConfig,
+            RuntimeConcurrencyConfig,
+            RuntimeRateLimitConfig,
+        )
+        from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        rate_limit_registry = RateLimitRegistry(config.rate_limit)
+        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+
+        # Create checkpoint manager if checkpointing is enabled
+        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
 
         # Execute via Orchestrator (creates full audit trail)
         orchestrator = Orchestrator(
             db,
             event_bus=event_bus,
             rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
         )
         result = orchestrator.run(
             pipeline_config,
@@ -962,16 +977,31 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(RunCompleted, _format_run_completed)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
-        # Create rate limit registry for external calls
+        # Create runtime configs for external calls and checkpointing
+        from elspeth.contracts.config.runtime import (
+            RuntimeCheckpointConfig,
+            RuntimeConcurrencyConfig,
+            RuntimeRateLimitConfig,
+        )
+        from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        rate_limit_registry = RateLimitRegistry(config.rate_limit)
+        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+
+        # Create checkpoint manager if checkpointing is enabled
+        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
 
         # Execute via Orchestrator (creates full audit trail)
         orchestrator = Orchestrator(
             db,
             event_bus=event_bus,
             rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
         )
         result = orchestrator.run(
             pipeline_config,
@@ -1418,10 +1448,18 @@ def _execute_resume_with_instances(
     event_bus.subscribe(RunCompleted, _format_run_completed)
     event_bus.subscribe(ProgressEvent, _format_progress)
 
-    # Create rate limit registry for external calls
+    # Create runtime configs for external calls and checkpointing
+    from elspeth.contracts.config.runtime import (
+        RuntimeCheckpointConfig,
+        RuntimeConcurrencyConfig,
+        RuntimeRateLimitConfig,
+    )
     from elspeth.core.rate_limit import RateLimitRegistry
 
-    rate_limit_registry = RateLimitRegistry(config.rate_limit)
+    rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+    rate_limit_registry = RateLimitRegistry(rate_limit_config)
+    concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+    checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
 
     # Create checkpoint manager and orchestrator for resume
     checkpoint_manager = CheckpointManager(db)
@@ -1429,7 +1467,9 @@ def _execute_resume_with_instances(
         db,
         event_bus=event_bus,
         checkpoint_manager=checkpoint_manager,
+        checkpoint_config=checkpoint_config,
         rate_limit_registry=rate_limit_registry,
+        concurrency_config=concurrency_config,
     )
 
     # Execute resume

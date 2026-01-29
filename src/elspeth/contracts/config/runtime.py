@@ -23,8 +23,10 @@ from typing import TYPE_CHECKING, Any, cast
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 
+from elspeth.core.config import ServiceRateLimit
+
 if TYPE_CHECKING:
-    from elspeth.core.config import CheckpointSettings, ConcurrencySettings, RateLimitSettings, RetrySettings, ServiceRateLimit
+    from elspeth.core.config import CheckpointSettings, ConcurrencySettings, RateLimitSettings, RetrySettings
 
 
 def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
@@ -195,6 +197,32 @@ class RuntimeRateLimitConfig:
     default_requests_per_minute: float | None
     persistence_path: str | None
     services: dict[str, "ServiceRateLimit"]
+
+    def get_service_config(self, service_name: str) -> ServiceRateLimit:
+        """Get rate limit config for a service, with fallback to defaults.
+
+        This mirrors RateLimitSettings.get_service_config() behavior, providing
+        the same interface for RateLimitRegistry to use.
+
+        Args:
+            service_name: Name of the service to get config for
+
+        Returns:
+            ServiceRateLimit for the service (specific config if available,
+            otherwise constructed from defaults)
+        """
+        if service_name in self.services:
+            return self.services[service_name]
+
+        # Construct from defaults - convert float back to int for ServiceRateLimit
+        # ServiceRateLimit expects int for requests_per_second
+        rps = int(self.default_requests_per_second) if self.default_requests_per_second is not None else 10
+        rpm = int(self.default_requests_per_minute) if self.default_requests_per_minute is not None else None
+
+        return ServiceRateLimit(
+            requests_per_second=rps,
+            requests_per_minute=rpm,
+        )
 
     @classmethod
     def default(cls) -> "RuntimeRateLimitConfig":

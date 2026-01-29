@@ -128,15 +128,18 @@ class TransformExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
+        max_workers: int | None = None,
     ) -> None:
         """Initialize executor.
 
         Args:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
+            max_workers: Maximum concurrent workers (None = no limit)
         """
         self._recorder = recorder
         self._spans = span_factory
+        self._max_workers = max_workers
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for transform.

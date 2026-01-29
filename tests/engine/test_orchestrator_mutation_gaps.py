@@ -546,6 +546,7 @@ class TestCheckpointSequencing:
         the counter without attempting DB insert (avoids FK constraint on run_id).
         The increment at line 152 happens unconditionally when checkpointing is enabled.
         """
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.dag import ExecutionGraph
@@ -553,11 +554,12 @@ class TestCheckpointSequencing:
         checkpoint_manager = CheckpointManager(landscape_db)
         # Use aggregation_only: increments counter but doesn't create checkpoint record
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         orchestrator = Orchestrator(
             landscape_db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # Build graph matching the nodes used in _maybe_checkpoint calls
@@ -595,13 +597,15 @@ class TestCheckpointSequencing:
 
     def test_sequence_number_not_incremented_when_disabled(self, landscape_db: LandscapeDB) -> None:
         """Lines 147-148: sequence_number should NOT increment when disabled."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
 
         checkpoint_settings = CheckpointSettings(enabled=False)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         orchestrator = Orchestrator(
             landscape_db,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         assert orchestrator._sequence_number == 0
@@ -617,14 +621,16 @@ class TestCheckpointSequencing:
 
     def test_sequence_number_not_incremented_without_manager(self, landscape_db: LandscapeDB) -> None:
         """Lines 149-150: sequence_number should NOT increment without manager."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
 
         # No checkpoint_manager provided
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         orchestrator = Orchestrator(
             landscape_db,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
             # checkpoint_manager deliberately omitted
         )
 

@@ -108,41 +108,54 @@ class TestRetryConfigAlignment:
 class TestConcurrencySettingsAlignment:
     """Verify ConcurrencySettings field usage.
 
-    STATUS: PENDING IMPLEMENTATION
-    The max_workers field exists but is never passed to runtime components.
-    Plugins that need concurrency (LLM, Azure) use their own settings.
+    STATUS: WIRED
+    RuntimeConcurrencyConfig is created from ConcurrencySettings in CLI
+    and passed to Orchestrator, which injects it into PluginContext.
+    Plugins can access ctx.concurrency_config.max_workers for pool sizing.
     """
 
-    # Fields that SHOULD be wired but aren't yet
-    PENDING_FIELDS: ClassVar[set[str]] = {
-        "max_workers",  # TODO: Pass to Orchestrator/ThreadPoolExecutor
+    # Fields wired through RuntimeConcurrencyConfig
+    WIRED_FIELDS: ClassVar[set[str]] = {
+        "max_workers",  # Accessible via PluginContext.concurrency_config
     }
 
-    def test_documents_pending_fields(self) -> None:
-        """Document which fields are pending implementation."""
+    def test_documents_wired_fields(self) -> None:
+        """Document which fields are wired to runtime."""
         from elspeth.core.config import ConcurrencySettings
 
         actual_fields = set(ConcurrencySettings.model_fields.keys())
 
-        # This test passes as documentation - update when fields are wired
-        assert actual_fields == self.PENDING_FIELDS, (
+        # This test passes as documentation - update when fields change
+        assert actual_fields == self.WIRED_FIELDS, (
             f"ConcurrencySettings fields changed. "
-            f"New fields: {actual_fields - self.PENDING_FIELDS}, "
-            f"Removed: {self.PENDING_FIELDS - actual_fields}. "
-            f"Update PENDING_FIELDS or add wiring tests."
+            f"New fields: {actual_fields - self.WIRED_FIELDS}, "
+            f"Removed: {self.WIRED_FIELDS - actual_fields}. "
+            f"Update WIRED_FIELDS and wiring tests."
         )
 
-    @pytest.mark.xfail(reason="max_workers not yet wired to runtime")
-    def test_max_workers_used_at_runtime(self) -> None:
-        """max_workers should control thread pool size.
+    def test_max_workers_accessible_in_context(self) -> None:
+        """max_workers is accessible via PluginContext.concurrency_config.
 
-        This test is expected to fail until ConcurrencySettings is
-        wired to Orchestrator or plugin execution.
+        The concurrency_config is passed CLI → Orchestrator → PluginContext,
+        making max_workers available to plugins for pool size decisions.
         """
-        # When implemented, this should verify:
-        # 1. Orchestrator accepts concurrency_settings parameter
-        # 2. ThreadPoolExecutor uses max_workers from settings
-        pytest.fail("ConcurrencySettings.max_workers not implemented")
+        from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
+        from elspeth.core.config import ConcurrencySettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine import Orchestrator
+
+        # Create concurrency config from settings
+        settings = ConcurrencySettings(max_workers=8)
+        config = RuntimeConcurrencyConfig.from_settings(settings)
+
+        # Verify Orchestrator accepts concurrency_config
+        db = LandscapeDB.in_memory()
+        try:
+            orchestrator = Orchestrator(db, concurrency_config=config)
+            assert orchestrator._concurrency_config is config
+            assert orchestrator._concurrency_config.max_workers == 8
+        finally:
+            db.close()
 
 
 class TestRateLimitSettingsAlignment:
@@ -171,23 +184,25 @@ class TestRateLimitSettingsAlignment:
         assert actual_fields == self.WIRED_FIELDS, "RateLimitSettings fields changed. Update WIRED_FIELDS."
 
     def test_registry_instantiated_from_settings(self) -> None:
-        """RateLimitRegistry is created from RateLimitSettings in CLI.
+        """RateLimitRegistry is created from RuntimeRateLimitConfig in CLI.
 
         The registry is created in _execute_pipeline_with_instances() and
-        _execute_resume_with_instances(), then passed to Orchestrator which
-        injects it into PluginContext.rate_limit_registry.
+        _execute_resume_with_instances() via RuntimeRateLimitConfig.from_settings(),
+        then passed to Orchestrator which injects it into PluginContext.rate_limit_registry.
         """
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        # Verify the registry can be created from settings
+        # Verify the registry can be created from settings via RuntimeRateLimitConfig
         settings = RateLimitSettings(
             enabled=True,
             default_requests_per_second=5,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
-        # Verify the registry uses the settings
+        # Verify the registry uses the config
         limiter = registry.get_limiter("test_service")
         assert limiter is not None  # Should return a real limiter when enabled
 
@@ -241,21 +256,18 @@ class TestLandscapeSettingsAlignment:
 class TestCheckpointSettingsAlignment:
     """Verify CheckpointSettings field usage.
 
-    STATUS: PARTIALLY WIRED
-    Fields are used during resume but not during normal run.
-    aggregation_boundaries is never checked.
+    STATUS: WIRED
+    RuntimeCheckpointConfig is created from CheckpointSettings in CLI
+    and passed to Orchestrator for both normal runs and resume.
+    Checkpointing is now enabled for normal runs when checkpoint.enabled=true.
     """
 
     # Fields used during resume
-    WIRED_IN_RESUME: ClassVar[set[str]] = {
+    WIRED_FIELDS: ClassVar[set[str]] = {
         "enabled",
         "frequency",
         "checkpoint_interval",
-    }
-
-    # Fields that exist but are never checked
-    PENDING_FIELDS: ClassVar[set[str]] = {
-        "aggregation_boundaries",  # Documented but not implemented
+        "aggregation_boundaries",
     }
 
     def test_field_categorization_complete(self) -> None:
@@ -263,20 +275,34 @@ class TestCheckpointSettingsAlignment:
         from elspeth.core.config import CheckpointSettings
 
         actual_fields = set(CheckpointSettings.model_fields.keys())
-        categorized = self.WIRED_IN_RESUME | self.PENDING_FIELDS
 
-        assert actual_fields == categorized, (
-            f"Uncategorized fields: {actual_fields - categorized}. Add to WIRED_IN_RESUME or PENDING_FIELDS."
+        assert actual_fields == self.WIRED_FIELDS, (
+            f"Uncategorized fields: {actual_fields - self.WIRED_FIELDS}. Add to WIRED_FIELDS."
         )
 
-    @pytest.mark.xfail(reason="Checkpointing only active during resume, not normal run")
-    def test_checkpoint_settings_used_in_normal_run(self) -> None:
-        """CheckpointSettings should be passed to Orchestrator for normal runs.
+    def test_checkpoint_config_passed_to_orchestrator(self) -> None:
+        """RuntimeCheckpointConfig is passed to Orchestrator for normal runs.
 
-        Currently checkpoint_settings is only passed during resume,
-        meaning checkpointing is disabled for normal runs.
+        Checkpointing is now enabled for normal runs via RuntimeCheckpointConfig.
         """
-        pytest.fail("CheckpointSettings not passed to Orchestrator for normal run")
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine import Orchestrator
+
+        # Create checkpoint config from settings
+        settings = CheckpointSettings(enabled=True, frequency="every_row")
+        config = RuntimeCheckpointConfig.from_settings(settings)
+
+        # Verify Orchestrator accepts checkpoint_config
+        db = LandscapeDB.in_memory()
+        try:
+            orchestrator = Orchestrator(db, checkpoint_config=config)
+            assert orchestrator._checkpoint_config is config
+            assert orchestrator._checkpoint_config.enabled is True
+            assert orchestrator._checkpoint_config.frequency == 1  # every_row -> 1
+        finally:
+            db.close()
 
 
 class TestPayloadStoreSettingsAlignment:

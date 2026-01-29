@@ -44,18 +44,21 @@ class TestResumeComprehensive:
     @pytest.fixture
     def test_env(self, tmp_path: Path) -> dict[str, Any]:
         """Set up test environment with database and payload store."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
         checkpoint_settings = CheckpointSettings(frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         return {
             "db": db,
             "payload_store": payload_store,
             "checkpoint_manager": checkpoint_mgr,
             "recovery_manager": recovery_mgr,
-            "checkpoint_settings": checkpoint_settings,
+            "checkpoint_config": checkpoint_config,
             "tmp_path": tmp_path,
         }
 
@@ -190,7 +193,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run
@@ -233,7 +236,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -295,7 +298,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run
@@ -338,7 +341,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -398,7 +401,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run with datetime schema
@@ -528,7 +531,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -588,7 +591,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run with Decimal schema
@@ -717,7 +720,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -773,7 +776,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run with array schema
@@ -902,7 +905,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -958,7 +961,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Set up failed run with nested object schema
@@ -1087,7 +1090,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),
@@ -1143,7 +1146,7 @@ class TestResumeComprehensive:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
 
         # Set up failed run with unsupported type
         run_id = "resume-unsupported-test"
@@ -1257,7 +1260,7 @@ class TestResumeComprehensive:
         resume_point = recovery_mgr.get_resume_point(run_id, graph)
         assert resume_point is not None
 
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_settings=checkpoint_settings)
+        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         config = PipelineConfig(
             source=NullSource({}),

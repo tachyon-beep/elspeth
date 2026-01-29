@@ -61,8 +61,9 @@ RowPlugin = TransformProtocol | GateProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
+    from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import CheckpointSettings, ElspethSettings
+    from elspeth.core.config import ElspethSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
 
@@ -146,9 +147,10 @@ class Orchestrator:
         event_bus: "EventBusProtocol" = None,  # type: ignore[assignment]
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
-        checkpoint_settings: "CheckpointSettings | None" = None,
+        checkpoint_config: "RuntimeCheckpointConfig | None" = None,
         clock: "Clock | None" = None,
         rate_limit_registry: "RateLimitRegistry | None" = None,
+        concurrency_config: "RuntimeConcurrencyConfig | None" = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -158,9 +160,10 @@ class Orchestrator:
         self._canonical_version = canonical_version
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
-        self._checkpoint_settings = checkpoint_settings
+        self._checkpoint_config = checkpoint_config
         self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._rate_limit_registry = rate_limit_registry
+        self._concurrency_config = concurrency_config
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
@@ -180,7 +183,7 @@ class Orchestrator:
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
         """
-        if not self._checkpoint_settings or not self._checkpoint_settings.enabled:
+        if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
         if self._checkpoint_manager is None:
             return
@@ -190,15 +193,17 @@ class Orchestrator:
 
         self._sequence_number += 1
 
+        # RuntimeCheckpointConfig.frequency is an int:
+        # - 1 = every_row
+        # - 0 = aggregation_only
+        # - N = every N rows
+        frequency = self._checkpoint_config.frequency
         should_checkpoint = False
-        if self._checkpoint_settings.frequency == "every_row":
-            should_checkpoint = True
-        elif self._checkpoint_settings.frequency == "every_n":
-            interval = self._checkpoint_settings.checkpoint_interval
-            # interval is validated in CheckpointSettings when frequency="every_n"
-            assert interval is not None  # Validated by CheckpointSettings model
-            should_checkpoint = (self._sequence_number % interval) == 0
-        # aggregation_only: checkpointed separately in aggregation flush
+        if frequency == 1:
+            should_checkpoint = True  # every_row
+        elif frequency > 1:
+            should_checkpoint = (self._sequence_number % frequency) == 0  # every_n
+        # frequency == 0: aggregation_only - checkpointed separately in aggregation flush
 
         if should_checkpoint:
             self._checkpoint_manager.create_checkpoint(
@@ -848,6 +853,7 @@ class Orchestrator:
             config=config.config,
             landscape=recorder,
             rate_limit_registry=self._rate_limit_registry,
+            concurrency_config=self._concurrency_config,
             _batch_checkpoints=batch_checkpoints or {},
         )
 
@@ -1922,6 +1928,7 @@ class Orchestrator:
             config=config.config,
             landscape=recorder,
             rate_limit_registry=self._rate_limit_registry,
+            concurrency_config=self._concurrency_config,
         )
 
         # Call on_start for transforms and sinks.

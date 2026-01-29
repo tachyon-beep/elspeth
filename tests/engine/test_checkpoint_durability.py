@@ -36,6 +36,7 @@ from elspeth.contracts import (
     SinkName,
     SourceRow,
 )
+from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -145,6 +146,7 @@ class TestCheckpointDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         # Track checkpoints during the run (before they're deleted)
         checkpoint_count_during_write: list[int] = []
@@ -220,7 +222,7 @@ class TestCheckpointDurability:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         result = orchestrator.run(config, graph=_build_production_graph(config))
@@ -292,6 +294,7 @@ class TestCheckpointDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
 
         # Track which rows are written during resume
@@ -511,7 +514,7 @@ class TestCheckpointDurability:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # Clear the tracking list before resume
@@ -593,6 +596,7 @@ class TestCheckpointDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         class RowSchema(PluginSchema):
             value: int
@@ -655,7 +659,7 @@ class TestCheckpointDurability:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         with pytest.raises(RuntimeError, match="Simulated sink failure"):
@@ -679,6 +683,7 @@ class TestCheckpointDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         # We'll capture the checkpoint state before completion deletes them
         captured_checkpoints: list[Any] = []
@@ -756,7 +761,7 @@ class TestCheckpointDurability:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         result = orchestrator.run(config, graph=graph)
@@ -783,6 +788,7 @@ class TestCheckpointDurability:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         # Track checkpoint count at various points
         checkpoints_before_write: list[int] = []
@@ -863,7 +869,7 @@ class TestCheckpointDurability:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         result = orchestrator.run(config, graph=_build_production_graph(config))
@@ -893,6 +899,7 @@ class TestCheckpointTimingInvariants:
         checkpoint_manager = CheckpointManager(db)
         # Checkpoint every 2 rows
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_n", checkpoint_interval=2)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         captured_checkpoints: list[Any] = []
 
@@ -965,7 +972,7 @@ class TestCheckpointTimingInvariants:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         result = orchestrator.run(config, graph=_build_production_graph(config))
@@ -995,6 +1002,7 @@ class TestCheckpointTimingInvariants:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=False)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         class RowSchema(PluginSchema):
             value: int
@@ -1059,7 +1067,7 @@ class TestCheckpointTimingInvariants:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         result = orchestrator.run(config, graph=_build_production_graph(config))
@@ -1075,6 +1083,7 @@ class TestCheckpointTimingInvariants:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         # No checkpoint_manager provided
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         class RowSchema(PluginSchema):
             value: int
@@ -1140,7 +1149,7 @@ class TestCheckpointTimingInvariants:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=None,  # No manager
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # Should run successfully without checkpointing

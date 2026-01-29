@@ -232,9 +232,12 @@ class TestResumeIdempotence:
         db_a.close()
 
         # ===== Pipeline B: Run with checkpoint at row 2, simulate crash, resume =====
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+
         db_b = LandscapeDB(f"sqlite:///{tmp_path}/resume_test.db")
         checkpoint_mgr = CheckpointManager(db_b)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
         recorder = LandscapeRecorder(db_b, payload_store=payload_store)
 
@@ -392,7 +395,7 @@ class TestResumeIdempotence:
         orchestrator_b = Orchestrator(
             db_b,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # Resume the run

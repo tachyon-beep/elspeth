@@ -102,6 +102,7 @@ class RowProcessor:
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
         payload_store: Any = None,
         clock: "Clock | None" = None,
+        max_workers: int | None = None,
     ) -> None:
         """Initialize processor.
 
@@ -124,6 +125,7 @@ class RowProcessor:
             payload_store: Optional PayloadStore for persisting source row payloads
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
+            max_workers: Maximum concurrent workers for transform execution (None = no limit)
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -140,7 +142,7 @@ class RowProcessor:
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
-        self._transform_executor = TransformExecutor(recorder, span_factory)
+        self._transform_executor = TransformExecutor(recorder, span_factory, max_workers=max_workers)
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
             recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock

@@ -23,6 +23,7 @@ class TestCheckpointRecoveryIntegration:
     @pytest.fixture
     def test_env(self, tmp_path: Path) -> dict[str, Any]:
         """Set up test environment with database and payload store."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.database import LandscapeDB
@@ -34,13 +35,14 @@ class TestCheckpointRecoveryIntegration:
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
         checkpoint_settings = CheckpointSettings(frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         return {
             "db": db,
             "payload_store": payload_store,
             "checkpoint_manager": checkpoint_mgr,
             "recovery_manager": recovery_mgr,
-            "checkpoint_settings": checkpoint_settings,
+            "checkpoint_config": checkpoint_config,
             "tmp_path": tmp_path,
         }
 
@@ -328,7 +330,7 @@ class TestCheckpointRecoveryIntegration:
         checkpoint_mgr = test_env["checkpoint_manager"]
         recovery_mgr = test_env["recovery_manager"]
         payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
+        checkpoint_config = test_env["checkpoint_config"]
         tmp_path = test_env["tmp_path"]
 
         # Create graph for this test with the actual nodes used
@@ -488,7 +490,7 @@ class TestCheckpointRecoveryIntegration:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         config = PipelineConfig(
