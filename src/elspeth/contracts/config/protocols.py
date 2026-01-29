@@ -29,7 +29,11 @@ Note on jitter:
     the value is always provided by RuntimeRetryConfig's factory methods.
 """
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from elspeth.contracts.config.runtime import ExporterConfig
+    from elspeth.contracts.enums import BackpressureMode, TelemetryGranularity
 
 
 @runtime_checkable
@@ -141,4 +145,46 @@ class RuntimeCheckpointProtocol(Protocol):
     @property
     def aggregation_boundaries(self) -> bool:
         """Whether to checkpoint at aggregation flush boundaries."""
+        ...
+
+
+@runtime_checkable
+class RuntimeTelemetryProtocol(Protocol):
+    """What TelemetryManager expects from telemetry configuration.
+
+    These fields come from TelemetrySettings (direct mapping unless noted):
+    - enabled: TelemetrySettings.enabled
+    - granularity: TelemetrySettings.granularity (parsed to TelemetryGranularity enum)
+    - backpressure_mode: TelemetrySettings.backpressure_mode (parsed to BackpressureMode enum)
+    - fail_on_total_exporter_failure: TelemetrySettings.fail_on_total_exporter_failure
+    - exporter_configs: TelemetrySettings.exporters (converted to tuple of ExporterConfig)
+
+    Note: The from_settings() factory validates that backpressure_mode is
+    implemented before returning. Unimplemented modes (like 'slow') cause
+    NotImplementedError at config load time, not at runtime.
+    """
+
+    @property
+    def enabled(self) -> bool:
+        """Whether telemetry is active."""
+        ...
+
+    @property
+    def granularity(self) -> "TelemetryGranularity":
+        """Granularity of events to emit (lifecycle, rows, or full)."""
+        ...
+
+    @property
+    def backpressure_mode(self) -> "BackpressureMode":
+        """How to handle backpressure when exporters can't keep up."""
+        ...
+
+    @property
+    def fail_on_total_exporter_failure(self) -> bool:
+        """Whether to fail the run if all exporters fail."""
+        ...
+
+    @property
+    def exporter_configs(self) -> "tuple[ExporterConfig, ...]":
+        """Immutable sequence of exporter configurations."""
         ...

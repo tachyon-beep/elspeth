@@ -13,6 +13,7 @@ Import pattern:
 # import through core.checkpoint -> core.landscape -> contracts.
 
 from elspeth.contracts.enums import (
+    BackpressureMode,
     BatchStatus,
     CallStatus,
     CallType,
@@ -25,6 +26,7 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunMode,
     RunStatus,
+    TelemetryGranularity,
     TriggerType,
 )
 from elspeth.contracts.errors import (
@@ -91,6 +93,8 @@ from elspeth.contracts.config import (
     ConcurrencySettings,
     DatabaseSettings,
     ElspethSettings,
+    ExporterConfig,
+    ExporterSettings,
     LandscapeExportSettings,
     LandscapeSettings,
     PayloadStoreSettings,
@@ -98,12 +102,15 @@ from elspeth.contracts.config import (
     RetrySettings,
     SinkSettings,
     SourceSettings,
+    TelemetrySettings,
     TransformSettings,
     # Runtime protocols
     RuntimeCheckpointProtocol,
     RuntimeConcurrencyProtocol,
     RuntimeRateLimitProtocol,
     RuntimeRetryProtocol,
+    RuntimeTelemetryConfig,
+    RuntimeTelemetryProtocol,
     # Default registries
     INTERNAL_DEFAULTS,
     POLICY_DEFAULTS,
@@ -168,6 +175,8 @@ __all__ = [  # Grouped by category for readability
     "ConcurrencySettings",
     "DatabaseSettings",
     "ElspethSettings",
+    "ExporterConfig",
+    "ExporterSettings",
     "LandscapeExportSettings",
     "LandscapeSettings",
     "PayloadStoreSettings",
@@ -175,12 +184,15 @@ __all__ = [  # Grouped by category for readability
     "RetrySettings",
     "SinkSettings",
     "SourceSettings",
+    "TelemetrySettings",
     "TransformSettings",
     # config - Runtime protocols
     "RuntimeCheckpointProtocol",
     "RuntimeConcurrencyProtocol",
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
+    "RuntimeTelemetryConfig",
+    "RuntimeTelemetryProtocol",
     # config - Default registries
     "INTERNAL_DEFAULTS",
     "POLICY_DEFAULTS",
@@ -189,6 +201,7 @@ __all__ = [  # Grouped by category for readability
     "FIELD_MAPPINGS",
     "SETTINGS_TO_RUNTIME",
     # enums
+    "BackpressureMode",
     "BatchStatus",
     "CallStatus",
     "CallType",
@@ -201,6 +214,7 @@ __all__ = [  # Grouped by category for readability
     "RowOutcome",
     "RunMode",
     "RunStatus",
+    "TelemetryGranularity",
     "TriggerType",
     # identity
     "TokenInfo",
