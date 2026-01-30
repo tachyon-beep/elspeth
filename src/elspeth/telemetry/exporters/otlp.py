@@ -361,14 +361,21 @@ class OTLPExporter:
         self._configured = False
 
 
-class _SyntheticReadableSpan:
-    """A minimal ReadableSpan implementation for direct export.
+# Conditional import for proper inheritance - opentelemetry is optional
+try:
+    from opentelemetry.sdk.trace import ReadableSpan as _ReadableSpanBase
+except ImportError:
+    _ReadableSpanBase = object  # type: ignore[misc,assignment]
+
+
+class _SyntheticReadableSpan(_ReadableSpanBase):
+    """A ReadableSpan subclass for direct export of ELSPETH telemetry events.
 
     OpenTelemetry's ReadableSpan is typically created by the SDK during
     normal tracing operations. Since we're converting ELSPETH events to
-    spans post-hoc, we need to create spans directly.
+    spans post-hoc, we create ReadableSpan instances directly.
 
-    This class implements the minimal interface required by OTLPSpanExporter.
+    Inherits from ReadableSpan to ensure type compatibility with exporters.
     """
 
     def __init__(
@@ -380,89 +387,26 @@ class _SyntheticReadableSpan:
         end_time: int,
         kind: Any,  # SpanKind
     ) -> None:
-        self._name = name
-        self._context = context
-        self._attributes = attributes
-        self._start_time = start_time
-        self._end_time = end_time
-        self._kind = kind
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def context(self) -> Any:
-        return self._context
-
-    def get_span_context(self) -> Any:
-        return self._context
-
-    @property
-    def attributes(self) -> dict[str, Any]:
-        return self._attributes
-
-    @property
-    def start_time(self) -> int:
-        return self._start_time
-
-    @property
-    def end_time(self) -> int:
-        return self._end_time
-
-    @property
-    def kind(self) -> Any:
-        return self._kind
-
-    @property
-    def parent(self) -> None:
-        return None
-
-    @property
-    def resource(self) -> Any:
-        """Return default resource."""
+        # Import SDK types for parent __init__
         from opentelemetry.sdk.resources import Resource
-
-        return Resource.create({})
-
-    @property
-    def instrumentation_scope(self) -> Any:
-        """Return instrumentation scope."""
         from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-
-        return InstrumentationScope(name="elspeth.telemetry", version="0.1.0")
-
-    @property
-    def status(self) -> Any:
-        """Return OK status."""
         from opentelemetry.trace import Status, StatusCode
 
-        return Status(StatusCode.OK)
-
-    @property
-    def events(self) -> tuple[()]:
-        return ()
-
-    @property
-    def links(self) -> tuple[()]:
-        return ()
-
-    @property
-    def dropped_attributes(self) -> int:
-        """Number of attributes dropped due to limits (always 0 for synthetic spans)."""
-        return 0
-
-    @property
-    def dropped_events(self) -> int:
-        """Number of events dropped due to limits (always 0 for synthetic spans)."""
-        return 0
-
-    @property
-    def dropped_links(self) -> int:
-        """Number of links dropped due to limits (always 0 for synthetic spans)."""
-        return 0
-
-    @property
-    def instrumentation_info(self) -> Any:
-        """Deprecated, use instrumentation_scope."""
-        return self.instrumentation_scope
+        # Call parent __init__ with appropriate defaults
+        super().__init__(
+            name=name,
+            context=context,
+            parent=None,  # Synthetic spans have no parent
+            resource=Resource.create({}),
+            attributes=attributes,
+            events=(),
+            links=(),
+            kind=kind,
+            instrumentation_scope=InstrumentationScope(
+                name="elspeth.telemetry",
+                version="0.1.0",
+            ),
+            status=Status(StatusCode.OK),
+            start_time=start_time,
+            end_time=end_time,
+        )
