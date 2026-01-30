@@ -20,6 +20,7 @@ from elspeth.contracts import (
     ExecutionError,
     NodeStateOpen,
     RoutingAction,
+    RoutingReason,
     RoutingSpec,
     RowOutcome,
     TokenInfo,
@@ -31,7 +32,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError, RoutingReason
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
