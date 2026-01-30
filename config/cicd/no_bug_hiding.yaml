@@ -901,22 +901,27 @@ allow_hits:
   safety: Graceful fallback to configured model - audit still captures actual value
   expires: null
 # TelemetryManager - exporter boundary (exporters are external code that can throw any exception)
-- key: telemetry/manager.py:R4:TelemetryManager:handle_event:line=125
+- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:line=131
+  owner: architecture
+  reason: 'False positive: queue.Queue.get() is not dict.get() - no bug hiding'
+  safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing keys
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:handle_event:line=171
   owner: architecture
   reason: 'Exporter boundary: export() implementations are external code that can throw any exception'
   safety: Caught, logged with warning, failure tracked in health metrics; pipeline continues
   expires: null
-- key: telemetry/manager.py:R1:TelemetryManager:handle_event:line=127
+- key: telemetry/manager.py:R1:TelemetryManager:handle_event:line=173
   owner: architecture
   reason: 'Counter accumulation pattern: exporter_failures counts may not exist for all exporters'
   safety: Default 0 for first failure of each exporter is correct initialization
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:flush:line=203
+- key: telemetry/manager.py:R4:TelemetryManager:flush:line=249
   owner: architecture
   reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still flushed
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:close:line=221
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=267
   owner: architecture
   reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still closed

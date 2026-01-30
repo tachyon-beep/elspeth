@@ -2,28 +2,37 @@
 """TelemetryManager coordinates event emission to configured exporters.
 
 The TelemetryManager is the central hub for telemetry:
-1. Subscribes to EventBus for telemetry events
+1. Receives telemetry events from EventBus
 2. Filters events based on configured granularity
-3. Dispatches to all exporters with failure isolation
-4. Tracks health metrics for monitoring
-5. Implements aggregate logging to prevent Warning Fatigue
+3. Queues events for async export via background thread
+4. Dispatches to all exporters with failure isolation
+5. Tracks health metrics for monitoring
+6. Implements aggregate logging to prevent Warning Fatigue
 
 Design principles:
 - Telemetry emitted AFTER Landscape recording (Landscape is the legal record)
 - Individual exporter failures don't crash the pipeline
 - Aggregate logging every 100 total failures (Warning Fatigue prevention)
-- Configurable behavior when ALL exporters fail repeatedly
+- Configurable backpressure behavior (BLOCK vs DROP)
 
 Thread Safety:
-    Assumes single-threaded EventBus dispatch from Orchestrator.
-    Not designed for concurrent event emission.
+    TelemetryManager uses a background export thread for async export.
+    - handle_event() is called from the pipeline thread (non-blocking)
+    - _export_loop() runs in the background export thread
+    - _events_dropped is protected by _dropped_lock (accessed from both threads)
+    - All other metrics are only modified by the export thread
+    - health_metrics reads are approximately consistent
 """
 
+import queue
+import threading
 from typing import Any
 
 import structlog
 
 from elspeth.contracts.config import RuntimeTelemetryProtocol
+from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
+from elspeth.contracts.enums import BackpressureMode  # noqa: F401 - used in Task 5
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import TelemetryEvent
 from elspeth.telemetry.filtering import should_emit
@@ -35,10 +44,14 @@ logger = structlog.get_logger(__name__)
 class TelemetryManager:
     """Coordinates event emission to configured exporters.
 
-    The TelemetryManager receives telemetry events, filters them based on
-    configured granularity, and dispatches to all exporters. It provides
-    failure isolation (one exporter failing doesn't affect others) and
-    tracks health metrics for operational monitoring.
+    The TelemetryManager receives telemetry events, queues them for async
+    export via a background thread, and dispatches to all exporters. It
+    provides failure isolation (one exporter failing doesn't affect others)
+    and tracks health metrics for operational monitoring.
+
+    Backpressure modes:
+    - BLOCK: handle_event() blocks when queue is full (pipeline slows)
+    - DROP: handle_event() drops events when queue is full (pipeline unaffected)
 
     Failure handling:
     - Individual exporter failures are logged but don't crash the pipeline
@@ -48,8 +61,9 @@ class TelemetryManager:
       - fail_on_total_exporter_failure=False: Log CRITICAL and continue
 
     Thread Safety:
-        Assumes single-threaded EventBus dispatch from Orchestrator.
-        Internal state is not protected by locks.
+        Uses background export thread. handle_event() is thread-safe.
+        _events_dropped protected by lock (both threads write).
+        Other metrics single-writer (export thread only).
 
     Example:
         >>> from elspeth.telemetry import TelemetryManager
@@ -69,8 +83,8 @@ class TelemetryManager:
         """Initialize the TelemetryManager.
 
         Args:
-            config: Runtime telemetry configuration with granularity and
-                fail_on_total_exporter_failure settings
+            config: Runtime telemetry configuration with granularity,
+                backpressure_mode, and fail_on_total_exporter_failure settings
             exporters: List of configured exporter instances. May be empty
                 (telemetry will be a no-op).
         """
@@ -87,6 +101,38 @@ class TelemetryManager:
 
         # Track whether we've already disabled telemetry
         self._disabled = False
+
+        # Thread coordination
+        self._shutdown_event = threading.Event()
+        self._dropped_lock = threading.Lock()
+        self._export_thread_ready = threading.Event()  # Signals thread is running
+
+        # Queue for async export - read size from INTERNAL_DEFAULTS
+        queue_size = int(INTERNAL_DEFAULTS["telemetry"]["queue_size"])
+        self._queue: queue.Queue[TelemetryEvent | None] = queue.Queue(maxsize=queue_size)
+
+        # Start export thread (non-daemon to ensure proper cleanup)
+        self._export_thread = threading.Thread(
+            target=self._export_loop,
+            name="telemetry-export",
+            daemon=False,
+        )
+        self._export_thread.start()
+        # Wait for thread to be ready (prevents startup race)
+        self._export_thread_ready.wait(timeout=5.0)
+
+    def _export_loop(self) -> None:
+        """Background thread: consume queue and export.
+
+        Stub implementation - will be replaced in Task 6.
+        """
+        self._export_thread_ready.set()
+        while True:
+            event = self._queue.get()
+            if event is None:  # Shutdown sentinel
+                self._queue.task_done()
+                break
+            self._queue.task_done()
 
     def handle_event(self, event: TelemetryEvent) -> None:
         """Filter and dispatch event to all exporters.
