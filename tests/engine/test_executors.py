@@ -370,7 +370,7 @@ class TestTransformExecutor:
         )
 
         transform = MockTransform(
-            result=TransformResult.error({"reason": "bad data"}),
+            result=TransformResult.error({"reason": "validation_failed", "error": "bad data"}),
             on_error=None,  # No error handler configured
         )
         transform.node_id = node.node_id

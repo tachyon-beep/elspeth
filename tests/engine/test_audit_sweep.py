@@ -721,7 +721,7 @@ class TestAuditSweepForkCoalesce:
                 # Since we can't easily check branch name here, we use a workaround:
                 # This transform is ONLY placed on path_b, so all rows through it fail
                 return TransformResult.error(
-                    {"reason": "path_b_intentional_failure"},
+                    {"reason": "intentional_failure", "error": "path_b_intentional_failure"},
                     retryable=False,
                 )
 

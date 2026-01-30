@@ -251,7 +251,7 @@ class TestRowProcessor:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if row.get("value", 0) < 0:
-                    return TransformResult.error({"message": "negative values not allowed"})
+                    return TransformResult.error({"reason": "validation_failed", "message": "negative values not allowed"})
                 return TransformResult.success(row)
 
         return ValidatorTransform(node_id, on_error)

@@ -1666,7 +1666,7 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_passthrough_failure"})
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_passthrough_failure"})
                 return TransformResult.success(dict(row))
 
         class CountTriggerSource(_TestSourceBase):
@@ -1834,7 +1834,7 @@ class TestTimeoutFlushErrorHandling:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "eos_failure"})
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "eos_failure"})
                 return TransformResult.success(dict(row))
 
         class ShortSource(_TestSourceBase):
@@ -2007,7 +2007,7 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_single_mode_failure"})
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_single_mode_failure"})
                 return TransformResult.success(dict(row))
 
         class CountTriggerSource(_TestSourceBase):
@@ -2166,7 +2166,7 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_transform_mode_failure"})
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_transform_mode_failure"})
                 return TransformResult.success(dict(row))
 
         class CountTriggerSource(_TestSourceBase):

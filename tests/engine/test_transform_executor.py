@@ -104,7 +104,7 @@ class TestTransformExecutor:
             _on_error = "discard"  # Required for transforms that return errors
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "validation failed"})
+                return TransformResult.error({"reason": "validation_failed", "message": "validation failed"})
 
         transform = FailingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -362,7 +362,7 @@ class TestTransformExecutor:
             _on_error = "discard"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "invalid input"})
+                return TransformResult.error({"reason": "invalid_input", "message": "invalid input"})
 
         transform = DiscardingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -433,7 +433,7 @@ class TestTransformExecutor:
             _on_error = "error_sink"  # Routes to named error sink
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "routing to error sink"})
+                return TransformResult.error({"reason": "validation_failed", "message": "routing to error sink"})
 
         transform = ErrorRoutingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -640,7 +640,7 @@ class TestTransformErrorIdRegression:
             _on_error = "error_sink"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"reason": "invalid phone format"})
+                return TransformResult.error({"reason": "validation_failed", "error": "invalid phone format"})
 
         transform = FailingFieldMapper()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)

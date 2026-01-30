@@ -90,7 +90,7 @@ class TestTransformErrorRecording:
             token_id="tok_123",
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
-            error_details={"reason": "Division by zero"},
+            error_details={"reason": "validation_failed", "error": "Division by zero"},
             destination="failed_rows",
         )
 
@@ -118,7 +118,7 @@ class TestTransformErrorRecording:
             token_id="tok_456",
             transform_id="field_mapper",
             row_data={"id": 42, "value": "bad"},
-            error_details={"reason": "Division by zero", "field": "divisor"},
+            error_details={"reason": "validation_failed", "error": "Division by zero", "field": "divisor"},
             destination="error_sink",
         )
 
@@ -162,7 +162,7 @@ class TestTransformErrorRecording:
             token_id="tok_789",
             transform_id="processor",
             row_data=row_data,
-            error_details={"reason": "Processing failed"},
+            error_details={"reason": "validation_failed", "error": "Processing failed"},
             destination="discard",
         )
 
@@ -194,7 +194,7 @@ class TestTransformErrorRecording:
             token_id="tok_999",
             transform_id="gate",
             row_data={"id": 1},
-            error_details={"reason": "Gate evaluation failed"},
+            error_details={"reason": "validation_failed", "error": "Gate evaluation failed"},
             destination="discard",
         )
 

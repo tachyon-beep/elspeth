@@ -464,8 +464,7 @@ class TestRetryBehavior:
                     return TransformResult.error(
                         {
                             "reason": "validation_failed",
-                            "row_id": row["id"],
-                            "message": f"Row {row['id']} failed validation",
+                            "error": f"Row {row['id']} failed validation",
                         }
                     )
                 return TransformResult.success(row)

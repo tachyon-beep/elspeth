@@ -194,7 +194,7 @@ class TestTransformErrorPersistence:
             token_id="token-123",
             transform_id="price_calculator",
             row={"quantity": 0, "total": 100},
-            error_details={"reason": "division_by_zero", "field": "quantity"},
+            error_details={"reason": "validation_failed", "error": "division_by_zero", "field": "quantity"},
             destination="failed_calculations",
         )
 
@@ -403,7 +403,7 @@ class TestErrorEventExplainQuery:
             token_id=token.token_id,
             transform_id=transform_node.node_id,
             row=row_data,
-            error_details={"reason": "division_by_zero"},
+            error_details={"reason": "validation_failed", "error": "division_by_zero"},
             destination="error_sink",
         )
 
@@ -519,7 +519,7 @@ class TestErrorEventExplainQuery:
             token_id=token.token_id,
             transform_id=transform1.node_id,
             row=row_data,
-            error_details={"reason": "error_1"},
+            error_details={"reason": "test_error", "error": "error_1"},
             destination="error_sink",
         )
 
@@ -527,7 +527,7 @@ class TestErrorEventExplainQuery:
             token_id=token.token_id,
             transform_id=transform2.node_id,
             row=row_data,
-            error_details={"reason": "error_2"},
+            error_details={"reason": "test_error", "error": "error_2"},
             destination="error_sink",
         )
 

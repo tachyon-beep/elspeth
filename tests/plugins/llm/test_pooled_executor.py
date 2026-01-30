@@ -295,7 +295,7 @@ class TestPooledExecutorCapacityHandling:
 
         def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
             # Return error result (not raise CapacityError)
-            return TransformResult.error({"reason": "bad_request"})
+            return TransformResult.error({"reason": "api_error", "error": "bad_request"})
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
 

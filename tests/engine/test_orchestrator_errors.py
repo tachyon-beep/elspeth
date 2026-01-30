@@ -272,7 +272,7 @@ class TestOrchestratorQuarantineMetrics:
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 if row.get("quality") == "bad":
-                    return TransformResult.error({"reason": "bad_quality", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "error": "bad_quality", "value": row["value"]})
                 return TransformResult.success(row)
 
         class CollectSink(_TestSinkBase):

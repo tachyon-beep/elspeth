@@ -222,13 +222,13 @@ class TestSharedBatchAdapter:
 
         # Emit error result
         token = MockTokenInfo(token_id="token-error", row_id=1)
-        result = TransformResult.error({"reason": "llm_failed", "details": "API down"})
+        result = TransformResult.error({"reason": "llm_call_failed", "error": "API down"})
         adapter.emit(token, result, "state-error")  # type: ignore[arg-type]
 
         got_result = waiter.wait(timeout=1.0)
 
         assert got_result.status == "error"
-        assert got_result.reason == {"reason": "llm_failed", "details": "API down"}
+        assert got_result.reason == {"reason": "llm_call_failed", "error": "API down"}
 
     def test_concurrent_waiters_in_parallel_threads(self) -> None:
         """Test multiple threads waiting concurrently."""

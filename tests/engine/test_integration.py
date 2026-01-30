@@ -2393,7 +2393,7 @@ class TestComplexDAGIntegration:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 3 == 0:
-                    return TransformResult.error({"reason": "divisible_by_3", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "error": "divisible_by_3", "value": row["value"]})
                 return TransformResult.success({"value": row["value"], "processed": True})
 
         class CollectSink(_TestSinkBase):
@@ -3434,7 +3434,7 @@ class TestErrorRecovery:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
-                    return TransformResult.error({"message": "Even values fail", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "error": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row)
 
         class CollectSink(_TestSinkBase):
@@ -3552,7 +3552,7 @@ class TestErrorRecovery:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
-                    return TransformResult.error({"message": "Even values fail", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "error": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row)
 
         class CollectSink(_TestSinkBase):

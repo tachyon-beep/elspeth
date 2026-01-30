@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import NodeType, TransformResult
+from elspeth.contracts import NodeType, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -47,7 +47,7 @@ class CollectingOutputPort:
 
     def __init__(self) -> None:
         self.results: list[tuple[dict[str, Any], TokenInfo]] = []
-        self.errors: list[tuple[dict[str, Any], TokenInfo]] = []
+        self.errors: list[tuple[TransformErrorReason, TokenInfo]] = []
         self._lock = threading.Lock()
 
     def emit(
@@ -64,7 +64,7 @@ class CollectingOutputPort:
         # Handle ExceptionResult (plugin bugs)
         if hasattr(result, "exception"):
             with self._lock:
-                self.errors.append(({"reason": "exception", "error": str(result.exception)}, token))
+                self.errors.append(({"reason": "test_error", "error": f"exception: {result.exception}"}, token))
             return
 
         # Handle TransformResult
@@ -73,7 +73,7 @@ class CollectingOutputPort:
             with self._lock:
                 self.results.append((row_data, token))
         else:
-            error_data = result.reason if result.reason is not None else {}
+            error_data: TransformErrorReason = result.reason if result.reason is not None else {"reason": "test_error"}
             with self._lock:
                 self.errors.append((error_data, token))
 

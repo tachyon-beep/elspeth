@@ -94,7 +94,7 @@ class TestTransformResult:
         from elspeth.plugins.results import TransformResult
 
         result = TransformResult.error(
-            reason={"action": "validation", "fields_modified": ["value"]},
+            reason={"reason": "validation_failed"},
             retryable=True,
         )
         assert result.status == "error"

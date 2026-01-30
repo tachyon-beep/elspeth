@@ -386,7 +386,7 @@ class TestTransformErrorRecording:
             token_id="tok_123",
             transform_id="field_mapper",
             row={"id": 1, "data": "test"},
-            error_details={"reason": "Cannot process"},
+            error_details={"reason": "validation_failed", "error": "Cannot process"},
             destination="error_sink",
         )
 
@@ -408,7 +408,7 @@ class TestTransformErrorRecording:
                 token_id="tok_123",
                 transform_id="field_mapper",
                 row={"id": 1, "data": "test"},
-                error_details={"reason": "Cannot process"},
+                error_details={"reason": "validation_failed", "error": "Cannot process"},
                 destination="error_sink",
             )
 
@@ -436,7 +436,7 @@ class TestTransformErrorRecording:
             token_id="tok_456",
             transform_id="field_mapper",
             row={"id": 42, "value": "bad"},
-            error_details={"reason": "Division by zero"},
+            error_details={"reason": "validation_failed", "error": "Division by zero"},
             destination="failed_rows",
         )
 
@@ -447,7 +447,7 @@ class TestTransformErrorRecording:
         assert call_kwargs["token_id"] == "tok_456"
         assert call_kwargs["transform_id"] == "field_mapper"
         assert call_kwargs["row_data"] == {"id": 42, "value": "bad"}
-        assert call_kwargs["error_details"] == {"reason": "Division by zero"}
+        assert call_kwargs["error_details"] == {"reason": "validation_failed", "error": "Division by zero"}
         assert call_kwargs["destination"] == "failed_rows"
 
         # Token should have error_id from landscape

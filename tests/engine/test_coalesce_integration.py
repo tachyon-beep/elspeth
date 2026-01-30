@@ -826,7 +826,7 @@ class TestCoalesceTimeoutIntegration:
                 # Row 2's path_a will arrive at coalesce, but path_b won't
                 if row.get("id") == 2:
                     return TransformResult.error(
-                        {"reason": "intentional_failure_for_timeout_test"},
+                        {"reason": "intentional_failure", "error": "intentional_failure_for_timeout_test"},
                         retryable=False,
                     )
                 return TransformResult.success(dict(row))

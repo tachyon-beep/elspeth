@@ -18,7 +18,7 @@ Aggregation is now engine-controlled via batch-aware transforms.
 
 import pytest
 
-from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo
+from elspeth.contracts import RoutingAction, RowOutcome, TokenInfo, TransformErrorReason
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -66,7 +66,7 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_error_has_rows_none(self) -> None:
         """TransformResult.error() sets rows to None."""
-        result = TransformResult.error({"reason": "failed"})
+        result = TransformResult.error({"reason": "test_error"})
 
         assert result.status == "error"
         assert result.row is None
@@ -76,7 +76,7 @@ class TestTransformResultMultiRow:
         """has_output_data property checks if ANY output exists."""
         single = TransformResult.success({"id": 1})
         multi = TransformResult.success_multi([{"id": 1}])
-        error = TransformResult.error({"reason": "failed"})
+        error = TransformResult.error({"reason": "test_error"})
 
         assert single.has_output_data is True
         assert multi.has_output_data is True
@@ -98,7 +98,7 @@ class TestTransformResult:
 
     def test_error_factory(self) -> None:
         """Error factory creates result with status='error' and reason."""
-        reason = {"error": "validation_failed", "field": "count"}
+        reason: TransformErrorReason = {"reason": "validation_failed", "field": "count"}
         result = TransformResult.error(reason)
 
         assert result.status == "error"
@@ -108,7 +108,7 @@ class TestTransformResult:
 
     def test_error_factory_with_retryable(self) -> None:
         """Error factory accepts retryable flag."""
-        reason = {"error": "timeout"}
+        reason: TransformErrorReason = {"reason": "retry_timeout", "error": "timeout"}
         result = TransformResult.error(reason, retryable=True)
 
         assert result.status == "error"
@@ -117,7 +117,7 @@ class TestTransformResult:
     def test_status_is_literal_not_enum(self) -> None:
         """Status is Literal string, not enum - can compare directly to string."""
         success = TransformResult.success({"x": 1})
-        error = TransformResult.error({"e": "msg"})
+        error = TransformResult.error({"reason": "test_error", "error": "msg"})
 
         # Direct string comparison works (not .value)
         assert success.status == "success"

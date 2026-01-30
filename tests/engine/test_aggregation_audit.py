@@ -78,7 +78,7 @@ class ErrorResultTransform(_TestTransformBase):
         ctx: PluginContext,
     ) -> TransformResult:
         """Returns an error result instead of raising."""
-        return TransformResult.error({"message": "batch processing failed", "code": "BATCH_ERROR"})
+        return TransformResult.error({"reason": "batch_error", "message": "batch processing failed"})
 
 
 class BatchPendingTransform(_TestTransformBase):

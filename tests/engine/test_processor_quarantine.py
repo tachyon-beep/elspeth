@@ -76,7 +76,8 @@ class TestQuarantineIntegration:
                 if row["value"] < 0:
                     return TransformResult.error(
                         {
-                            "message": "negative values not allowed",
+                            "reason": "validation_failed",
+                            "error": "negative values not allowed",
                             "value": row["value"],
                         }
                     )
@@ -174,8 +175,8 @@ class TestQuarantineIntegration:
                 if "required_field" not in row:
                     return TransformResult.error(
                         {
-                            "message": "missing required_field",
-                            "row_keys": list(row.keys()),
+                            "reason": "missing_field",
+                            "error": "missing required_field",
                         }
                     )
                 return TransformResult.success({**row, "validated": True})
@@ -223,4 +224,5 @@ class TestQuarantineIntegration:
         import json
 
         error_data = json.loads(state.error_json)
-        assert error_data["message"] == "missing required_field"
+        assert error_data["reason"] == "missing_field"
+        assert error_data["error"] == "missing required_field"

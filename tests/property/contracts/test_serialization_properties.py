@@ -24,6 +24,7 @@ from typing import Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts import TransformErrorReason
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.results import TransformResult
@@ -300,7 +301,7 @@ class TestTransformResultJsonSerializationProperties:
     @settings(max_examples=100)
     def test_transform_result_error_json_round_trip_preserves_reason(
         self,
-        reason: dict[str, Any],
+        reason: TransformErrorReason,
     ) -> None:
         """Property: TransformResult.error() JSON round-trip preserves reason."""
         result = TransformResult.error(reason)

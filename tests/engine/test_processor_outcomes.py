@@ -527,7 +527,7 @@ class TestEngineIntegrationOutcomes:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
-                    return TransformResult.error({"reason": "negative_value"})
+                    return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
                 return TransformResult.success(row)
 
         processor = RowProcessor(

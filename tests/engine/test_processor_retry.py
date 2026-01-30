@@ -341,6 +341,7 @@ class TestRowProcessorRetry:
         # Error result returned instead of exception propagated
         assert result.status == "error"
         assert result.retryable is True
+        assert result.reason is not None
         assert "network fail" in result.reason["error"]
         assert result.reason["reason"] == "transient_error_no_retry"
 
@@ -388,6 +389,7 @@ class TestRowProcessorRetry:
         # Error result with LLM-specific reason
         assert result.status == "error"
         assert result.retryable is True
+        assert result.reason is not None
         assert result.reason["reason"] == "llm_retryable_error_no_retry"
         assert "Rate limit exceeded" in result.reason["error"]
         assert error_sink == "quarantine"
