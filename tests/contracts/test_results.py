@@ -164,7 +164,7 @@ class TestGateResult:
     def test_creation(self) -> None:
         """GateResult stores row and routing action."""
         row = {"value": 100}
-        action = RoutingAction.route("high", reason={"threshold": 50})
+        action = RoutingAction.route("high", reason={"rule": "value > threshold", "matched_value": 50})
         result = GateResult(row=row, action=action)
 
         assert result.row == row

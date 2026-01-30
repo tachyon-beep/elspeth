@@ -490,7 +490,7 @@ class TestLandscapeExporterComplexRun:
             state_id=state.state_id,
             edge_id=edge.edge_id,
             mode=RoutingMode.MOVE,
-            reason={"rule": "value > 1000"},
+            reason={"rule": "value > 1000", "matched_value": True},
         )
         recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
 

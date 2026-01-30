@@ -216,7 +216,7 @@ class TestGateExecutorParametrized:
                             row=row,
                             action=RoutingAction.route(
                                 "above",  # Route label
-                                reason={"threshold_exceeded": True, "value": row["value"]},
+                                reason={"rule": "threshold_exceeded", "matched_value": row["value"]},
                             ),
                         )
                     return GateResult(row=row, action=RoutingAction.continue_())
@@ -351,7 +351,7 @@ class TestGateExecutorParametrized:
                         row=row,
                         action=RoutingAction.fork_to_paths(
                             ["path_a", "path_b"],
-                            reason={"split_reason": "parallel processing"},
+                            reason={"rule": "parallel processing", "matched_value": "split"},
                         ),
                     )
 
