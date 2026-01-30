@@ -234,8 +234,45 @@ class TestRowProcessor:
         assert result.final_data == {"passthrough": True}
         assert result.outcome == RowOutcome.COMPLETED
 
-    def test_transform_error_without_on_error_raises(self) -> None:
-        """Transform returning error without on_error configured raises RuntimeError."""
+    @staticmethod
+    def _make_validator_transform(on_error: str | None, node_id: str) -> BaseTransform:
+        """Create a validator transform with configurable on_error behavior."""
+
+        class ValidatorTransform(BaseTransform):
+            name = "validator"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, nid: str, on_err: str | None) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+                self.node_id = nid
+                if on_err is not None:
+                    self._on_error = on_err
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                if row.get("value", 0) < 0:
+                    return TransformResult.error({"message": "negative values not allowed"})
+                return TransformResult.success(row)
+
+        return ValidatorTransform(node_id, on_error)
+
+    import pytest
+
+    @pytest.mark.parametrize(
+        ("on_error_config", "expected_behavior"),
+        [
+            pytest.param(None, "raises", id="no_on_error_raises"),
+            pytest.param("discard", RowOutcome.QUARANTINED, id="discard_quarantines"),
+            pytest.param("error_sink", RowOutcome.ROUTED, id="sink_routes"),
+        ],
+    )
+    def test_transform_error_handling(self, on_error_config: str | None, expected_behavior: str | RowOutcome) -> None:
+        """Transform error handling varies by on_error configuration.
+
+        - None: No on_error configured - errors are bugs, raises RuntimeError
+        - "discard": Intentionally discard errors - returns QUARANTINED
+        - "error_sink": Route errors to named sink - returns ROUTED
+        """
         import pytest
 
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -263,20 +300,7 @@ class TestRowProcessor:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        class ValidatorTransform(BaseTransform):
-            name = "validator"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            # No _on_error configured - errors are bugs
-
-            def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
-                self.node_id = node_id
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                if row.get("value", 0) < 0:
-                    return TransformResult.error({"message": "negative values not allowed"})
-                return TransformResult.success(row)
+        validator = self._make_validator_transform(on_error_config, transform.node_id)
 
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         processor = RowProcessor(
@@ -286,175 +310,51 @@ class TestRowProcessor:
             source_node_id=NodeID(source.node_id),
         )
 
-        # Without on_error configured, returning error is a bug - should raise
-        with pytest.raises(RuntimeError) as exc_info:
-            processor.process_row(
-                row_index=0,
-                row_data={"value": -5},
-                transforms=[ValidatorTransform(transform.node_id)],
-                ctx=ctx,
-            )
+        # Case 1: No on_error configured - should raise RuntimeError
+        if expected_behavior == "raises":
+            with pytest.raises(RuntimeError) as exc_info:
+                processor.process_row(
+                    row_index=0,
+                    row_data={"value": -5},
+                    transforms=[validator],
+                    ctx=ctx,
+                )
+            assert "no on_error configured" in str(exc_info.value)
+            return
 
-        assert "no on_error configured" in str(exc_info.value)
-
-    def test_transform_error_with_discard_returns_quarantined(self) -> None:
-        """Transform error with on_error='discard' should return QUARANTINED."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.spans import SpanFactory
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        transform = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="validator",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        class DiscardingValidator(BaseTransform):
-            """Validator that discards errors (on_error='discard')."""
-
-            name = "validator"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            _on_error = "discard"  # Intentionally discard errors
-
-            def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
-                self.node_id = node_id
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                if row.get("value", 0) < 0:
-                    return TransformResult.error({"message": "negative values not allowed"})
-                return TransformResult.success(row)
-
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
-        )
-
+        # Case 2 & 3: on_error configured - should return result with expected outcome
         results = processor.process_row(
             row_index=0,
             row_data={"value": -5},
-            transforms=[DiscardingValidator(transform.node_id)],
+            transforms=[validator],
             ctx=ctx,
         )
 
-        # Single result - no forks
         assert len(results) == 1
         result = results[0]
+        assert result.outcome == expected_behavior
+        assert result.final_data == {"value": -5}  # Original data preserved
 
-        # With on_error='discard', error becomes QUARANTINED (intentional rejection)
-        assert result.outcome == RowOutcome.QUARANTINED
-        # Original data preserved
-        assert result.final_data == {"value": -5}
+        # Audit trail verification differs by outcome
+        if expected_behavior == RowOutcome.QUARANTINED:
+            # QUARANTINED: Token outcome recorded immediately with error_hash
+            outcome = recorder.get_token_outcome(result.token_id)
+            assert outcome is not None, "Token outcome should be recorded"
+            assert outcome.outcome == RowOutcome.QUARANTINED
+            assert outcome.error_hash is not None, "Error hash should be recorded"
+            assert outcome.is_terminal is True
 
-        # === P1: Audit trail verification for QUARANTINED ===
-        # Verify token outcome was recorded with error_hash
-        outcome = recorder.get_token_outcome(result.token_id)
-        assert outcome is not None, "Token outcome should be recorded"
-        assert outcome.outcome == RowOutcome.QUARANTINED, "Outcome should be QUARANTINED"
-        assert outcome.error_hash is not None, "Error hash should be recorded for quarantined rows"
-        assert outcome.is_terminal is True, "QUARANTINED is terminal"
+            # Node state should be failed
+            states = recorder.get_node_states_for_token(result.token_id)
+            assert len(states) == 1
+            assert states[0].status.value == "failed"
 
-        # Verify node_state was recorded as failed
-        states = recorder.get_node_states_for_token(result.token_id)
-        assert len(states) == 1, "Should have 1 node_state for the validator"
-        state = states[0]
-        assert state.status.value == "failed", "State should be failed"
-
-    def test_transform_error_with_sink_returns_routed(self) -> None:
-        """Transform error with on_error=sink_name should return ROUTED."""
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.spans import SpanFactory
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        source = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        transform = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="validator",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        class RoutingValidator(BaseTransform):
-            """Validator that routes errors to error_sink."""
-
-            name = "validator"
-            input_schema = _TestSchema
-            output_schema = _TestSchema
-            _on_error = "error_sink"  # Route errors to named sink
-
-            def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
-                self.node_id = node_id
-
-            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                if row.get("value", 0) < 0:
-                    return TransformResult.error({"message": "negative values not allowed"})
-                return TransformResult.success(row)
-
-        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
-        processor = RowProcessor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            source_node_id=NodeID(source.node_id),
-        )
-
-        results = processor.process_row(
-            row_index=0,
-            row_data={"value": -5},
-            transforms=[RoutingValidator(transform.node_id)],
-            ctx=ctx,
-        )
-
-        # Single result - no forks
-        assert len(results) == 1
-        result = results[0]
-
-        # With on_error='error_sink', error becomes ROUTED to that sink
-        assert result.outcome == RowOutcome.ROUTED
-        assert result.sink_name == "error_sink"
-        # Original data preserved
-        assert result.final_data == {"value": -5}
-
-        # === Audit trail semantics ===
-        # Token outcome recording is DEFERRED to sink_executor.write() to ensure
-        # outcome is only recorded AFTER sink durability is achieved.
-        # At this point (after process_row), the outcome is NOT yet recorded.
-        # See: Token Outcome Assurance (TOA) - outcomes recorded after sink.flush()
-        outcome = recorder.get_token_outcome(result.token_id)
-        assert outcome is None, "Outcome should NOT be recorded yet - deferred to sink write"
+        elif expected_behavior == RowOutcome.ROUTED:
+            # ROUTED: Outcome recording is DEFERRED to sink_executor.write()
+            # to ensure outcome is only recorded AFTER sink durability is achieved.
+            assert result.sink_name == on_error_config
+            outcome = recorder.get_token_outcome(result.token_id)
+            assert outcome is None, "Outcome deferred to sink write"
 
 
 class TestRowProcessorTokenIdentity:

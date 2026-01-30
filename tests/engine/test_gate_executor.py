@@ -14,13 +14,20 @@ from tests.conftest import as_gate
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 
 
-class TestGateExecutor:
-    """Gate execution with audit and routing."""
+# Gate type identifiers for parametrization
+PLUGIN_GATE = "plugin"
+CONFIG_GATE = "config"
 
-    def test_execute_gate_continue(self) -> None:
+
+class TestGateExecutorParametrized:
+    """Gate execution with audit and routing - parameterized tests for plugin and config gates."""
+
+    @pytest.mark.parametrize("gate_type", [PLUGIN_GATE, CONFIG_GATE])
+    def test_execute_gate_continue(self, gate_type: str) -> None:
         """Gate returns continue action - routing event recorded for audit (AUD-002)."""
         from elspeth.contracts import TokenInfo
         from elspeth.contracts.enums import RoutingMode
+        from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
@@ -57,18 +64,6 @@ class TestGateExecutor:
         )
         edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
 
-        # Mock gate that continues
-        class PassThroughGate:
-            name = "pass_through"
-            node_id = gate_node.node_id
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(
-                    row=row,
-                    action=RoutingAction.continue_(),
-                )
-
-        gate = PassThroughGate()
         ctx = PluginContext(run_id=run.run_id, config={})
         executor = GateExecutor(recorder, SpanFactory(), edge_map=edge_map)
 
@@ -86,12 +81,40 @@ class TestGateExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        outcome = executor.execute_gate(
-            gate=as_gate(gate),
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-        )
+        # Execute based on gate type
+        if gate_type == PLUGIN_GATE:
+            # Mock gate that continues
+            class PassThroughGate:
+                name = "pass_through"
+                node_id = gate_node.node_id
+
+                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                    return GateResult(
+                        row=row,
+                        action=RoutingAction.continue_(),
+                    )
+
+            gate = PassThroughGate()
+            outcome = executor.execute_gate(
+                gate=as_gate(gate),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
+        else:
+            # Config-driven gate that checks for true condition (always continue)
+            gate_config = GateSettings(
+                name="pass_through",
+                condition="row['value'] > 0",
+                routes={"true": "continue", "false": "review_sink"},
+            )
+            outcome = executor.execute_config_gate(
+                gate_config=gate_config,
+                node_id=gate_node.node_id,
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
 
         # Verify outcome
         assert outcome.result.action.kind == "continue"
@@ -115,9 +138,11 @@ class TestGateExecutor:
         assert events[0].edge_id == continue_edge.edge_id
         assert events[0].mode == RoutingMode.MOVE
 
-    def test_execute_gate_route(self) -> None:
+    @pytest.mark.parametrize("gate_type", [PLUGIN_GATE, CONFIG_GATE])
+    def test_execute_gate_route(self, gate_type: str) -> None:
         """Gate routes to sink via route label - routing event recorded."""
         from elspeth.contracts import TokenInfo
+        from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
@@ -147,43 +172,27 @@ class TestGateExecutor:
         )
 
         # Register edge from gate to sink using route label
+        # Plugin gates use "above" label, config gates use "true" label
+        route_label = "above" if gate_type == PLUGIN_GATE else "true"
         edge = recorder.register_edge(
             run_id=run.run_id,
             from_node_id=gate_node.node_id,
             to_node_id=sink_node.node_id,
-            label="above",  # Route label, not sink name
+            label=route_label,
             mode=RoutingMode.MOVE,
         )
 
-        # Mock gate that routes high values using route label
-        class ThresholdGate:
-            name = "threshold_gate"
-            node_id = gate_node.node_id
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                if row.get("value", 0) > 100:
-                    return GateResult(
-                        row=row,
-                        action=RoutingAction.route(
-                            "above",  # Route label
-                            reason={"threshold_exceeded": True, "value": row["value"]},
-                        ),
-                    )
-                return GateResult(row=row, action=RoutingAction.continue_())
-
-        gate = ThresholdGate()
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        # Edge map: (node_id, label) -> edge_id
-        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "above"): edge.edge_id}
-        # Route resolution map: (node_id, label) -> sink_name
-        route_resolution_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "above"): "high_values"}
+        # Edge map and route resolution map
+        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), route_label): edge.edge_id}
+        route_resolution_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), route_label): "high_values"}
         executor = GateExecutor(recorder, SpanFactory(), edge_map, route_resolution_map)
 
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 150},  # Above threshold
+            row_data={"value": 150},  # Above threshold / low confidence
         )
         row = recorder.create_row(
             run_id=run.run_id,
@@ -194,12 +203,44 @@ class TestGateExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        outcome = executor.execute_gate(
-            gate=as_gate(gate),
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-        )
+        # Execute based on gate type
+        if gate_type == PLUGIN_GATE:
+            # Mock gate that routes high values using route label
+            class ThresholdGate:
+                name = "threshold_gate"
+                node_id = gate_node.node_id
+
+                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                    if row.get("value", 0) > 100:
+                        return GateResult(
+                            row=row,
+                            action=RoutingAction.route(
+                                "above",  # Route label
+                                reason={"threshold_exceeded": True, "value": row["value"]},
+                            ),
+                        )
+                    return GateResult(row=row, action=RoutingAction.continue_())
+
+            gate = ThresholdGate()
+            outcome = executor.execute_gate(
+                gate=as_gate(gate),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
+        else:
+            gate_config = GateSettings(
+                name="threshold_gate",
+                condition="row['value'] > 100",
+                routes={"true": "high_values", "false": "continue"},
+            )
+            outcome = executor.execute_config_gate(
+                gate_config=gate_config,
+                node_id=gate_node.node_id,
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
 
         # Verify outcome
         assert outcome.result.action.kind == "route"
@@ -217,86 +258,11 @@ class TestGateExecutor:
         assert events[0].edge_id == edge.edge_id
         assert events[0].mode == RoutingMode.MOVE
 
-    def test_missing_edge_raises_error(self) -> None:
-        """Gate routing to unregistered route label raises MissingEdgeError."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor, MissingEdgeError
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-        from elspeth.plugins.results import GateResult, RoutingAction
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="broken_gate",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        # Mock gate that routes to a label that has no route resolution
-        class BrokenGate:
-            name = "broken_gate"
-            node_id = gate_node.node_id
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(
-                    row=row,
-                    action=RoutingAction.route("nonexistent_label"),
-                )
-
-        gate = BrokenGate()
-        ctx = PluginContext(run_id=run.run_id, config={})
-
-        # Empty route resolution map - label not configured
-        executor = GateExecutor(recorder, SpanFactory(), edge_map={}, route_resolution_map={})
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"value": 42},
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        with pytest.raises(MissingEdgeError) as exc_info:
-            executor.execute_gate(
-                gate=as_gate(gate),
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-            )
-
-        # Verify error details
-        assert exc_info.value.node_id == gate_node.node_id
-        assert exc_info.value.label == "nonexistent_label"
-        assert "Audit trail would be incomplete" in str(exc_info.value)
-
-        # Verify node_state was completed with FAILED status (not left OPEN)
-        states = recorder.get_node_states_for_token(token.token_id)
-        assert len(states) == 1
-        assert states[0].status == NodeStateStatus.FAILED
-
-        # Verify audit fields are populated (P3 fix completeness)
-        state = states[0]
-        assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
-        assert state.duration_ms >= 0, "duration_ms must be non-negative"
-        # Error details are stored in the database - verify via raw query
-        # (NodeState model may not expose error fields directly)
-
-    def test_execute_gate_fork(self) -> None:
+    @pytest.mark.parametrize("gate_type", [PLUGIN_GATE, CONFIG_GATE])
+    def test_execute_gate_fork(self, gate_type: str) -> None:
         """Gate forks to multiple paths - routing events and child tokens created."""
         from elspeth.contracts import TokenInfo
+        from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
@@ -350,21 +316,6 @@ class TestGateExecutor:
             mode=RoutingMode.COPY,
         )
 
-        # Mock gate that forks to both paths
-        class SplitterGate:
-            name = "splitter"
-            node_id = gate_node.node_id
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(
-                    row=row,
-                    action=RoutingAction.fork_to_paths(
-                        ["path_a", "path_b"],
-                        reason={"split_reason": "parallel processing"},
-                    ),
-                )
-
-        gate = SplitterGate()
         ctx = PluginContext(run_id=run.run_id, config={})
 
         edge_map: dict[tuple[NodeID, str], str] = {
@@ -388,13 +339,45 @@ class TestGateExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        outcome = executor.execute_gate(
-            gate=as_gate(gate),
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-            token_manager=token_manager,
-        )
+        # Execute based on gate type
+        if gate_type == PLUGIN_GATE:
+            # Mock gate that forks to both paths
+            class SplitterGate:
+                name = "splitter"
+                node_id = gate_node.node_id
+
+                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                    return GateResult(
+                        row=row,
+                        action=RoutingAction.fork_to_paths(
+                            ["path_a", "path_b"],
+                            reason={"split_reason": "parallel processing"},
+                        ),
+                    )
+
+            gate = SplitterGate()
+            outcome = executor.execute_gate(
+                gate=as_gate(gate),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+                token_manager=token_manager,
+            )
+        else:
+            gate_config = GateSettings(
+                name="splitter",
+                condition="True",  # Always fork
+                routes={"true": "fork", "false": "continue"},
+                fork_to=["path_a", "path_b"],
+            )
+            outcome = executor.execute_config_gate(
+                gate_config=gate_config,
+                node_id=gate_node.node_id,
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+                token_manager=token_manager,
+            )
 
         # Verify outcome
         assert outcome.result.action.kind == "fork_to_paths"
@@ -419,9 +402,11 @@ class TestGateExecutor:
         group_ids = {e.routing_group_id for e in events}
         assert len(group_ids) == 1
 
-    def test_fork_without_token_manager_raises_error(self) -> None:
+    @pytest.mark.parametrize("gate_type", [PLUGIN_GATE, CONFIG_GATE])
+    def test_fork_without_token_manager_raises_error(self, gate_type: str) -> None:
         """Gate fork without token_manager raises RuntimeError for audit integrity."""
         from elspeth.contracts import TokenInfo
+        from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import GateExecutor
         from elspeth.engine.spans import SpanFactory
@@ -474,18 +459,6 @@ class TestGateExecutor:
             mode=RoutingMode.COPY,
         )
 
-        # Mock gate that forks to multiple paths
-        class SplitterGate:
-            name = "splitter"
-            node_id = gate_node.node_id
-
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
-                return GateResult(
-                    row=row,
-                    action=RoutingAction.fork_to_paths(["path_a", "path_b"]),
-                )
-
-        gate = SplitterGate()
         ctx = PluginContext(run_id=run.run_id, config={})
 
         edge_map: dict[tuple[NodeID, str], str] = {
@@ -509,14 +482,43 @@ class TestGateExecutor:
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
         # Call without token_manager - should raise RuntimeError
-        with pytest.raises(RuntimeError, match="audit integrity would be compromised"):
-            executor.execute_gate(
-                gate=as_gate(gate),
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-                token_manager=None,  # Explicitly None
+        if gate_type == PLUGIN_GATE:
+            # Mock gate that forks to multiple paths
+            class SplitterGate:
+                name = "splitter"
+                node_id = gate_node.node_id
+
+                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                    return GateResult(
+                        row=row,
+                        action=RoutingAction.fork_to_paths(["path_a", "path_b"]),
+                    )
+
+            gate = SplitterGate()
+            with pytest.raises(RuntimeError, match="audit integrity would be compromised"):
+                executor.execute_gate(
+                    gate=as_gate(gate),
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=1,
+                    token_manager=None,  # Explicitly None
+                )
+        else:
+            gate_config = GateSettings(
+                name="splitter",
+                condition="True",
+                routes={"true": "fork", "false": "continue"},
+                fork_to=["path_a", "path_b"],
             )
+            with pytest.raises(RuntimeError, match="audit integrity would be compromised"):
+                executor.execute_config_gate(
+                    gate_config=gate_config,
+                    node_id=gate_node.node_id,
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=1,
+                    token_manager=None,
+                )
 
         # Verify node_state was completed with FAILED status (not left OPEN)
         states = recorder.get_node_states_for_token(token.token_id)
@@ -527,6 +529,109 @@ class TestGateExecutor:
         state = states[0]
         assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
         assert state.duration_ms >= 0, "duration_ms must be non-negative"
+
+    @pytest.mark.parametrize("gate_type", [PLUGIN_GATE, CONFIG_GATE])
+    def test_missing_edge_raises_error(self, gate_type: str) -> None:
+        """Gate routing to unregistered route label raises MissingEdgeError."""
+        from elspeth.contracts import TokenInfo
+        from elspeth.core.config import GateSettings
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import GateExecutor, MissingEdgeError
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import GateResult, RoutingAction
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        gate_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="broken_gate",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Empty edge map - no route resolution
+        executor = GateExecutor(recorder, SpanFactory(), edge_map={}, route_resolution_map={})
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data={"value": 42},
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=gate_node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        # Determine expected label based on gate type
+        expected_label = "nonexistent_label" if gate_type == PLUGIN_GATE else "true"
+
+        if gate_type == PLUGIN_GATE:
+            # Mock gate that routes to a label that has no route resolution
+            class BrokenGate:
+                name = "broken_gate"
+                node_id = gate_node.node_id
+
+                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                    return GateResult(
+                        row=row,
+                        action=RoutingAction.route("nonexistent_label"),
+                    )
+
+            gate = BrokenGate()
+            with pytest.raises(MissingEdgeError) as exc_info:
+                executor.execute_gate(
+                    gate=as_gate(gate),
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=1,
+                )
+        else:
+            gate_config = GateSettings(
+                name="broken_gate",
+                condition="row['value'] > 0",  # Will evaluate to true
+                routes={"true": "error_sink", "false": "continue"},
+            )
+            with pytest.raises(MissingEdgeError) as exc_info:
+                executor.execute_config_gate(
+                    gate_config=gate_config,
+                    node_id=gate_node.node_id,
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=1,
+                )
+
+        # Verify error details
+        assert exc_info.value.node_id == gate_node.node_id
+        assert exc_info.value.label == expected_label
+        assert "Audit trail would be incomplete" in str(exc_info.value)
+
+        # Verify node state exists
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+
+        # Plugin gates record FAILED status before raising; config gates raise from
+        # _record_routing which happens after successful evaluation but before
+        # state completion (state is left OPEN - see test_plugin_gate_missing_edge_records_failure)
+        if gate_type == PLUGIN_GATE:
+            assert states[0].status == NodeStateStatus.FAILED
+            # Verify audit fields are populated (P3 fix completeness)
+            state = states[0]
+            assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
+            assert state.duration_ms >= 0, "duration_ms must be non-negative"
+
+
+class TestPluginGateExecutor:
+    """Plugin gate-specific tests that cannot be parameterized."""
 
     def test_execute_gate_exception_records_failure(self) -> None:
         """Gate raising exception still records audit state."""
@@ -686,182 +791,7 @@ class TestGateExecutor:
 
 
 class TestConfigGateExecutor:
-    """Config-driven gate execution with ExpressionParser."""
-
-    def test_execute_config_gate_continue(self) -> None:
-        """Config gate returns continue destination - routing event recorded for audit (AUD-002)."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="quality_check",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        # Register next node in pipeline for continue edge
-        next_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="next_transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        # Register continue edge from gate to next node (AUD-002)
-        continue_edge = recorder.register_edge(
-            run_id=run.run_id,
-            from_node_id=gate_node.node_id,
-            to_node_id=next_node.node_id,
-            label="continue",
-            mode=RoutingMode.MOVE,
-        )
-        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "continue"): continue_edge.edge_id}
-
-        # Config-driven gate that checks confidence
-        gate_config = GateSettings(
-            name="quality_check",
-            condition="row['confidence'] >= 0.85",
-            routes={"true": "continue", "false": "review_sink"},
-        )
-
-        ctx = PluginContext(run_id=run.run_id, config={})
-        executor = GateExecutor(recorder, SpanFactory(), edge_map=edge_map)
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"confidence": 0.95},  # Above threshold
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        outcome = executor.execute_config_gate(
-            gate_config=gate_config,
-            node_id=gate_node.node_id,
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-        )
-
-        # Verify outcome
-        assert outcome.result.action.kind == "continue"
-        assert outcome.sink_name is None
-        assert outcome.child_tokens == []
-        assert outcome.updated_token.row_data == {"confidence": 0.95}
-
-        # Verify audit fields populated
-        assert outcome.result.input_hash is not None
-        assert outcome.result.output_hash is not None
-        assert outcome.result.duration_ms is not None
-
-        # Verify node state recorded as completed
-        states = recorder.get_node_states_for_token(token.token_id)
-        assert len(states) == 1
-        assert states[0].status == NodeStateStatus.COMPLETED
-
-        # Verify routing event recorded for continue (AUD-002)
-        events = recorder.get_routing_events(states[0].state_id)
-        assert len(events) == 1
-        assert events[0].edge_id == continue_edge.edge_id
-
-    def test_execute_config_gate_route_to_sink(self) -> None:
-        """Config gate routes to sink when condition evaluates to route label."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="quality_check",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        sink_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="review_sink",
-            node_type=NodeType.SINK,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        # Register edge for "false" route label
-        edge = recorder.register_edge(
-            run_id=run.run_id,
-            from_node_id=gate_node.node_id,
-            to_node_id=sink_node.node_id,
-            label="false",
-            mode=RoutingMode.MOVE,
-        )
-
-        gate_config = GateSettings(
-            name="quality_check",
-            condition="row['confidence'] >= 0.85",
-            routes={"true": "continue", "false": "review_sink"},
-        )
-
-        edge_map: dict[tuple[NodeID, str], str] = {(NodeID(gate_node.node_id), "false"): edge.edge_id}
-        ctx = PluginContext(run_id=run.run_id, config={})
-        executor = GateExecutor(recorder, SpanFactory(), edge_map)
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"confidence": 0.5},  # Below threshold
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        outcome = executor.execute_config_gate(
-            gate_config=gate_config,
-            node_id=gate_node.node_id,
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-        )
-
-        # Verify routing to sink
-        assert outcome.result.action.kind == "route"
-        assert outcome.sink_name == "review_sink"
-        assert outcome.child_tokens == []
-
-        # Verify routing event recorded
-        states = recorder.get_node_states_for_token(token.token_id)
-        events = recorder.get_routing_events(states[0].state_id)
-        assert len(events) == 1
-        assert events[0].edge_id == edge.edge_id
+    """Config gate-specific tests that cannot be parameterized."""
 
     def test_execute_config_gate_string_result(self) -> None:
         """Config gate using ternary expression that returns string route labels."""
@@ -936,168 +866,6 @@ class TestConfigGateExecutor:
 
         assert outcome.result.action.kind == "route"
         assert outcome.sink_name == "high_priority_sink"
-
-    def test_execute_config_gate_fork(self) -> None:
-        """Config gate forks to multiple paths."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.engine.tokens import TokenManager
-        from elspeth.plugins.context import PluginContext
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="parallel_analysis",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        path_a = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="path_a",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        path_b = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="path_b",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        edge_a = recorder.register_edge(
-            run_id=run.run_id,
-            from_node_id=gate_node.node_id,
-            to_node_id=path_a.node_id,
-            label="path_a",
-            mode=RoutingMode.COPY,
-        )
-        edge_b = recorder.register_edge(
-            run_id=run.run_id,
-            from_node_id=gate_node.node_id,
-            to_node_id=path_b.node_id,
-            label="path_b",
-            mode=RoutingMode.COPY,
-        )
-
-        gate_config = GateSettings(
-            name="parallel_analysis",
-            condition="True",  # Always fork
-            routes={"true": "fork", "false": "continue"},
-            fork_to=["path_a", "path_b"],
-        )
-
-        edge_map: dict[tuple[NodeID, str], str] = {
-            (NodeID(gate_node.node_id), "path_a"): edge_a.edge_id,
-            (NodeID(gate_node.node_id), "path_b"): edge_b.edge_id,
-        }
-        ctx = PluginContext(run_id=run.run_id, config={})
-        executor = GateExecutor(recorder, SpanFactory(), edge_map)
-        token_manager = TokenManager(recorder)
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"value": 42},
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        outcome = executor.execute_config_gate(
-            gate_config=gate_config,
-            node_id=gate_node.node_id,
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-            token_manager=token_manager,
-        )
-
-        # Verify fork
-        assert outcome.result.action.kind == "fork_to_paths"
-        assert outcome.sink_name is None
-        assert len(outcome.child_tokens) == 2
-
-        # Verify child tokens have correct branch names
-        branch_names = {t.branch_name for t in outcome.child_tokens}
-        assert branch_names == {"path_a", "path_b"}
-
-        # Verify routing events
-        states = recorder.get_node_states_for_token(token.token_id)
-        events = recorder.get_routing_events(states[0].state_id)
-        assert len(events) == 2
-
-    def test_execute_config_gate_fork_without_token_manager_raises_error(self) -> None:
-        """Config gate fork without token_manager raises RuntimeError."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="fork_gate",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        gate_config = GateSettings(
-            name="fork_gate",
-            condition="True",
-            routes={"true": "fork", "false": "continue"},
-            fork_to=["path_a", "path_b"],
-        )
-
-        ctx = PluginContext(run_id=run.run_id, config={})
-        executor = GateExecutor(recorder, SpanFactory())
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"value": 42},
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        with pytest.raises(RuntimeError, match="audit integrity would be compromised"):
-            executor.execute_config_gate(
-                gate_config=gate_config,
-                node_id=gate_node.node_id,
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-                token_manager=None,
-            )
 
     def test_execute_config_gate_missing_route_label_raises_error(self) -> None:
         """Config gate condition returning unlisted label raises ValueError."""
@@ -1218,64 +986,6 @@ class TestConfigGateExecutor:
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
         assert states[0].status == NodeStateStatus.FAILED
-
-    def test_execute_config_gate_missing_edge_raises_error(self) -> None:
-        """Config gate routing to unregistered edge raises MissingEdgeError."""
-        from elspeth.contracts import TokenInfo
-        from elspeth.core.config import GateSettings
-        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.executors import GateExecutor, MissingEdgeError
-        from elspeth.engine.spans import SpanFactory
-        from elspeth.plugins.context import PluginContext
-
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-
-        gate_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="routing_gate",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        gate_config = GateSettings(
-            name="routing_gate",
-            condition="row['value'] < 0",
-            routes={"true": "error_sink", "false": "continue"},
-        )
-
-        # No edge registered for "true" route
-        ctx = PluginContext(run_id=run.run_id, config={})
-        executor = GateExecutor(recorder, SpanFactory(), edge_map={})
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="token-1",
-            row_data={"value": -5},  # Will trigger route to error_sink
-        )
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=gate_node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        with pytest.raises(MissingEdgeError) as exc_info:
-            executor.execute_config_gate(
-                gate_config=gate_config,
-                node_id=gate_node.node_id,
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-            )
-
-        assert exc_info.value.node_id == gate_node.node_id
-        assert exc_info.value.label == "true"
 
     def test_execute_config_gate_reason_includes_condition(self) -> None:
         """Config gate routing action reason includes condition and result."""
