@@ -68,7 +68,7 @@ jobs:
           mypy src/
 
   # ===========================================================================
-  # Stage 2: Bug-Hiding Check
+  # Stage 2a: Bug-Hiding Check
   # ===========================================================================
   no-bug-hiding:
     name: No Bug-Hiding Patterns
@@ -94,12 +94,33 @@ jobs:
             --format text
 
   # ===========================================================================
+  # Stage 2b: Contract Enforcement (Settings→Runtime alignment)
+  # ===========================================================================
+  contract-enforcement:
+    name: Contract Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Enforce contract alignment
+        run: python scripts/check_contracts.py
+
+  # ===========================================================================
   # Stage 3: Test (Quality gate - ~3-5 minutes)
   # ===========================================================================
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: [lint, no-bug-hiding]
+    needs: [lint, no-bug-hiding, contract-enforcement]
     strategy:
       fail-fast: false
       matrix:
@@ -140,6 +161,7 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=80 \
             -v \
+            -m "not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Run tests without coverage
@@ -148,6 +170,7 @@ jobs:
           source .venv/bin/activate
           pytest tests/ \
             -v \
+            -m "not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Upload coverage report
@@ -159,7 +182,41 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # Stage 4: Integration Tests (Optional - requires secrets)
+  # Stage 4: Stress Tests (ChaosLLM HTTP server - ~5-10 minutes)
+  # ===========================================================================
+  stress-tests:
+    name: Stress Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e ".[all]"
+          uv pip install uvicorn
+
+      - name: Run stress tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/stress/ -m stress --timeout=300 -v
+        timeout-minutes: 15
+
+  # ===========================================================================
+  # Stage 5: Integration Tests (Optional - requires secrets)
   # ===========================================================================
   integration:
     name: Integration Tests
@@ -199,7 +256,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, no-bug-hiding, test]
+    needs: [lint, no-bug-hiding, contract-enforcement, test]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -210,6 +267,10 @@ jobs:
           fi
           if [[ "${{ needs.no-bug-hiding.result }}" != "success" ]]; then
             echo "No-bug-hiding job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.contract-enforcement.result }}" != "success" ]]; then
+            echo "Contract enforcement job failed"
             exit 1
           fi
           if [[ "${{ needs.test.result }}" != "success" ]]; then

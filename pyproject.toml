@@ -241,6 +241,8 @@ markers = [
     "integration: marks tests requiring external services",
     "asyncio: marks tests as async (handled by pytest-asyncio)",
     "performance: marks tests as performance benchmarks",
+    "stress: marks tests as stress tests requiring ChaosLLM HTTP server (deselect with '-m \"not stress\"')",
+    "chaosllm: Configure ChaosLLM server for the test (preset=None, **kwargs)",
 ]
 # Load .env file for integration tests (API keys)
 env_files = [".env"]
