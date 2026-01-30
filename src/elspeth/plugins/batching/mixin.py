@@ -28,9 +28,8 @@ from elspeth.plugins.batching.row_reorder_buffer import (
 if TYPE_CHECKING:
     from typing import Any
 
-    from elspeth.contracts import TransformResult
+    from elspeth.contracts import ExceptionResult, TransformResult
     from elspeth.contracts.identity import TokenInfo
-    from elspeth.engine.batch_adapter import ExceptionResult
     from elspeth.plugins.context import PluginContext
 
 
@@ -233,8 +232,8 @@ class BatchTransformMixin:
             # The waiter will re-raise this exception in the main thread
             tb = traceback.format_exc()
 
-            # Import here to avoid circular dependency
-            from elspeth.engine.batch_adapter import ExceptionResult
+            # Import here to avoid circular dependency at module load time
+            from elspeth.contracts import ExceptionResult
 
             exception_result = ExceptionResult(exception=e, traceback=tb)
             # KeyError means ticket was evicted due to timeout - discard late result.
@@ -290,7 +289,7 @@ class BatchTransformMixin:
                 # Wrap exception and emit it so the waiter can propagate, rather than hanging
                 tb = traceback.format_exc()
 
-                from elspeth.engine.batch_adapter import ExceptionResult
+                from elspeth.contracts import ExceptionResult
 
                 exception_result = ExceptionResult(exception=e, traceback=tb)
 

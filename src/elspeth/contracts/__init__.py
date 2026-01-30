@@ -117,6 +117,7 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.contracts.results import (
     ArtifactDescriptor,
+    ExceptionResult,
     FailureInfo,
     GateResult,
     RowResult,
@@ -219,6 +220,7 @@ __all__ = [  # Grouped by category for readability
     "SinkName",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
+    "ExceptionResult",
     "FailureInfo",
     "GateResult",
     "RowResult",

@@ -22,6 +22,25 @@ from elspeth.contracts.routing import RoutingAction
 
 
 @dataclass
+class ExceptionResult:
+    """Wrapper for exceptions that should propagate through async pattern.
+
+    When a worker thread encounters an uncaught exception (plugin bug),
+    it wraps the exception in this container. The waiter then re-raises
+    the original exception in the orchestrator thread, ensuring plugin
+    bugs crash the pipeline as intended.
+
+    Used by:
+    - engine/batch_adapter.py: Wraps exceptions in worker threads
+    - plugins/batching/mixin.py: Creates ExceptionResult on worker failure
+    - plugins/batching/ports.py: Type hint in BatchOutputPort protocol
+    """
+
+    exception: BaseException
+    traceback: str
+
+
+@dataclass
 class FailureInfo:
     """Type-safe error details for RowResult.
 

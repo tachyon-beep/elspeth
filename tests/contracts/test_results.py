@@ -561,3 +561,41 @@ class TestRowResultWithFailureInfo:
         # We verify by checking that FailureInfo is in the string representation
         type_str = str(error_field.type)
         assert "FailureInfo" in type_str or error_field.type is FailureInfo
+
+
+class TestExceptionResult:
+    """Tests for ExceptionResult dataclass."""
+
+    def test_exception_result_in_contracts(self) -> None:
+        """ExceptionResult should be importable from contracts."""
+        from elspeth.contracts import ExceptionResult
+
+        err = ExceptionResult(
+            exception=ValueError("test"),
+            traceback="Traceback...",
+        )
+        assert err.exception.args == ("test",)
+        assert err.traceback == "Traceback..."
+
+    def test_exception_result_stores_base_exception(self) -> None:
+        """ExceptionResult can store any BaseException subclass."""
+        from elspeth.contracts import ExceptionResult
+
+        # Regular exception
+        err1 = ExceptionResult(exception=ValueError("value error"), traceback="tb1")
+        assert isinstance(err1.exception, ValueError)
+
+        # BaseException subclass (KeyboardInterrupt, SystemExit)
+        err2 = ExceptionResult(exception=KeyboardInterrupt(), traceback="tb2")
+        assert isinstance(err2.exception, KeyboardInterrupt)
+
+    def test_exception_result_in_results_module(self) -> None:
+        """ExceptionResult should also be importable from contracts.results."""
+        from elspeth.contracts.results import ExceptionResult
+
+        err = ExceptionResult(
+            exception=RuntimeError("test runtime"),
+            traceback="Traceback (most recent call last):\n...",
+        )
+        assert isinstance(err.exception, RuntimeError)
+        assert "most recent call last" in err.traceback

@@ -309,12 +309,12 @@ allow_hits:
   reason: 'Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible default'
   safety: Default 'elspeth-fingerprint-key' used when not set - documented behavior
   expires: null
-- key: contracts/results.py:R3:ArtifactDescriptor:for_database:line=239
+- key: contracts/results.py:R3:ArtifactDescriptor:for_database:line=258
   owner: architecture
   reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials in audit trail'
   safety: Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()
   expires: null
-- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=270
+- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=289
   owner: architecture
   reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit trail'
   safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
@@ -399,17 +399,17 @@ allow_hits:
   reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
   safety: Logged with warning - original timeout error still raised
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=231
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=230
   owner: architecture
   reason: 'Trust boundary: batch processing can fail for many reasons (API errors, timeouts)'
   safety: Caught, logged, and result emitted with error status for audit trail
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=288
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=287
   owner: architecture
   reason: 'Background thread cleanup: iteration failure should not crash release loop'
   safety: Logged with error, loop continues to process remaining results
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=301
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=300
   owner: architecture
   reason: 'Background thread emit: emit failure should not crash release loop'
   safety: Logged with error, loop continues - waiter will timeout if emit fails
