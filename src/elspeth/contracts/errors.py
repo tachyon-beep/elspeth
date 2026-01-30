@@ -4,7 +4,7 @@ TypedDict schemas for structured error payloads in the audit trail.
 These provide consistent shapes for executor error recording.
 """
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class ExecutionError(TypedDict):
@@ -72,6 +72,218 @@ class TransformReason(TypedDict):
     action: str  # What the transform did
     fields_modified: NotRequired[list[str]]  # Fields that were changed
     validation_errors: NotRequired[list[str]]  # Any validation issues
+
+
+# =============================================================================
+# Transform Error Reason Types
+# =============================================================================
+
+
+class TemplateErrorEntry(TypedDict):
+    """Entry in template_errors list for batch processing failures."""
+
+    row_index: int
+    error: str
+
+
+class RowErrorEntry(TypedDict):
+    """Entry in row_errors list for batch processing failures."""
+
+    row_index: int
+    reason: str
+    error: NotRequired[str]
+
+
+class UsageStats(TypedDict, total=False):
+    """LLM token usage statistics."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+# Literal type for compile-time validation of error categories
+TransformErrorCategory = Literal[
+    # API/Network errors
+    "api_error",
+    "api_call_failed",
+    "llm_call_failed",
+    "network_error",
+    "permanent_error",
+    "retry_timeout",
+    # Field/validation errors
+    "missing_field",
+    "type_mismatch",
+    "validation_failed",
+    "invalid_input",
+    # Template errors
+    "template_rendering_failed",
+    "all_templates_failed",
+    # JSON/response parsing errors
+    "json_parse_failed",
+    "invalid_json_response",
+    "invalid_json_type",
+    "empty_choices",
+    "malformed_response",
+    "missing_output_field",
+    "response_truncated",
+    # Batch processing errors
+    "batch_error",
+    "batch_create_failed",
+    "batch_failed",
+    "batch_cancelled",
+    "batch_expired",
+    "batch_timeout",
+    "batch_retrieve_failed",
+    "file_upload_failed",
+    "file_download_failed",
+    "all_output_lines_malformed",
+    "all_rows_failed",
+    "result_not_found",
+    "query_failed",
+    "rate_limited",
+    # Content filtering
+    "blocked_content",
+    "content_filtered",
+    "content_safety_violation",
+    "prompt_injection_detected",
+    # Generic (for tests and edge cases)
+    "test_error",
+    "property_test_error",
+    "simulated_failure",
+    "deliberate_failure",
+    "intentional_failure",
+]
+
+
+class TransformErrorReason(TypedDict):
+    """Reason for transform processing error.
+
+    Used when transforms return TransformResult.error().
+    The reason field describes what category of error occurred.
+    Additional fields provide context specific to the error type.
+
+    Recorded in the audit trail (Tier 1 - full trust) for legal traceability.
+    Every transform error must be attributable to its cause.
+
+    Required field:
+        reason: Error category from TransformErrorCategory literal type.
+                Compile-time validated to prevent typos.
+
+    Common context fields:
+        error: Exception message or detailed error description
+        field: Field name for field-related errors
+        error_type: Sub-category (e.g., "http_error", "network_error")
+        message: Human-readable error message (alternative to error)
+
+    Multi-query/template context:
+        query: Which query in multi-query failed
+        template_hash: Template version for debugging
+        template_errors: List of per-row template failures (batch processing)
+
+    LLM response context:
+        max_tokens: Configured max tokens limit
+        completion_tokens: Actual tokens used in response
+        prompt_tokens: Tokens used in prompt
+        raw_response: Truncated raw LLM response content
+        raw_response_preview: Alternative name for truncated preview
+        content_after_fence_strip: Content after markdown fence removal
+        usage: Token usage stats from LLM response
+        response: Full response object for debugging
+        response_keys: Keys present in response dict
+        body_preview: HTTP body preview for errors
+        content_type: Content-Type header value
+
+    Type validation context:
+        expected: Expected type or value
+        actual: Actual type or value received
+        value: The actual value (truncated for audit)
+
+    Rate limiting/timeout context:
+        elapsed_seconds: Time elapsed before timeout
+        max_seconds: Maximum allowed time
+        status_code: HTTP status code
+
+    Content filtering context:
+        matched_pattern: Regex pattern that matched
+        match_context: Context around the match
+        categories: Content safety violation categories
+
+    Batch processing context:
+        batch_id: Azure/OpenRouter batch job ID
+        queries_completed: Number of queries completed before failure
+        row_errors: List of per-row error entries
+
+    Example usage:
+        # API error with exception details
+        TransformResult.error({
+            "reason": "api_error",
+            "error": str(e),
+            "error_type": "http_error",
+        })
+
+        # Field-related error
+        TransformResult.error({
+            "reason": "missing_field",
+            "field": "customer_id",
+        })
+
+        # LLM response truncation
+        TransformResult.error({
+            "reason": "response_truncated",
+            "error": "Response was truncated at 1000 tokens",
+            "query": "sentiment",
+            "max_tokens": 1000,
+            "completion_tokens": 1000,
+        })
+    """
+
+    # REQUIRED - error category (Literal-typed for compile-time validation)
+    reason: TransformErrorCategory
+
+    # Common context
+    error: NotRequired[str]
+    field: NotRequired[str]
+    error_type: NotRequired[str]
+    message: NotRequired[str]
+
+    # Multi-query/template context
+    query: NotRequired[str]
+    template_hash: NotRequired[str]
+    template_errors: NotRequired[list[TemplateErrorEntry]]
+
+    # LLM response context
+    max_tokens: NotRequired[int]
+    completion_tokens: NotRequired[int]
+    prompt_tokens: NotRequired[int]
+    raw_response: NotRequired[str]
+    raw_response_preview: NotRequired[str]
+    content_after_fence_strip: NotRequired[str]
+    usage: NotRequired[UsageStats]
+    response: NotRequired[dict[str, Any]]
+    response_keys: NotRequired[list[str]]
+    body_preview: NotRequired[str]
+    content_type: NotRequired[str]
+
+    # Type validation context
+    expected: NotRequired[str]
+    actual: NotRequired[str]
+    value: NotRequired[str]
+
+    # Rate limiting/timeout context
+    elapsed_seconds: NotRequired[float]
+    max_seconds: NotRequired[float]
+    status_code: NotRequired[int]
+
+    # Content filtering context
+    matched_pattern: NotRequired[str]
+    match_context: NotRequired[str]
+    categories: NotRequired[list[str]]
+
+    # Batch processing context
+    batch_id: NotRequired[str]
+    queries_completed: NotRequired[int]
+    row_errors: NotRequired[list[RowErrorEntry]]
 
 
 # =============================================================================
