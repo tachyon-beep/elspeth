@@ -1094,3 +1094,43 @@ class TestBackpressureMode:
 
         exported_ids = [e.run_id for e in exporter.exports]
         assert exported_ids == run_ids, "Events not exported in FIFO order"
+
+    def test_task_done_called_on_exception(self, base_timestamp: datetime) -> None:
+        """task_done() is called even when exporter raises, preventing join() hang."""
+        failing_exporter = MockExporter("failing", fail_export=True)
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[failing_exporter])
+
+        # Queue events (they'll all fail to export)
+        for i in range(3):
+            event = make_run_started(f"run-{i}", base_timestamp)
+            manager.handle_event(event)
+
+        # close() should not hang - use threading.Event for cross-platform timeout
+        close_completed = threading.Event()
+        close_exception: Exception | None = None
+
+        def close_with_tracking():
+            nonlocal close_exception
+            try:
+                manager.close()
+            except Exception as e:
+                close_exception = e
+            finally:
+                close_completed.set()
+
+        close_thread = threading.Thread(target=close_with_tracking)
+        close_thread.start()
+
+        # Wait with timeout - if task_done() not called, close() would hang
+        if not close_completed.wait(timeout=5.0):
+            # Force cleanup and fail
+            manager._shutdown_event.set()
+            manager._queue.put(None)  # Try to unblock
+            close_thread.join(timeout=1.0)
+            pytest.fail("close() hung - task_done() not called properly")
+
+        close_thread.join(timeout=1.0)
+
+        # Should get here without hanging
+        assert manager.health_metrics["events_dropped"] == 3
