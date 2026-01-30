@@ -756,6 +756,7 @@ class ChaosLLMAnalyzer:
                         "outcome (TEXT: success/error_injected/error_malformed)",
                         "status_code (INTEGER)",
                         "error_type (TEXT)",
+                        "injection_type (TEXT)",
                         "latency_ms (REAL)",
                         "injected_delay_ms (REAL)",
                         "message_count (INTEGER)",

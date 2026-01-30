@@ -30,6 +30,7 @@ from typing import Annotated, Any
 import typer
 
 from elspeth.testing.chaosllm.config import (
+    DEFAULT_MEMORY_DB,
     list_presets,
     load_config,
 )
@@ -114,7 +115,7 @@ def serve(
             "-d",
             help="SQLite database path for metrics storage.",
         ),
-    ] = "./chaosllm-metrics.db",
+    ] = DEFAULT_MEMORY_DB,
     # Error injection overrides
     rate_limit_pct: Annotated[
         float | None,
@@ -159,6 +160,13 @@ def serve(
             help="Connection timeout percentage (0-100).",
             min=0.0,
             max=100.0,
+        ),
+    ] = None,
+    selection_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--selection-mode",
+            help="Error selection strategy: priority or weighted.",
         ),
     ] = None,
     # Latency overrides
@@ -271,6 +279,8 @@ def serve(
         error_overrides["internal_error_pct"] = internal_error_pct
     if timeout_pct is not None:
         error_overrides["timeout_pct"] = timeout_pct
+    if selection_mode is not None:
+        error_overrides["selection_mode"] = selection_mode
 
     # Burst overrides
     burst_overrides: dict[str, Any] = {}

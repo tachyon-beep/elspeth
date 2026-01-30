@@ -27,6 +27,7 @@ Usage:
 """
 
 from elspeth.testing.chaosllm.config import (
+    DEFAULT_MEMORY_DB,
     ChaosLLMConfig,
     ErrorInjectionConfig,
     LatencyConfig,
@@ -43,6 +44,7 @@ from elspeth.testing.chaosllm.response_generator import OpenAIResponse, Response
 from elspeth.testing.chaosllm.server import ChaosLLMServer, create_app
 
 __all__ = [
+    "DEFAULT_MEMORY_DB",
     "ChaosLLMConfig",
     "ChaosLLMServer",
     "ErrorDecision",

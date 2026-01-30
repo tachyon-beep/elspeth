@@ -8,7 +8,7 @@ server:
   workers: 4
 
 metrics:
-  database: "./chaosllm-metrics.db"
+  database: "file:chaosllm-metrics?mode=memory&cache=shared"
   timeseries_bucket_sec: 1
 
 response:

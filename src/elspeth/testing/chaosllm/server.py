@@ -114,6 +114,7 @@ class ChaosLLMServer:
             Route("/admin/config", self._admin_config_endpoint, methods=["GET", "POST"]),
             Route("/admin/stats", self._admin_stats_endpoint, methods=["GET"]),
             Route("/admin/reset", self._admin_reset_endpoint, methods=["POST"]),
+            Route("/admin/export", self._admin_export_endpoint, methods=["GET"]),
         ]
         return Starlette(debug=False, routes=routes)
 
@@ -141,6 +142,16 @@ class ChaosLLMServer:
         self._response_generator.reset()
         self._metrics_recorder.reset()
         return self._metrics_recorder.run_id
+
+    def export_metrics(self) -> dict[str, Any]:
+        """Export raw metrics data for external pushback."""
+        data = self._metrics_recorder.export_data()
+        data["config"] = {
+            "server": self._config.server.model_dump(),
+            "metrics": self._config.metrics.model_dump(),
+            **self._get_current_config(),
+        }
+        return data
 
     def update_config(self, updates: dict[str, Any]) -> None:
         """Update server configuration at runtime.
@@ -220,6 +231,10 @@ class ChaosLLMServer:
         new_run_id = self.reset()
         return JSONResponse({"status": "reset", "new_run_id": new_run_id})
 
+    async def _admin_export_endpoint(self, request: Request) -> JSONResponse:
+        """Handle GET /admin/export."""
+        return JSONResponse(self.export_metrics())
+
     # === Request handling ===
 
     async def _handle_completion_request(
@@ -253,6 +268,18 @@ class ChaosLLMServer:
         decision = self._error_injector.decide()
 
         if decision.should_inject:
+            if decision.error_type == "slow_response":
+                return await self._handle_slow_response(
+                    decision=decision,
+                    request_id=request_id,
+                    timestamp_utc=timestamp_utc,
+                    endpoint=endpoint,
+                    deployment=deployment,
+                    body=body,
+                    mode_override=mode_override,
+                    template_override=template_override,
+                    start_time=start_time,
+                )
             return await self._handle_error_injection(
                 decision=decision,
                 request_id=request_id,
@@ -274,6 +301,33 @@ class ChaosLLMServer:
             mode_override=mode_override,
             template_override=template_override,
             start_time=start_time,
+        )
+
+    async def _handle_slow_response(
+        self,
+        decision: ErrorDecision,
+        request_id: str,
+        timestamp_utc: str,
+        endpoint: str,
+        deployment: str | None,
+        body: dict[str, Any],
+        mode_override: str | None,
+        template_override: str | None,
+        start_time: float,
+    ) -> JSONResponse:
+        """Handle a slow response that eventually succeeds."""
+        delay = decision.delay_sec if decision.delay_sec is not None else 15.0
+        return await self._handle_success_response(
+            request_id=request_id,
+            timestamp_utc=timestamp_utc,
+            endpoint=endpoint,
+            deployment=deployment,
+            body=body,
+            mode_override=mode_override,
+            template_override=template_override,
+            start_time=start_time,
+            extra_delay_sec=delay,
+            injection_type="slow_response",
         )
 
     async def _handle_error_injection(
@@ -356,6 +410,7 @@ class ChaosLLMServer:
                 model=model,
                 status_code=None,
                 error_type="timeout",
+                injection_type="timeout",
                 latency_ms=elapsed_ms,
                 injected_delay_ms=delay * 1000,
                 message_count=message_count,
@@ -378,6 +433,7 @@ class ChaosLLMServer:
                 model=model,
                 status_code=None,
                 error_type="connection_reset",
+                injection_type="connection_reset",
                 latency_ms=elapsed_ms,
                 message_count=message_count,
             )
@@ -386,30 +442,7 @@ class ChaosLLMServer:
             raise ConnectionResetError("Connection reset by server")
 
         elif error_type == "slow_response":
-            # Add artificial delay before responding normally
-            delay = decision.delay_sec if decision.delay_sec is not None else 15.0
-            await asyncio.sleep(delay)
-
-            # After delay, record and return success
-            elapsed_ms = (time.monotonic() - start_time) * 1000
-            self._record_request(
-                request_id=request_id,
-                timestamp_utc=timestamp_utc,
-                endpoint=endpoint,
-                outcome="error_injected",
-                deployment=deployment,
-                model=model,
-                status_code=None,
-                error_type="slow_response",
-                latency_ms=elapsed_ms,
-                injected_delay_ms=delay * 1000,
-                message_count=message_count,
-            )
-            # Return an error to indicate the slow response was intentional
-            return JSONResponse(
-                {"error": {"type": "slow_response", "message": "Response delayed"}},
-                status_code=504,
-            )
+            raise ValueError("slow_response should be handled by _handle_slow_response")
 
         # Should not reach here
         raise ValueError(f"Unknown connection error type: {error_type}")
@@ -461,6 +494,7 @@ class ChaosLLMServer:
             model=model,
             status_code=status_code,
             error_type=error_type,
+            injection_type=error_type,
             latency_ms=elapsed_ms,
             message_count=message_count,
         )
@@ -492,6 +526,7 @@ class ChaosLLMServer:
             model=model,
             status_code=200,
             error_type=f"malformed_{malformed_type}",
+            injection_type=f"malformed_{malformed_type}",
             latency_ms=elapsed_ms,
             message_count=message_count,
         )
@@ -549,12 +584,15 @@ class ChaosLLMServer:
         mode_override: str | None,
         template_override: str | None,
         start_time: float,
+        extra_delay_sec: float | None = None,
+        injection_type: str | None = None,
     ) -> JSONResponse:
         """Handle a successful response with latency simulation."""
         # Add latency
         delay = self._latency_simulator.simulate()
-        if delay > 0:
-            await asyncio.sleep(delay)
+        total_delay = delay + (extra_delay_sec or 0.0)
+        if total_delay > 0:
+            await asyncio.sleep(total_delay)
 
         # Generate response
         response = self._response_generator.generate(
@@ -574,11 +612,12 @@ class ChaosLLMServer:
             model=body.get("model", "gpt-4"),
             status_code=200,
             latency_ms=elapsed_ms,
-            injected_delay_ms=delay * 1000 if delay > 0 else None,
+            injected_delay_ms=total_delay * 1000 if total_delay > 0 else None,
             message_count=len(body.get("messages", [])),
             prompt_tokens_approx=response.prompt_tokens,
             response_tokens=response.completion_tokens,
             response_mode=mode_override or self._response_generator._config.mode,
+            injection_type=injection_type,
         )
 
         return JSONResponse(response.to_dict())
@@ -594,6 +633,7 @@ class ChaosLLMServer:
         model: str | None = None,
         status_code: int | None = None,
         error_type: str | None = None,
+        injection_type: str | None = None,
         latency_ms: float | None = None,
         injected_delay_ms: float | None = None,
         message_count: int | None = None,
@@ -611,6 +651,7 @@ class ChaosLLMServer:
             model=model,
             status_code=status_code,
             error_type=error_type,
+            injection_type=injection_type,
             latency_ms=latency_ms,
             injected_delay_ms=injected_delay_ms,
             message_count=message_count,

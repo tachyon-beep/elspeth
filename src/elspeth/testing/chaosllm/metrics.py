@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS requests (
     outcome TEXT NOT NULL,
     status_code INTEGER,
     error_type TEXT,
+    injection_type TEXT,
     latency_ms REAL,
     injected_delay_ms REAL,
     message_count INTEGER,
@@ -79,6 +80,7 @@ class RequestRecord:
         model: Model name (optional)
         status_code: HTTP status code (optional)
         error_type: Type of error if any (optional)
+        injection_type: Type of injected behavior (optional)
         latency_ms: Total response latency in milliseconds (optional)
         injected_delay_ms: Artificial delay injected in milliseconds (optional)
         message_count: Number of messages in the request (optional)
@@ -95,6 +97,7 @@ class RequestRecord:
     model: str | None = None
     status_code: int | None = None
     error_type: str | None = None
+    injection_type: str | None = None
     latency_ms: float | None = None
     injected_delay_ms: float | None = None
     message_count: int | None = None
@@ -151,7 +154,7 @@ def _classify_outcome(
     is_capacity_error = status_code == 529
     is_server_error = status_code is not None and 500 <= status_code < 600 and status_code != 529
     is_client_error = status_code is not None and 400 <= status_code < 500 and status_code != 429
-    is_connection_error = error_type in ("timeout", "connection_reset", "slow_response")
+    is_connection_error = error_type in ("timeout", "connection_reset")
     is_malformed = outcome == "error_malformed"
 
     return (
@@ -212,10 +215,15 @@ class MetricsRecorder:
         self._local = threading.local()
         self._lock = threading.Lock()
 
-        # Ensure database directory exists
-        db_path = Path(config.database)
-        if db_path.parent != Path("."):
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Detect in-memory databases and URI usage
+        self._use_uri = config.database.startswith("file:")
+        self._is_memory_db = config.database == ":memory:" or "mode=memory" in config.database
+
+        # Ensure database directory exists for file-backed databases
+        if not self._is_memory_db and not self._use_uri:
+            db_path = Path(config.database)
+            if db_path.parent != Path("."):
+                db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Initialize schema
         self._init_schema()
@@ -241,10 +249,15 @@ class MetricsRecorder:
                 self._config.database,
                 check_same_thread=False,
                 timeout=30.0,
+                uri=self._use_uri,
             )
-            # Enable WAL mode for better concurrent write performance
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+            # Configure journaling for performance (in-memory uses MEMORY mode)
+            if self._is_memory_db:
+                conn.execute("PRAGMA journal_mode=MEMORY")
+                conn.execute("PRAGMA synchronous=OFF")
+            else:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
             conn.row_factory = sqlite3.Row
             self._local.connection = conn
             return conn
@@ -276,6 +289,7 @@ class MetricsRecorder:
         model: str | None = None,
         status_code: int | None = None,
         error_type: str | None = None,
+        injection_type: str | None = None,
         latency_ms: float | None = None,
         injected_delay_ms: float | None = None,
         message_count: int | None = None,
@@ -297,6 +311,7 @@ class MetricsRecorder:
             model: Model name (optional)
             status_code: HTTP status code (optional)
             error_type: Type of error if any (optional)
+            injection_type: Type of injected behavior if any (optional)
             latency_ms: Total response latency in milliseconds (optional)
             injected_delay_ms: Artificial delay injected in milliseconds (optional)
             message_count: Number of messages in the request (optional)
@@ -311,9 +326,9 @@ class MetricsRecorder:
             """
             INSERT INTO requests (
                 request_id, timestamp_utc, endpoint, outcome, deployment, model,
-                status_code, error_type, latency_ms, injected_delay_ms,
+                status_code, error_type, injection_type, latency_ms, injected_delay_ms,
                 message_count, prompt_tokens_approx, response_tokens, response_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
@@ -324,6 +339,7 @@ class MetricsRecorder:
                 model,
                 status_code,
                 error_type,
+                injection_type,
                 latency_ms,
                 injected_delay_ms,
                 message_count,
@@ -688,6 +704,18 @@ class MetricsRecorder:
             "requests_by_status_code": requests_by_status_code,
             "latency_stats": latency_stats,
             "error_rate": error_rate,
+        }
+
+    def export_data(self) -> dict[str, Any]:
+        """Export raw requests and time-series data for pushback."""
+        conn = self._get_connection()
+        requests = [dict(row) for row in conn.execute("SELECT * FROM requests ORDER BY timestamp_utc")]
+        timeseries = [dict(row) for row in conn.execute("SELECT * FROM timeseries ORDER BY bucket_utc")]
+        return {
+            "run_id": self._run_id,
+            "started_utc": self._started_utc,
+            "requests": requests,
+            "timeseries": timeseries,
         }
 
     def save_run_info(

@@ -11,6 +11,9 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Default shared in-memory SQLite database for ephemeral metrics
+DEFAULT_MEMORY_DB = "file:chaosllm-metrics?mode=memory&cache=shared"
+
 
 class ServerConfig(BaseModel):
     """Server binding and worker configuration."""
@@ -40,8 +43,8 @@ class MetricsConfig(BaseModel):
     model_config = {"frozen": True}
 
     database: str = Field(
-        default="./chaosllm-metrics.db",
-        description="SQLite database path for metrics storage",
+        default=DEFAULT_MEMORY_DB,
+        description="SQLite database path for metrics storage (in-memory by default)",
     )
     timeseries_bucket_sec: int = Field(
         default=1,
@@ -312,6 +315,13 @@ class ErrorInjectionConfig(BaseModel):
     burst: BurstConfig = Field(
         default_factory=BurstConfig,
         description="Burst pattern configuration",
+    )
+
+    # === Selection Mode ===
+
+    selection_mode: Literal["priority", "weighted"] = Field(
+        default="priority",
+        description="Error selection strategy: priority (first match) or weighted mix",
     )
 
     @field_validator("retry_after_sec", "timeout_sec", "slow_response_sec", mode="before")

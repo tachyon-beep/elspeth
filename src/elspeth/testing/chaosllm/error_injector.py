@@ -240,10 +240,11 @@ class ErrorInjector:
     def decide(self) -> ErrorDecision:
         """Decide whether to inject an error for this request.
 
-        Errors are evaluated in priority order. If multiple errors would
-        trigger, only the first (highest priority) is returned.
+        Errors are evaluated based on selection_mode:
+        - priority: first matching error wins (current default)
+        - weighted: errors are chosen by configured weights
 
-        Priority order:
+        Priority order (when selection_mode=priority):
         1. Connection-level errors (timeout, connection_reset, slow_response)
         2. HTTP errors (rate_limit, capacity_529, service_unavailable, etc.)
         3. Malformed responses
@@ -252,6 +253,12 @@ class ErrorInjector:
             ErrorDecision indicating what error (if any) to inject
         """
         elapsed = self._get_current_time()
+        if self._config.selection_mode == "weighted":
+            return self._decide_weighted(elapsed)
+        return self._decide_priority(elapsed)
+
+    def _decide_priority(self, elapsed: float) -> ErrorDecision:
+        """Priority-based decision (first matching error wins)."""
 
         # === Connection-level errors (highest priority) ===
 
@@ -338,6 +345,76 @@ class ErrorInjector:
             return ErrorDecision.malformed_response("wrong_content_type")
 
         # No error - success!
+        return ErrorDecision.success()
+
+    def _decide_weighted(self, elapsed: float) -> ErrorDecision:
+        """Weighted mix decision (errors chosen by configured weights)."""
+        choices: list[tuple[float, Callable[[], ErrorDecision]]] = []
+
+        def _add(weight: float, builder: Callable[[], ErrorDecision]) -> None:
+            if weight > 0:
+                choices.append((weight, builder))
+
+        # Connection-level
+        _add(
+            self._config.timeout_pct,
+            lambda: ErrorDecision.connection_error("timeout", delay_sec=self._pick_timeout_delay()),
+        )
+        _add(
+            self._config.connection_reset_pct,
+            lambda: ErrorDecision.connection_error("connection_reset"),
+        )
+        _add(
+            self._config.slow_response_pct,
+            lambda: ErrorDecision.connection_error("slow_response", delay_sec=self._pick_slow_response_delay()),
+        )
+
+        # HTTP-level (burst-adjusted for rate limit and capacity)
+        _add(
+            self._get_burst_rate_limit_pct(elapsed),
+            lambda: ErrorDecision.http_error(
+                "rate_limit",
+                429,
+                retry_after_sec=self._pick_retry_after(),
+            ),
+        )
+        _add(
+            self._get_burst_capacity_pct(elapsed),
+            lambda: ErrorDecision.http_error(
+                "capacity_529",
+                529,
+                retry_after_sec=self._pick_retry_after(),
+            ),
+        )
+        _add(self._config.service_unavailable_pct, lambda: ErrorDecision.http_error("service_unavailable", 503))
+        _add(self._config.bad_gateway_pct, lambda: ErrorDecision.http_error("bad_gateway", 502))
+        _add(self._config.gateway_timeout_pct, lambda: ErrorDecision.http_error("gateway_timeout", 504))
+        _add(self._config.internal_error_pct, lambda: ErrorDecision.http_error("internal_error", 500))
+        _add(self._config.forbidden_pct, lambda: ErrorDecision.http_error("forbidden", 403))
+        _add(self._config.not_found_pct, lambda: ErrorDecision.http_error("not_found", 404))
+
+        # Malformed responses
+        _add(self._config.invalid_json_pct, lambda: ErrorDecision.malformed_response("invalid_json"))
+        _add(self._config.truncated_pct, lambda: ErrorDecision.malformed_response("truncated"))
+        _add(self._config.empty_body_pct, lambda: ErrorDecision.malformed_response("empty_body"))
+        _add(self._config.missing_fields_pct, lambda: ErrorDecision.malformed_response("missing_fields"))
+        _add(self._config.wrong_content_type_pct, lambda: ErrorDecision.malformed_response("wrong_content_type"))
+
+        total_weight = sum(weight for weight, _ in choices)
+        if total_weight <= 0:
+            return ErrorDecision.success()
+
+        success_weight = max(0.0, 100.0 - total_weight)
+        roll = self._rng.random() * (total_weight + success_weight)
+        if roll >= total_weight:
+            return ErrorDecision.success()
+
+        threshold = 0.0
+        for weight, builder in choices:
+            threshold += weight
+            if roll < threshold:
+                return builder()
+
         return ErrorDecision.success()
 
     def reset(self) -> None:
