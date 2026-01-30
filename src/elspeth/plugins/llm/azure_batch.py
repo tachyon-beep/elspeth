@@ -24,7 +24,7 @@ from typing import Any, cast
 
 from pydantic import Field
 
-from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, RowErrorEntry, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
@@ -591,7 +591,7 @@ class AzureBatchLLMTransform(BaseTransform):
             # Batch failed - clear checkpoint and return error
             self._clear_checkpoint(ctx)
 
-            error_info: dict[str, Any] = {
+            error_info: TransformErrorReason = {
                 "reason": "batch_failed",
                 "batch_id": batch_id,
             }
@@ -770,7 +770,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Assemble output rows in original order
         output_rows: list[dict[str, Any]] = []
-        row_errors: list[dict[str, Any]] = []
+        row_errors: list[RowErrorEntry] = []
 
         # Track which rows had template errors (excluded from batch)
         template_error_indices = {idx for idx, _ in template_errors}

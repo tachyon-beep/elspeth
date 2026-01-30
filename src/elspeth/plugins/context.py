@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     # Using string annotations to avoid import errors in Phase 2
     from opentelemetry.trace import Span, Tracer
 
-    from elspeth.contracts import Call, CallStatus, CallType
+    from elspeth.contracts import Call, CallStatus, CallType, TransformErrorReason
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -343,7 +343,7 @@ class PluginContext:
         token_id: str,
         transform_id: str,
         row: dict[str, Any],
-        error_details: dict[str, Any],
+        error_details: "TransformErrorReason",
         destination: str,
     ) -> TransformErrorToken:
         """Record a transform processing error for audit trail.
@@ -355,7 +355,7 @@ class PluginContext:
             token_id: Token ID for the row being processed
             transform_id: Transform that returned the error
             row: The row data that could not be processed
-            error_details: Error details from TransformResult.error()
+            error_details: Error details from TransformResult.error() (TransformErrorReason TypedDict)
             destination: Sink name where row is routed, or "discard"
 
         Returns:

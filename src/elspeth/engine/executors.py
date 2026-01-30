@@ -390,11 +390,18 @@ class TransformExecutor:
             # Record error event (always, even for discard - audit completeness)
             # Use node_id (unique DAG identifier), not name (plugin type)
             # Bug fix: P2-2026-01-19-transform-errors-ambiguous-transform-id
+            #
+            # result.reason MUST be set for error results - TransformResult.error() requires it.
+            # If None, that's a bug in the transform (constructed error result without reason).
+            assert result.reason is not None, (
+                f"Transform '{transform.name}' returned error but reason is None. "
+                'Use TransformResult.error({{"reason": "...", ...}}) to create error results.'
+            )
             ctx.record_transform_error(
                 token_id=token.token_id,
                 transform_id=transform.node_id,
                 row=token.row_data,
-                error_details=result.reason or {},
+                error_details=result.reason,
                 destination=on_error,
             )
 

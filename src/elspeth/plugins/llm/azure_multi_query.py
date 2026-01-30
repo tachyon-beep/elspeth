@@ -13,7 +13,7 @@ from __future__ import annotations
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
@@ -426,8 +426,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         validation_result = validate_json_object_response(content)
         if not isinstance(validation_result, ValidationSuccess):
             # Map validation error to TransformResult with context
-            error_info: dict[str, Any] = {
-                "reason": validation_result.reason,
+            # validation_result.reason is one of: "invalid_json", "invalid_json_type"
+            # which are valid TransformErrorCategory values
+            error_info: TransformErrorReason = {
+                "reason": cast(TransformErrorCategory, validation_result.reason),
                 "query": spec.output_prefix,
                 "raw_response": response.content[:500] if response.content else None,
             }

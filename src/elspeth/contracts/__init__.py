@@ -100,6 +100,7 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import (
     BatchPendingError,
+    CoalesceFailureReason,
     ConfigGateReason,
     ExecutionError,
     PluginGateReason,
@@ -156,6 +157,7 @@ __all__ = [  # Grouped by category for readability
     "Artifact",
     # errors
     "BatchPendingError",
+    "CoalesceFailureReason",
     "ConfigGateReason",
     "ExecutionError",
     "PluginGateReason",

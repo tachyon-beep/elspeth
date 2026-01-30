@@ -314,7 +314,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                         "error_type": "http_error",
                         "status_code": status_code,
                         "message": str(e),
-                        "retryable": False,
                     },
                     retryable=False,
                 )
@@ -324,7 +323,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                         "reason": "api_error",
                         "error_type": "network_error",
                         "message": str(e),
-                        "retryable": True,
                     },
                     retryable=True,
                 )
@@ -336,8 +334,8 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                         "reason": "prompt_injection_detected",
                         "field": field_name,
                         "attacks": analysis,
-                        "retryable": False,
-                    }
+                    },
+                    retryable=False,
                 )
 
         return TransformResult.success(row)

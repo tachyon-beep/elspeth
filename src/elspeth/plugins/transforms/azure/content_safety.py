@@ -344,7 +344,6 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         "error_type": "http_error",
                         "status_code": status_code,
                         "message": str(e),
-                        "retryable": False,
                     },
                     retryable=False,
                 )
@@ -354,7 +353,6 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         "reason": "api_error",
                         "error_type": "network_error",
                         "message": str(e),
-                        "retryable": True,
                     },
                     retryable=True,
                 )
@@ -367,8 +365,8 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         "reason": "content_safety_violation",
                         "field": field_name,
                         "categories": violation,
-                        "retryable": False,
-                    }
+                    },
+                    retryable=False,
                 )
 
         return TransformResult.success(row)

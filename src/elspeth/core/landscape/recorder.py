@@ -24,6 +24,7 @@ from elspeth.contracts import (
     Call,
     CallStatus,
     CallType,
+    CoalesceFailureReason,
     Determinism,
     Edge,
     ExecutionError,
@@ -49,6 +50,7 @@ from elspeth.contracts import (
     Token,
     TokenOutcome,
     TokenParent,
+    TransformErrorReason,
     TransformErrorRecord,
     TriggerType,
     ValidationErrorRecord,
@@ -1050,7 +1052,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStatePending: ...
 
@@ -1062,7 +1064,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStateCompleted: ...
 
@@ -1074,7 +1076,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStateFailed: ...
 
@@ -1085,7 +1087,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
         """Complete a node state.
@@ -2297,7 +2299,7 @@ class LandscapeRecorder:
         token_id: str,
         transform_id: str,
         row_data: dict[str, Any],
-        error_details: dict[str, Any],
+        error_details: TransformErrorReason,
         destination: str,
     ) -> str:
         """Record a transform processing error in the audit trail.
@@ -2310,7 +2312,7 @@ class LandscapeRecorder:
             token_id: Token ID for the row
             transform_id: Transform that returned the error
             row_data: The row that could not be processed
-            error_details: Error details from TransformResult
+            error_details: Error details from TransformResult (TransformErrorReason TypedDict)
             destination: Where row was routed ("discard" or sink name)
 
         Returns:

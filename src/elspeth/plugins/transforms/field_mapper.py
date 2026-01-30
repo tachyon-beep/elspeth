@@ -110,7 +110,9 @@ class FieldMapper(BaseTransform):
 
             if value is MISSING:
                 if self._strict:
-                    return TransformResult.error({"message": f"Required field '{source}' not found in row"})
+                    return TransformResult.error(
+                        {"reason": "missing_field", "field": source, "message": f"Required field '{source}' not found in row"}
+                    )
                 continue  # Skip missing fields in non-strict mode
 
             # Remove old key if it exists (for rename within same dict)

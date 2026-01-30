@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.errors import TransformErrorReason
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
 
@@ -95,7 +96,7 @@ class TransformResult:
 
     status: Literal["success", "error"]
     row: dict[str, Any] | None
-    reason: dict[str, Any] | None
+    reason: TransformErrorReason | None
     retryable: bool = False
     rows: list[dict[str, Any]] | None = None
 
@@ -139,11 +140,21 @@ class TransformResult:
     @classmethod
     def error(
         cls,
-        reason: dict[str, Any],
+        reason: TransformErrorReason,
         *,
         retryable: bool = False,
     ) -> "TransformResult":
-        """Create error result with reason."""
+        """Create error result with structured reason.
+
+        Args:
+            reason: Error details with required 'reason' field from
+                    TransformErrorCategory (compile-time validated).
+                    See TransformErrorReason for all available context fields.
+            retryable: Whether the error is transient and should be retried.
+
+        Returns:
+            TransformResult with status="error" and the provided reason.
+        """
         return cls(
             status="error",
             row=None,

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryManager
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -1180,7 +1180,7 @@ class RowProcessor:
                             f"Error: {e}"
                         ) from e
 
-                    error_details = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
+                    error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
                     ctx.record_transform_error(
                         token_id=token.token_id,
                         transform_id=transform.node_id,
@@ -1209,17 +1209,17 @@ class RowProcessor:
                         f"Error: {e}"
                     ) from e
 
-                error_details = {"reason": "transient_error_no_retry", "error": str(e)}
+                transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
                 ctx.record_transform_error(
                     token_id=token.token_id,
                     transform_id=transform.node_id,
                     row=token.row_data,
-                    error_details=error_details,
+                    error_details=transient_error,
                     destination=on_error,
                 )
 
                 return (
-                    TransformResult.error(error_details, retryable=True),
+                    TransformResult.error(transient_error, retryable=True),
                     token,
                     on_error,
                 )

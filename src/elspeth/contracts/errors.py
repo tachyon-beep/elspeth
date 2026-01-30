@@ -18,6 +18,24 @@ class ExecutionError(TypedDict):
     traceback: NotRequired[str]  # Optional full traceback
 
 
+class CoalesceFailureReason(TypedDict, total=False):
+    """Schema for coalesce/barrier failure payloads.
+
+    Used by CoalesceExecutor when recording fork-join barrier failures.
+    These are internal engine errors, not transform or plugin errors.
+    """
+
+    failure_reason: str  # Why coalesce failed (e.g., "late_arrival_after_merge")
+    waiting_tokens: list[str]  # Token IDs still waiting at barrier
+    barrier: str  # Barrier identifier
+    expected_branches: list[str]  # Branches expected to arrive
+    actual_branches: list[str]  # Branches that actually arrived
+    branches_arrived: list[str]  # Alias for actual_branches (backwards compat)
+    merge_policy: str  # Merge policy in effect
+    timeout_ms: int  # Timeout that triggered failure
+    select_branch: str | None  # Target branch for select merge policy
+
+
 class ConfigGateReason(TypedDict):
     """Reason from config-driven gate (expression evaluation).
 
@@ -108,9 +126,11 @@ TransformErrorCategory = Literal[
     "api_error",
     "api_call_failed",
     "llm_call_failed",
+    "llm_retryable_error_no_retry",  # LLM error that would be retried but retry disabled
     "network_error",
     "permanent_error",
     "retry_timeout",
+    "transient_error_no_retry",  # Transient error (connection/timeout) but retry disabled
     # Field/validation errors
     "missing_field",
     "type_mismatch",
@@ -121,6 +141,7 @@ TransformErrorCategory = Literal[
     "all_templates_failed",
     # JSON/response parsing errors
     "json_parse_failed",
+    "invalid_json",  # Generic JSON parse failure
     "invalid_json_response",
     "invalid_json_type",
     "empty_choices",
@@ -250,19 +271,23 @@ class TransformErrorReason(TypedDict):
     # Multi-query/template context
     query: NotRequired[str]
     template_hash: NotRequired[str]
+    template_source: NotRequired[str | None]  # Template source identifier
     template_errors: NotRequired[list[TemplateErrorEntry]]
+    failed_queries: NotRequired[list[str] | list[dict[str, Any]]]  # Query names or detailed failures
+    succeeded_count: NotRequired[int]  # Number of successful queries
+    total_count: NotRequired[int]  # Total number of queries attempted
 
     # LLM response context
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int]
     prompt_tokens: NotRequired[int]
-    raw_response: NotRequired[str]
-    raw_response_preview: NotRequired[str]
+    raw_response: NotRequired[str | None]
+    raw_response_preview: NotRequired[str | None]
     content_after_fence_strip: NotRequired[str]
-    usage: NotRequired[UsageStats]
+    usage: NotRequired[UsageStats | dict[str, int]]
     response: NotRequired[dict[str, Any]]
-    response_keys: NotRequired[list[str]]
-    body_preview: NotRequired[str]
+    response_keys: NotRequired[list[str] | None]
+    body_preview: NotRequired[str | None]
     content_type: NotRequired[str]
 
     # Type validation context
@@ -273,17 +298,23 @@ class TransformErrorReason(TypedDict):
     # Rate limiting/timeout context
     elapsed_seconds: NotRequired[float]
     max_seconds: NotRequired[float]
+    elapsed_hours: NotRequired[float]  # Batch timeout (hours scale)
+    max_wait_hours: NotRequired[float]  # Batch max wait time (hours)
     status_code: NotRequired[int]
 
     # Content filtering context
     matched_pattern: NotRequired[str]
     match_context: NotRequired[str]
-    categories: NotRequired[list[str]]
+    categories: NotRequired[list[str] | dict[str, dict[str, Any]]]  # List of names OR detailed severity/threshold map
+    attacks: NotRequired[dict[str, bool]]  # Prompt shield attack flags (user_prompt_attack, document_attack)
 
     # Batch processing context
     batch_id: NotRequired[str]
     queries_completed: NotRequired[int]
     row_errors: NotRequired[list[RowErrorEntry]]
+    output_file_id: NotRequired[str]  # Batch output file reference
+    malformed_count: NotRequired[int]  # Count of malformed batch lines
+    errors: NotRequired[list[str] | list[dict[str, Any]]]  # Error messages or structured errors
 
 
 # =============================================================================
