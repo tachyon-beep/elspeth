@@ -412,8 +412,8 @@ class RuntimeCheckpointConfig:
         else:
             # every_n uses checkpoint_interval
             # Settings validator ensures checkpoint_interval is set when frequency="every_n"
-            # This assert is for static type checking - at runtime it's always true
-            assert settings.checkpoint_interval is not None
+            if settings.checkpoint_interval is None:
+                raise ValueError("checkpoint_interval required when checkpointing is enabled")
             frequency = settings.checkpoint_interval
 
         return cls(

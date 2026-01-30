@@ -242,6 +242,9 @@ class PooledExecutor:
             for entry in ready:
                 results.append(entry.result)
 
+        if len(results) != len(contexts):
+            raise RuntimeError(f"Pool returned {len(results)} results for {len(contexts)} contexts")
+
         return results
 
     def _wait_for_dispatch_gate(self) -> None:

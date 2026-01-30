@@ -12,11 +12,12 @@ at parse time per canonical JSON policy. Use null for missing values.
 
 import json
 from collections.abc import Iterator
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import SourceDataConfig
 from elspeth.plugins.context import PluginContext
@@ -89,8 +90,8 @@ class JSONSource(BaseSource):
 
         # Store schema config for audit trail
         # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
-        assert cfg.schema_config is not None
-        self._schema_config = cfg.schema_config
+        schema_config = cast(SchemaConfig, cfg.schema_config)
+        self._schema_config = schema_config
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure

@@ -7,7 +7,7 @@ If the source outputs wrong types, the transform crashes immediately.
 """
 
 import copy
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -58,14 +58,13 @@ class FieldMapper(BaseTransform):
         self._validate_input: bool = cfg.validate_input
         self._on_error: str | None = cfg.on_error
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
-        self._schema_config = cfg.schema_config
+        schema_config = cast(SchemaConfig, cfg.schema_config)
+        self._schema_config = schema_config
 
         # Create input schema from config
         # CRITICAL: allow_coercion=False - wrong types are source bugs
         self.input_schema = create_schema_from_config(
-            self._schema_config,
+            schema_config,
             "FieldMapperInputSchema",
             allow_coercion=False,
         )

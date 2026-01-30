@@ -1,11 +1,12 @@
 """Keyword filter transform for blocking content matching regex patterns."""
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -82,9 +83,9 @@ class KeywordFilter(BaseTransform):
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         # Create schema
-        assert cfg.schema_config is not None
+        schema_config = cast(SchemaConfig, cfg.schema_config)
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             "KeywordFilterSchema",
             allow_coercion=False,  # Transforms do NOT coerce
         )

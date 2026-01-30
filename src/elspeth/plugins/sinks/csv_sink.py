@@ -11,9 +11,10 @@ import csv
 import hashlib
 import os
 from collections.abc import Sequence
-from typing import IO, TYPE_CHECKING, Any, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal, cast
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
@@ -150,8 +151,8 @@ class CSVSink(BaseSink):
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
-        assert cfg.schema_config is not None
-        self._schema_config = cfg.schema_config
+        schema_config = cast(SchemaConfig, cfg.schema_config)
+        self._schema_config = schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)

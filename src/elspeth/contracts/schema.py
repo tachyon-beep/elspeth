@@ -107,7 +107,9 @@ class FieldDefinition:
             )
 
         # FIELD_PATTERN regex guarantees field_type is one of the supported literals
-        assert field_type in SUPPORTED_TYPES, f"Regex validation failed: {field_type}"
+        # This check is defense-in-depth in case regex is modified incorrectly
+        if field_type not in SUPPORTED_TYPES:
+            raise ValueError(f"Unsupported field type: {field_type}")
         # Cast needed because mypy can't infer type narrowing from set membership
         typed_field: Literal["str", "int", "float", "bool", "any"] = field_type  # type: ignore[assignment]
 

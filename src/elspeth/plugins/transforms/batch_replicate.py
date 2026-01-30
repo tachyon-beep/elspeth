@@ -11,7 +11,7 @@ For output_mode: transform, the engine creates NEW tokens for each output
 row, with parent linkage to track deaggregation lineage.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -87,13 +87,12 @@ class BatchReplicate(BaseTransform):
         self._include_copy_index = cfg.include_copy_index
         self._on_error = cfg.on_error
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
-        self._schema_config = cfg.schema_config
+        schema_config = cast(SchemaConfig, cfg.schema_config)
+        self._schema_config = schema_config
 
         # Input schema from config
         self.input_schema = create_schema_from_config(
-            self._schema_config,
+            schema_config,
             "BatchReplicateInputSchema",
             allow_coercion=False,
         )

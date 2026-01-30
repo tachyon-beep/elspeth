@@ -97,8 +97,8 @@ def _create_explicit_schema(
     allow_coercion: bool,
 ) -> type[PluginSchema]:
     """Create a schema with explicit field definitions."""
-    assert config.fields is not None
-    assert config.mode is not None
+    if config.fields is None or config.mode is None:
+        raise ValueError("_create_explicit_schema requires fields and mode to be set")
 
     # Build field definitions for create_model
     # Format: field_name=(type, default) or field_name=(type, ...)

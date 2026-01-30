@@ -14,7 +14,7 @@ variables, not hardcoded in configuration files.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, cast
 
 from pydantic import BaseModel, model_validator
 
@@ -159,10 +159,11 @@ class AzureAuthConfig(BaseModel):
 
         elif self.sas_token:
             # SAS token auth: append token to account URL
-            assert self.account_url is not None  # Validated by model_validator
+            # model_validator guarantees account_url is non-None when sas_token is set
+            account_url = cast(str, self.account_url)
             # Ensure SAS token starts with '?' for URL concatenation
             sas = self.sas_token if self.sas_token.startswith("?") else f"?{self.sas_token}"
-            sas_url = f"{self.account_url.rstrip('/')}{sas}"
+            sas_url = f"{account_url.rstrip('/')}{sas}"
             return BlobServiceClient(sas_url)
 
         elif self.use_managed_identity:
@@ -173,10 +174,10 @@ class AzureAuthConfig(BaseModel):
                     "azure-identity is required for Managed Identity auth. Install with: uv pip install azure-identity"
                 ) from e
 
+            # model_validator guarantees account_url is non-None when use_managed_identity is True
+            account_url = cast(str, self.account_url)
             credential = DefaultAzureCredential()
-            # account_url is validated to be not None by the model_validator
-            assert self.account_url is not None  # Validated by model_validator
-            return BlobServiceClient(self.account_url, credential=credential)
+            return BlobServiceClient(account_url, credential=credential)
 
         else:
             # Service principal auth
@@ -187,17 +188,17 @@ class AzureAuthConfig(BaseModel):
                     "azure-identity is required for Service Principal auth. Install with: uv pip install azure-identity"
                 ) from e
 
-            # All fields are validated to be not None by the model_validator
-            assert self.tenant_id is not None  # Validated by model_validator
-            assert self.client_id is not None  # Validated by model_validator
-            assert self.client_secret is not None  # Validated by model_validator
-            assert self.account_url is not None  # Validated by model_validator
+            # model_validator guarantees all service principal fields are non-None in this branch
+            tenant_id = cast(str, self.tenant_id)
+            client_id = cast(str, self.client_id)
+            client_secret = cast(str, self.client_secret)
+            account_url = cast(str, self.account_url)
             sp_credential = ClientSecretCredential(
-                tenant_id=self.tenant_id,
-                client_id=self.client_id,
-                client_secret=self.client_secret,
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
             )
-            return BlobServiceClient(self.account_url, credential=sp_credential)
+            return BlobServiceClient(account_url, credential=sp_credential)
 
     @property
     def auth_method(self) -> str:

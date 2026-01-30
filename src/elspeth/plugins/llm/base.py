@@ -11,7 +11,7 @@ Provides the foundation for all LLM-based transforms with:
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import Field, field_validator, model_validator
 
@@ -222,9 +222,9 @@ class BaseLLMTransform(BaseTransform):
 
         # Schema from config
         # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
+        schema_config = cast(SchemaConfig, cfg.schema_config)
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,  # Transforms do NOT coerce
         )
@@ -236,16 +236,16 @@ class BaseLLMTransform(BaseTransform):
         audit = get_llm_audit_fields(self._response_field)
 
         # Merge with any existing fields from base schema
-        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
-        base_audit = cfg.schema_config.audit_fields or ()
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
-            mode=cfg.schema_config.mode,
-            fields=cfg.schema_config.fields,
-            is_dynamic=cfg.schema_config.is_dynamic,
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
-            required_fields=cfg.schema_config.required_fields,
+            required_fields=schema_config.required_fields,
         )
 
     @abstractmethod

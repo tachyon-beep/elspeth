@@ -11,7 +11,7 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.schema import SchemaConfig
@@ -151,30 +151,29 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
 
-        # Schema from config - must have schema_config for transform
-        assert cfg.schema_config is not None
-
         # Build output schema config with field categorization
         # Multi-query: collect fields from all query specs
+        # cfg.schema_config is validated by LLMConfig.validate_schema_config()
+        schema_config = cast(SchemaConfig, cfg.schema_config)
         all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
 
         # Merge with base schema
-        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
-        base_audit = cfg.schema_config.audit_fields or ()
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
-            mode=cfg.schema_config.mode,
-            fields=cfg.schema_config.fields,
-            is_dynamic=cfg.schema_config.is_dynamic,
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
             audit_fields=tuple(set(base_audit) | all_audit),
-            required_fields=cfg.schema_config.required_fields,
+            required_fields=schema_config.required_fields,
         )
 
         # Create schema from config
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,
         )
@@ -634,7 +633,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         from elspeth.plugins.pooling.executor import RowContext
 
         # Type narrowing - caller ensures executor is not None
-        assert self._executor is not None
+        if self._executor is None:
+            raise RuntimeError("LLM executor not initialized - call initialize() first")
 
         # Build RowContext for each query
         # All queries share the same state_id (FK constraint)
