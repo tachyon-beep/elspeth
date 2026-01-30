@@ -453,8 +453,8 @@ class TestRetryExponentialBackoff:
         """
         from unittest.mock import patch
 
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
         from elspeth.engine.retry import RetryManager
 
         # Create config with non-default exponential_base
@@ -521,8 +521,8 @@ class TestRetryExponentialBackoff:
         - But RuntimeRetryConfig.from_settings() didn't map it
         - So configured values were silently ignored
         """
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         # Test with non-default exponential_base
         settings = RetrySettings(
@@ -550,8 +550,8 @@ class TestRetryExponentialBackoff:
 
         If exponential_base is not passed to tenacity, backoff uses default (2.0).
         """
-        from elspeth.core.config import RetrySettings
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
         from elspeth.engine.retry import RetryManager
 
         # Create config with large exponential_base

@@ -218,8 +218,8 @@ class TestRowProcessorRetry:
         """RowProcessor can be constructed with RetryManager."""
         from unittest.mock import Mock
 
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.processor import RowProcessor
         from elspeth.engine.retry import RetryManager
 
         retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0))
@@ -240,8 +240,8 @@ class TestRowProcessorRetry:
         from unittest.mock import Mock
 
         from elspeth.contracts import TransformResult
-        from elspeth.engine.processor import RowProcessor
         from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.engine.processor import RowProcessor
         from elspeth.engine.retry import RetryManager
 
         # Track call count
@@ -429,10 +429,10 @@ class TestRowProcessorRetry:
         """When all retries exhausted, process_row returns FAILED outcome."""
 
         from elspeth.contracts import RowOutcome
+        from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
-        from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.engine.retry import RetryManager
         from elspeth.engine.spans import SpanFactory
 

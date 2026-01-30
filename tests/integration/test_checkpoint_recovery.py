@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
