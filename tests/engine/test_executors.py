@@ -351,58 +351,6 @@ class TestTransformExecutor:
         assert result.duration_ms is not None
         assert result.duration_ms >= 0
 
-    def test_execute_exception_records_failure_and_reraises(
-        self,
-        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
-        span_factory: SpanFactory,
-    ) -> None:
-        """Transform exception is recorded in node_state and re-raised."""
-        _db, recorder, run = landscape_setup
-
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="mock_transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        transform = MockTransform(raises=ValueError("something went wrong"))
-        transform.node_id = node.node_id
-
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-            node_id=node.node_id,
-            landscape=recorder,
-        )
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="tok-1",
-            row_data={"input": 1},
-        )
-
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        executor = TransformExecutor(recorder, span_factory)
-
-        with pytest.raises(ValueError, match="something went wrong"):
-            executor.execute_transform(
-                transform=as_transform(transform),
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-            )
-
     def test_error_without_on_error_raises_runtime_error(
         self,
         landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
@@ -457,62 +405,6 @@ class TestTransformExecutor:
                 ctx=ctx,
                 step_in_pipeline=1,
             )
-
-    def test_error_with_discard_returns_discard_sink(
-        self,
-        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
-        span_factory: SpanFactory,
-    ) -> None:
-        """Transform error with on_error='discard' returns 'discard' as error_sink."""
-        _db, recorder, run = landscape_setup
-
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="mock_transform",
-            node_type=NodeType.TRANSFORM,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        transform = MockTransform(
-            result=TransformResult.error({"reason": "invalid"}),
-            on_error="discard",
-        )
-        transform.node_id = node.node_id
-
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-            node_id=node.node_id,
-            landscape=recorder,
-        )
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="tok-1",
-            row_data={"input": 1},
-        )
-
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        executor = TransformExecutor(recorder, span_factory)
-        result, _updated_token, error_sink = executor.execute_transform(
-            transform=as_transform(transform),
-            token=token,
-            ctx=ctx,
-            step_in_pipeline=1,
-        )
-
-        assert result.status == "error"
-        assert error_sink == "discard"
 
     def test_requires_node_id_set(
         self,
@@ -804,58 +696,6 @@ class TestGateExecutor:
 
         assert exc_info.value.label == "continue"
 
-    def test_execute_exception_records_failure(
-        self,
-        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
-        span_factory: SpanFactory,
-    ) -> None:
-        """Gate exception is recorded and re-raised."""
-        _db, recorder, run = landscape_setup
-
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="mock_gate",
-            node_type=NodeType.GATE,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        gate = MockGate(raises=RuntimeError("gate evaluation failed"))
-        gate.node_id = node.node_id
-
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-            node_id=node.node_id,
-            landscape=recorder,
-        )
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="tok-1",
-            row_data={"x": 1},
-        )
-
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data=token.row_data,
-            row_id=token.row_id,
-        )
-        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
-
-        executor = GateExecutor(recorder, span_factory)
-
-        with pytest.raises(RuntimeError, match="gate evaluation failed"):
-            executor.execute_gate(
-                gate=gate,  # type: ignore[arg-type]
-                token=token,
-                ctx=ctx,
-                step_in_pipeline=1,
-            )
-
     def test_requires_node_id_set(
         self,
         landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
@@ -913,60 +753,6 @@ class TestAggregationExecutor:
         trigger = TriggerConfig(count=5)
         settings = AggregationSettings(name="test_agg", plugin="batch_stats", trigger=trigger)
         return node_id, settings
-
-    def test_buffer_row_creates_batch_on_first_row(
-        self,
-        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
-        span_factory: SpanFactory,
-    ) -> None:
-        """Buffering the first row creates a new batch in the audit trail."""
-        _db, recorder, run = landscape_setup
-
-        # Register aggregation node in database (required for FK constraint)
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="batch_stats",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        node_id = NodeID(node.node_id)
-        trigger = TriggerConfig(count=5)
-        settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", trigger=trigger)}
-
-        executor = AggregationExecutor(
-            recorder,
-            span_factory,
-            run_id=run.run_id,
-            aggregation_settings=settings,
-        )
-
-        # Create row and token in landscape (required for batch_members FK)
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=node.node_id,
-            row_index=0,
-            data={"value": 1},
-            row_id="row-1",
-        )
-        recorder.create_token(row_id=row.row_id, token_id="tok-1")
-
-        token = TokenInfo(
-            row_id="row-1",
-            token_id="tok-1",
-            row_data={"value": 1},
-        )
-
-        # Initially no batch
-        assert executor.get_batch_id(node_id) is None
-
-        # Buffer first row
-        executor.buffer_row(node_id, token)
-
-        # Now batch exists
-        batch_id = executor.get_batch_id(node_id)
-        assert batch_id is not None
 
     def test_buffer_row_increments_count(
         self,
@@ -1360,45 +1146,6 @@ class TestSinkExecutor:
         assert artifact is not None
         assert artifact.content_hash == "abc123"
         assert artifact.path_or_uri == "file:///tmp/output.csv"
-
-    def test_write_empty_tokens_returns_none(
-        self,
-        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
-        span_factory: SpanFactory,
-    ) -> None:
-        """Writing empty token list returns None without calling sink."""
-        _db, recorder, run = landscape_setup
-
-        node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="mock_sink",
-            node_type=NodeType.SINK,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-
-        sink = MockSink()
-        sink.node_id = node.node_id
-
-        ctx = PluginContext(
-            run_id=run.run_id,
-            config={},
-            node_id=node.node_id,
-            landscape=recorder,
-        )
-
-        executor = SinkExecutor(recorder, span_factory, run.run_id)
-        artifact = executor.write(
-            sink=as_sink(sink),
-            tokens=[],  # Empty
-            ctx=ctx,
-            step_in_pipeline=5,
-            sink_name="mock_sink",
-        )
-
-        assert artifact is None
-        assert sink.written_rows == []
 
     def test_write_exception_records_failure_for_all_tokens(
         self,

@@ -276,8 +276,7 @@ class TestCoalesceExecutorFirst:
             name="first_wins",
             branches=["fast", "slow"],
             policy="first",
-            merge="select",
-            select_branch="fast",  # Prefer fast, but take whatever arrives first
+            merge="union",  # Union merge takes first arrival's data (policy=first means one token)
         )
 
         executor = CoalesceExecutor(
@@ -520,12 +519,17 @@ class TestCoalesceExecutorQuorum:
             "model_b": {"score": 0.85},
         }
 
-    def test_quorum_does_not_merge_on_timeout_if_quorum_not_met(
+    def test_quorum_records_failure_on_timeout_if_quorum_not_met(
         self,
         recorder: LandscapeRecorder,
         run: Run,
     ) -> None:
-        """QUORUM should NOT merge on timeout if quorum not met."""
+        """QUORUM should record failure on timeout if quorum not met.
+
+        Note: This test was updated from asserting len(timed_out) == 0 (buggy behavior)
+        to asserting len(timed_out) == 1 with failure outcome (correct behavior).
+        Bug 6tb fix ensures stranded tokens are properly recorded as failed.
+        """
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.engine.clock import MockClock
         from elspeth.engine.coalesce_executor import CoalesceExecutor
@@ -601,9 +605,11 @@ class TestCoalesceExecutorQuorum:
         # Advance clock past timeout (0.1s + 0.05s margin)
         clock.advance(0.15)  # Now at 100.15
 
-        # check_timeouts should return empty list (quorum not met)
+        # check_timeouts should record failure and return outcome
+        # (Bug 6tb fix: no longer returns empty list)
         timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
-        assert len(timed_out) == 0
+        assert len(timed_out) == 1
+        assert timed_out[0].failure_reason == "quorum_not_met_at_timeout"
 
     def test_flush_pending_quorum_failure_records_audit_trail(
         self,
@@ -1638,3 +1644,476 @@ class TestFlushPending:
         # No coalesces registered, nothing pending
         flushed = executor.flush_pending(step_map={})
         assert len(flushed) == 0
+
+
+class TestDuplicateBranchDetection:
+    """Tests for bug x5a: Duplicate branch arrivals should be detected and rejected.
+
+    Current behavior (BUG): Silent overwrite of first token
+    Expected behavior: Raise ValueError to catch upstream bugs immediately
+
+    Per ELSPETH's "Plugin Ownership" principle: bugs in our code should crash,
+    not be silently hidden. Duplicate arrivals indicate a bug in fork, retry,
+    or checkpoint/resume logic.
+    """
+
+    def test_duplicate_branch_arrival_raises_error(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Accepting same branch twice for same row_id must raise ValueError.
+
+        This detects bugs in:
+        - Fork creating duplicate branch names
+        - Retry logic re-sending already-coalesced tokens
+        - Checkpoint/resume replaying tokens incorrectly
+
+        The silent overwrite in current code violates audit integrity:
+        first token is lost without any record.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="merge_all",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="merge_all",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create tokens for testing
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children, _fork_group_id = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # First arrival for path_a - should be held
+        token_a_first = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "result": "first"},
+            branch_name="path_a",
+        )
+        outcome = executor.accept(token_a_first, "merge_all", step_in_pipeline=2)
+        assert outcome.held is True
+
+        # Second arrival for path_a (DUPLICATE) - should raise ValueError
+        # Using SAME token to simulate retry/checkpoint bug that replays token
+        token_a_duplicate = TokenInfo(
+            row_id=children[0].row_id,  # Same row_id
+            token_id=children[0].token_id,  # Same token - replayed
+            row_data={"value": 100, "result": "duplicate_data"},
+            branch_name="path_a",  # Same branch - THIS IS THE BUG
+        )
+
+        # BUG x5a: Currently this silently overwrites first token's data
+        # Expected: Should raise ValueError to catch upstream bugs
+        with pytest.raises(ValueError, match=r"Duplicate arrival.*path_a"):
+            executor.accept(token_a_duplicate, "merge_all", step_in_pipeline=2)
+
+
+class TestTimeoutFailureRecording:
+    """Tests for bug 6tb: Timeout-triggered failures must be recorded in audit trail.
+
+    Current behavior (BUG): check_timeouts() returns empty list when quorum not met,
+    leaving tokens stranded in _pending with no failure recorded.
+
+    Expected behavior: Return CoalesceOutcome with failure_reason, record FAILED
+    outcomes for held tokens, clean up pending entry.
+    """
+
+    def test_check_timeouts_records_failure_when_quorum_not_met(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When timeout fires and quorum not met, must record FAILED outcomes.
+
+        Bug 6tb: Currently check_timeouts() silently ignores quorum-not-met,
+        leaving tokens stranded until flush_pending() at end-of-source.
+        For streaming sources that never end, tokens are stranded indefinitely.
+
+        Expected: Record failure just like flush_pending() does.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.enums import RowOutcome
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        clock = MockClock(start=100.0)
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="quorum_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="quorum_merge",
+            branches=["model_a", "model_b", "model_c"],
+            policy="quorum",
+            quorum_count=2,  # Need 2 of 3
+            merge="nested",
+            timeout_seconds=0.1,
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+            clock=clock,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={},
+        )
+        children, _fork_group_id = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["model_a", "model_b", "model_c"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Accept only ONE token (quorum needs 2)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"score": 0.9},
+            branch_name="model_a",
+        )
+        outcome = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
+        assert outcome.held is True
+
+        # Advance clock past timeout
+        clock.advance(0.15)
+
+        # BUG 6tb: Currently returns empty list, leaving token stranded
+        # Expected: Return failure outcome with proper audit trail
+        timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
+
+        # Should return ONE failure outcome
+        assert len(timed_out) == 1, (
+            f"Bug 6tb: check_timeouts() returned {len(timed_out)} outcomes, expected 1 failure outcome. "
+            f"When timeout fires and quorum not met, must record failure."
+        )
+
+        failure_outcome = timed_out[0]
+        assert failure_outcome.failure_reason == "quorum_not_met_at_timeout", (
+            f"Expected failure_reason='quorum_not_met_at_timeout', got {failure_outcome.failure_reason}"
+        )
+
+        # Verify consumed token was returned
+        assert len(failure_outcome.consumed_tokens) == 1
+        assert failure_outcome.consumed_tokens[0].token_id == token_a.token_id
+
+        # Verify FAILED outcome recorded in audit trail
+        token_outcome = recorder.get_token_outcome(token_a.token_id)
+        assert token_outcome is not None, (
+            "Bug 6tb: Token has no outcome recorded. check_timeouts() should record FAILED outcome like flush_pending() does."
+        )
+        assert token_outcome.outcome == RowOutcome.FAILED
+
+        # Verify pending entry was cleaned up
+        key = ("quorum_merge", token_a.row_id)
+        assert key not in executor._pending, (
+            "Bug 6tb: Pending entry not cleaned up after timeout failure. Token would be stranded indefinitely."
+        )
+
+
+class TestSelectBranchValidation:
+    """Tests for bug 2ho: Select merge must fail when select_branch not arrived.
+
+    Current behavior (BUG): Silent fallback to first arrived branch
+    Expected behavior: Return failure outcome when select_branch missing
+
+    The silent fallback violates audit integrity: metadata says "select: slow_model"
+    but data came from "fast_model".
+    """
+
+    def test_select_merge_fails_when_select_branch_not_arrived(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Select merge must fail if select_branch hasn't arrived.
+
+        Scenario:
+        - branches: [slow_model, fast_model]
+        - policy: first (merge on first arrival)
+        - merge: select, select_branch: slow_model
+
+        Bug 2ho: If fast_model arrives first, triggers merge, returns fast_model
+        data silently (fallback on line 396).
+
+        Expected: Return failure since slow_model (the selected branch) not present.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="select_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure: "first" policy with "select" merge - problematic combo
+        settings = CoalesceSettings(
+            name="select_merge",
+            branches=["slow_model", "fast_model"],
+            policy="first",  # Merge on first arrival
+            merge="select",
+            select_branch="slow_model",  # We want slow_model's output
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"query": "test"},
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["slow_model", "fast_model"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # fast_model arrives first - triggers merge due to "first" policy
+        # But select_branch is "slow_model" which hasn't arrived!
+        fast_token = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"query": "test", "result": "fast_result"},
+            branch_name="fast_model",
+        )
+
+        outcome = executor.accept(fast_token, "select_merge", step_in_pipeline=2)
+
+        # BUG 2ho: Currently outcome.held=False, outcome.merged_token contains
+        # fast_model data (silent fallback), violating the select contract.
+        #
+        # Expected: failure_reason because select_branch not in arrived
+        assert outcome.held is False, "First policy should not hold"
+        assert outcome.failure_reason == "select_branch_not_arrived", (
+            f"Bug 2ho: Expected failure_reason='select_branch_not_arrived', "
+            f"but got {outcome.failure_reason}. "
+            f"Merged token contains wrong data: {outcome.merged_token.row_data if outcome.merged_token else 'None'}"
+        )
+        assert outcome.merged_token is None, "Bug 2ho: Should NOT return merged_token when select_branch missing"
+
+
+class TestCoalesceMetadataRecording:
+    """Tests for bug l4h: Coalesce metadata must be persisted in audit trail.
+
+    Current behavior (BUG): coalesce_metadata is computed in _execute_merge()
+    and returned in CoalesceOutcome, but never recorded to the audit database.
+
+    Expected behavior: coalesce_metadata should be included in node_state
+    output_data for consumed tokens, enabling complete lineage queries.
+    """
+
+    def test_successful_merge_records_coalesce_metadata_in_node_state(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Successful merge must persist coalesce_metadata in audit trail.
+
+        Bug l4h: Currently output_data only contains {"merged_into": token_id}.
+        The rich metadata (policy, branches, timing) is computed but discarded.
+
+        Expected: output_data should include coalesce_context with:
+        - policy
+        - merge_strategy
+        - branches_arrived
+        - arrival_order
+        - wait_duration_ms
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.enums import NodeStateStatus
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="merge_results",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="merge_results",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children, _ = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Accept both tokens to trigger merge
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+
+        executor.accept(token_a, "merge_results", step_in_pipeline=2)
+        outcome = executor.accept(token_b, "merge_results", step_in_pipeline=2)
+
+        assert outcome.merged_token is not None
+
+        # Query node state for consumed token (path_a)
+        node_states = recorder.get_node_states_for_token(token_a.token_id)
+        coalesce_state = next(s for s in node_states if s.node_id == coalesce_node.node_id)
+
+        assert coalesce_state.status == NodeStateStatus.COMPLETED
+
+        # BUG l4h: context_after_json should contain coalesce_context with merge metadata
+        # Currently it's None because _execute_merge() doesn't pass context_after
+        import json
+
+        context_after_json = coalesce_state.context_after_json
+        assert context_after_json is not None, (
+            "Bug l4h: context_after_json is None. coalesce_metadata was computed but never persisted via context_after."
+        )
+
+        context_after = json.loads(context_after_json)
+        assert "coalesce_context" in context_after, (
+            f"Bug l4h: coalesce_context missing from context_after. "
+            f"Got: {context_after}. "
+            f"coalesce_metadata was computed but never persisted."
+        )
+
+        context = context_after["coalesce_context"]
+        assert context["policy"] == "require_all", f"Expected policy='require_all', got {context.get('policy')}"
+        assert context["merge_strategy"] == "union", f"Expected merge_strategy='union', got {context.get('merge_strategy')}"
+        assert set(context["branches_arrived"]) == {"path_a", "path_b"}, (
+            f"Expected branches_arrived=['path_a', 'path_b'], got {context.get('branches_arrived')}"
+        )
