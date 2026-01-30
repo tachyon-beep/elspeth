@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts import (
     Artifact,
@@ -31,7 +31,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import OrchestrationInvariantError, RoutingReason
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -854,7 +854,7 @@ class GateExecutor:
                 state_id=state_id,
                 edge_id=edge_id,
                 mode=action.mode,
-                reason=dict(action.reason) if action.reason else None,
+                reason=cast(RoutingReason, dict(action.reason)) if action.reason else None,
             )
         else:
             # Multiple destinations (fork)
@@ -868,7 +868,7 @@ class GateExecutor:
             self._recorder.record_routing_events(
                 state_id=state_id,
                 routes=routes,
-                reason=dict(action.reason) if action.reason else None,
+                reason=cast(RoutingReason, dict(action.reason)) if action.reason else None,
             )
 
 

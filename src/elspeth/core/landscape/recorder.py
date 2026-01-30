@@ -39,6 +39,7 @@ from elspeth.contracts import (
     NonCanonicalMetadata,
     RoutingEvent,
     RoutingMode,
+    RoutingReason,
     RoutingSpec,
     Row,
     RowLineage,
@@ -1158,7 +1159,7 @@ class LandscapeRecorder:
         state_id: str,
         edge_id: str,
         mode: RoutingMode,
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
         *,
         event_id: str | None = None,
         routing_group_id: str | None = None,
@@ -1217,7 +1218,7 @@ class LandscapeRecorder:
         self,
         state_id: str,
         routes: list[RoutingSpec],
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
     ) -> list[RoutingEvent]:
         """Record multiple routing events (fork/multi-destination).
 
