@@ -1017,20 +1017,32 @@ allow_hits:
   safety: Graceful fallback to configured model - audit still captures actual value
   expires: null
 # TelemetryManager - exporter boundary (exporters are external code that can throw any exception)
-- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:line=131
+- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:line=138
   owner: architecture
   reason: 'False positive: queue.Queue.get() is not dict.get() - no bug hiding'
   safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing keys
   expires: null
-# REMOVED: telemetry/manager.py:R4:TelemetryManager:handle_event:line=171
-# REMOVED: telemetry/manager.py:R1:TelemetryManager:handle_event:line=173
-# Reason: handle_event refactored to queue events - dispatch moved to _export_loop (Task 6)
-- key: telemetry/manager.py:R4:TelemetryManager:flush:line=241
+- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:line=144
+  owner: architecture
+  reason: 'Export thread boundary: must catch all exceptions to prevent thread crash'
+  safety: Caught, logged with error, task_done() still called; export thread continues
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:_dispatch_to_exporters:line=165
+  owner: architecture
+  reason: 'Exporter boundary: export() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning, failure tracked; other exporters still attempted
+  expires: null
+- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:line=167
+  owner: architecture
+  reason: 'Counter accumulation pattern: _exporter_failures counts failures per exporter name'
+  safety: Default 0 for first failure of an exporter is correct initialization
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:flush:line=320
   owner: architecture
   reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still flushed
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:close:line=259
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=338
   owner: architecture
   reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still closed

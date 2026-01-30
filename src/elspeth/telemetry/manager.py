@@ -33,7 +33,7 @@ import structlog
 from elspeth.contracts.config import RuntimeTelemetryProtocol
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import BackpressureMode
-from elspeth.telemetry.errors import TelemetryExporterError  # noqa: F401 - used in Task 6
+from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import TelemetryEvent
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.protocols import ExporterProtocol
@@ -124,15 +124,94 @@ class TelemetryManager:
     def _export_loop(self) -> None:
         """Background thread: consume queue and export.
 
-        Stub implementation - will be replaced in Task 6.
+        Runs until shutdown sentinel (None) is received. Each event is
+        dispatched to all exporters with failure isolation.
+
+        Thread Safety:
+            Runs exclusively in the export thread. Metrics updates
+            (except _events_dropped on total failure) are single-threaded.
         """
+        # Signal that export thread is ready to receive events
         self._export_thread_ready.set()
+
         while True:
             event = self._queue.get()
             if event is None:  # Shutdown sentinel
                 self._queue.task_done()
                 break
-            self._queue.task_done()
+            try:
+                self._dispatch_to_exporters(event)
+            except Exception as e:
+                # CRITICAL: Log but don't crash - telemetry must not kill pipeline
+                logger.error("Export loop failed unexpectedly", error=str(e))
+            finally:
+                # ALWAYS call task_done() to prevent join() hangs
+                self._queue.task_done()
+
+    def _dispatch_to_exporters(self, event: TelemetryEvent) -> None:
+        """Export to all exporters with failure isolation.
+
+        Thread Safety:
+            Called only from export thread. _events_dropped protected by lock
+            when incrementing on total failure.
+
+        Args:
+            event: The telemetry event to export
+        """
+        failures = 0
+        for exporter in self._exporters:
+            try:
+                exporter.export(event)
+            except Exception as e:
+                failures += 1
+                self._exporter_failures[exporter.name] = self._exporter_failures.get(exporter.name, 0) + 1
+                logger.warning(
+                    "Telemetry exporter failed",
+                    exporter=exporter.name,
+                    event_type=type(event).__name__,
+                    error=str(e),
+                )
+
+        # Update metrics based on outcome
+        if failures == 0:
+            # Complete success
+            self._events_emitted += 1
+            self._consecutive_total_failures = 0
+        elif failures == len(self._exporters):
+            # ALL exporters failed
+            self._consecutive_total_failures += 1
+            # Lock required - pipeline thread also writes in DROP mode
+            with self._dropped_lock:
+                self._events_dropped += 1
+
+            # Aggregate logging every _LOG_INTERVAL
+            if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+                logger.error(
+                    "ALL telemetry exporters failing - events dropped",
+                    dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
+                    dropped_total=self._events_dropped,
+                    consecutive_failures=self._consecutive_total_failures,
+                )
+                self._last_logged_drop_count = self._events_dropped
+
+            # Check if we should crash or disable
+            if self._consecutive_total_failures >= self._max_consecutive_failures:
+                if self._config.fail_on_total_exporter_failure:
+                    raise TelemetryExporterError(
+                        "all",
+                        f"All {len(self._exporters)} exporters failed {self._max_consecutive_failures} consecutive times.",
+                    )
+                else:
+                    logger.critical(
+                        "Telemetry disabled after repeated total failures",
+                        consecutive_failures=self._consecutive_total_failures,
+                        events_dropped=self._events_dropped,
+                    )
+                    self._disabled = True
+        else:
+            # Partial success - at least one exporter worked
+            self._events_emitted += 1
+            self._consecutive_total_failures = 0
 
     def handle_event(self, event: TelemetryEvent) -> None:
         """Queue event for async export.
