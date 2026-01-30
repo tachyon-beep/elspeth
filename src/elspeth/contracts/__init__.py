@@ -4,37 +4,18 @@ All dataclasses, enums, TypedDicts, and NamedTuples that cross subsystem
 boundaries MUST be defined here. Internal types are whitelisted in
 config/cicd/contracts-whitelist.yaml.
 
-Import pattern:
+This package is a LEAF MODULE with no outbound dependencies to core/engine.
+To maintain this property, Settings classes (RetrySettings, ElspethSettings, etc.)
+are NOT re-exported here - import them from elspeth.core.config.
+
+Import patterns:
+    # Contracts (lightweight, no heavy dependencies)
     from elspeth.contracts import NodeType, TransformResult, Run
+
+    # Settings classes (from core, pulls in heavy deps)
+    from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
-# isort: skip_file
-# Import order is load-bearing: config imports MUST come last to avoid circular
-# import through core.checkpoint -> core.landscape -> contracts.
-
-from elspeth.contracts.enums import (
-    BackpressureMode,
-    BatchStatus,
-    CallStatus,
-    CallType,
-    Determinism,
-    ExportStatus,
-    NodeStateStatus,
-    NodeType,
-    RoutingKind,
-    RoutingMode,
-    RowOutcome,
-    RunMode,
-    RunStatus,
-    TelemetryGranularity,
-    TriggerType,
-)
-from elspeth.contracts.errors import (
-    BatchPendingError,
-    ExecutionError,
-    RoutingReason,
-    TransformReason,
-)
 from elspeth.contracts.audit import (
     Artifact,
     Batch,
@@ -62,25 +43,36 @@ from elspeth.contracts.audit import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
-from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
-from elspeth.contracts.types import (
-    AggregationName,
-    BranchName,
-    CoalesceName,
-    GateName,
-    NodeID,
-    SinkName,
+from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+
+# =============================================================================
+# Settings classes are NOT re-exported from contracts
+# =============================================================================
+# To maintain contracts as a leaf module (no core dependencies), Settings classes
+# must be imported directly from elspeth.core.config:
+#     from elspeth.core.config import RetrySettings, ElspethSettings
+#
+# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+# =============================================================================
+from elspeth.contracts.config import (
+    # Alignment documentation
+    EXEMPT_SETTINGS,
+    FIELD_MAPPINGS,
+    # Default registries
+    INTERNAL_DEFAULTS,
+    POLICY_DEFAULTS,
+    SETTINGS_TO_RUNTIME,
+    # Runtime config dataclasses
+    ExporterConfig,
+    # Runtime protocols (what engine components expect)
+    RuntimeCheckpointProtocol,
+    RuntimeConcurrencyProtocol,
+    RuntimeRateLimitProtocol,
+    RuntimeRetryProtocol,
+    RuntimeTelemetryConfig,
+    RuntimeTelemetryProtocol,
 )
-from elspeth.contracts.results import (
-    ArtifactDescriptor,
-    FailureInfo,
-    GateResult,
-    RowResult,
-    SourceRow,
-    TransformResult,
-)
-from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
 from elspeth.contracts.data import (
     CompatibilityResult,
     PluginSchema,
@@ -88,36 +80,29 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
-from elspeth.contracts.config import (
-    CheckpointSettings,
-    ConcurrencySettings,
-    DatabaseSettings,
-    ElspethSettings,
-    ExporterConfig,
-    ExporterSettings,
-    LandscapeExportSettings,
-    LandscapeSettings,
-    PayloadStoreSettings,
-    RateLimitSettings,
-    RetrySettings,
-    SinkSettings,
-    SourceSettings,
-    TelemetrySettings,
-    TransformSettings,
-    # Runtime protocols
-    RuntimeCheckpointProtocol,
-    RuntimeConcurrencyProtocol,
-    RuntimeRateLimitProtocol,
-    RuntimeRetryProtocol,
-    RuntimeTelemetryConfig,
-    RuntimeTelemetryProtocol,
-    # Default registries
-    INTERNAL_DEFAULTS,
-    POLICY_DEFAULTS,
-    # Alignment documentation
-    EXEMPT_SETTINGS,
-    FIELD_MAPPINGS,
-    SETTINGS_TO_RUNTIME,
+from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.enums import (
+    BackpressureMode,
+    BatchStatus,
+    CallStatus,
+    CallType,
+    Determinism,
+    ExportStatus,
+    NodeStateStatus,
+    NodeType,
+    RoutingKind,
+    RoutingMode,
+    RowOutcome,
+    RunMode,
+    RunStatus,
+    TelemetryGranularity,
+    TriggerType,
+)
+from elspeth.contracts.errors import (
+    BatchPendingError,
+    ExecutionError,
+    RoutingReason,
+    TransformReason,
 )
 from elspeth.contracts.events import (
     PhaseAction,
@@ -128,15 +113,31 @@ from elspeth.contracts.events import (
     RunCompleted,
     RunCompletionStatus,
 )
-from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
-from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.results import (
+    ArtifactDescriptor,
+    FailureInfo,
+    GateResult,
+    RowResult,
+    SourceRow,
+    TransformResult,
+)
+from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.types import (
+    AggregationName,
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    SinkName,
+)
 from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
     SanitizedDatabaseUrl,
     SanitizedWebhookUrl,
 )
-from elspeth.contracts.sink import OutputValidationResult
 
 __all__ = [  # Grouped by category for readability
     # audit
@@ -170,29 +171,15 @@ __all__ = [  # Grouped by category for readability
     "TokenParent",
     "TransformErrorRecord",
     "ValidationErrorRecord",
-    # config - Settings classes
-    "CheckpointSettings",
-    "ConcurrencySettings",
-    "DatabaseSettings",
-    "ElspethSettings",
-    "ExporterConfig",
-    "ExporterSettings",
-    "LandscapeExportSettings",
-    "LandscapeSettings",
-    "PayloadStoreSettings",
-    "RateLimitSettings",
-    "RetrySettings",
-    "SinkSettings",
-    "SourceSettings",
-    "TelemetrySettings",
-    "TransformSettings",
-    # config - Runtime protocols
+    # config - Runtime protocols (contracts, not core)
     "RuntimeCheckpointProtocol",
     "RuntimeConcurrencyProtocol",
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
-    "RuntimeTelemetryConfig",
     "RuntimeTelemetryProtocol",
+    # config - Runtime config dataclasses
+    "ExporterConfig",
+    "RuntimeTelemetryConfig",
     # config - Default registries
     "INTERNAL_DEFAULTS",
     "POLICY_DEFAULTS",
@@ -200,6 +187,8 @@ __all__ = [  # Grouped by category for readability
     "EXEMPT_SETTINGS",
     "FIELD_MAPPINGS",
     "SETTINGS_TO_RUNTIME",
+    # NOTE: Settings classes (RetrySettings, ElspethSettings, etc.) are NOT here
+    # Import them from elspeth.core.config to avoid breaking the leaf boundary
     # enums
     "BackpressureMode",
     "BatchStatus",

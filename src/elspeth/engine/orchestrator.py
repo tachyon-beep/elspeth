@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
     from elspeth.telemetry import TelemetryEvent, TelemetryManager
 
+from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
@@ -838,11 +839,13 @@ class Orchestrator:
                 # Aggregations have plugin instances in node_to_plugin (transforms with metadata)
                 if node_id in config_gate_node_ids:
                     # Config gates are deterministic (expression evaluation is deterministic)
-                    plugin_version = "1.0.0"
+                    # Use engine version to track which version of ExpressionParser was used
+                    plugin_version = f"engine:{ENGINE_VERSION}"
                     determinism = Determinism.DETERMINISTIC
                 elif node_id in coalesce_node_ids:
                     # Coalesce nodes merge tokens from parallel paths - deterministic operation
-                    plugin_version = "1.0.0"
+                    # Use engine version to track which version of the coalesce logic was used
+                    plugin_version = f"engine:{ENGINE_VERSION}"
                     determinism = Determinism.DETERMINISTIC
                 else:
                     # Direct access - if node_id is in execution_order (from graph.topological_order()),

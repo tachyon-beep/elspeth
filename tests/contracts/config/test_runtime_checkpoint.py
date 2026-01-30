@@ -83,8 +83,8 @@ class TestRuntimeCheckpointFromSettings:
 
     def test_from_settings_every_row(self) -> None:
         """from_settings() with frequency='every_row' produces frequency=1."""
-        from elspeth.contracts.config import CheckpointSettings
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
 
         settings = CheckpointSettings(
             enabled=True,
@@ -101,8 +101,8 @@ class TestRuntimeCheckpointFromSettings:
 
     def test_from_settings_every_n(self) -> None:
         """from_settings() with frequency='every_n' uses checkpoint_interval."""
-        from elspeth.contracts.config import CheckpointSettings
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
 
         settings = CheckpointSettings(
             enabled=True,
@@ -120,8 +120,8 @@ class TestRuntimeCheckpointFromSettings:
 
     def test_from_settings_aggregation_only(self) -> None:
         """from_settings() with frequency='aggregation_only' produces frequency=0."""
-        from elspeth.contracts.config import CheckpointSettings
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
 
         settings = CheckpointSettings(
             enabled=True,
@@ -138,8 +138,8 @@ class TestRuntimeCheckpointFromSettings:
 
     def test_from_settings_disabled(self) -> None:
         """from_settings() preserves enabled=False."""
-        from elspeth.contracts.config import CheckpointSettings
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
 
         settings = CheckpointSettings(
             enabled=False,
@@ -153,8 +153,8 @@ class TestRuntimeCheckpointFromSettings:
 
     def test_from_settings_with_defaults(self) -> None:
         """from_settings() should handle default values from Settings."""
-        from elspeth.contracts.config import CheckpointSettings
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+        from elspeth.core.config import CheckpointSettings
 
         # Use Settings defaults
         settings = CheckpointSettings()

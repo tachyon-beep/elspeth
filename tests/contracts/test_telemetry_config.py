@@ -13,14 +13,16 @@ import pytest
 
 from elspeth.contracts.config import (
     ExporterConfig,
-    ExporterSettings,
     RuntimeTelemetryConfig,
-    TelemetrySettings,
 )
 from elspeth.contracts.enums import (
     _IMPLEMENTED_BACKPRESSURE_MODES,
     BackpressureMode,
     TelemetryGranularity,
+)
+from elspeth.core.config import (
+    ExporterSettings,
+    TelemetrySettings,
 )
 
 

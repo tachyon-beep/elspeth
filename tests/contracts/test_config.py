@@ -1,12 +1,23 @@
-"""Tests for configuration contracts."""
+"""Tests for configuration contracts.
+
+After fixing P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary,
+Settings classes are NO LONGER re-exported from contracts. They must be
+imported directly from elspeth.core.config.
+
+This test verifies:
+1. Runtime protocols and config classes ARE available in contracts.config
+2. Settings classes are NOT in contracts.config (leaf boundary preserved)
+3. Settings classes ARE available in core.config
+"""
 
 import pytest
 
 from elspeth.contracts import config as contract_config
 from elspeth.core import config as core_config
 
-# Settings classes that should be re-exported from core.config
-SETTINGS_REEXPORTS = {
+# Settings classes that should ONLY be in core.config (NOT re-exported from contracts)
+# This is the fix for P2-2026-01-20 - maintaining contracts as a leaf module
+SETTINGS_IN_CORE_ONLY = {
     "AggregationSettings",
     "CheckpointSettings",
     "CoalesceSettings",
@@ -28,7 +39,7 @@ SETTINGS_REEXPORTS = {
     "TriggerConfig",
 }
 
-# Items defined in the contracts.config subpackage (not from core.config)
+# Items defined in the contracts.config subpackage (these ARE exported)
 CONTRACTS_CONFIG_ITEMS = {
     # Runtime protocols
     "RuntimeCheckpointProtocol",
@@ -58,15 +69,30 @@ CONTRACTS_CONFIG_ITEMS = {
 }
 
 
-class TestConfigReexports:
-    """Verify config types are accessible from contracts."""
+class TestConfigLeafBoundary:
+    """Verify Settings are NOT re-exported from contracts (leaf boundary)."""
 
-    @pytest.mark.parametrize("name", sorted(SETTINGS_REEXPORTS))
-    def test_settings_reexports_identity(self, name: str) -> None:
-        """Settings re-exports are identical to core config types."""
-        contract_type = getattr(contract_config, name)
-        core_type = getattr(core_config, name)
-        assert contract_type is core_type
+    @pytest.mark.parametrize("name", sorted(SETTINGS_IN_CORE_ONLY))
+    def test_settings_not_in_contracts_config(self, name: str) -> None:
+        """Settings classes must NOT be in contracts.config (leaf boundary fix).
+
+        This is a regression test for P2-2026-01-20. Settings classes were
+        previously re-exported from contracts.config, which broke the leaf
+        boundary and caused 1,200+ module imports.
+        """
+        assert not hasattr(contract_config, name), (
+            f"{name} should NOT be in contracts.config - import from core.config instead. "
+            "Re-exporting Settings would break the leaf boundary (P2-2026-01-20)."
+        )
+
+    @pytest.mark.parametrize("name", sorted(SETTINGS_IN_CORE_ONLY))
+    def test_settings_available_in_core_config(self, name: str) -> None:
+        """Settings classes are available in core.config."""
+        assert hasattr(core_config, name), f"{name} should be in core.config"
+
+
+class TestContractsConfigItems:
+    """Verify contracts.config items that ARE exported."""
 
     @pytest.mark.parametrize("name", sorted(CONTRACTS_CONFIG_ITEMS))
     def test_contracts_config_items_exist(self, name: str) -> None:
@@ -74,22 +100,25 @@ class TestConfigReexports:
         item = getattr(contract_config, name)
         assert item is not None
 
-    def test_all_exports_categorized(self) -> None:
-        """All items in __all__ must be in either SETTINGS_REEXPORTS or CONTRACTS_CONFIG_ITEMS."""
+    def test_all_exports_match_expected(self) -> None:
+        """All items in __all__ should be in CONTRACTS_CONFIG_ITEMS."""
         all_exports = set(contract_config.__all__)
-        categorized = SETTINGS_REEXPORTS | CONTRACTS_CONFIG_ITEMS
 
-        missing = all_exports - categorized
-        extra = categorized - all_exports
+        missing = all_exports - CONTRACTS_CONFIG_ITEMS
+        extra = CONTRACTS_CONFIG_ITEMS - all_exports
 
-        assert not missing, f"Uncategorized exports: {missing}. Add to SETTINGS_REEXPORTS or CONTRACTS_CONFIG_ITEMS."
-        assert not extra, f"Categorized items not in __all__: {extra}. Remove from test categories or add to __all__."
+        assert not missing, f"Unexpected exports in __all__: {missing}. Add to CONTRACTS_CONFIG_ITEMS or remove from __all__."
+        assert not extra, f"Expected items not in __all__: {extra}. Remove from test or add to __all__."
+
+
+class TestCoreConfigSettings:
+    """Tests for Settings classes in core.config."""
 
     def test_settings_are_pydantic_models(self) -> None:
         """Config types are Pydantic (trust boundary validation)."""
         from pydantic import BaseModel
 
-        from elspeth.contracts import ElspethSettings, SourceSettings
+        from elspeth.core.config import ElspethSettings, SourceSettings
 
         assert issubclass(ElspethSettings, BaseModel)
         assert issubclass(SourceSettings, BaseModel)
@@ -98,7 +127,7 @@ class TestConfigReexports:
         """Config is immutable after construction."""
         from pydantic import ValidationError
 
-        from elspeth.contracts import SourceSettings
+        from elspeth.core.config import SourceSettings
 
         settings = SourceSettings(plugin="csv_local")
 

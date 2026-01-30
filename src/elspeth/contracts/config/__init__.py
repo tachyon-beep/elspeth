@@ -2,17 +2,23 @@
 """Configuration contracts subpackage.
 
 This subpackage contains:
-- Settings classes (re-exported from core/config.py)
-- Runtime protocols (protocols.py)
-- Default registries (defaults.py)
-- Field alignment documentation (alignment.py)
+- Runtime protocols (protocols.py) - what engine components expect
+- Runtime config dataclasses (runtime.py) - concrete implementations
+- Default registries (defaults.py) - POLICY_DEFAULTS, INTERNAL_DEFAULTS
+- Field alignment documentation (alignment.py) - Settings→Runtime mapping
 
-Import pattern:
-    # Settings classes (most common)
-    from elspeth.contracts.config import RetrySettings, CheckpointSettings
+NOTE: Settings classes (RetrySettings, ElspethSettings, etc.) are NOT here.
+      Import them from elspeth.core.config to avoid breaking the leaf boundary.
 
-    # Runtime protocols (for type hints accepting runtime config)
+Import patterns:
+    # Settings classes (from core, not contracts!)
+    from elspeth.core.config import RetrySettings, ElspethSettings
+
+    # Runtime protocols (for type hints)
     from elspeth.contracts.config import RuntimeRetryProtocol
+
+    # Runtime config (concrete implementations)
+    from elspeth.contracts.config import RuntimeRetryConfig
 
     # Defaults (for runtime config construction)
     from elspeth.contracts.config import POLICY_DEFAULTS, INTERNAL_DEFAULTS
@@ -20,12 +26,6 @@ Import pattern:
     # Alignment (for tooling/tests)
     from elspeth.contracts.config import FIELD_MAPPINGS, EXEMPT_SETTINGS
 """
-
-# =============================================================================
-# Settings classes (re-exports from core/config.py)
-# =============================================================================
-# These are the original Pydantic models for user configuration.
-# Re-exported here for import consistency: `from elspeth.contracts import ...`
 
 # =============================================================================
 # Field alignment documentation
@@ -76,27 +76,18 @@ from elspeth.contracts.config.runtime import (
     RuntimeRetryConfig,
     RuntimeTelemetryConfig,
 )
-from elspeth.core.config import (
-    AggregationSettings,
-    CheckpointSettings,
-    CoalesceSettings,
-    ConcurrencySettings,
-    DatabaseSettings,
-    ElspethSettings,
-    ExporterSettings,
-    GateSettings,
-    LandscapeExportSettings,
-    LandscapeSettings,
-    PayloadStoreSettings,
-    RateLimitSettings,
-    RetrySettings,
-    ServiceRateLimit,
-    SinkSettings,
-    SourceSettings,
-    TelemetrySettings,
-    TransformSettings,
-    TriggerConfig,
-)
+
+# =============================================================================
+# Settings classes are NOT re-exported here
+# =============================================================================
+# Settings classes (RetrySettings, ElspethSettings, etc.) live in core.config.
+# They are NOT imported here to maintain contracts as a leaf module.
+#
+# Import Settings from elspeth.core.config:
+#     from elspeth.core.config import RetrySettings, ElspethSettings
+#
+# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+# =============================================================================
 
 __all__ = [
     "EXEMPT_SETTINGS",
@@ -104,20 +95,7 @@ __all__ = [
     "INTERNAL_DEFAULTS",
     "POLICY_DEFAULTS",
     "SETTINGS_TO_RUNTIME",
-    "AggregationSettings",
-    "CheckpointSettings",
-    "CoalesceSettings",
-    "ConcurrencySettings",
-    "DatabaseSettings",
-    "ElspethSettings",
     "ExporterConfig",
-    "ExporterSettings",
-    "GateSettings",
-    "LandscapeExportSettings",
-    "LandscapeSettings",
-    "PayloadStoreSettings",
-    "RateLimitSettings",
-    "RetrySettings",
     "RuntimeCheckpointConfig",
     "RuntimeCheckpointProtocol",
     "RuntimeConcurrencyConfig",
@@ -128,12 +106,6 @@ __all__ = [
     "RuntimeRetryProtocol",
     "RuntimeTelemetryConfig",
     "RuntimeTelemetryProtocol",
-    "ServiceRateLimit",
-    "SinkSettings",
-    "SourceSettings",
-    "TelemetrySettings",
-    "TransformSettings",
-    "TriggerConfig",
     "get_internal_default",
     "get_policy_default",
     "get_runtime_field_name",

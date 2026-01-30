@@ -55,8 +55,8 @@ class TestRuntimeRateLimitFromSettings:
 
     def test_from_settings_maps_all_fields(self) -> None:
         """from_settings() must map all Settings fields correctly."""
-        from elspeth.contracts.config import RateLimitSettings, ServiceRateLimit
         from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+        from elspeth.core.config import RateLimitSettings, ServiceRateLimit
 
         # Create settings with non-default values
         services = {"openai": ServiceRateLimit(requests_per_second=5)}
@@ -79,8 +79,8 @@ class TestRuntimeRateLimitFromSettings:
 
     def test_from_settings_with_defaults(self) -> None:
         """from_settings() should handle default values from Settings."""
-        from elspeth.contracts.config import RateLimitSettings
         from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+        from elspeth.core.config import RateLimitSettings
 
         # Use Settings defaults
         settings = RateLimitSettings()
@@ -95,8 +95,8 @@ class TestRuntimeRateLimitFromSettings:
 
     def test_from_settings_converts_int_to_float(self) -> None:
         """from_settings() should convert int rates to float for protocol compliance."""
-        from elspeth.contracts.config import RateLimitSettings
         from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+        from elspeth.core.config import RateLimitSettings
 
         settings = RateLimitSettings(
             default_requests_per_second=10,  # int in Settings

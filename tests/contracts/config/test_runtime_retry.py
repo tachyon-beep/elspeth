@@ -49,8 +49,8 @@ class TestRuntimeRetryFromSettings:
 
     def test_from_settings_maps_all_fields(self) -> None:
         """from_settings() must map all Settings fields correctly."""
-        from elspeth.contracts.config import RetrySettings
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         # Use non-default values to catch forgotten mappings
         settings = RetrySettings(
@@ -70,8 +70,9 @@ class TestRuntimeRetryFromSettings:
 
     def test_from_settings_uses_internal_jitter(self) -> None:
         """from_settings() must use internal default for jitter."""
-        from elspeth.contracts.config import INTERNAL_DEFAULTS, RetrySettings
+        from elspeth.contracts.config import INTERNAL_DEFAULTS
         from elspeth.contracts.config.runtime import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
 
         settings = RetrySettings()
         config = RuntimeRetryConfig.from_settings(settings)

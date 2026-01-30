@@ -1212,3 +1212,223 @@ class TestNodeMetadataFromPlugin:
             f"Aggregation determinism should be 'non_deterministic' from transform, "
             f"got '{agg_node.determinism}' (was hardcoded to 'deterministic')"
         )
+
+    def test_config_gate_node_uses_engine_version(self) -> None:
+        """Config gate nodes should use engine version, not hardcoded '1.0.0'.
+
+        BUG FIX: P2-2026-01-15-node-metadata-hardcoded
+        Config gates are engine-internal nodes (not plugins) that evaluate
+        expressions. They should use 'engine:{VERSION}' format to indicate
+        they're engine components, not user plugins.
+        """
+        from elspeth import __version__ as ENGINE_VERSION
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.config import GateSettings
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class ValueSchema(PluginSchema):
+            value: int
+
+        class ListSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = ValueSchema
+
+            def __init__(self, data: list[dict[str, Any]]) -> None:
+                self._data = data
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                for _row in self._data:
+                    yield SourceRow.valid(_row)
+
+            def close(self) -> None:
+                pass
+
+        class CollectSink(_TestSinkBase):
+            name = "test_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                if isinstance(rows, list):
+                    self.results.extend(rows)
+                else:
+                    self.results.append(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        # Create a config gate (expression-based, not plugin-based)
+        # Use literal "True" - the expression parser allows boolean literals
+        config_gate = GateSettings(
+            name="value_check",
+            condition="True",
+            routes={"true": "continue", "false": "continue"},
+        )
+
+        source = ListSource([{"value": 42}])
+        sink = CollectSink()
+
+        # Build graph with config gate
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[config_gate],
+            default_sink="default",
+        )
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+            gates=[config_gate],
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph)
+
+        # Query Landscape to verify config gate node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the config gate node (named "config_gate:value_check")
+        config_gate_node = next(
+            (n for n in nodes if n.plugin_name.startswith("config_gate:")),
+            None,
+        )
+        assert config_gate_node is not None, "Config gate node not found in Landscape"
+
+        # CRITICAL: Verify config gate uses engine version, NOT hardcoded "1.0.0"
+        expected_version = f"engine:{ENGINE_VERSION}"
+        assert config_gate_node.plugin_version == expected_version, (
+            f"Config gate plugin_version should be '{expected_version}', got '{config_gate_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+
+        # Config gates are deterministic (expression evaluation is pure)
+        assert config_gate_node.determinism == Determinism.DETERMINISTIC, (
+            f"Config gate determinism should be DETERMINISTIC, got '{config_gate_node.determinism}'"
+        )
+
+    def test_coalesce_node_uses_engine_version(self) -> None:
+        """Coalesce nodes should use engine version, not hardcoded '1.0.0'.
+
+        BUG FIX: P2-2026-01-15-node-metadata-hardcoded (related)
+        Coalesce nodes merge tokens from parallel fork paths. Like config gates,
+        they're engine-internal and should use 'engine:{VERSION}' format.
+        """
+        from elspeth import __version__ as ENGINE_VERSION
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        # Use settings-based approach which properly wires fork/coalesce
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),  # No file access needed
+            transforms=[
+                TransformSettings(
+                    plugin="passthrough",
+                    name="path_a",
+                    options={"schema": {"fields": "dynamic"}},
+                ),
+                TransformSettings(
+                    plugin="passthrough",
+                    name="path_b",
+                    options={"schema": {"fields": "dynamic"}},
+                ),
+            ],
+            sinks={
+                "default": SinkSettings(
+                    plugin="json",
+                    options={"path": "/tmp/test_coalesce_audit.json", "schema": {"fields": "dynamic"}},
+                ),
+            },
+            default_sink="default",
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_paths",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        config = PipelineConfig(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            gates=list(settings.gates),
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph, settings=settings)
+
+        # Query Landscape to verify coalesce node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the coalesce node (named "coalesce:merge_paths")
+        coalesce_node = next(
+            (n for n in nodes if n.plugin_name.startswith("coalesce:")),
+            None,
+        )
+        assert coalesce_node is not None, "Coalesce node not found in Landscape"
+
+        # CRITICAL: Verify coalesce uses engine version, NOT hardcoded "1.0.0"
+        expected_version = f"engine:{ENGINE_VERSION}"
+        assert coalesce_node.plugin_version == expected_version, (
+            f"Coalesce plugin_version should be '{expected_version}', got '{coalesce_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+
+        # Coalesce is deterministic (merging is a pure operation)
+        assert coalesce_node.determinism == Determinism.DETERMINISTIC, (
+            f"Coalesce determinism should be DETERMINISTIC, got '{coalesce_node.determinism}'"
+        )

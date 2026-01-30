@@ -50,8 +50,11 @@ def get_protocol_class(name: str) -> type:
 
 
 def get_settings_class(name: str) -> type:
-    """Import and return a Settings class by name."""
-    from elspeth.contracts import config
+    """Import and return a Settings class by name.
+
+    Settings classes are in core.config, NOT contracts.config (leaf boundary fix).
+    """
+    from elspeth.core import config
 
     return getattr(config, name)
 

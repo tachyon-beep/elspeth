@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any, cast
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
-from elspeth.core.config import ServiceRateLimit
+
+# NOTE: ServiceRateLimit and other Settings classes are imported lazily inside
+# from_settings() methods to avoid breaking the contracts leaf module boundary.
+# Importing from elspeth.core at module level would pull in 1,200+ modules.
+# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
 
 if TYPE_CHECKING:
     from elspeth.core.config import (
@@ -31,6 +35,7 @@ if TYPE_CHECKING:
         ConcurrencySettings,
         RateLimitSettings,
         RetrySettings,
+        ServiceRateLimit,
         TelemetrySettings,
     )
 
@@ -204,7 +209,7 @@ class RuntimeRateLimitConfig:
     persistence_path: str | None
     services: dict[str, "ServiceRateLimit"]
 
-    def get_service_config(self, service_name: str) -> ServiceRateLimit:
+    def get_service_config(self, service_name: str) -> "ServiceRateLimit":
         """Get rate limit config for a service, with fallback to defaults.
 
         This mirrors RateLimitSettings.get_service_config() behavior, providing
@@ -219,6 +224,9 @@ class RuntimeRateLimitConfig:
         """
         if service_name in self.services:
             return self.services[service_name]
+
+        # Lazy import to avoid breaking contracts leaf boundary
+        from elspeth.core.config import ServiceRateLimit
 
         # Construct from defaults - convert float back to int for ServiceRateLimit
         # ServiceRateLimit expects int for requests_per_second

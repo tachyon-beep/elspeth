@@ -52,8 +52,8 @@ class TestRuntimeConcurrencyFromSettings:
 
     def test_from_settings_maps_all_fields(self) -> None:
         """from_settings() must map all Settings fields correctly."""
-        from elspeth.contracts.config import ConcurrencySettings
         from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
+        from elspeth.core.config import ConcurrencySettings
 
         # Create settings with non-default values
         settings = ConcurrencySettings(max_workers=16)
@@ -65,8 +65,8 @@ class TestRuntimeConcurrencyFromSettings:
 
     def test_from_settings_with_defaults(self) -> None:
         """from_settings() should handle default values from Settings."""
-        from elspeth.contracts.config import ConcurrencySettings
         from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
+        from elspeth.core.config import ConcurrencySettings
 
         # Use Settings defaults
         settings = ConcurrencySettings()
