@@ -200,11 +200,64 @@ class JSONSource(BaseSource):
                 return  # Stop processing this file
 
         # Extract from nested key if specified
+        # Per Three-Tier Trust Model (CLAUDE.md), structural mismatches in external
+        # data are quarantined, not exceptions. This handles:
+        # 1. data_key configured but JSON root is a list (not dict)
+        # 2. data_key configured but key doesn't exist in JSON object
+        # 3. data_key extraction results in non-list
         if self._data_key:
+            # Check 1: Root must be a dict to use data_key
+            if not isinstance(data, dict):
+                error_msg = f"Cannot extract data_key '{self._data_key}': expected JSON object, got {type(data).__name__}"
+                ctx.record_validation_error(
+                    row={"file_path": str(self._path), "data_key": self._data_key},
+                    error=error_msg,
+                    schema_mode="structure",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row={"file_path": str(self._path), "structure_error": error_msg},
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return
+
+            # Check 2: Key must exist in the dict
+            if self._data_key not in data:
+                error_msg = f"data_key '{self._data_key}' not found in JSON object. Available keys: {list(data.keys())}"
+                ctx.record_validation_error(
+                    row={"file_path": str(self._path), "data_key": self._data_key},
+                    error=error_msg,
+                    schema_mode="structure",
+                    destination=self._on_validation_failure,
+                )
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row={"file_path": str(self._path), "structure_error": error_msg},
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return
+
             data = data[self._data_key]
 
+        # Check 3: Data must be a list (either root or extracted via data_key)
         if not isinstance(data, list):
-            raise ValueError(f"Expected JSON array, got {type(data).__name__}")
+            error_msg = f"Expected JSON array, got {type(data).__name__}"
+            ctx.record_validation_error(
+                row={"file_path": str(self._path)},
+                error=error_msg,
+                schema_mode="structure",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row={"file_path": str(self._path), "structure_error": error_msg},
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
 
         for row in data:
             yield from self._validate_and_yield(row, ctx)

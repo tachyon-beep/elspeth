@@ -172,8 +172,12 @@ class TestJSONSource:
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))
 
-    def test_non_array_json_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Non-array JSON raises ValueError."""
+    def test_non_array_json_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Non-array JSON is quarantined per Three-Tier Trust Model.
+
+        External data (Tier 3) with wrong structure should be quarantined,
+        not raise exceptions. This allows audit trail to record the failure.
+        """
         from elspeth.plugins.sources.json_source import JSONSource
 
         json_file = tmp_path / "object.json"
@@ -186,8 +190,13 @@ class TestJSONSource:
                 "on_validation_failure": QUARANTINE_SINK,
             }
         )
-        with pytest.raises(ValueError, match="Expected JSON array"):
-            list(source.load(ctx))
+        # Should NOT raise - should quarantine instead
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert "array" in results[0].quarantine_error.lower()
+        assert "dict" in results[0].quarantine_error.lower()
 
     def test_close_is_idempotent(self, tmp_path: Path, ctx: PluginContext) -> None:
         """close() can be called multiple times."""
@@ -711,3 +720,178 @@ class TestJSONSourceNonFiniteConstants:
         assert quarantined.is_quarantined is True
         assert "__raw_line__" in quarantined.row
         assert nan_line in quarantined.row["__raw_line__"]
+
+
+class TestJSONSourceDataKeyStructuralErrors:
+    """Tests for JSON source handling of data_key structural mismatches.
+
+    Per CLAUDE.md Three-Tier Trust Model (Tier 3 - external data):
+    - If data_key is configured but JSON root is a list, quarantine don't crash
+    - If data_key is configured but key doesn't exist in JSON object, quarantine
+    - If data_key extraction results in non-list, quarantine don't crash
+
+    Bug: P2-2026-01-21-jsonsource-data-key-missing-crash
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_data_key_on_list_root_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """data_key configured but JSON root is a list - quarantine, not TypeError.
+
+        This tests the case where an API changes from returning {results: [...]}
+        to returning [...] directly. Should quarantine gracefully.
+        """
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # JSON file is a list, but data_key expects an object
+        json_file = tmp_path / "data.json"
+        json_file.write_text('[{"id": 1}, {"id": 2}]')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",  # Expects object with "results" key
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should NOT raise TypeError - should quarantine
+        results = list(source.load(ctx))
+
+        # Should yield 1 quarantined row for the structural error
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_destination == "quarantine"
+        # Error should indicate structural mismatch
+        error = results[0].quarantine_error
+        assert error is not None
+        assert "list" in error.lower() or "dict" in error.lower() or "object" in error.lower()
+
+    def test_data_key_missing_in_object_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """data_key configured but key doesn't exist in JSON object - quarantine, not KeyError.
+
+        This tests the case where data_key: "results" is configured but
+        the JSON has {"items": [...]} instead.
+        """
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # JSON object has "items" key, not "results"
+        json_file = tmp_path / "data.json"
+        json_file.write_text('{"items": [{"id": 1}, {"id": 2}], "metadata": {}}')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",  # Key doesn't exist
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should NOT raise KeyError - should quarantine
+        results = list(source.load(ctx))
+
+        # Should yield 1 quarantined row for the missing key
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_destination == "quarantine"
+        # Error should indicate missing key
+        error = results[0].quarantine_error
+        assert error is not None
+        assert "results" in error or "key" in error.lower() or "missing" in error.lower()
+
+    def test_data_key_extracts_non_list_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """data_key extracts a non-list value - quarantine, not crash.
+
+        This tests the case where data_key points to a scalar or nested object
+        instead of an array.
+        """
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # data_key points to an object, not a list
+        json_file = tmp_path / "data.json"
+        json_file.write_text('{"results": {"count": 0, "items": []}, "status": "ok"}')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",  # Points to object, not list
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should NOT raise ValueError - should quarantine
+        results = list(source.load(ctx))
+
+        # Should yield 1 quarantined row for wrong type
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        # Error should indicate type mismatch (expected array)
+        error = results[0].quarantine_error
+        assert error is not None
+        assert "array" in error.lower() or "list" in error.lower() or "dict" in error.lower()
+
+    def test_data_key_structural_error_with_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """With on_validation_failure='discard', structural errors yield nothing."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_text('[{"id": 1}]')  # List root, but data_key expects object
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",
+                "on_validation_failure": "discard",  # Don't yield quarantined
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should NOT raise - should discard silently
+        results = list(source.load(ctx))
+
+        # No rows yielded - structural error discarded
+        assert len(results) == 0
+
+    def test_data_key_structural_error_logs_validation_error(
+        self, tmp_path: Path, ctx: PluginContext, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Structural errors are recorded via ctx.record_validation_error().
+
+        Without a Landscape connection, PluginContext logs a warning instead
+        of persisting. This test verifies the recording path is called.
+        """
+        import logging
+
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_text('{"wrong_key": [{"id": 1}]}')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "data_key": "results",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Execute with log capture
+        with caplog.at_level(logging.WARNING, logger="elspeth.plugins.context"):
+            list(source.load(ctx))
+
+        # Verify validation error was logged (no Landscape in test context)
+        assert len(caplog.records) == 1
+        assert "Validation error not recorded" in caplog.records[0].message
+        assert "results" in caplog.records[0].message  # The missing key
