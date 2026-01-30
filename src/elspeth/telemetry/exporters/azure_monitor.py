@@ -23,6 +23,8 @@ from elspeth.telemetry.exporters.otlp import (
 )
 
 if TYPE_CHECKING:
+    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
     from elspeth.contracts.events import TelemetryEvent
 
 logger = structlog.get_logger(__name__)
@@ -61,7 +63,7 @@ class AzureMonitorExporter:
         """Initialize unconfigured exporter."""
         self._connection_string: str | None = None
         self._batch_size: int = 100
-        self._azure_exporter: Any = None  # AzureMonitorTraceExporter
+        self._azure_exporter: AzureMonitorTraceExporter | None = None
         self._buffer: list[TelemetryEvent] = []
         self._configured: bool = False
 

@@ -1030,68 +1030,68 @@ allow_hits:
   safety: Caught, logged with warning; other exporters still closed
   expires: null
 # OTLP Exporter - telemetry exporters must never crash the pipeline
-- key: telemetry/exporters/otlp.py:R3:_derive_span_id:line=63
+- key: telemetry/exporters/otlp.py:R3:_derive_span_id:line=65
   owner: architecture
   reason: 'Polymorphic events: different TelemetryEvent types have different fields (token_id, state_id, row_id)'
   safety: hasattr is correct here - gracefully includes available fields for span ID uniqueness
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=138
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=140
   owner: architecture
   reason: 'Optional config field: headers is not required for OTLP export'
   safety: Empty dict default is safe - no headers sent to OTLP endpoint
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=139
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=141
   owner: architecture
   reason: 'Optional config field: batch_size has sensible default of 100'
   safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=140
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=142
   owner: architecture
   reason: 'Optional config field: flush_interval_ms has sensible default of 5000ms'
   safety: Default 5000ms is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:line=194
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:line=196
   owner: architecture
   reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - buffered events dropped, pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:line=224
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:line=226
   owner: architecture
   reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning, buffer cleared - pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:line=335
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:line=337
   owner: architecture
   reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:line=352
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:line=354
   owner: architecture
   reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
 # Azure Monitor Exporter - telemetry exporters must never crash the pipeline
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:line=101
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:line=103
   owner: architecture
   reason: 'Optional config field: batch_size has sensible default of 100'
   safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:line=156
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:line=158
   owner: architecture
   reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - buffered events dropped, pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:line=186
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:line=188
   owner: architecture
   reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning, buffer cleared - pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:line=297
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:line=299
   owner: architecture
   reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:line=315
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:line=317
   owner: architecture
   reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
   safety: Caught, logged with warning - other cleanup continues

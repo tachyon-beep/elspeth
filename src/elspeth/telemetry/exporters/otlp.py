@@ -21,6 +21,8 @@ import structlog
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
     from elspeth.contracts.events import TelemetryEvent
 
 logger = structlog.get_logger(__name__)
@@ -105,7 +107,7 @@ class OTLPExporter:
         self._headers: dict[str, str] = {}
         self._batch_size: int = 100
         self._flush_interval_ms: int = 5000  # Documented but not implemented
-        self._span_exporter: Any = None  # OTLPSpanExporter, typed as Any for lazy import
+        self._span_exporter: OTLPSpanExporter | None = None
         self._buffer: list[TelemetryEvent] = []
         self._configured: bool = False
 
@@ -216,7 +218,7 @@ class OTLPExporter:
 
         try:
             spans = [self._event_to_span(e) for e in self._buffer]
-            self._span_exporter.export(spans)
+            self._span_exporter.export(spans)  # type: ignore[arg-type]  # _SyntheticReadableSpan duck-types ReadableSpan
             logger.debug(
                 "OTLP batch exported",
                 span_count=len(spans),
