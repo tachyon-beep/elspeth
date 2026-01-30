@@ -2,6 +2,11 @@
 
 These tests verify that RuntimeConcurrencyConfig is properly wired through
 the CLI -> Orchestrator -> RowProcessor -> TransformExecutor pipeline.
+
+STATUS: IMPLEMENTED
+- Orchestrator: accepts concurrency_config parameter
+- TransformExecutor: accepts max_workers parameter
+- RowProcessor: accepts max_workers and forwards to TransformExecutor
 """
 
 from elspeth.contracts.config import RuntimeConcurrencyConfig

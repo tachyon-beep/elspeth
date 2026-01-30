@@ -647,71 +647,71 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
   expires: null
 # Orchestrator cleanup and routed_destinations counting
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=238
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=264
   owner: architecture
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
 # _execute_run: routed_destinations counter accumulation (6 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1103
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1237
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1136
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1270
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1203
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1337
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1275
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1409
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1313
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1447
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _process_resumed_rows: routed_destinations counter accumulation (5 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2064
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2200
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2089
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2225
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2145
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2281
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2192
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2328
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2228
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2364
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _check_aggregation_timeouts: routed_destinations counter for timeout-triggered downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2509
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2645
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _flush_remaining_aggregation_buffers: routed_destinations counter for end-of-source flush downstream routing
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2678
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2814
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
@@ -989,4 +989,97 @@ allow_hits:
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
   safety: Empty list default produces 0 for message_count in metrics - safe for recording
+  expires: null
+# OpenRouter Batch LLM Transform - external LLM API responses (Tier 3)
+- key: plugins/llm/openrouter_batch.py:R4:OpenRouterBatchLLMTransform:_process_batch:line=258
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): ThreadPoolExecutor futures may fail for many reasons (network, API errors)'
+  safety: Caught and stored; assembled into error rows with full details for audit trail
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:line=264
+  owner: architecture
+  reason: 'Internal dict lookup after parallel execution - results dict is fully populated'
+  safety: None check on next line handles unexpected missing entries with error row
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=486
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
+  safety: Graceful default to {} - usage is metadata, not critical for processing
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=491
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API model field is optional in response'
+  safety: None in audit trail is acceptable - field is informational only
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=505
+  owner: architecture
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  safety: Graceful fallback to configured model - audit still captures actual value
+  expires: null
+# TelemetryManager - exporter boundary (exporters are external code that can throw any exception)
+- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:line=131
+  owner: architecture
+  reason: 'False positive: queue.Queue.get() is not dict.get() - no bug hiding'
+  safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing keys
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:handle_event:line=171
+  owner: architecture
+  reason: 'Exporter boundary: export() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning, failure tracked in health metrics; pipeline continues
+  expires: null
+- key: telemetry/manager.py:R1:TelemetryManager:handle_event:line=173
+  owner: architecture
+  reason: 'Counter accumulation pattern: exporter_failures counts may not exist for all exporters'
+  safety: Default 0 for first failure of each exporter is correct initialization
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:flush:line=249
+  owner: architecture
+  reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning; other exporters still flushed
+  expires: null
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=267
+  owner: architecture
+  reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
+  safety: Caught, logged with warning; other exporters still closed
+  expires: null
+# OTLP Exporter - telemetry exporters must never crash the pipeline
+- key: telemetry/exporters/otlp.py:R3:_derive_span_id:line=63
+  owner: architecture
+  reason: 'Polymorphic events: different TelemetryEvent types have different fields (token_id, state_id, row_id)'
+  safety: hasattr is correct here - gracefully includes available fields for span ID uniqueness
+  expires: null
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=138
+  owner: architecture
+  reason: 'Optional config field: headers is not required for OTLP export'
+  safety: Empty dict default is safe - no headers sent to OTLP endpoint
+  expires: null
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=139
+  owner: architecture
+  reason: 'Optional config field: batch_size has sensible default of 100'
+  safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=140
+  owner: architecture
+  reason: 'Optional config field: flush_interval_ms has sensible default of 5000ms'
+  safety: Default 5000ms is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:line=194
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - buffered events dropped, pipeline continues
+  expires: null
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:line=224
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning, buffer cleared - pipeline continues
+  expires: null
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:line=335
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:line=352
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  safety: Caught, logged with warning - other cleanup continues
   expires: null

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace import Span, Tracer
 
     from elspeth.contracts import Call, CallStatus, CallType
+    from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.payload_store import PayloadStore
@@ -86,6 +87,7 @@ class PluginContext:
     tracer: "Tracer | None" = None
     payload_store: "PayloadStore | None" = None
     rate_limit_registry: "RateLimitRegistry | None" = None
+    concurrency_config: "RuntimeConcurrencyConfig | None" = None
 
     # Additional metadata
     node_id: str | None = field(default=None)

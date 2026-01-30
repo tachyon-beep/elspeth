@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 from elspeth.core.config import RateLimitSettings, ServiceRateLimit
 from elspeth.core.rate_limit.limiter import RateLimiter
 from elspeth.core.rate_limit.registry import NoOpLimiter, RateLimitRegistry
@@ -58,7 +59,8 @@ class TestRateLimitRegistryDisabled:
     def test_returns_noop_limiter_when_disabled(self) -> None:
         """Registry returns NoOpLimiter when rate limiting is disabled."""
         settings = RateLimitSettings(enabled=False)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter = registry.get_limiter("any_service")
 
@@ -67,7 +69,8 @@ class TestRateLimitRegistryDisabled:
     def test_same_noop_instance_for_all_services(self) -> None:
         """All services get the same NoOpLimiter instance when disabled."""
         settings = RateLimitSettings(enabled=False)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter1 = registry.get_limiter("service_a")
         limiter2 = registry.get_limiter("service_b")
@@ -86,7 +89,8 @@ class TestRateLimitRegistryEnabled:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter = registry.get_limiter("new_service")
 
@@ -99,7 +103,8 @@ class TestRateLimitRegistryEnabled:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter1 = registry.get_limiter("my_service")
         limiter2 = registry.get_limiter("my_service")
@@ -113,7 +118,8 @@ class TestRateLimitRegistryEnabled:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter_a = registry.get_limiter("service_a")
         limiter_b = registry.get_limiter("service_b")
@@ -137,7 +143,8 @@ class TestRateLimitRegistryEnabled:
                 ),
             },
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter = registry.get_limiter("openai")
 
@@ -165,7 +172,8 @@ class TestRateLimitRegistryEnabled:
                 "openai": ServiceRateLimit(requests_per_second=5),
             },
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         # This service is not in the services dict
         limiter = registry.get_limiter("unknown_api")
@@ -190,7 +198,8 @@ class TestRateLimitRegistryThreadSafety:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         results: list[RateLimiter | NoOpLimiter] = []
 
@@ -212,7 +221,8 @@ class TestRateLimitRegistryThreadSafety:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         def get_limiter(service_name: str) -> RateLimiter | NoOpLimiter:
             return registry.get_limiter(service_name)
@@ -238,7 +248,8 @@ class TestRateLimitRegistryCleanup:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         # Create some limiters
         limiter1 = registry.get_limiter("service_a")
@@ -261,7 +272,8 @@ class TestRateLimitRegistryCleanup:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         # Create some limiters
         limiter1 = registry.get_limiter("service_a")
@@ -279,7 +291,8 @@ class TestRateLimitRegistryCleanup:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         registry.get_limiter("test_service")
 
@@ -293,7 +306,8 @@ class TestRateLimitRegistryCleanup:
             enabled=True,
             default_requests_per_second=10,
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         original = registry.get_limiter("service")
         registry.reset_all()

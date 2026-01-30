@@ -1,47 +1,12 @@
 # tests/contracts/config/test_runtime_rate_limit.py
 """Tests for RuntimeRateLimitConfig.
 
-TDD tests written before implementation. These verify:
-1. Protocol compliance (structural typing)
-2. Orphan field detection (no fields without Settings origin)
-3. Field name mapping (explicit mapping assertions)
-4. Factory method behavior (from_settings, default)
+Rate-limit-specific tests only. Common tests (frozen, slots, protocol, orphan fields)
+are in test_runtime_common.py.
 """
 
-import pytest
 
-
-class TestRuntimeRateLimitProtocolCompliance:
-    """Verify RuntimeRateLimitConfig implements RuntimeRateLimitProtocol."""
-
-    def test_runtime_rate_limit_implements_protocol(self) -> None:
-        """RuntimeRateLimitConfig must implement RuntimeRateLimitProtocol.
-
-        This uses runtime_checkable to verify structural typing.
-        """
-        from elspeth.contracts.config import RuntimeRateLimitProtocol
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        # Create instance with defaults
-        config = RuntimeRateLimitConfig.default()
-
-        # Protocol check via isinstance (runtime_checkable)
-        assert isinstance(config, RuntimeRateLimitProtocol), (
-            "RuntimeRateLimitConfig does not implement RuntimeRateLimitProtocol. "
-            "Check that all protocol properties are present with correct types."
-        )
-
-    def test_protocol_fields_have_correct_types(self) -> None:
-        """Protocol fields must return correct types."""
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        config = RuntimeRateLimitConfig.default()
-
-        assert isinstance(config.enabled, bool)
-        # default_requests_per_second can be float or None
-        assert config.default_requests_per_second is None or isinstance(config.default_requests_per_second, float)
-        # default_requests_per_minute can be float or None
-        assert config.default_requests_per_minute is None or isinstance(config.default_requests_per_minute, float)
+# NOTE: Protocol compliance, orphan detection, frozen/slots tests are in test_runtime_common.py
 
 
 class TestRuntimeRateLimitAllFields:
@@ -64,57 +29,6 @@ class TestRuntimeRateLimitAllFields:
 
         assert expected_fields == actual_fields, (
             f"RuntimeRateLimitConfig fields mismatch.\nMissing: {expected_fields - actual_fields}\nExtra: {actual_fields - expected_fields}"
-        )
-
-
-class TestRuntimeRateLimitNoOrphanFields:
-    """Verify RuntimeRateLimitConfig has no orphan fields.
-
-    Every field must come from RateLimitSettings (no internal-only fields).
-    """
-
-    def test_runtime_has_no_orphan_fields(self) -> None:
-        """Every RuntimeRateLimitConfig field must have documented origin."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, RateLimitSettings
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        # Get all RuntimeRateLimitConfig fields
-        runtime_fields = set(RuntimeRateLimitConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "RateLimitSettings"
-        settings_fields = set(RateLimitSettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # All runtime fields must be accounted for
-        orphan_fields = runtime_fields - runtime_from_settings
-
-        assert not orphan_fields, f"RuntimeRateLimitConfig has orphan fields: {orphan_fields}. These must be mapped from RateLimitSettings."
-
-    def test_no_missing_settings_fields(self) -> None:
-        """RuntimeRateLimitConfig must receive all Settings fields."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, RateLimitSettings
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        # Get all RuntimeRateLimitConfig fields
-        runtime_fields = set(RuntimeRateLimitConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "RateLimitSettings"
-        settings_fields = set(RateLimitSettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # All settings fields must exist in runtime
-        missing_fields = runtime_from_settings - runtime_fields
-
-        assert not missing_fields, (
-            f"RuntimeRateLimitConfig is missing Settings fields: {missing_fields}. Add these fields to RuntimeRateLimitConfig."
         )
 
 
@@ -210,24 +124,3 @@ class TestRuntimeRateLimitConvenienceFactories:
         assert config.default_requests_per_minute is None
         assert config.persistence_path is None
         assert config.services == {}
-
-
-class TestRuntimeRateLimitImmutability:
-    """Test that RuntimeRateLimitConfig is immutable (frozen dataclass)."""
-
-    def test_frozen_dataclass(self) -> None:
-        """RuntimeRateLimitConfig should be frozen (immutable)."""
-        from dataclasses import FrozenInstanceError
-
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        config = RuntimeRateLimitConfig.default()
-
-        with pytest.raises(FrozenInstanceError):
-            config.enabled = True  # type: ignore[misc]
-
-    def test_has_slots(self) -> None:
-        """RuntimeRateLimitConfig should use __slots__ for memory efficiency."""
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-
-        assert hasattr(RuntimeRateLimitConfig, "__slots__"), "RuntimeRateLimitConfig should have __slots__"

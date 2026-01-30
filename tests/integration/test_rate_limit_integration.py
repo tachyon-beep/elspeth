@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from elspeth.contracts import TransformResult
+from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 from elspeth.core.config import RateLimitSettings
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.rate_limit import RateLimitRegistry
@@ -50,7 +51,8 @@ class TestRateLimitRegistryInOrchestrator:
         """Orchestrator constructor accepts rate_limit_registry parameter."""
         db = LandscapeDB.in_memory()
         settings = RateLimitSettings(enabled=True, default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         try:
             # Should not raise
@@ -77,7 +79,8 @@ class TestRateLimitRegistryInContext:
     def test_context_has_rate_limit_registry_field(self) -> None:
         """PluginContext has rate_limit_registry field."""
         settings = RateLimitSettings(enabled=True, default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         try:
             ctx = PluginContext(
@@ -113,7 +116,8 @@ class TestRateLimitThrottling:
             enabled=True,
             default_requests_per_second=10,  # 10 per second
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         try:
             transform = RateLimitAwareTransform({"service_name": "throttle_test"})
@@ -148,7 +152,8 @@ class TestRateLimitThrottling:
             enabled=False,
             default_requests_per_second=1,  # Would be slow if enabled
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         try:
             transform = RateLimitAwareTransform({"service_name": "no_throttle_test"})
@@ -187,7 +192,8 @@ class TestRateLimitServiceConfig:
                 "fast_service": ServiceRateLimit(requests_per_second=100),
             },
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         try:
             # Get limiters for different services

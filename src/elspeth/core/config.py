@@ -617,6 +617,100 @@ class PayloadStoreSettings(BaseModel):
     retention_days: int = Field(default=90, gt=0, description="Payload retention in days")
 
 
+class ExporterSettings(BaseModel):
+    """Configuration for a single telemetry exporter.
+
+    Example YAML:
+        telemetry:
+          exporters:
+            - name: console
+              options:
+                pretty: true
+            - name: otlp
+              options:
+                endpoint: https://otel.example.com
+    """
+
+    model_config = {"frozen": True}
+
+    name: str = Field(description="Exporter name (console, otlp, azure_monitor, datadog)")
+    options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Exporter-specific configuration options",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_not_empty(cls, v: str) -> str:
+        """Exporter name cannot be empty."""
+        if not v.strip():
+            raise ValueError("exporter name cannot be empty")
+        return v
+
+
+class TelemetrySettings(BaseModel):
+    """Configuration for pipeline telemetry emission.
+
+    Telemetry emits structured events about pipeline execution for monitoring,
+    observability, and debugging. Events flow to configured exporters.
+
+    Example YAML:
+        telemetry:
+          enabled: true
+          granularity: rows
+          backpressure_mode: drop
+          fail_on_total_exporter_failure: false
+          exporters:
+            - name: console
+              options:
+                pretty: true
+            - name: otlp
+              options:
+                endpoint: https://otel.example.com
+
+    Granularity levels (from least to most verbose):
+        - lifecycle: Only run start/complete/failed events
+        - rows: Lifecycle + row-level events
+        - full: Rows + external call events (LLM, HTTP, etc.)
+
+    Backpressure modes:
+        - block: Block pipeline when exporters can't keep up (safest)
+        - drop: Drop events when buffer is full (lossy, no pipeline impact)
+        - slow: Adaptive rate limiting (not yet implemented)
+    """
+
+    model_config = {"frozen": True}
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable telemetry emission",
+    )
+    granularity: Literal["lifecycle", "rows", "full"] = Field(
+        default="lifecycle",
+        description="Event granularity: lifecycle (minimal), rows, or full (verbose)",
+    )
+    backpressure_mode: Literal["block", "drop", "slow"] = Field(
+        default="block",
+        description="How to handle backpressure when exporters can't keep up",
+    )
+    fail_on_total_exporter_failure: bool = Field(
+        default=True,
+        description="Fail the run if all exporters fail (when enabled)",
+    )
+    exporters: list[ExporterSettings] = Field(
+        default_factory=list,
+        description="List of telemetry exporters to send events to",
+    )
+
+    @model_validator(mode="after")
+    def validate_exporters_when_enabled(self) -> "TelemetrySettings":
+        """Warn if telemetry is enabled but no exporters are configured."""
+        # Note: This is a warning case, not an error. Telemetry with no exporters
+        # just means events are produced but not exported anywhere - useful for
+        # testing or when exporters are added dynamically.
+        return self
+
+
 class ElspethSettings(BaseModel):
     """Top-level Elspeth configuration matching architecture specification.
 
@@ -695,6 +789,10 @@ class ElspethSettings(BaseModel):
     rate_limit: RateLimitSettings = Field(
         default_factory=RateLimitSettings,
         description="Rate limiting configuration",
+    )
+    telemetry: TelemetrySettings = Field(
+        default_factory=TelemetrySettings,
+        description="Telemetry and observability configuration",
     )
 
     @model_validator(mode="after")

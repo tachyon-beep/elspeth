@@ -34,6 +34,7 @@ from elspeth.contracts import (
     SinkName,
     SourceRow,
 )
+from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -125,6 +126,7 @@ class TestCompletedOutcomeTimingContract:
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
         checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         class RowSchema(PluginSchema):
             value: int
@@ -182,7 +184,7 @@ class TestCompletedOutcomeTimingContract:
         orchestrator = Orchestrator(
             db,
             checkpoint_manager=checkpoint_manager,
-            checkpoint_settings=checkpoint_settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # Run the pipeline - expect it to fail due to sink exception

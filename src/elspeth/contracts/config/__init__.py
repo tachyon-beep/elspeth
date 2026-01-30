@@ -61,6 +61,7 @@ from elspeth.contracts.config.protocols import (
     RuntimeConcurrencyProtocol,
     RuntimeRateLimitProtocol,
     RuntimeRetryProtocol,
+    RuntimeTelemetryProtocol,
 )
 
 # =============================================================================
@@ -68,10 +69,12 @@ from elspeth.contracts.config.protocols import (
 # =============================================================================
 # Concrete implementations of Runtime*Protocol interfaces.
 from elspeth.contracts.config.runtime import (
+    ExporterConfig,
     RuntimeCheckpointConfig,
     RuntimeConcurrencyConfig,
     RuntimeRateLimitConfig,
     RuntimeRetryConfig,
+    RuntimeTelemetryConfig,
 )
 from elspeth.core.config import (
     AggregationSettings,
@@ -80,6 +83,7 @@ from elspeth.core.config import (
     ConcurrencySettings,
     DatabaseSettings,
     ElspethSettings,
+    ExporterSettings,
     GateSettings,
     LandscapeExportSettings,
     LandscapeSettings,
@@ -89,6 +93,7 @@ from elspeth.core.config import (
     ServiceRateLimit,
     SinkSettings,
     SourceSettings,
+    TelemetrySettings,
     TransformSettings,
     TriggerConfig,
 )
@@ -105,6 +110,8 @@ __all__ = [
     "ConcurrencySettings",
     "DatabaseSettings",
     "ElspethSettings",
+    "ExporterConfig",
+    "ExporterSettings",
     "GateSettings",
     "LandscapeExportSettings",
     "LandscapeSettings",
@@ -119,9 +126,12 @@ __all__ = [
     "RuntimeRateLimitProtocol",
     "RuntimeRetryConfig",
     "RuntimeRetryProtocol",
+    "RuntimeTelemetryConfig",
+    "RuntimeTelemetryProtocol",
     "ServiceRateLimit",
     "SinkSettings",
     "SourceSettings",
+    "TelemetrySettings",
     "TransformSettings",
     "TriggerConfig",
     "get_internal_default",

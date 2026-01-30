@@ -22,9 +22,17 @@ from typing import TYPE_CHECKING, Any, cast
 
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.enums import _IMPLEMENTED_BACKPRESSURE_MODES, BackpressureMode, TelemetryGranularity
+from elspeth.core.config import ServiceRateLimit
 
 if TYPE_CHECKING:
-    from elspeth.core.config import CheckpointSettings, ConcurrencySettings, RateLimitSettings, RetrySettings, ServiceRateLimit
+    from elspeth.core.config import (
+        CheckpointSettings,
+        ConcurrencySettings,
+        RateLimitSettings,
+        RetrySettings,
+        TelemetrySettings,
+    )
 
 
 def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
@@ -195,6 +203,32 @@ class RuntimeRateLimitConfig:
     default_requests_per_minute: float | None
     persistence_path: str | None
     services: dict[str, "ServiceRateLimit"]
+
+    def get_service_config(self, service_name: str) -> ServiceRateLimit:
+        """Get rate limit config for a service, with fallback to defaults.
+
+        This mirrors RateLimitSettings.get_service_config() behavior, providing
+        the same interface for RateLimitRegistry to use.
+
+        Args:
+            service_name: Name of the service to get config for
+
+        Returns:
+            ServiceRateLimit for the service (specific config if available,
+            otherwise constructed from defaults)
+        """
+        if service_name in self.services:
+            return self.services[service_name]
+
+        # Construct from defaults - convert float back to int for ServiceRateLimit
+        # ServiceRateLimit expects int for requests_per_second
+        rps = int(self.default_requests_per_second) if self.default_requests_per_second is not None else 10
+        rpm = int(self.default_requests_per_minute) if self.default_requests_per_minute is not None else None
+
+        return ServiceRateLimit(
+            requests_per_second=rps,
+            requests_per_minute=rpm,
+        )
 
     @classmethod
     def default(cls) -> "RuntimeRateLimitConfig":
@@ -379,4 +413,117 @@ class RuntimeCheckpointConfig:
             frequency=frequency,
             checkpoint_interval=settings.checkpoint_interval,
             aggregation_boundaries=settings.aggregation_boundaries,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ExporterConfig:
+    """Configuration for a single telemetry exporter.
+
+    This is an immutable container for exporter settings. Each exporter
+    has a name (which determines the exporter class) and options dict
+    (passed to the exporter's constructor).
+
+    Example YAML that produces ExporterConfig instances:
+        telemetry:
+          exporters:
+            - name: console
+              options:
+                pretty: true
+            - name: otlp
+              options:
+                endpoint: https://otel.example.com
+    """
+
+    name: str
+    options: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        """Validate exporter configuration."""
+        if not self.name:
+            raise ValueError("exporter name cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeTelemetryConfig:
+    """Runtime configuration for telemetry emission.
+
+    Implements RuntimeTelemetryProtocol for structural typing verification.
+
+    Field Origins (all from TelemetrySettings):
+        - enabled: TelemetrySettings.enabled (direct mapping)
+        - granularity: TelemetrySettings.granularity (parsed from str to enum)
+        - backpressure_mode: TelemetrySettings.backpressure_mode (parsed from str to enum)
+        - fail_on_total_exporter_failure: TelemetrySettings.fail_on_total_exporter_failure (direct)
+        - exporter_configs: TelemetrySettings.exporters (converted to tuple of ExporterConfig)
+
+    Protocol Coverage:
+        All fields are part of RuntimeTelemetryProtocol.
+
+    Fail-Fast Behavior:
+        The from_settings() factory validates that backpressure_mode is implemented.
+        Unimplemented modes (like 'slow') cause NotImplementedError at config load time,
+        not at runtime. This follows ELSPETH's principle of failing fast with clear errors.
+    """
+
+    enabled: bool
+    granularity: TelemetryGranularity
+    backpressure_mode: BackpressureMode
+    fail_on_total_exporter_failure: bool
+    exporter_configs: tuple[ExporterConfig, ...]
+
+    @classmethod
+    def default(cls) -> "RuntimeTelemetryConfig":
+        """Factory for default telemetry configuration.
+
+        Returns config with telemetry disabled - telemetry is opt-in.
+        No exporters are configured by default.
+        """
+        return cls(
+            enabled=False,
+            granularity=TelemetryGranularity.LIFECYCLE,
+            backpressure_mode=BackpressureMode.BLOCK,
+            fail_on_total_exporter_failure=True,
+            exporter_configs=(),
+        )
+
+    @classmethod
+    def from_settings(cls, settings: "TelemetrySettings") -> "RuntimeTelemetryConfig":
+        """Factory from TelemetrySettings config model.
+
+        Field Mapping:
+            settings.enabled -> enabled (direct)
+            settings.granularity -> granularity (parsed to enum)
+            settings.backpressure_mode -> backpressure_mode (parsed to enum)
+            settings.fail_on_total_exporter_failure -> fail_on_total_exporter_failure (direct)
+            settings.exporters -> exporter_configs (converted to tuple of ExporterConfig)
+
+        Args:
+            settings: Validated Pydantic settings model
+
+        Returns:
+            RuntimeTelemetryConfig with mapped values
+
+        Raises:
+            NotImplementedError: If backpressure_mode is not yet implemented (e.g., 'slow')
+            ValueError: If granularity or backpressure_mode is invalid
+        """
+        # Parse enum values from settings strings (lowercase for normalization)
+        granularity = TelemetryGranularity(settings.granularity.lower())
+        backpressure_mode = BackpressureMode(settings.backpressure_mode.lower())
+
+        # Fail fast on unimplemented backpressure modes
+        if backpressure_mode not in _IMPLEMENTED_BACKPRESSURE_MODES:
+            implemented = sorted(m.value for m in _IMPLEMENTED_BACKPRESSURE_MODES)
+            raise NotImplementedError(f"backpressure_mode='{backpressure_mode.value}' is not yet implemented. Use one of: {implemented}")
+
+        # Convert exporter list to tuple of ExporterConfig
+        exporter_configs = tuple(ExporterConfig(name=exp.name, options=dict(exp.options)) for exp in settings.exporters)
+
+        return cls(
+            enabled=settings.enabled,
+            granularity=granularity,
+            backpressure_mode=backpressure_mode,
+            fail_on_total_exporter_failure=settings.fail_on_total_exporter_failure,
+            exporter_configs=exporter_configs,
         )

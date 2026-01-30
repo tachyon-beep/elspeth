@@ -13,6 +13,7 @@ SETTINGS_REEXPORTS = {
     "ConcurrencySettings",
     "DatabaseSettings",
     "ElspethSettings",
+    "ExporterSettings",
     "GateSettings",
     "LandscapeExportSettings",
     "LandscapeSettings",
@@ -22,6 +23,7 @@ SETTINGS_REEXPORTS = {
     "ServiceRateLimit",
     "SinkSettings",
     "SourceSettings",
+    "TelemetrySettings",
     "TransformSettings",
     "TriggerConfig",
 }
@@ -33,11 +35,14 @@ CONTRACTS_CONFIG_ITEMS = {
     "RuntimeConcurrencyProtocol",
     "RuntimeRateLimitProtocol",
     "RuntimeRetryProtocol",
+    "RuntimeTelemetryProtocol",
     # Runtime configuration dataclasses
+    "ExporterConfig",
     "RuntimeCheckpointConfig",
     "RuntimeConcurrencyConfig",
     "RuntimeRateLimitConfig",
     "RuntimeRetryConfig",
+    "RuntimeTelemetryConfig",
     # Default registries
     "INTERNAL_DEFAULTS",
     "POLICY_DEFAULTS",

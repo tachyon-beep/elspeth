@@ -1,107 +1,13 @@
 # tests/contracts/config/test_runtime_retry.py
 """Tests for RuntimeRetryConfig.
 
-TDD tests written before implementation. These verify:
-1. Protocol compliance (structural typing)
-2. Orphan field detection (no fields without Settings or INTERNAL origin)
-3. Field name mapping (explicit mapping assertions)
-4. Factory method behavior (from_settings, from_policy, default, no_retry)
+Retry-specific tests only. Common tests (frozen, slots, protocol, orphan fields)
+are in test_runtime_common.py.
 """
 
 import pytest
 
-
-class TestRuntimeRetryProtocolCompliance:
-    """Verify RuntimeRetryConfig implements RuntimeRetryProtocol."""
-
-    def test_runtime_retry_implements_protocol(self) -> None:
-        """RuntimeRetryConfig must implement RuntimeRetryProtocol.
-
-        This uses runtime_checkable to verify structural typing.
-        """
-        from elspeth.contracts.config import RuntimeRetryProtocol
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        # Create instance with defaults
-        config = RuntimeRetryConfig.default()
-
-        # Protocol check via isinstance (runtime_checkable)
-        assert isinstance(config, RuntimeRetryProtocol), (
-            "RuntimeRetryConfig does not implement RuntimeRetryProtocol. Check that all protocol properties are present with correct types."
-        )
-
-    def test_protocol_fields_have_correct_types(self) -> None:
-        """Protocol fields must return correct types."""
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        config = RuntimeRetryConfig.default()
-
-        assert isinstance(config.max_attempts, int)
-        assert isinstance(config.base_delay, float)
-        assert isinstance(config.max_delay, float)
-        assert isinstance(config.exponential_base, float)
-
-
-class TestRuntimeRetryNoOrphanFields:
-    """Verify RuntimeRetryConfig has no orphan fields.
-
-    Every field must be documented as either:
-    - Coming from RetrySettings (possibly renamed)
-    - Being INTERNAL (hardcoded, documented in INTERNAL_DEFAULTS)
-    """
-
-    def test_runtime_has_no_orphan_fields(self) -> None:
-        """Every RuntimeRetryConfig field must have documented origin."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, INTERNAL_DEFAULTS, RetrySettings
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        # Get all RuntimeRetryConfig fields
-        runtime_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "RetrySettings"
-        settings_fields = set(RetrySettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # Get internal-only fields from INTERNAL_DEFAULTS
-        internal_fields = set(INTERNAL_DEFAULTS.get("retry", {}).keys())
-
-        # All runtime fields must be accounted for
-        expected_fields = runtime_from_settings | internal_fields
-        orphan_fields = runtime_fields - expected_fields
-
-        assert not orphan_fields, (
-            f"RuntimeRetryConfig has orphan fields: {orphan_fields}. "
-            f"These must either be:\n"
-            f"  1. Mapped from RetrySettings (add to FIELD_MAPPINGS if renamed)\n"
-            f"  2. Documented as internal (add to INTERNAL_DEFAULTS['retry'])"
-        )
-
-    def test_no_missing_settings_fields(self) -> None:
-        """RuntimeRetryConfig must receive all Settings fields."""
-        from elspeth.contracts.config import FIELD_MAPPINGS, RetrySettings
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        # Get all RuntimeRetryConfig fields
-        runtime_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
-
-        # Get Settings fields (with their runtime names via mapping)
-        settings_class = "RetrySettings"
-        settings_fields = set(RetrySettings.model_fields.keys())
-        field_mappings = FIELD_MAPPINGS.get(settings_class, {})
-
-        # Map settings fields to their runtime names
-        runtime_from_settings = {field_mappings.get(f, f) for f in settings_fields}
-
-        # All settings fields must exist in runtime
-        missing_fields = runtime_from_settings - runtime_fields
-
-        assert not missing_fields, (
-            f"RuntimeRetryConfig is missing Settings fields: {missing_fields}. Add these fields to RuntimeRetryConfig."
-        )
+# NOTE: Protocol compliance, orphan detection, frozen/slots tests are in test_runtime_common.py
 
 
 class TestRetryFieldNameMapping:
@@ -269,27 +175,6 @@ class TestRuntimeRetryConvenienceFactories:
         config = RuntimeRetryConfig.no_retry()
 
         assert config.max_attempts == 1, "no_retry should have max_attempts=1"
-
-
-class TestRuntimeRetryImmutability:
-    """Test that RuntimeRetryConfig is immutable (frozen dataclass)."""
-
-    def test_frozen_dataclass(self) -> None:
-        """RuntimeRetryConfig should be frozen (immutable)."""
-        from dataclasses import FrozenInstanceError
-
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        config = RuntimeRetryConfig.default()
-
-        with pytest.raises(FrozenInstanceError):
-            config.max_attempts = 10  # type: ignore[misc]
-
-    def test_has_slots(self) -> None:
-        """RuntimeRetryConfig should use __slots__ for memory efficiency."""
-        from elspeth.contracts.config.runtime import RuntimeRetryConfig
-
-        assert hasattr(RuntimeRetryConfig, "__slots__"), "RuntimeRetryConfig should have __slots__"
 
 
 class TestRuntimeRetryValidation:

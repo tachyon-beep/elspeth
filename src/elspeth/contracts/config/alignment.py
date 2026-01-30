@@ -35,6 +35,9 @@ FIELD_MAPPINGS: Final[dict[str, dict[str, str]]] = {
         "initial_delay_seconds": "base_delay",
         "max_delay_seconds": "max_delay",
     },
+    "TelemetrySettings": {
+        "exporters": "exporter_configs",
+    },
     # RateLimitSettings, ConcurrencySettings, CheckpointSettings
     # all use same field names in Settings and Runtime
 }
@@ -52,6 +55,7 @@ SETTINGS_TO_RUNTIME: Final[dict[str, str]] = {
     "RateLimitSettings": "RuntimeRateLimitConfig",
     "ConcurrencySettings": "RuntimeConcurrencyConfig",
     "CheckpointSettings": "RuntimeCheckpointConfig",
+    "TelemetrySettings": "RuntimeTelemetryConfig",
 }
 
 
@@ -85,6 +89,8 @@ EXEMPT_SETTINGS: Final[set[str]] = {
     "PayloadStoreSettings",
     # Nested in RateLimitSettings - handled by parent
     "ServiceRateLimit",
+    # Nested in TelemetrySettings - no Runtime counterpart
+    "ExporterSettings",
     # Top-level container
     "ElspethSettings",
 }

@@ -218,3 +218,40 @@ class RunMode(str, Enum):
     LIVE = "live"
     REPLAY = "replay"
     VERIFY = "verify"
+
+
+class TelemetryGranularity(str, Enum):
+    """Granularity of telemetry events emitted by the TelemetryManager.
+
+    Uses (str, Enum) for YAML/settings parsing and serialization.
+
+    Values:
+        LIFECYCLE: Only run start/complete/failed events (minimal overhead)
+        ROWS: Lifecycle + row-level events (row_started, row_completed, etc.)
+        FULL: Rows + external call events (LLM requests, HTTP calls, etc.)
+    """
+
+    LIFECYCLE = "lifecycle"
+    ROWS = "rows"
+    FULL = "full"
+
+
+class BackpressureMode(str, Enum):
+    """How to handle backpressure when telemetry exporters can't keep up.
+
+    Uses (str, Enum) for YAML/settings parsing and serialization.
+
+    Values:
+        BLOCK: Block the pipeline until exporters catch up (safest, may slow pipeline)
+        DROP: Drop events when buffer is full (lossy, no pipeline impact)
+        SLOW: Adaptive rate limiting (not yet implemented)
+    """
+
+    BLOCK = "block"
+    DROP = "drop"
+    SLOW = "slow"
+
+
+# Backpressure modes that are currently implemented.
+# Used by RuntimeTelemetryConfig.from_settings() to fail fast on unimplemented modes.
+_IMPLEMENTED_BACKPRESSURE_MODES = frozenset({BackpressureMode.BLOCK, BackpressureMode.DROP})

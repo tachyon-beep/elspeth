@@ -1,4 +1,8 @@
-"""Tests for CSV sink plugin."""
+"""Tests for CSV sink plugin.
+
+NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
+are in conftest.py as parametrized tests covering all sink plugins.
+"""
 
 import csv
 import hashlib
@@ -7,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
@@ -20,22 +23,6 @@ class TestCSVSink:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """CSVSink implements SinkProtocol."""
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-
-        sink = CSVSink({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})
-        assert isinstance(sink, SinkProtocol)
-
-    def test_has_required_attributes(self) -> None:
-        """CSVSink has name and input_schema."""
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-
-        assert CSVSink.name == "csv"
-        # input_schema is now set per-instance based on config
-        sink = CSVSink({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})
-        assert hasattr(sink, "input_schema")
 
     def test_write_creates_file(self, tmp_path: Path, ctx: PluginContext) -> None:
         """write() creates CSV file with headers."""

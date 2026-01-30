@@ -17,10 +17,12 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
+    from elspeth.telemetry import TelemetryEvent, TelemetryManager
 
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
@@ -43,6 +45,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
+from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -61,8 +64,9 @@ RowPlugin = TransformProtocol | GateProtocol
 
 if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
+    from elspeth.contracts.config.runtime import RuntimeCheckpointConfig, RuntimeConcurrencyConfig
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.config import CheckpointSettings, ElspethSettings
+    from elspeth.core.config import ElspethSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
 
@@ -146,9 +150,11 @@ class Orchestrator:
         event_bus: "EventBusProtocol" = None,  # type: ignore[assignment]
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
-        checkpoint_settings: "CheckpointSettings | None" = None,
+        checkpoint_config: "RuntimeCheckpointConfig | None" = None,
         clock: "Clock | None" = None,
         rate_limit_registry: "RateLimitRegistry | None" = None,
+        concurrency_config: "RuntimeConcurrencyConfig | None" = None,
+        telemetry_manager: "TelemetryManager | None" = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -158,11 +164,25 @@ class Orchestrator:
         self._canonical_version = canonical_version
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
-        self._checkpoint_settings = checkpoint_settings
+        self._checkpoint_config = checkpoint_config
         self._clock = clock if clock is not None else DEFAULT_CLOCK
         self._rate_limit_registry = rate_limit_registry
+        self._concurrency_config = concurrency_config
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
+        self._telemetry = telemetry_manager  # Optional, disabled by default
+
+    def _emit_telemetry(self, event: "TelemetryEvent") -> None:
+        """Emit telemetry event if manager is configured.
+
+        Telemetry is emitted AFTER Landscape recording succeeds. Landscape is
+        the legal record; telemetry is operational visibility.
+
+        Args:
+            event: The telemetry event to emit
+        """
+        if self._telemetry is not None:
+            self._telemetry.handle_event(event)
 
     def _maybe_checkpoint(self, run_id: str, token_id: str, node_id: str) -> None:
         """Create checkpoint if configured.
@@ -180,7 +200,7 @@ class Orchestrator:
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
         """
-        if not self._checkpoint_settings or not self._checkpoint_settings.enabled:
+        if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
         if self._checkpoint_manager is None:
             return
@@ -190,15 +210,17 @@ class Orchestrator:
 
         self._sequence_number += 1
 
+        # RuntimeCheckpointConfig.frequency is an int:
+        # - 1 = every_row
+        # - 0 = aggregation_only
+        # - N = every N rows
+        frequency = self._checkpoint_config.frequency
         should_checkpoint = False
-        if self._checkpoint_settings.frequency == "every_row":
-            should_checkpoint = True
-        elif self._checkpoint_settings.frequency == "every_n":
-            interval = self._checkpoint_settings.checkpoint_interval
-            # interval is validated in CheckpointSettings when frequency="every_n"
-            assert interval is not None  # Validated by CheckpointSettings model
-            should_checkpoint = (self._sequence_number % interval) == 0
-        # aggregation_only: checkpointed separately in aggregation flush
+        if frequency == 1:
+            should_checkpoint = True  # every_row
+        elif frequency > 1:
+            should_checkpoint = (self._sequence_number % frequency) == 0  # every_n
+        # frequency == 0: aggregation_only - checkpointed separately in aggregation flush
 
         if should_checkpoint:
             self._checkpoint_manager.create_checkpoint(
@@ -515,6 +537,17 @@ class Orchestrator:
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
 
+        # Local imports for telemetry events - consolidated here to avoid repeated imports
+        from elspeth.telemetry import (
+            PhaseChanged as TelemetryPhaseChanged,
+        )
+        from elspeth.telemetry import (
+            RunCompleted as TelemetryRunCompleted,
+        )
+        from elspeth.telemetry import (
+            RunStarted as TelemetryRunStarted,
+        )
+
         # DATABASE phase - create recorder and begin run
         phase_start = time.perf_counter()
         try:
@@ -530,6 +563,16 @@ class Orchestrator:
                 config=config.config,
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
+            )
+
+            # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record
+            self._emit_telemetry(
+                TelemetryRunStarted(
+                    timestamp=datetime.now(UTC),
+                    run_id=run.run_id,
+                    config_hash=run.config_hash,
+                    source_plugin=config.source.name,
+                )
             )
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.DATABASE, duration_seconds=time.perf_counter() - phase_start))
@@ -556,6 +599,18 @@ class Orchestrator:
             result.status = RunStatus.COMPLETED
             run_completed = True
 
+            # Emit telemetry AFTER Landscape finalize succeeds
+            run_duration_ms = (time.perf_counter() - run_start_time) * 1000
+            self._emit_telemetry(
+                TelemetryRunCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=run.run_id,
+                    status=RunStatus.COMPLETED,
+                    row_count=result.rows_processed,
+                    duration_ms=run_duration_ms,
+                )
+            )
+
             # Delete checkpoints on successful completion
             # (checkpoints are for recovery, not needed after success)
             self._delete_checkpoints(run.run_id)
@@ -573,6 +628,16 @@ class Orchestrator:
                 phase_start = time.perf_counter()
                 try:
                     self._events.emit(PhaseStarted(phase=PipelinePhase.EXPORT, action=PhaseAction.EXPORTING, target=export_config.sink))
+
+                    # Emit telemetry PhaseChanged for EXPORT
+                    self._emit_telemetry(
+                        TelemetryPhaseChanged(
+                            timestamp=datetime.now(UTC),
+                            run_id=run.run_id,
+                            phase=PipelinePhase.EXPORT,
+                            action=PhaseAction.EXPORTING,
+                        )
+                    )
 
                     self._export_landscape(
                         run_id=run.run_id,
@@ -625,6 +690,8 @@ class Orchestrator:
 
             if run_completed:
                 # Export failed after successful run - emit PARTIAL status
+                # NOTE: TelemetryRunCompleted was already emitted at lines 604-612
+                # before the export attempt, so we only emit the EventBus event here
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -642,6 +709,18 @@ class Orchestrator:
             else:
                 # Run failed before completion - emit FAILED status with zero metrics
                 recorder.finalize_run(run.run_id, status=RunStatus.FAILED)
+
+                # Emit telemetry AFTER Landscape finalize succeeds
+                self._emit_telemetry(
+                    TelemetryRunCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=run.run_id,
+                        status=RunStatus.FAILED,
+                        row_count=0,
+                        duration_ms=total_duration * 1000,
+                    )
+                )
+
                 self._events.emit(
                     RunCompleted(
                         run_id=run.run_id,
@@ -691,6 +770,14 @@ class Orchestrator:
         # Store graph for checkpointing during execution
         self._current_graph = graph
 
+        # Local imports for telemetry events - consolidated here to avoid repeated imports
+        from elspeth.telemetry import (
+            PhaseChanged as TelemetryPhaseChanged,
+        )
+        from elspeth.telemetry import (
+            RowCreated as TelemetryRowCreated,
+        )
+
         # Get execution order from graph
         execution_order = graph.topological_order()
 
@@ -729,6 +816,16 @@ class Orchestrator:
         phase_start = time.perf_counter()
         try:
             self._events.emit(PhaseStarted(phase=PipelinePhase.GRAPH, action=PhaseAction.BUILDING))
+
+            # Emit telemetry PhaseChanged - we now have run_id from begin_run
+            self._emit_telemetry(
+                TelemetryPhaseChanged(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    phase=PipelinePhase.GRAPH,
+                    action=PhaseAction.BUILDING,
+                )
+            )
 
             # Register nodes with Landscape using graph's node IDs and actual plugin metadata
             from elspeth.contracts import Determinism
@@ -848,6 +945,7 @@ class Orchestrator:
             config=config.config,
             landscape=recorder,
             rate_limit_registry=self._rate_limit_registry,
+            concurrency_config=self._concurrency_config,
             _batch_checkpoints=batch_checkpoints or {},
         )
 
@@ -974,6 +1072,16 @@ class Orchestrator:
         phase_start = time.perf_counter()
         self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
 
+        # Emit telemetry PhaseChanged for SOURCE
+        self._emit_telemetry(
+            TelemetryPhaseChanged(
+                timestamp=datetime.now(UTC),
+                run_id=run_id,
+                phase=PipelinePhase.SOURCE,
+                action=PhaseAction.INITIALIZING,
+            )
+        )
+
         try:
             # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
             try:
@@ -993,6 +1101,16 @@ class Orchestrator:
             # PROCESS phase - iterate through rows
             phase_start = time.perf_counter()
             self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
+
+            # Emit telemetry PhaseChanged for PROCESS
+            self._emit_telemetry(
+                TelemetryPhaseChanged(
+                    timestamp=datetime.now(UTC),
+                    run_id=run_id,
+                    phase=PipelinePhase.PROCESS,
+                    action=PhaseAction.PROCESSING,
+                )
+            )
 
             # Nested try for PROCESS phase to catch iteration/processing failures
             try:
@@ -1026,6 +1144,17 @@ class Orchestrator:
                                 source_node_id=source_id,
                                 row_index=row_index,
                                 row_data=source_item.row,
+                            )
+
+                            # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                            self._emit_telemetry(
+                                TelemetryRowCreated(
+                                    timestamp=datetime.now(UTC),
+                                    run_id=run_id,
+                                    row_id=quarantine_token.row_id,
+                                    token_id=quarantine_token.token_id,
+                                    content_hash=stable_hash(source_item.row),
+                                )
                             )
 
                             # Record QUARANTINED outcome with error_hash for audit trail
@@ -1922,6 +2051,7 @@ class Orchestrator:
             config=config.config,
             landscape=recorder,
             rate_limit_registry=self._rate_limit_registry,
+            concurrency_config=self._concurrency_config,
         )
 
         # Call on_start for transforms and sinks.
