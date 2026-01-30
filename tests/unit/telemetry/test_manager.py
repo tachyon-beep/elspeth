@@ -1076,3 +1076,21 @@ class TestBackpressureMode:
 
         # Cleanup (close won't try to stop already-dead thread)
         manager._shutdown_event.set()
+
+    def test_events_exported_in_fifo_order(self, base_timestamp: datetime) -> None:
+        """Events are exported in the order they were queued (FIFO)."""
+        exporter = MockExporter("test")
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[exporter])
+
+        # Queue events with distinct run_ids
+        run_ids = [f"run-{i}" for i in range(20)]
+        for run_id in run_ids:
+            event = make_run_started(run_id, base_timestamp)
+            manager.handle_event(event)
+
+        # Close and verify order
+        manager.close()
+
+        exported_ids = [e.run_id for e in exporter.exports]
+        assert exported_ids == run_ids, "Events not exported in FIFO order"
