@@ -36,11 +36,13 @@ INTERNAL_DEFAULTS: Final[dict[str, dict[str, int | float | bool | str]]] = {
         # Fixed at 1.0 second - not user-configurable by design
         "jitter": 1.0,
     },
-    # Future internal defaults go here as subsystems are identified
-    # Example:
-    # "checkpoint": {
-    #     "flush_buffer_size": 1000,  # Internal buffer before disk write
-    # },
+    # Telemetry internal defaults
+    "telemetry": {
+        # Queue size for async export buffer
+        # 1000 events absorbs bursts without excessive memory
+        # Not user-configurable - internal implementation detail
+        "queue_size": 1000,
+    },
 }
 
 
