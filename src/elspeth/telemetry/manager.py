@@ -32,8 +32,8 @@ import structlog
 
 from elspeth.contracts.config import RuntimeTelemetryProtocol
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
-from elspeth.contracts.enums import BackpressureMode  # noqa: F401 - used in Task 5
-from elspeth.telemetry.errors import TelemetryExporterError
+from elspeth.contracts.enums import BackpressureMode
+from elspeth.telemetry.errors import TelemetryExporterError  # noqa: F401 - used in Task 6
 from elspeth.telemetry.events import TelemetryEvent
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.protocols import ExporterProtocol
@@ -135,22 +135,24 @@ class TelemetryManager:
             self._queue.task_done()
 
     def handle_event(self, event: TelemetryEvent) -> None:
-        """Filter and dispatch event to all exporters.
+        """Queue event for async export.
 
-        Events are filtered by granularity before dispatch. Each exporter
-        receives the event independently - failures are isolated.
+        Events are filtered by granularity before queuing. Queue behavior
+        depends on backpressure_mode config:
+        - BLOCK: Blocks until queue has space (may slow pipeline), with timeout
+        - DROP: Drops event if queue is full (pipeline unaffected)
 
-        When ALL exporters fail, the event is counted as dropped. After
-        _max_consecutive_failures total failures, behavior depends on
-        fail_on_total_exporter_failure config setting.
+        Thread Safety:
+            Safe to call from any thread. Uses thread-safe Event check
+            and Queue operations. _events_dropped protected by lock.
 
         Args:
             event: The telemetry event to process
-
-        Raises:
-            TelemetryExporterError: If all exporters fail repeatedly and
-                fail_on_total_exporter_failure is True
         """
+        # Thread-safe shutdown check
+        if self._shutdown_event.is_set():
+            return
+
         # Skip if telemetry was disabled due to repeated failures
         if self._disabled:
             return
@@ -163,59 +165,49 @@ class TelemetryManager:
         if not should_emit(event, self._config.granularity):
             return
 
-        # Dispatch to all exporters with failure isolation
-        failures = 0
-        for exporter in self._exporters:
+        # Check thread readiness and liveness
+        if not self._export_thread_ready.is_set():
+            logger.warning("Export thread not ready, dropping event")
+            with self._dropped_lock:
+                self._events_dropped += 1
+            return
+
+        if not self._export_thread.is_alive():
+            logger.critical("Export thread died, disabling telemetry")
+            self._disabled = True
+            return
+
+        # Queue event based on backpressure mode
+        if self._config.backpressure_mode == BackpressureMode.DROP:
             try:
-                exporter.export(event)
-            except Exception as e:
-                failures += 1
-                self._exporter_failures[exporter.name] = self._exporter_failures.get(exporter.name, 0) + 1
-                logger.warning(
-                    "Telemetry exporter failed",
-                    exporter=exporter.name,
-                    event_type=type(event).__name__,
-                    error=str(e),
-                )
+                self._queue.put_nowait(event)
+            except queue.Full:
+                with self._dropped_lock:
+                    self._events_dropped += 1
+                    self._log_drops_if_needed()
+        else:  # BLOCK (default)
+            # Timeout prevents permanent deadlock if export thread dies
+            try:
+                self._queue.put(event, timeout=30.0)
+            except queue.Full:
+                # Timeout hit - thread may be dead or stuck
+                logger.error("BLOCK mode put() timed out - export thread may be stuck")
+                with self._dropped_lock:
+                    self._events_dropped += 1
 
-        # Update metrics based on outcome
-        if failures == 0:
-            # Complete success
-            self._events_emitted += 1
-            self._consecutive_total_failures = 0
-        elif failures == len(self._exporters):
-            # ALL exporters failed
-            self._consecutive_total_failures += 1
-            self._events_dropped += 1
+    def _log_drops_if_needed(self) -> None:
+        """Log aggregate drop message if threshold reached.
 
-            # Aggregate logging every _LOG_INTERVAL
-            if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
-                logger.error(
-                    "ALL telemetry exporters failing - events dropped",
-                    dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
-                    dropped_total=self._events_dropped,
-                    consecutive_failures=self._consecutive_total_failures,
-                )
-                self._last_logged_drop_count = self._events_dropped
-
-            # Check if we should crash or disable
-            if self._consecutive_total_failures >= self._max_consecutive_failures:
-                if self._config.fail_on_total_exporter_failure:
-                    raise TelemetryExporterError(
-                        "all",
-                        f"All {len(self._exporters)} exporters failed {self._max_consecutive_failures} consecutive times.",
-                    )
-                else:
-                    logger.critical(
-                        "Telemetry disabled after repeated total failures",
-                        consecutive_failures=self._consecutive_total_failures,
-                        events_dropped=self._events_dropped,
-                    )
-                    self._disabled = True
-        else:
-            # Partial success - at least one exporter worked
-            self._events_emitted += 1
-            self._consecutive_total_failures = 0
+        Must be called while holding _dropped_lock.
+        """
+        if self._events_dropped - self._last_logged_drop_count >= self._LOG_INTERVAL:
+            logger.warning(
+                "Telemetry events dropped due to backpressure",
+                dropped_since_last_log=self._events_dropped - self._last_logged_drop_count,
+                dropped_total=self._events_dropped,
+                backpressure_mode="drop",
+            )
+            self._last_logged_drop_count = self._events_dropped
 
     @property
     def health_metrics(self) -> dict[str, Any]:
