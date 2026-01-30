@@ -23,6 +23,11 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
+from elspeth.contracts.events import (
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
+)
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -35,9 +40,6 @@ from elspeth.telemetry.events import (
     RowCreated,
     RunCompleted,
     RunStarted,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
 )
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
 

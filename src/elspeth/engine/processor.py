@@ -19,10 +19,11 @@ from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
     from elspeth.contracts.enums import RoutingMode
+    from elspeth.contracts.events import TelemetryEvent
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.executors import GateOutcome
-    from elspeth.telemetry import TelemetryEvent, TelemetryManager
+    from elspeth.telemetry import TelemetryManager
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
@@ -198,8 +199,8 @@ class RowProcessor:
 
         from datetime import UTC, datetime
 
+        from elspeth.contracts import TransformCompleted
         from elspeth.contracts.enums import NodeStateStatus
-        from elspeth.telemetry.events import TransformCompleted
 
         status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
 
@@ -242,7 +243,7 @@ class RowProcessor:
 
         from datetime import UTC, datetime
 
-        from elspeth.telemetry.events import GateEvaluated
+        from elspeth.contracts import GateEvaluated
 
         self._emit_telemetry(
             GateEvaluated(
@@ -277,7 +278,7 @@ class RowProcessor:
 
         from datetime import UTC, datetime
 
-        from elspeth.telemetry.events import TokenCompleted
+        from elspeth.contracts import TokenCompleted
 
         self._emit_telemetry(
             TokenCompleted(

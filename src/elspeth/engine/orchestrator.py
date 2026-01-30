@@ -21,8 +21,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from elspeth.contracts.events import TelemetryEvent
     from elspeth.core.events import EventBusProtocol
-    from elspeth.telemetry import TelemetryEvent, TelemetryManager
+    from elspeth.telemetry import TelemetryManager
 
 from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo

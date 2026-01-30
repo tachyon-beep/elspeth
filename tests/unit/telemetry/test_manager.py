@@ -26,8 +26,8 @@ from hypothesis import strategies as st
 from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
 
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
+from elspeth.contracts.events import TelemetryEvent
 from elspeth.telemetry import RunCompleted, RunStarted, TelemetryManager
-from elspeth.telemetry.events import TelemetryEvent
 
 # =============================================================================
 # Test Doubles

@@ -15,8 +15,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from elspeth.contracts.events import TelemetryEvent
 from elspeth.telemetry.buffer import BoundedBuffer
-from elspeth.telemetry.events import TelemetryEvent
 
 # =============================================================================
 # Fixtures

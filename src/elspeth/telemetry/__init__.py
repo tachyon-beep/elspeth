@@ -9,7 +9,7 @@ replace the Landscape audit trail:
 - Telemetry: Operational visibility, real-time streaming, ephemeral
 
 Components:
-- events: TelemetryEvent base and all event dataclasses
+- events: Telemetry-specific event dataclasses (base TelemetryEvent in contracts)
 - buffer: BoundedBuffer for event batching with overflow tracking
 - filtering: should_emit() for granularity-based event filtering
 - manager: TelemetryManager for coordinating event emission
@@ -19,16 +19,17 @@ Components:
 - exporters: Built-in exporters (ConsoleExporter)
 
 Usage:
+    # Row-level events (TransformCompleted, GateEvaluated, TokenCompleted)
+    # are in contracts as they cross the engine<->telemetry boundary:
+    from elspeth.contracts import TransformCompleted, GateEvaluated, TokenCompleted
+
+    # Telemetry-specific events:
     from elspeth.telemetry import (
         # Events
-        TelemetryEvent,
         RunStarted,
         RunCompleted,
         PhaseChanged,
         RowCreated,
-        TransformCompleted,
-        GateEvaluated,
-        TokenCompleted,
         ExternalCallCompleted,
         # Buffer
         BoundedBuffer,
@@ -48,14 +49,10 @@ from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     ExternalCallCompleted,
-    GateEvaluated,
     PhaseChanged,
     RowCreated,
     RunCompleted,
     RunStarted,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
 )
 from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.filtering import should_emit
@@ -67,15 +64,11 @@ __all__ = [
     "ConsoleExporter",
     "ExporterProtocol",
     "ExternalCallCompleted",
-    "GateEvaluated",
     "PhaseChanged",
     "RowCreated",
     "RunCompleted",
     "RunStarted",
-    "TelemetryEvent",
     "TelemetryExporterError",
     "TelemetryManager",
-    "TokenCompleted",
-    "TransformCompleted",
     "should_emit",
 ]

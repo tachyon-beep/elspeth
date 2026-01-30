@@ -19,6 +19,7 @@ from pydantic import ConfigDict
 
 from elspeth.contracts import Determinism, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.events import TelemetryEvent
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
@@ -26,7 +27,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.telemetry.events import PhaseChanged, RunCompleted, RunStarted, TelemetryEvent
+from elspeth.telemetry.events import PhaseChanged, RunCompleted, RunStarted
 
 # =============================================================================
 # Test Fixtures

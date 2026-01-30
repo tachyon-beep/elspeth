@@ -15,12 +15,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts import TokenCompleted
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     RunCompleted,
     RunStarted,
-    TokenCompleted,
 )
 from elspeth.telemetry.exporters.otlp import (
     OTLPExporter,
@@ -405,8 +405,8 @@ class TestOTLPExporterSpanConversion:
         exporter, mock_sdk = self._create_configured_exporter()
 
         # GateEvaluated has destinations as tuple
+        from elspeth.contracts import GateEvaluated
         from elspeth.contracts.enums import RoutingMode
-        from elspeth.telemetry.events import GateEvaluated
 
         event = GateEvaluated(
             timestamp=datetime.now(UTC),

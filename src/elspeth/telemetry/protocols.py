@@ -8,7 +8,7 @@ observability platforms (OTLP, Azure Monitor, Datadog, etc.).
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from elspeth.telemetry.events import TelemetryEvent
+    from elspeth.contracts.events import TelemetryEvent
 
 
 @runtime_checkable

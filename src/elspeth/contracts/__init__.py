@@ -105,6 +105,7 @@ from elspeth.contracts.errors import (
     TransformReason,
 )
 from elspeth.contracts.events import (
+    GateEvaluated,
     PhaseAction,
     PhaseCompleted,
     PhaseError,
@@ -112,6 +113,9 @@ from elspeth.contracts.events import (
     PipelinePhase,
     RunCompleted,
     RunCompletionStatus,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
 )
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
@@ -242,6 +246,7 @@ __all__ = [  # Grouped by category for readability
     "IntegrityError",
     "PayloadStore",
     # events
+    "GateEvaluated",
     "PhaseAction",
     "PhaseCompleted",
     "PhaseError",
@@ -249,6 +254,9 @@ __all__ = [  # Grouped by category for readability
     "PipelinePhase",
     "RunCompleted",
     "RunCompletionStatus",
+    "TelemetryEvent",
+    "TokenCompleted",
+    "TransformCompleted",
     # cli
     "ExecutionResult",
     "ProgressEvent",

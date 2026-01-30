@@ -22,7 +22,7 @@ from elspeth.telemetry.errors import TelemetryExporterError
 if TYPE_CHECKING:
     from ddtrace import Tracer
 
-    from elspeth.telemetry.events import TelemetryEvent
+    from elspeth.contracts.events import TelemetryEvent
 
 logger = structlog.get_logger(__name__)
 

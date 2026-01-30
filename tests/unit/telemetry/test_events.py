@@ -22,17 +22,20 @@ from elspeth.contracts.enums import (
     RowOutcome,
     RunStatus,
 )
-from elspeth.contracts.events import PhaseAction, PipelinePhase
+from elspeth.contracts.events import (
+    GateEvaluated,
+    PhaseAction,
+    PipelinePhase,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
+)
 from elspeth.telemetry import (
     ExternalCallCompleted,
-    GateEvaluated,
     PhaseChanged,
     RowCreated,
     RunCompleted,
     RunStarted,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
 )
 
 # =============================================================================

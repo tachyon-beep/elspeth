@@ -15,34 +15,13 @@ Event categories:
 """
 
 from dataclasses import dataclass
-from datetime import datetime
 
 from elspeth.contracts.enums import (
     CallStatus,
     CallType,
-    NodeStateStatus,
-    RoutingMode,
-    RowOutcome,
     RunStatus,
 )
-from elspeth.contracts.events import PhaseAction, PipelinePhase
-
-
-@dataclass(frozen=True, slots=True)
-class TelemetryEvent:
-    """Base class for all telemetry events.
-
-    All events include:
-    - timestamp: When the event occurred (UTC)
-    - run_id: Pipeline run this event belongs to
-
-    Events are immutable (frozen) for thread-safety and to prevent
-    accidental modification during export.
-    """
-
-    timestamp: datetime
-    run_id: str
-
+from elspeth.contracts.events import PhaseAction, PipelinePhase, TelemetryEvent
 
 # =============================================================================
 # Lifecycle Events
@@ -97,6 +76,8 @@ class PhaseChanged(TelemetryEvent):
 # =============================================================================
 # Row-Level Events
 # =============================================================================
+# NOTE: TransformCompleted, GateEvaluated, TokenCompleted moved to contracts/events.py
+# as they cross the engine<->telemetry boundary.
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,69 +93,6 @@ class RowCreated(TelemetryEvent):
     row_id: str
     token_id: str
     content_hash: str
-
-
-@dataclass(frozen=True, slots=True)
-class TransformCompleted(TelemetryEvent):
-    """Emitted when a transform finishes processing a row.
-
-    Attributes:
-        row_id: Source row identity
-        token_id: Token instance being processed
-        node_id: DAG node that processed the row
-        plugin_name: Name of the transform plugin
-        status: Processing result (completed, failed)
-        duration_ms: Transform execution time in milliseconds
-        input_hash: Hash of transform input for lineage
-        output_hash: Hash of transform output for lineage
-    """
-
-    row_id: str
-    token_id: str
-    node_id: str
-    plugin_name: str
-    status: NodeStateStatus
-    duration_ms: float
-    input_hash: str
-    output_hash: str
-
-
-@dataclass(frozen=True, slots=True)
-class GateEvaluated(TelemetryEvent):
-    """Emitted when a gate makes a routing decision.
-
-    Attributes:
-        row_id: Source row identity
-        token_id: Token instance being routed
-        node_id: Gate node that made the decision
-        plugin_name: Name of the gate plugin
-        routing_mode: How routing was performed (move, copy)
-        destinations: Tuple of destination node/sink names
-    """
-
-    row_id: str
-    token_id: str
-    node_id: str
-    plugin_name: str
-    routing_mode: RoutingMode
-    destinations: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class TokenCompleted(TelemetryEvent):
-    """Emitted when a token reaches its terminal state.
-
-    Attributes:
-        row_id: Source row identity
-        token_id: Token instance that completed
-        outcome: Terminal outcome (completed, routed, failed, etc.)
-        sink_name: Destination sink if applicable, None otherwise
-    """
-
-    row_id: str
-    token_id: str
-    outcome: RowOutcome
-    sink_name: str | None
 
 
 # =============================================================================

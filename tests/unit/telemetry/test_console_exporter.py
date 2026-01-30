@@ -18,15 +18,18 @@ from unittest.mock import patch
 import pytest
 
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome, RunStatus
-from elspeth.contracts.events import PhaseAction, PipelinePhase
+from elspeth.contracts.events import (
+    PhaseAction,
+    PipelinePhase,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
+)
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     PhaseChanged,
     RunCompleted,
     RunStarted,
-    TelemetryEvent,
-    TokenCompleted,
-    TransformCompleted,
 )
 from elspeth.telemetry.exporters.console import ConsoleExporter
 from elspeth.telemetry.protocols import ExporterProtocol
@@ -140,9 +143,7 @@ class TestProtocolCompliance:
         """name property returns 'console'."""
         assert exporter.name == "console"
 
-    def test_name_property_matches_class_attribute(
-        self, exporter: ConsoleExporter
-    ) -> None:
+    def test_name_property_matches_class_attribute(self, exporter: ConsoleExporter) -> None:
         """name property matches _name class attribute."""
         assert exporter.name == ConsoleExporter._name
 
@@ -227,9 +228,7 @@ class TestConfiguration:
 
     def test_unknown_config_keys_ignored(self, exporter: ConsoleExporter) -> None:
         """Unknown configuration keys are silently ignored."""
-        exporter.configure(
-            {"format": "json", "output": "stdout", "unknown_key": "some_value"}
-        )
+        exporter.configure({"format": "json", "output": "stdout", "unknown_key": "some_value"})
         assert exporter._format == "json"
         assert exporter._output == "stdout"
 
@@ -652,8 +651,8 @@ class TestSerializationEdgeCases:
     ) -> None:
         """Tuples are converted to lists in pretty format details."""
         # GateEvaluated has a tuple field (destinations)
+        from elspeth.contracts import GateEvaluated
         from elspeth.contracts.enums import RoutingMode
-        from elspeth.telemetry.events import GateEvaluated
 
         event = GateEvaluated(
             timestamp=base_timestamp,

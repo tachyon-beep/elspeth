@@ -17,13 +17,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts import GateEvaluated, TokenCompleted
 from elspeth.contracts.enums import RoutingMode, RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
-    GateEvaluated,
     RunCompleted,
     RunStarted,
-    TokenCompleted,
 )
 from elspeth.telemetry.exporters.datadog import DatadogExporter
 
