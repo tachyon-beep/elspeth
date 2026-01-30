@@ -36,8 +36,8 @@ def create_mock_ddtrace_module() -> tuple[MagicMock, MagicMock, MagicMock]:
     """
     mock_span = MagicMock()
     mock_tracer = MagicMock()
-    mock_tracer.trace.return_value.__enter__ = MagicMock(return_value=mock_span)
-    mock_tracer.trace.return_value.__exit__ = MagicMock(return_value=False)
+    # Configure start_span to return the mock span (new API)
+    mock_tracer.start_span.return_value = mock_span
 
     mock_module = MagicMock()
     mock_module.tracer = mock_tracer
@@ -223,6 +223,50 @@ class TestDatadogExporterSpanCreation:
 
         return exporter, mock_tracer, mock_span
 
+    def test_span_uses_event_timestamp_not_export_time(self) -> None:
+        """Span start/finish times come from event.timestamp, not export time.
+
+        This is critical for buffered/async export scenarios where the event
+        may be created at time T but exported at time T+10s. The span should
+        reflect when the event actually occurred, not when it was exported.
+        """
+        mock_module, mock_tracer, mock_span = create_mock_ddtrace_module()
+        mock_tracer.start_span.return_value = mock_span
+
+        with patch.dict(sys.modules, {"ddtrace": mock_module}):
+            exporter = DatadogExporter()
+            exporter.configure({"service_name": "test-service"})
+
+        # Create event with a known timestamp in the past
+        event_timestamp = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
+        expected_unix_seconds = event_timestamp.timestamp()
+
+        event = RunStarted(
+            timestamp=event_timestamp,
+            run_id="run-123",
+            config_hash="abc",
+            source_plugin="csv",
+        )
+        exporter.export(event)
+
+        # Verify start_span was called with explicit start time
+        mock_tracer.start_span.assert_called_once()
+        call_kwargs = mock_tracer.start_span.call_args[1]
+        assert "start" in call_kwargs, "start_span must be called with explicit 'start' parameter"
+        assert call_kwargs["start"] == expected_unix_seconds, (
+            f"Span start time should be event timestamp ({expected_unix_seconds}), "
+            f"not export time. Got: {call_kwargs.get('start')}"
+        )
+
+        # Verify span was finished with the same timestamp (instant span)
+        mock_span.finish.assert_called_once()
+        finish_call_kwargs = mock_span.finish.call_args[1] if mock_span.finish.call_args[1] else {}
+        finish_time = finish_call_kwargs.get("finish_time")
+        assert finish_time == expected_unix_seconds, (
+            f"Span finish time should be event timestamp ({expected_unix_seconds}) for instant span. "
+            f"Got: {finish_time}"
+        )
+
     def test_span_name_is_event_class_name(self) -> None:
         """Span name is the event class name."""
         exporter, mock_tracer, _ = self._create_configured_exporter()
@@ -235,8 +279,8 @@ class TestDatadogExporterSpanCreation:
         )
         exporter.export(event)
 
-        mock_tracer.trace.assert_called_once()
-        call_kwargs = mock_tracer.trace.call_args[1]
+        mock_tracer.start_span.assert_called_once()
+        call_kwargs = mock_tracer.start_span.call_args[1]
         assert call_kwargs["name"] == "RunStarted"
 
     def test_span_service_name_from_config(self) -> None:
@@ -251,7 +295,7 @@ class TestDatadogExporterSpanCreation:
         )
         exporter.export(event)
 
-        call_kwargs = mock_tracer.trace.call_args[1]
+        call_kwargs = mock_tracer.start_span.call_args[1]
         assert call_kwargs["service"] == "test-service"
 
     def test_span_resource_is_event_type(self) -> None:
@@ -266,7 +310,7 @@ class TestDatadogExporterSpanCreation:
         )
         exporter.export(event)
 
-        call_kwargs = mock_tracer.trace.call_args[1]
+        call_kwargs = mock_tracer.start_span.call_args[1]
         assert call_kwargs["resource"] == "RunStarted"
 
     def test_env_tag_set(self) -> None:
@@ -540,7 +584,7 @@ class TestDatadogExporterLifecycle:
     def test_export_failure_does_not_raise(self) -> None:
         """Export failures are logged but don't raise exceptions."""
         exporter, mock_tracer, _ = self._create_configured_exporter()
-        mock_tracer.trace.side_effect = Exception("Tracer error")
+        mock_tracer.start_span.side_effect = Exception("Tracer error")
 
         event = RunStarted(
             timestamp=datetime.now(UTC),

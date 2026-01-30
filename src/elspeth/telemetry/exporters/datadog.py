@@ -196,6 +196,11 @@ class DatadogExporter:
         The span is created and immediately finished since telemetry events
         represent completed operations (points in time, not durations).
 
+        IMPORTANT: Uses explicit timestamps from event.timestamp rather than
+        letting ddtrace auto-timestamp at export time. This ensures spans
+        reflect when events actually occurred, not when they were exported
+        (critical for buffered/async export scenarios).
+
         Args:
             event: The telemetry event to convert to a span
         """
@@ -204,13 +209,20 @@ class DatadogExporter:
 
         event_type = type(event).__name__
 
-        # Create a span for this event
-        # Use trace() as context manager to ensure proper cleanup
-        with self._tracer.trace(
+        # Convert event timestamp to Unix seconds for ddtrace
+        # ddtrace expects start/finish times in Unix epoch seconds (float)
+        event_unix_seconds = event.timestamp.timestamp()
+
+        # Create span with explicit start time from event.timestamp
+        # This ensures span timing reflects when the event occurred, not export time
+        span = self._tracer.start_span(
             name=event_type,
             service=self._service_name,
             resource=event_type,
-        ) as span:
+            start=event_unix_seconds,
+        )
+
+        try:
             # Set standard Datadog tags
             span.set_tag("env", self._env)
             if self._version:
@@ -222,6 +234,10 @@ class DatadogExporter:
 
             # Set all event fields as tags
             self._set_event_tags(span, event)
+        finally:
+            # Finish span with explicit timestamp (instant span - start == finish)
+            # This ensures proper cleanup even if tag setting fails
+            span.finish(finish_time=event_unix_seconds)
 
     def _set_event_tags(self, span: Any, event: TelemetryEvent) -> None:
         """Set event fields as span tags.

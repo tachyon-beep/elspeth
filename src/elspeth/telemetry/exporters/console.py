@@ -69,8 +69,13 @@ class ConsoleExporter:
         Raises:
             TelemetryExporterError: If configuration values are invalid
         """
-        # Validate and set format
+        # Validate type and value for format
         format_value = config.get("format", "json")
+        if not isinstance(format_value, str):
+            raise TelemetryExporterError(
+                self._name,
+                f"'format' must be a string, got {type(format_value).__name__}",
+            )
         if format_value not in self._VALID_FORMATS:
             raise TelemetryExporterError(
                 self._name,
@@ -79,8 +84,13 @@ class ConsoleExporter:
             )
         self._format = format_value  # type: ignore[assignment]
 
-        # Validate and set output stream
+        # Validate type and value for output stream
         output_value = config.get("output", "stdout")
+        if not isinstance(output_value, str):
+            raise TelemetryExporterError(
+                self._name,
+                f"'output' must be a string, got {type(output_value).__name__}",
+            )
         if output_value not in self._VALID_OUTPUTS:
             raise TelemetryExporterError(
                 self._name,
