@@ -892,22 +892,32 @@ class TestBackpressureMode:
             config_hash="test-hash",
             source_plugin="test-source",
         )
+
+        # Step 1: Send first event - export thread will consume it and block on SlowExporter
+        manager.handle_event(event)
+
+        # Wait for export thread to start processing (confirms event was consumed from queue)
+        assert slow_exporter.export_started.wait(timeout=5.0), "Export thread never started"
+
+        # Step 2: Queue is now empty (export thread consumed the event). Send second event.
+        manager.handle_event(event)  # Fills the queue (maxsize=1)
+
+        # Step 3: Third event should block because queue is full
         started_blocking = threading.Event()
         finished_blocking = threading.Event()
 
         def blocking_put() -> None:
-            manager.handle_event(event)  # First fills queue
-            started_blocking.set()  # Signal we're about to block
-            manager.handle_event(event)  # Second should block
+            started_blocking.set()  # Signal we're about to try
+            manager.handle_event(event)  # Should block - queue is full
             finished_blocking.set()  # Signal that we got past blocking
 
         thread = threading.Thread(target=blocking_put)
         thread.start()
 
-        # Wait for thread to signal it's about to block
+        # Wait for thread to signal it's starting
         assert started_blocking.wait(timeout=5.0), "Thread never started"
 
-        # Give thread a moment to actually enter blocking put()
+        # Give thread time to enter blocking put()
         # Then verify it hasn't finished (still blocked)
         assert not finished_blocking.wait(timeout=0.5), "handle_event should have blocked but didn't"
 
@@ -977,7 +987,7 @@ class TestBackpressureMode:
         # Fire many events - some will drop on queue full, some on export fail
         events_fired = 100
         for i in range(events_fired):
-            event = RunStarted(timestamp=base_timestamp, run_id=f"run-{i}")
+            event = make_run_started(f"run-{i}", base_timestamp)
             manager.handle_event(event)
 
         # Close to flush everything
