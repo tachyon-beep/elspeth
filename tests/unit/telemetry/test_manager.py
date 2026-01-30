@@ -883,9 +883,6 @@ class TestBackpressureMode:
         config = MockConfig(backpressure_mode=BackpressureMode.BLOCK)
         manager = TelemetryManager(config, exporters=[slow_exporter])
 
-        # Override queue size for testing
-        manager._queue = queue.Queue(maxsize=1)
-
         event = RunStarted(
             timestamp=base_timestamp,
             run_id="test-run",
@@ -893,16 +890,20 @@ class TestBackpressureMode:
             source_plugin="test-source",
         )
 
-        # Step 1: Send first event - export thread will consume it and block on SlowExporter
+        # Step 1: Send first event to old queue - export thread will consume it
         manager.handle_event(event)
 
         # Wait for export thread to start processing (confirms event was consumed from queue)
         assert slow_exporter.export_started.wait(timeout=5.0), "Export thread never started"
 
-        # Step 2: Queue is now empty (export thread consumed the event). Send second event.
-        manager.handle_event(event)  # Fills the queue (maxsize=1)
+        # Step 2: NOW replace queue - export thread has consumed from old queue
+        # and is blocked in SlowExporter.export()
+        manager._queue = queue.Queue(maxsize=1)
 
-        # Step 3: Third event should block because queue is full
+        # Step 3: Fill the new queue
+        manager.handle_event(event)  # Fills queue (maxsize=1)
+
+        # Step 4: Third event should block because queue is full
         started_blocking = threading.Event()
         finished_blocking = threading.Event()
 
@@ -921,10 +922,10 @@ class TestBackpressureMode:
         # Then verify it hasn't finished (still blocked)
         assert not finished_blocking.wait(timeout=0.5), "handle_event should have blocked but didn't"
 
-        # Unblock exporter so queue drains
+        # Unblock exporter - this allows export thread to finish and read from new queue
         slow_exporter.can_continue.set()
 
-        # Now thread should complete
+        # Now thread should complete (export thread will consume from new queue)
         assert finished_blocking.wait(timeout=5.0), "handle_event never unblocked"
 
         thread.join(timeout=1.0)
