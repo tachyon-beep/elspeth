@@ -10,44 +10,39 @@ Triaged **122 generated bug reports** from `docs/bugs/generated/`. Results:
 | **INVALID/EMPTY** | 46 |
 | **DUPLICATE** | 3 |
 
-## P1 Bugs Created (9 filed)
+## P1 Bugs Created (25 filed)
 
-These critical bugs have been filed in `docs/bugs/open/`:
+All critical P1 bugs have been filed in `docs/bugs/open/`:
 
 | Bug | Location | Issue |
 |-----|----------|-------|
 | P1-2026-01-31-recovery-missing-payload-hash-verification | core-checkpoint/ | Resume doesn't verify payload integrity |
+| P1-2026-01-31-running-status-blocks-resume | core-checkpoint/ | RUNNING status blocks crash recovery |
 | P1-2026-01-31-payload-store-path-traversal | core-payload/ | Path traversal via unvalidated content_hash |
 | P1-2026-01-31-routing-reason-payload-not-persisted | core-landscape/ | Routing reason payloads never stored |
+| P1-2026-01-31-fetchone-multi-row-silent-truncation | core-landscape/ | fetchone silently drops extra rows |
+| P1-2026-01-31-compute-grade-no-determinism-validation | core-landscape/ | Invalid determinism values accepted |
+| P1-2026-01-31-json-formatter-nan-coercion | core-landscape/ | JSON export allows NaN/Infinity |
+| P1-2026-01-31-nodestate-repo-missing-invariant-checks | core-landscape/ | OPEN/PENDING invariants not enforced |
+| P1-2026-01-31-token-outcome-repo-is-terminal-coercion | core-landscape/ | Invalid is_terminal coerced silently |
+| P1-2026-01-31-gate-drops-computed-schema-guarantees | core-dag/ | Gate nodes break schema contract |
 | P1-2026-01-31-sanitized-webhook-url-fragment-secrets | core-security/ | Fragment-based secrets not sanitized |
+| P1-2026-01-31-http-client-records-raw-urls-with-secrets | core-security/ | HTTP URLs with secrets recorded |
 | P1-2026-01-31-sink-flush-failure-leaves-open-states | engine-executors/ | Sink flush failures leave OPEN states |
-| P1-2026-01-31-multi-query-output-key-collisions | plugins-llm/ | Silent data loss from key collisions |
-| P1-2026-01-31-settings-path-missing-silent-fallback | cli/ | Missing settings file silently falls back |
+| P1-2026-01-31-quarantine-outcome-before-durability | engine-orchestrator/ | Outcome recorded before sink durability |
+| P1-2026-01-31-expression-errors-bubble-raw | engine-expression-parser/ | Expression errors crash with opaque errors |
 | P1-2026-01-31-row-reorder-buffer-deadlock | engine-pooling/ | Deadlock on non-head sequence eviction |
+| P1-2026-01-31-batching-mixin-unbound-local-error | engine-pooling/ | UnboundLocalError in exception handler |
+| P1-2026-01-31-multi-query-output-key-collisions | plugins-llm/ | Silent data loss from key collisions |
+| P1-2026-01-31-llm-response-payload-dropped-on-parse-failure | plugins-llm/ | LLM response lost on parse failure |
+| P1-2026-01-31-context-record-call-bypasses-allocator | plugins-transforms/ | Duplicate call_index values possible |
+| P1-2026-01-31-azure-csv-bad-lines-skipped-no-quarantine | plugins-sources/ | CSV bad lines silently skipped |
+| P1-2026-01-31-azure-json-errors-crash-instead-quarantine | plugins-sources/ | JSON errors crash instead of quarantine |
+| P1-2026-01-31-azure-json-accepts-nan-infinity | plugins-sources/ | NaN/Infinity allowed in JSON input |
 | P1-2026-01-31-azure-blob-sink-no-audit-calls | plugins-sinks/ | Azure Blob operations not audited |
+| P1-2026-01-31-settings-path-missing-silent-fallback | cli/ | Missing settings file silently falls back |
 
-## Remaining Valid Bugs (64 pending)
-
-### Additional P1 Bugs (not yet filed)
-
-| Area | Bug | Priority |
-|------|-----|----------|
-| core-landscape | fetchone multi-row silent truncation | P1 |
-| core-landscape | compute_grade no determinism validation | P1 |
-| core-landscape | json formatter nan coercion | P1 |
-| core-landscape | nodestate repo missing invariant checks | P1 |
-| core-landscape | token outcome repo is_terminal coercion | P1 |
-| core-checkpoint | RUNNING status blocks resume | P1 |
-| core-dag | Gate drops computed schema guarantees | P1 |
-| engine-orchestrator | Quarantine outcome before durability | P1 |
-| engine-expression-parser | Expression errors bubble as raw exceptions | P1 |
-| plugins-context | record_call bypasses centralized call_index | P1 |
-| plugins-batching | mixin UnboundLocalError on exception | P1 |
-| plugins-clients | LLM response payload dropped on parse failure | P1 |
-| plugins-clients | HTTP client records raw URLs with secrets | P1 |
-| plugins-sources | Azure CSV bad lines skipped without quarantine | P1 |
-| plugins-sources | Azure JSON array errors crash instead of quarantine | P1 |
-| plugins-sources | Azure JSON accepts NaN/Infinity | P1 |
+## Remaining Valid Bugs (48 pending)
 
 ### P2 Bugs (not yet filed)
 
