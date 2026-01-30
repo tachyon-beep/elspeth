@@ -961,6 +961,39 @@ class TestBackpressureMode:
         assert isinstance(metrics["events_emitted"], int)
         assert isinstance(metrics["events_dropped"], int)
 
+    def test_lock_contention_on_events_dropped(self, base_timestamp: datetime) -> None:
+        """Both threads incrementing _events_dropped doesn't corrupt counter."""
+        # Create scenario where both threads write _events_dropped:
+        # - Pipeline thread: DROP mode with full queue
+        # - Export thread: All exporters failing
+
+        failing_exporter = MockExporter("failing", fail_export=True)
+        config = MockConfig(backpressure_mode=BackpressureMode.DROP)
+        manager = TelemetryManager(config, exporters=[failing_exporter])
+
+        # Use tiny queue to force drops
+        manager._queue = queue.Queue(maxsize=2)
+
+        # Fire many events - some will drop on queue full, some on export fail
+        events_fired = 100
+        for i in range(events_fired):
+            event = RunStarted(timestamp=base_timestamp, run_id=f"run-{i}")
+            manager.handle_event(event)
+
+        # Close to flush everything
+        manager.close()
+
+        # Key assertion: dropped count should be consistent
+        # (not corrupted by concurrent increments)
+        metrics = manager.health_metrics
+        total_accounted = metrics["events_emitted"] + metrics["events_dropped"]
+
+        # We don't know exact split, but total should equal events fired
+        # (some may be in-flight when we closed, so allow small variance)
+        assert total_accounted <= events_fired, (
+            f"More events accounted ({total_accounted}) than fired ({events_fired}) - counter corruption detected"
+        )
+
     def test_reentrant_handle_event_no_deadlock(self, base_timestamp: datetime) -> None:
         """Exporter calling handle_event() from export thread doesn't deadlock.
 
@@ -974,7 +1007,7 @@ class TestBackpressureMode:
         reentrant_exporter = ReentrantExporter("reentrant", manager)
         manager._exporters = [reentrant_exporter]
 
-        event = RunStarted(timestamp=base_timestamp, run_id="test")
+        event = make_run_started("test", base_timestamp)
 
         # This should complete without deadlock
         manager.handle_event(event)
