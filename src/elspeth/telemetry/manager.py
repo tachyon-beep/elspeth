@@ -309,11 +309,16 @@ class TelemetryManager:
         }
 
     def flush(self) -> None:
-        """Flush all exporters.
+        """Wait for queue to drain, then flush exporters.
 
-        Ensures all buffered events are sent. Exporter flush failures
-        are logged but don't raise - telemetry should not crash the pipeline.
+        Blocks until all queued events have been processed by the export
+        thread, then flushes each exporter's internal buffer.
+
+        Exporter flush failures are logged but don't raise - telemetry
+        should not crash the pipeline.
         """
+        if not self._shutdown_event.is_set():
+            self._queue.join()  # Wait for all queued events to be processed
         for exporter in self._exporters:
             try:
                 exporter.flush()
@@ -325,12 +330,40 @@ class TelemetryManager:
                 )
 
     def close(self) -> None:
-        """Close all exporters and log final metrics.
+        """Shutdown export thread and close exporters.
+
+        Shutdown Sequence (order is critical to avoid deadlock/data loss):
+        1. Signal shutdown to reject new events
+        2. Send sentinel FIRST (before waiting) - thread processes remaining
+           events then exits when it sees the sentinel
+        3. Wait for thread to exit (implicitly waits for queue drain)
+        4. Close exporters
+
+        CRITICAL: Do NOT call queue.join() before sending sentinel - this
+        creates a race condition where the thread may block on get() after
+        join() completes but before sentinel arrives.
 
         Should be called at pipeline shutdown. Logs final health metrics
         and releases exporter resources. Close failures are logged but
         don't raise.
         """
+        # 1. Signal shutdown - prevents new events from being queued
+        self._shutdown_event.set()
+
+        # 2. Send sentinel FIRST - thread will process remaining events
+        #    then exit when it sees the sentinel
+        try:
+            self._queue.put(None, timeout=1.0)
+        except queue.Full:
+            logger.error("Failed to send shutdown sentinel - queue full")
+
+        # 3. Wait for thread to exit (this implicitly waits for queue drain
+        #    because thread processes all events before exiting on sentinel)
+        self._export_thread.join(timeout=5.0)
+        if self._export_thread.is_alive():
+            logger.error("Export thread did not exit cleanly within timeout")
+
+        # 4. Close exporters
         logger.info("Telemetry manager closing", **self.health_metrics)
         for exporter in self._exporters:
             try:
