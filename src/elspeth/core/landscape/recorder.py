@@ -5,6 +5,8 @@ This is the main interface for recording audit trail entries during
 pipeline execution. It wraps the low-level database operations.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from threading import Lock
@@ -438,7 +440,7 @@ class LandscapeRecorder:
         sequence: int | None = None,
         schema_hash: str | None = None,
         determinism: Determinism = Determinism.DETERMINISTIC,
-        schema_config: "SchemaConfig",
+        schema_config: SchemaConfig,
     ) -> Node:
         """Register a plugin instance (node) in the execution graph.
 
@@ -1969,7 +1971,7 @@ class LandscapeRecorder:
 
     # === Reproducibility Grade Management ===
 
-    def compute_reproducibility_grade(self, run_id: str) -> "ReproducibilityGrade":
+    def compute_reproducibility_grade(self, run_id: str) -> ReproducibilityGrade:
         """Compute reproducibility grade for a run based on node determinism.
 
         Logic:

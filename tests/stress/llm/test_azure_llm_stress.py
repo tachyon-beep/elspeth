@@ -37,6 +37,9 @@ from .conftest import (
     make_token,
 )
 
+# Mark all tests in this module as stress tests (skipped by default)
+pytestmark = pytest.mark.stress
+
 
 class CollectingOutputPort:
     """Output port that collects results for verification.

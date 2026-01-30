@@ -235,6 +235,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
+    "-m", "not stress",  # Skip stress tests by default (run with: pytest -m stress)
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

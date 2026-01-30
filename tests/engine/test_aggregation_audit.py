@@ -431,8 +431,8 @@ class TestAggregationFlushAuditTrail:
         # Verify result is error
         assert result.status == "error"
         assert result.reason == {
+            "reason": "batch_error",
             "message": "batch processing failed",
-            "code": "BATCH_ERROR",
         }
 
         # Verify batch status is "failed"
@@ -463,7 +463,7 @@ class TestAggregationFlushAuditTrail:
         assert error["type"] == "TransformError"
         # The exception field contains the stringified reason dict
         assert "batch processing failed" in error["exception"]
-        assert "BATCH_ERROR" in error["exception"]
+        assert "batch_error" in error["exception"]
 
         # Verify duration_ms is populated
         assert agg_state.duration_ms is not None

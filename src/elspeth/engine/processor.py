@@ -9,6 +9,8 @@ Coordinates:
 - Final outcome recording
 """
 
+from __future__ import annotations
+
 import hashlib
 from collections import deque
 from dataclasses import dataclass
@@ -101,15 +103,15 @@ class RowProcessor:
         config_gate_id_map: dict[GateName, NodeID] | None = None,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
         retry_manager: RetryManager | None = None,
-        coalesce_executor: "CoalesceExecutor | None" = None,
+        coalesce_executor: CoalesceExecutor | None = None,
         coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         coalesce_step_map: dict[CoalesceName, int] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
-        payload_store: "PayloadStore | None" = None,
-        clock: "Clock | None" = None,
+        payload_store: PayloadStore | None = None,
+        clock: Clock | None = None,
         max_workers: int | None = None,
-        telemetry_manager: "TelemetryManager | None" = None,
+        telemetry_manager: TelemetryManager | None = None,
     ) -> None:
         """Initialize processor.
 
@@ -168,7 +170,7 @@ class RowProcessor:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
 
-    def _emit_telemetry(self, event: "TelemetryEvent") -> None:
+    def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
 
         Telemetry is emitted AFTER Landscape recording succeeds. Landscape is
@@ -225,7 +227,7 @@ class RowProcessor:
         token: TokenInfo,
         gate_name: str,
         gate_node_id: str,
-        routing_mode: "RoutingMode",
+        routing_mode: RoutingMode,
         destinations: tuple[str, ...],
     ) -> None:
         """Emit GateEvaluated telemetry event.
@@ -292,7 +294,7 @@ class RowProcessor:
             )
         )
 
-    def _get_gate_destinations(self, outcome: "GateOutcome") -> tuple[str, ...]:
+    def _get_gate_destinations(self, outcome: GateOutcome) -> tuple[str, ...]:
         """Extract destination names from gate outcome for telemetry.
 
         Args:
@@ -444,7 +446,7 @@ class RowProcessor:
         step: int,
         total_steps: int,
         trigger_type: TriggerType,
-    ) -> tuple[list[RowResult], list["_WorkItem"]]:
+    ) -> tuple[list[RowResult], list[_WorkItem]]:
         """Handle an aggregation flush with proper output_mode semantics.
 
         This method mirrors the flush handling in _process_batch_aggregation_node but

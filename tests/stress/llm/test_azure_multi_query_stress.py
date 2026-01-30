@@ -38,6 +38,9 @@ from .conftest import (
     make_token,
 )
 
+# Mark all tests in this module as stress tests (skipped by default)
+pytestmark = pytest.mark.stress
+
 # JSON template for multi-query responses
 # Must match the output_mapping in make_azure_multi_query_config
 MULTI_QUERY_JSON_TEMPLATE = '{"score": 5, "rationale": "Test assessment rationale"}'

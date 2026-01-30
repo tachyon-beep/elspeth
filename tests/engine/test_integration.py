@@ -3434,7 +3434,7 @@ class TestErrorRecovery:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
-                    return TransformResult.error({"reason": "validation_failed", "error": "Even values fail", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row)
 
         class CollectSink(_TestSinkBase):
@@ -3552,7 +3552,7 @@ class TestErrorRecovery:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
-                    return TransformResult.error({"reason": "validation_failed", "error": "Even values fail", "value": row["value"]})
+                    return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
                 return TransformResult.success(row)
 
         class CollectSink(_TestSinkBase):

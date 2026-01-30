@@ -10,6 +10,8 @@ Coordinates:
 - Post-run audit export (when configured)
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -151,14 +153,14 @@ class Orchestrator:
         self,
         db: LandscapeDB,
         *,
-        event_bus: "EventBusProtocol" = None,  # type: ignore[assignment]
+        event_bus: EventBusProtocol = None,  # type: ignore[assignment]
         canonical_version: str = "sha256-rfc8785-v1",
-        checkpoint_manager: "CheckpointManager | None" = None,
-        checkpoint_config: "RuntimeCheckpointConfig | None" = None,
-        clock: "Clock | None" = None,
-        rate_limit_registry: "RateLimitRegistry | None" = None,
-        concurrency_config: "RuntimeConcurrencyConfig | None" = None,
-        telemetry_manager: "TelemetryManager | None" = None,
+        checkpoint_manager: CheckpointManager | None = None,
+        checkpoint_config: RuntimeCheckpointConfig | None = None,
+        clock: Clock | None = None,
+        rate_limit_registry: RateLimitRegistry | None = None,
+        concurrency_config: RuntimeConcurrencyConfig | None = None,
+        telemetry_manager: TelemetryManager | None = None,
     ) -> None:
         from elspeth.core.events import NullEventBus
         from elspeth.engine.clock import DEFAULT_CLOCK
@@ -176,7 +178,7 @@ class Orchestrator:
         self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
         self._telemetry = telemetry_manager  # Optional, disabled by default
 
-    def _emit_telemetry(self, event: "TelemetryEvent") -> None:
+    def _emit_telemetry(self, event: TelemetryEvent) -> None:
         """Emit telemetry event if manager is configured.
 
         Telemetry is emitted AFTER Landscape recording succeeds. Landscape is
@@ -389,7 +391,7 @@ class Orchestrator:
 
     def _validate_source_quarantine_destination(
         self,
-        source: "SourceProtocol",
+        source: SourceProtocol,
         available_sinks: set[str],
     ) -> None:
         """Validate source quarantine destination references an existing sink.
@@ -473,7 +475,7 @@ class Orchestrator:
         self,
         graph: ExecutionGraph,
         config: PipelineConfig,
-        settings: "ElspethSettings | None",
+        settings: ElspethSettings | None,
     ) -> dict[CoalesceName, int]:
         """Compute coalesce step positions aligned with graph topology.
 
@@ -514,10 +516,10 @@ class Orchestrator:
         self,
         config: PipelineConfig,
         graph: ExecutionGraph | None = None,
-        settings: "ElspethSettings | None" = None,
+        settings: ElspethSettings | None = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: "PayloadStore | None" = None,
+        payload_store: PayloadStore | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -746,10 +748,10 @@ class Orchestrator:
         run_id: str,
         config: PipelineConfig,
         graph: ExecutionGraph,
-        settings: "ElspethSettings | None" = None,
+        settings: ElspethSettings | None = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: "PayloadStore | None" = None,
+        payload_store: PayloadStore | None = None,
     ) -> RunResult:
         """Execute the run using the execution graph.
 
@@ -1020,7 +1022,6 @@ class Orchestrator:
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
-        from elspeth.contracts import TokenInfo
         from elspeth.engine.executors import SinkExecutor
 
         rows_processed = 0
@@ -1575,7 +1576,7 @@ class Orchestrator:
     def _export_landscape(
         self,
         run_id: str,
-        settings: "ElspethSettings",
+        settings: ElspethSettings,
         sinks: dict[str, Any],
     ) -> None:
         """Export audit trail to configured sink after run completion.
@@ -1847,12 +1848,12 @@ class Orchestrator:
 
     def resume(
         self,
-        resume_point: "ResumePoint",
+        resume_point: ResumePoint,
         config: PipelineConfig,
         graph: ExecutionGraph,
         *,
-        payload_store: "PayloadStore | None" = None,
-        settings: "ElspethSettings | None" = None,
+        payload_store: PayloadStore | None = None,
+        settings: ElspethSettings | None = None,
     ) -> RunResult:
         """Resume a failed run from a checkpoint.
 
@@ -1956,9 +1957,9 @@ class Orchestrator:
         graph: ExecutionGraph,
         unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
         restored_aggregation_state: dict[str, dict[str, Any]],
-        settings: "ElspethSettings | None" = None,
+        settings: ElspethSettings | None = None,
         *,
-        payload_store: "PayloadStore | None" = None,
+        payload_store: PayloadStore | None = None,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -2126,7 +2127,6 @@ class Orchestrator:
         )
 
         # Process rows - Buffer TOKENS
-        from elspeth.contracts import TokenInfo
         from elspeth.engine.executors import SinkExecutor
 
         rows_processed = 0
