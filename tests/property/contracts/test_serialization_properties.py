@@ -60,12 +60,36 @@ path_names = st.text(
 # Unique path lists for fork
 unique_path_lists = st.lists(path_names, min_size=1, max_size=5, unique=True)
 
-# Reason dictionaries for RoutingAction (JSON-safe)
-reason_dicts = st.dictionaries(
-    keys=st.sampled_from(["condition", "threshold", "rule", "match", "reason"]),
-    values=st.one_of(st.text(max_size=50), st.integers(min_value=-1000, max_value=1000), st.booleans()),
-    min_size=0,
-    max_size=3,
+# ConfigGateReason: condition + result (from config-driven gates)
+config_gate_reasons = st.fixed_dictionaries(
+    {
+        "condition": st.text(min_size=1, max_size=50),
+        "result": st.text(min_size=1, max_size=20),
+    }
+)
+
+# PluginGateReason: rule + matched_value
+plugin_gate_reasons = st.fixed_dictionaries(
+    {
+        "rule": st.text(min_size=1, max_size=50),
+        "matched_value": st.one_of(
+            st.text(max_size=50),
+            st.integers(min_value=-1000, max_value=1000),
+            st.booleans(),
+        ),
+    },
+    optional={
+        "threshold": st.floats(min_value=-1000, max_value=1000, allow_nan=False),
+        "field": st.text(min_size=1, max_size=30),
+        "comparison": st.sampled_from([">", "<", ">=", "<="]),
+    },
+)
+
+# RoutingReason union for property tests
+routing_reasons = st.one_of(
+    st.none(),
+    config_gate_reasons,
+    plugin_gate_reasons,
 )
 
 # TransformErrorReason dictionaries for TransformResult.error()
@@ -353,7 +377,7 @@ class TestTransformResultJsonSerializationProperties:
 class TestRoutingActionJsonSerializationProperties:
     """Property tests for RoutingAction JSON serialization."""
 
-    @given(reason=st.one_of(st.none(), reason_dicts))
+    @given(reason=routing_reasons)
     @settings(max_examples=100)
     def test_routing_action_continue_serializes_to_valid_json(
         self,
@@ -369,7 +393,7 @@ class TestRoutingActionJsonSerializationProperties:
         assert isinstance(parsed, dict)
         assert parsed["kind"] == RoutingKind.CONTINUE.value
 
-    @given(reason=st.one_of(st.none(), reason_dicts))
+    @given(reason=routing_reasons)
     @settings(max_examples=100)
     def test_routing_action_continue_json_round_trip_preserves_invariants(
         self,
@@ -385,7 +409,7 @@ class TestRoutingActionJsonSerializationProperties:
         assert parsed["destinations"] == []
         assert parsed["mode"] == RoutingMode.MOVE.value
 
-    @given(label=path_names, reason=st.one_of(st.none(), reason_dicts))
+    @given(label=path_names, reason=routing_reasons)
     @settings(max_examples=100)
     def test_routing_action_route_json_round_trip_preserves_destination(
         self,
@@ -402,7 +426,7 @@ class TestRoutingActionJsonSerializationProperties:
         assert parsed["destinations"] == [label]
         assert parsed["mode"] == RoutingMode.MOVE.value
 
-    @given(paths=unique_path_lists, reason=st.one_of(st.none(), reason_dicts))
+    @given(paths=unique_path_lists, reason=routing_reasons)
     @settings(max_examples=100)
     def test_routing_action_fork_json_round_trip_preserves_paths(
         self,
@@ -423,11 +447,11 @@ class TestRoutingActionJsonSerializationProperties:
 class TestRoutingActionReasonSerializationProperties:
     """Property tests for RoutingAction reason field serialization."""
 
-    @given(reason=reason_dicts)
+    @given(reason=routing_reasons)
     @settings(max_examples=100)
     def test_routing_action_reason_json_round_trip(
         self,
-        reason: dict[str, Any],
+        reason: dict[str, Any] | None,
     ) -> None:
         """Property: RoutingAction reason field JSON round-trips correctly."""
         action = RoutingAction.continue_(reason=reason)
@@ -435,16 +459,17 @@ class TestRoutingActionReasonSerializationProperties:
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
+        # RoutingAction preserves None as None, dicts are deep-copied
         assert parsed["reason"] == reason
 
     def test_routing_action_empty_reason_serializes(self) -> None:
-        """Property: Empty reason serializes to empty dict."""
+        """Property: None reason serializes to null."""
         action = RoutingAction.continue_()
 
         serialized = json.dumps(_routing_action_to_dict(action))
         parsed = json.loads(serialized)
 
-        assert parsed["reason"] == {}
+        assert parsed["reason"] is None
 
 
 # =============================================================================
@@ -455,12 +480,12 @@ class TestRoutingActionReasonSerializationProperties:
 def _routing_action_to_dict(action: RoutingAction) -> dict[str, Any]:
     """Convert RoutingAction to JSON-serializable dict.
 
-    RoutingAction uses MappingProxyType for reason and tuple for destinations,
-    which need conversion for standard JSON serialization.
+    RoutingAction uses tuple for destinations which needs conversion
+    for standard JSON serialization.
     """
     return {
         "kind": action.kind.value,
         "destinations": list(action.destinations),
         "mode": action.mode.value,
-        "reason": dict(action.reason),
+        "reason": action.reason,
     }

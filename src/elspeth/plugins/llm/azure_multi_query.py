@@ -393,21 +393,21 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # See AuditedLLMClient.chat_completion() lines 292-299 for details.
         completion_tokens = response.usage.get("completion_tokens", 0)
         if effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens:
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "error": (
-                        f"LLM response was truncated at {completion_tokens} tokens "
-                        f"(max_tokens={effective_max_tokens}). "
-                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
-                    ),
-                    "query": spec.output_prefix,
-                    "max_tokens": effective_max_tokens,
-                    "completion_tokens": completion_tokens,
-                    "prompt_tokens": response.usage.get("prompt_tokens", 0),
-                    "raw_response_preview": response.content[:500] if response.content else None,
-                }
-            )
+            truncation_error: TransformErrorReason = {
+                "reason": "response_truncated",
+                "error": (
+                    f"LLM response was truncated at {completion_tokens} tokens "
+                    f"(max_tokens={effective_max_tokens}). "
+                    f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                ),
+                "query": spec.output_prefix,
+                "max_tokens": effective_max_tokens,
+                "completion_tokens": completion_tokens,
+                "prompt_tokens": response.usage.get("prompt_tokens", 0),
+            }
+            if response.content:
+                truncation_error["raw_response_preview"] = response.content[:500]
+            return TransformResult.error(truncation_error)
 
         # 7. Parse JSON response (THEIR DATA - wrap)
         content = response.content.strip()
@@ -431,8 +431,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             error_info: TransformErrorReason = {
                 "reason": cast(TransformErrorCategory, validation_result.reason),
                 "query": spec.output_prefix,
-                "raw_response": response.content[:500] if response.content else None,
             }
+            if response.content:
+                error_info["raw_response"] = response.content[:500]
             if validation_result.detail:
                 error_info["error"] = validation_result.detail
                 error_info["content_after_fence_strip"] = content
@@ -596,7 +597,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             return TransformResult.error(
                 {
                     "reason": "query_failed",
-                    "failed_queries": [{"query": spec.output_prefix, "error": r.reason} for spec, r in failed],
+                    "failed_queries": [
+                        {
+                            "query": spec.output_prefix,
+                            "error": r.reason.get("error", str(r.reason)) if isinstance(r.reason, dict) else str(r.reason),
+                        }
+                        for spec, r in failed
+                    ],
                     "succeeded_count": len(results) - len(failed),
                     "total_count": len(results),
                 }

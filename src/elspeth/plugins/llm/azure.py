@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from pydantic import Field, model_validator
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
@@ -283,14 +283,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             rendered = self._template.render_with_metadata(row)
         except TemplateError as e:
-            return TransformResult.error(
-                {
-                    "reason": "template_rendering_failed",
-                    "error": str(e),
-                    "template_hash": self._template.template_hash,
-                    "template_source": self._template.template_source,
-                }
-            )
+            error_reason: TransformErrorReason = {
+                "reason": "template_rendering_failed",
+                "error": str(e),
+                "template_hash": self._template.template_hash,
+            }
+            if self._template.template_source:
+                error_reason["template_file_path"] = self._template.template_source
+            return TransformResult.error(error_reason)
 
         # 2. Build messages
         messages: list[dict[str, str]] = []

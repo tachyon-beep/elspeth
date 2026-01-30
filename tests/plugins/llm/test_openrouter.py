@@ -1462,7 +1462,7 @@ Text: {{ row.text }}""",
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "template_rendering_failed"
-        assert result.reason["template_source"] == "prompts/requires_field.j2"
+        assert result.reason["template_file_path"] == "prompts/requires_field.j2"
 
 
 class TestOpenRouterConcurrency:

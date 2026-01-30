@@ -43,15 +43,32 @@ all_routing_kinds = st.sampled_from(list(RoutingKind))
 # All RoutingMode values
 all_routing_modes = st.sampled_from(list(RoutingMode))
 
-# Reason dictionaries (matching routing.py's reason field)
-reason_dicts = st.one_of(
+# ConfigGateReason: condition + result (from config-driven gates)
+config_gate_reasons = st.fixed_dictionaries(
+    {
+        "condition": st.text(min_size=1, max_size=100),
+        "result": st.text(min_size=1, max_size=30),
+    }
+)
+
+# PluginGateReason: rule + matched_value + optional threshold fields
+plugin_gate_reasons = st.fixed_dictionaries(
+    {
+        "rule": st.text(min_size=1, max_size=100),
+        "matched_value": json_primitives,
+    },
+    optional={
+        "threshold": st.floats(allow_nan=False, allow_infinity=False),
+        "field": st.text(min_size=1, max_size=50, alphabet="abcdefghijklmnopqrstuvwxyz_"),
+        "comparison": st.sampled_from([">", "<", ">=", "<=", "==", "!="]),
+    },
+)
+
+# RoutingReason is ConfigGateReason | PluginGateReason
+routing_reasons = st.one_of(
     st.none(),
-    st.dictionaries(
-        keys=dict_keys,
-        values=json_primitives,
-        min_size=0,
-        max_size=5,
-    ),
+    config_gate_reasons,
+    plugin_gate_reasons,
 )
 
 # Valid route labels (non-empty strings for destinations)
@@ -260,7 +277,7 @@ class TestRoutingKindEnumProperties:
 class TestRoutingActionProperties:
     """Property tests for RoutingAction invariants."""
 
-    @given(reason=reason_dicts)
+    @given(reason=routing_reasons)
     @settings(max_examples=100)
     def test_continue_action_has_no_destination(self, reason: dict[str, Any] | None) -> None:
         """Property: CONTINUE action always has empty destinations.
@@ -275,7 +292,7 @@ class TestRoutingActionProperties:
         assert len(action.destinations) == 0
         assert action.mode == RoutingMode.MOVE
 
-    @given(label=route_labels, reason=reason_dicts)
+    @given(label=route_labels, reason=routing_reasons)
     @settings(max_examples=100)
     def test_route_action_contains_correct_sink_name(self, label: str, reason: dict[str, Any] | None) -> None:
         """Property: ROUTE action contains exactly the specified sink name.
@@ -291,7 +308,7 @@ class TestRoutingActionProperties:
         assert action.destinations[0] == label
         assert action.mode == RoutingMode.MOVE
 
-    @given(paths=multiple_branches, reason=reason_dicts)
+    @given(paths=multiple_branches, reason=routing_reasons)
     @settings(max_examples=100)
     def test_fork_action_contains_all_branch_names(self, paths: list[str], reason: dict[str, Any] | None) -> None:
         """Property: FORK_TO_PATHS action contains all specified branch names.
@@ -308,7 +325,7 @@ class TestRoutingActionProperties:
             assert path in action.destinations
         assert action.mode == RoutingMode.COPY
 
-    @given(reason=reason_dicts)
+    @given(reason=routing_reasons)
     @settings(max_examples=50)
     def test_continue_uses_move_mode(self, reason: dict[str, Any] | None) -> None:
         """Property: CONTINUE always uses MOVE mode.
@@ -388,29 +405,27 @@ class TestRoutingActionProperties:
 
 
 class TestRoutingActionReasonImmutability:
-    """Property tests for RoutingAction reason immutability."""
+    """Property tests for RoutingAction reason immutability.
+
+    RoutingAction uses deep copy to prevent external mutation. The frozen
+    dataclass prevents reassignment of the reason field, but the dict
+    itself is a regular dict (not MappingProxyType) for TypedDict compatibility.
+    """
 
     @given(reason=st.dictionaries(dict_keys, json_primitives, min_size=1, max_size=3))
     @settings(max_examples=100)
-    def test_reason_is_frozen_mapping(self, reason: dict[str, Any]) -> None:
-        """Property: Reason dict is frozen (immutable) after construction.
+    def test_reason_preserves_type(self, reason: dict[str, Any]) -> None:
+        """Property: Reason dict is a dict after construction.
 
-        RoutingAction.reason is a MappingProxyType to prevent mutation.
-        This is critical for audit integrity - routing reasons must be
-        immutable once recorded.
+        RoutingAction.reason is a deep-copied dict (for TypedDict compatibility).
+        The frozen dataclass prevents reassignment; deep copy prevents
+        external mutation via retained references.
         """
-        from types import MappingProxyType
-
         action = RoutingAction.continue_(reason=reason)
 
-        # Reason is a MappingProxyType (immutable view)
-        assert isinstance(action.reason, MappingProxyType)
-
-        # Cannot modify through the proxy
-        import pytest
-
-        with pytest.raises(TypeError):
-            action.reason["new_key"] = "value"  # type: ignore[index]
+        # Reason is a dict (TypedDict compatible)
+        assert isinstance(action.reason, dict)
+        assert action.reason == reason
 
     @given(reason=st.dictionaries(dict_keys, json_primitives, min_size=1, max_size=3))
     @settings(max_examples=100)
@@ -429,7 +444,7 @@ class TestRoutingActionReasonImmutability:
 
         # Action's reason should not be affected
         assert "__after_creation__" not in action.reason
-        assert dict(action.reason) == original_reason
+        assert action.reason == original_reason
 
 
 # =============================================================================

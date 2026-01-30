@@ -456,7 +456,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 "error": {
                     "reason": "invalid_json_response",
                     "error": str(e),
-                    "body_preview": response.text[:500] if response.text else None,
+                    **({"body_preview": response.text[:500]} if response.text else {}),
                 }
             }
 
@@ -530,6 +530,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         output[f"{self._response_field}_usage"] = usage
         output[f"{self._response_field}_template_hash"] = rendered.template_hash
         output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
+        # Template source metadata - always present for audit (None = inline template)
         output[f"{self._response_field}_template_source"] = rendered.template_source
         output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source

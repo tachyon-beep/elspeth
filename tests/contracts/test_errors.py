@@ -447,3 +447,165 @@ class TestNestedTypeDicts:
         # Only some fields provided
         usage: UsageStats = {"prompt_tokens": 100}
         assert usage["prompt_tokens"] == 100
+
+
+class TestQueryFailureDetailSchema:
+    """Tests for QueryFailureDetail TypedDict schema."""
+
+    def test_query_failure_detail_required_keys(self) -> None:
+        """QueryFailureDetail has query as required."""
+        from elspeth.contracts import QueryFailureDetail
+
+        assert QueryFailureDetail.__required_keys__ == frozenset({"query"})
+
+    def test_query_failure_detail_optional_keys(self) -> None:
+        """QueryFailureDetail has error, error_type, status_code as optional."""
+        from elspeth.contracts import QueryFailureDetail
+
+        assert QueryFailureDetail.__optional_keys__ == frozenset({"error", "error_type", "status_code"})
+
+
+class TestQueryFailureDetailUsage:
+    """Tests for constructing valid QueryFailureDetail values."""
+
+    def test_minimal_query_failure(self) -> None:
+        """QueryFailureDetail works with only required field."""
+        from elspeth.contracts import QueryFailureDetail
+
+        detail: QueryFailureDetail = {"query": "sentiment"}
+        assert detail["query"] == "sentiment"
+
+    def test_query_failure_with_error(self) -> None:
+        """QueryFailureDetail with error details."""
+        from elspeth.contracts import QueryFailureDetail
+
+        detail: QueryFailureDetail = {
+            "query": "classification",
+            "error": "Rate limit exceeded",
+            "error_type": "rate_limit",
+            "status_code": 429,
+        }
+        assert detail["query"] == "classification"
+        assert detail["error"] == "Rate limit exceeded"
+        assert detail["error_type"] == "rate_limit"
+        assert detail["status_code"] == 429
+
+
+class TestErrorDetailSchema:
+    """Tests for ErrorDetail TypedDict schema."""
+
+    def test_error_detail_required_keys(self) -> None:
+        """ErrorDetail has message as required."""
+        from elspeth.contracts import ErrorDetail
+
+        assert ErrorDetail.__required_keys__ == frozenset({"message"})
+
+    def test_error_detail_optional_keys(self) -> None:
+        """ErrorDetail has error_type, row_index, details as optional."""
+        from elspeth.contracts import ErrorDetail
+
+        assert ErrorDetail.__optional_keys__ == frozenset({"error_type", "row_index", "details"})
+
+
+class TestErrorDetailUsage:
+    """Tests for constructing valid ErrorDetail values."""
+
+    def test_minimal_error_detail(self) -> None:
+        """ErrorDetail works with only required field."""
+        from elspeth.contracts import ErrorDetail
+
+        detail: ErrorDetail = {"message": "Something went wrong"}
+        assert detail["message"] == "Something went wrong"
+
+    def test_error_detail_with_context(self) -> None:
+        """ErrorDetail with full context."""
+        from elspeth.contracts import ErrorDetail
+
+        detail: ErrorDetail = {
+            "message": "JSON parse failed",
+            "error_type": "json_parse_error",
+            "row_index": 42,
+            "details": "Unexpected token at position 15",
+        }
+        assert detail["message"] == "JSON parse failed"
+        assert detail["error_type"] == "json_parse_error"
+        assert detail["row_index"] == 42
+        assert detail["details"] == "Unexpected token at position 15"
+
+
+class TestFailedQueriesFieldType:
+    """Tests for failed_queries field with union type."""
+
+    def test_failed_queries_with_strings(self) -> None:
+        """failed_queries accepts list of query names."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "query_failed",
+            "failed_queries": ["sentiment", "classification"],
+        }
+        assert reason["failed_queries"] == ["sentiment", "classification"]
+
+    def test_failed_queries_with_details(self) -> None:
+        """failed_queries accepts list of QueryFailureDetail."""
+        from elspeth.contracts import QueryFailureDetail, TransformErrorReason
+
+        detail1: QueryFailureDetail = {"query": "sentiment", "error": "Timeout"}
+        detail2: QueryFailureDetail = {"query": "classification", "status_code": 500}
+
+        reason: TransformErrorReason = {
+            "reason": "query_failed",
+            "failed_queries": [detail1, detail2],
+        }
+        assert len(reason["failed_queries"]) == 2
+
+    def test_failed_queries_mixed(self) -> None:
+        """failed_queries accepts mixed list of strings and QueryFailureDetail."""
+        from elspeth.contracts import QueryFailureDetail, TransformErrorReason
+
+        detail: QueryFailureDetail = {"query": "sentiment", "error": "Timeout"}
+
+        reason: TransformErrorReason = {
+            "reason": "query_failed",
+            "failed_queries": ["classification", detail],
+        }
+        assert len(reason["failed_queries"]) == 2
+
+
+class TestErrorsFieldType:
+    """Tests for errors field with union type."""
+
+    def test_errors_with_strings(self) -> None:
+        """errors accepts list of error message strings."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "batch_failed",
+            "errors": ["Row 1 failed", "Row 5 failed"],
+        }
+        assert reason["errors"] == ["Row 1 failed", "Row 5 failed"]
+
+    def test_errors_with_details(self) -> None:
+        """errors accepts list of ErrorDetail."""
+        from elspeth.contracts import ErrorDetail, TransformErrorReason
+
+        detail1: ErrorDetail = {"message": "Row 1 failed", "row_index": 1}
+        detail2: ErrorDetail = {"message": "Row 5 failed", "row_index": 5}
+
+        reason: TransformErrorReason = {
+            "reason": "batch_failed",
+            "errors": [detail1, detail2],
+        }
+        assert len(reason["errors"]) == 2
+
+    def test_errors_mixed(self) -> None:
+        """errors accepts mixed list of strings and ErrorDetail."""
+        from elspeth.contracts import ErrorDetail, TransformErrorReason
+
+        detail: ErrorDetail = {"message": "Row 5 failed", "row_index": 5}
+
+        reason: TransformErrorReason = {
+            "reason": "batch_failed",
+            "errors": ["Row 1 failed", detail],
+        }
+        assert len(reason["errors"]) == 2

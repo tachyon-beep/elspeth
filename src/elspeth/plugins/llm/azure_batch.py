@@ -596,7 +596,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 "batch_id": batch_id,
             }
             if hasattr(batch, "errors") and batch.errors:
-                error_info["errors"] = [{"code": e.code, "message": e.message} for e in batch.errors.data]
+                error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
 
             return TransformResult.error(error_info)
 
@@ -764,7 +764,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 {
                     "reason": "all_output_lines_malformed",
                     "malformed_count": len(malformed_lines),
-                    "errors": malformed_lines[:10],  # First 10 errors for diagnosis
+                    "errors": list(malformed_lines[:10]),  # First 10 errors for diagnosis
                 }
             )
 

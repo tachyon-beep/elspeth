@@ -594,7 +594,8 @@ class TestSequentialFallback:
             assert call_count[0] == 4
 
             # Verify it's an immediate failure, not a retry timeout
-            assert result.reason["failed_queries"][0]["error"]["reason"] == "rate_limited"
+            # error is now a string extracted from the TransformErrorReason["error"] field
+            assert "Rate limit" in result.reason["failed_queries"][0]["error"]
 
 
 class TestMemoryLeakPrevention:

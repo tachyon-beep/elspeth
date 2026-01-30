@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 from pydantic import Field
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
@@ -261,14 +261,14 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             rendered = self._template.render_with_metadata(row)
         except TemplateError as e:
-            return TransformResult.error(
-                {
-                    "reason": "template_rendering_failed",
-                    "error": str(e),
-                    "template_hash": self._template.template_hash,
-                    "template_source": self._template.template_source,
-                }
-            )
+            error_reason: TransformErrorReason = {
+                "reason": "template_rendering_failed",
+                "error": str(e),
+                "template_hash": self._template.template_hash,
+            }
+            if self._template.template_source:
+                error_reason["template_file_path"] = self._template.template_source
+            return TransformResult.error(error_reason)
 
         # 2. Build request
         messages: list[dict[str, str]] = []
@@ -314,15 +314,14 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             try:
                 data = response.json()
             except (ValueError, TypeError) as e:
-                return TransformResult.error(
-                    {
-                        "reason": "invalid_json_response",
-                        "error": f"Response is not valid JSON: {e}",
-                        "content_type": response.headers.get("content-type", "unknown"),
-                        "body_preview": response.text[:500] if response.text else None,
-                    },
-                    retryable=False,
-                )
+                error_reason_json: TransformErrorReason = {
+                    "reason": "invalid_json_response",
+                    "error": f"Response is not valid JSON: {e}",
+                    "content_type": response.headers.get("content-type", "unknown"),
+                }
+                if response.text:
+                    error_reason_json["body_preview"] = response.text[:500]
+                return TransformResult.error(error_reason_json, retryable=False)
 
             # 6. Extract content from response (EXTERNAL DATA - wrap)
             try:

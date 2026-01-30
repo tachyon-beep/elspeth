@@ -120,6 +120,30 @@ class UsageStats(TypedDict, total=False):
     total_tokens: int
 
 
+class QueryFailureDetail(TypedDict):
+    """Detailed information about a failed query in multi-query transforms.
+
+    Used when transforms need to report more than just the query name.
+    """
+
+    query: str
+    error: NotRequired[str]
+    error_type: NotRequired[str]
+    status_code: NotRequired[int]
+
+
+class ErrorDetail(TypedDict):
+    """Detailed information about an error in batch processing.
+
+    Used when more context is needed than a simple error message string.
+    """
+
+    message: str
+    error_type: NotRequired[str]
+    row_index: NotRequired[int]
+    details: NotRequired[str]
+
+
 # Literal type for compile-time validation of error categories
 TransformErrorCategory = Literal[
     # API/Network errors
@@ -271,9 +295,9 @@ class TransformErrorReason(TypedDict):
     # Multi-query/template context
     query: NotRequired[str]
     template_hash: NotRequired[str]
-    template_source: NotRequired[str | None]  # Template source identifier
+    template_file_path: NotRequired[str]  # Path to template file; absent = inline template
     template_errors: NotRequired[list[TemplateErrorEntry]]
-    failed_queries: NotRequired[list[str] | list[dict[str, Any]]]  # Query names or detailed failures
+    failed_queries: NotRequired[list[str | QueryFailureDetail]]  # Query names or detailed failures
     succeeded_count: NotRequired[int]  # Number of successful queries
     total_count: NotRequired[int]  # Total number of queries attempted
 
@@ -281,13 +305,13 @@ class TransformErrorReason(TypedDict):
     max_tokens: NotRequired[int]
     completion_tokens: NotRequired[int]
     prompt_tokens: NotRequired[int]
-    raw_response: NotRequired[str | None]
-    raw_response_preview: NotRequired[str | None]
+    raw_response: NotRequired[str]  # LLM response text; absent = empty/unavailable
+    raw_response_preview: NotRequired[str]  # Truncated preview; absent = empty/unavailable
     content_after_fence_strip: NotRequired[str]
     usage: NotRequired[UsageStats | dict[str, int]]
     response: NotRequired[dict[str, Any]]
     response_keys: NotRequired[list[str] | None]
-    body_preview: NotRequired[str | None]
+    body_preview: NotRequired[str]  # HTTP body preview; absent = empty/unavailable
     content_type: NotRequired[str]
 
     # Type validation context
@@ -314,7 +338,7 @@ class TransformErrorReason(TypedDict):
     row_errors: NotRequired[list[RowErrorEntry]]
     output_file_id: NotRequired[str]  # Batch output file reference
     malformed_count: NotRequired[int]  # Count of malformed batch lines
-    errors: NotRequired[list[str] | list[dict[str, Any]]]  # Error messages or structured errors
+    errors: NotRequired[list[str | ErrorDetail]]  # Error messages or structured errors
 
 
 # =============================================================================
