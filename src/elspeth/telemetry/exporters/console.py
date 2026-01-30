@@ -79,8 +79,7 @@ class ConsoleExporter:
         if format_value not in self._VALID_FORMATS:
             raise TelemetryExporterError(
                 self._name,
-                f"Invalid format '{format_value}'. "
-                f"Must be one of: {', '.join(sorted(self._VALID_FORMATS))}",
+                f"Invalid format '{format_value}'. Must be one of: {', '.join(sorted(self._VALID_FORMATS))}",
             )
         self._format = format_value  # type: ignore[assignment]
 
@@ -94,8 +93,7 @@ class ConsoleExporter:
         if output_value not in self._VALID_OUTPUTS:
             raise TelemetryExporterError(
                 self._name,
-                f"Invalid output '{output_value}'. "
-                f"Must be one of: {', '.join(sorted(self._VALID_OUTPUTS))}",
+                f"Invalid output '{output_value}'. Must be one of: {', '.join(sorted(self._VALID_OUTPUTS))}",
             )
         self._output = output_value  # type: ignore[assignment]
         self._stream = sys.stdout if self._output == "stdout" else sys.stderr

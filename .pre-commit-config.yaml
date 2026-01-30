@@ -1,3 +1,7 @@
+# IMPORTANT: Scans ALL files by design, not just staged/changed files.
+# This ensures ALL files pass CI/CD checks, not just the ones you edited.
+# DO NOT change this behavior - it catches existing issues that must be fixed.
+# Hooks are CHECK-ONLY - they do NOT auto-fix or modify files.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
@@ -14,11 +18,11 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.0
     hooks:
-      # Linter
+      # Linter - check only, no auto-fix
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-      # Formatter
+      # Formatter - check only, no auto-format
       - id: ruff-format
+        args: [--check]
 
   - repo: local
     hooks:

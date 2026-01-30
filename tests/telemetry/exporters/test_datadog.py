@@ -254,8 +254,7 @@ class TestDatadogExporterSpanCreation:
         call_kwargs = mock_tracer.start_span.call_args[1]
         assert "start" in call_kwargs, "start_span must be called with explicit 'start' parameter"
         assert call_kwargs["start"] == expected_unix_seconds, (
-            f"Span start time should be event timestamp ({expected_unix_seconds}), "
-            f"not export time. Got: {call_kwargs.get('start')}"
+            f"Span start time should be event timestamp ({expected_unix_seconds}), not export time. Got: {call_kwargs.get('start')}"
         )
 
         # Verify span was finished with the same timestamp (instant span)
@@ -263,8 +262,7 @@ class TestDatadogExporterSpanCreation:
         finish_call_kwargs = mock_span.finish.call_args[1] if mock_span.finish.call_args[1] else {}
         finish_time = finish_call_kwargs.get("finish_time")
         assert finish_time == expected_unix_seconds, (
-            f"Span finish time should be event timestamp ({expected_unix_seconds}) for instant span. "
-            f"Got: {finish_time}"
+            f"Span finish time should be event timestamp ({expected_unix_seconds}) for instant span. Got: {finish_time}"
         )
 
     def test_span_name_is_event_class_name(self) -> None:

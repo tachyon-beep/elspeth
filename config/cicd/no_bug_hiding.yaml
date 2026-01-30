@@ -1155,3 +1155,24 @@ allow_hits:
   reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
+# Console Exporter - telemetry exporters must never crash the pipeline
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=73
+  owner: architecture
+  reason: 'Optional config field: format has sensible default of "json"'
+  safety: Default "json" is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=87
+  owner: architecture
+  reason: 'Optional config field: output has sensible default of "stdout"'
+  safety: Default "stdout" is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:line=123
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:line=216
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
