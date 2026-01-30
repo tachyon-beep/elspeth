@@ -4,8 +4,7 @@ These types answer: "Where does data go next?"
 """
 
 import copy
-from dataclasses import dataclass, field
-from typing import Any, cast
+from dataclasses import dataclass
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from elspeth.contracts.errors import RoutingReason
@@ -27,8 +26,7 @@ def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
     if reason is None:
         return None
     # Deep copy to prevent mutation of original or nested dicts
-    # Cast is safe: input is RoutingReason, deep copy preserves structure
-    return cast(RoutingReason, copy.deepcopy(reason))
+    return copy.deepcopy(reason)
 
 
 @dataclass(frozen=True)
