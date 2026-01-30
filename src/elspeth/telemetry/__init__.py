@@ -46,7 +46,6 @@ Usage:
 
 from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
-from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.events import (
     ExternalCallCompleted,
     GateEvaluated,
@@ -58,6 +57,7 @@ from elspeth.telemetry.events import (
     TokenCompleted,
     TransformCompleted,
 )
+from elspeth.telemetry.exporters import ConsoleExporter
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.manager import TelemetryManager
 from elspeth.telemetry.protocols import ExporterProtocol

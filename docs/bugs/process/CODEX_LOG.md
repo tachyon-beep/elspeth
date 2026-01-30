@@ -31,3 +31,8 @@
 | 2026-01-25T11:17:55+00:00 | ok | src/elspeth/plugins/llm/azure.py | docs/bugs/generated/plugins/llm/azure.py.md |  | 734.93 |  |
 | 2026-01-25T11:19:24+00:00 | ok | src/elspeth/plugins/llm/base.py | docs/bugs/generated/plugins/llm/base.py.md |  | 824.05 |  |
 | 2026-01-25T11:21:38+00:00 | ok | src/elspeth/plugins/llm/openrouter.py | docs/bugs/generated/plugins/llm/openrouter.py.md |  | 957.52 |  |
+| 2026-01-30T09:14:26+00:00 | ok | src/elspeth/engine/executors.py | docs/bugs/generated/engine/executors.py.md |  | 205.92 |  |
+| 2026-01-30T09:18:16+00:00 | ok | src/elspeth/engine/orchestrator.py | docs/bugs/generated/engine/orchestrator.py.md |  | 435.80 |  |
+| 2026-01-30T09:22:07+00:00 | ok | src/elspeth/core/dag.py | docs/bugs/generated/core/dag.py.md |  | 667.44 |  |
+| 2026-01-30T09:22:41+00:00 | ok | src/elspeth/engine/processor.py | docs/bugs/generated/engine/processor.py.md |  | 701.09 |  |
+| 2026-01-30T09:23:54+00:00 | ok | src/elspeth/engine/coalesce_executor.py | docs/bugs/generated/engine/coalesce_executor.py.md |  | 774.47 |  |

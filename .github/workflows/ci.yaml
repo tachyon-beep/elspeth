@@ -4,6 +4,7 @@
 #   - Linting (ruff, mypy) - ~30 seconds
 #   - Testing (pytest with coverage) - ~3-5 minutes
 #   - Bug-hiding pattern detection
+#   - Contract enforcement (Settings→Runtime alignment, type boundaries)
 #
 # All checks must pass before merging to main.
 
