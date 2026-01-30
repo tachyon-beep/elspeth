@@ -59,12 +59,30 @@ path_names = st.text(
 # Unique path lists for fork
 unique_path_lists = st.lists(path_names, min_size=1, max_size=5, unique=True)
 
-# Reason dictionaries (JSON-safe)
+# Reason dictionaries for RoutingAction (JSON-safe)
 reason_dicts = st.dictionaries(
     keys=st.sampled_from(["condition", "threshold", "rule", "match", "reason"]),
     values=st.one_of(st.text(max_size=50), st.integers(min_value=-1000, max_value=1000), st.booleans()),
     min_size=0,
     max_size=3,
+)
+
+# TransformErrorReason dictionaries for TransformResult.error()
+# Valid TransformErrorReason requires "reason" field with Literal-typed value
+_test_error_categories = [
+    "api_error",
+    "missing_field",
+    "validation_failed",
+    "test_error",
+    "property_test_error",
+]
+
+transform_error_reasons = st.fixed_dictionaries(
+    {"reason": st.sampled_from(_test_error_categories)},
+    optional={
+        "error": st.text(min_size=1, max_size=100),
+        "field": st.text(min_size=1, max_size=50, alphabet="abcdefghijklmnopqrstuvwxyz_"),
+    },
 )
 
 
@@ -278,7 +296,7 @@ class TestTransformResultJsonSerializationProperties:
         assert parsed["row"] == data
         assert parsed["reason"] is None
 
-    @given(reason=reason_dicts)
+    @given(reason=transform_error_reasons)
     @settings(max_examples=100)
     def test_transform_result_error_json_round_trip_preserves_reason(
         self,
@@ -302,7 +320,7 @@ class TestTransformResultJsonSerializationProperties:
         retryable: bool,
     ) -> None:
         """Property: TransformResult.error() JSON round-trip preserves retryable flag."""
-        result = TransformResult.error({"reason": "test"}, retryable=retryable)
+        result = TransformResult.error({"reason": "test_error"}, retryable=retryable)
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)

@@ -23,7 +23,7 @@ from typing import Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from elspeth.contracts import RoutingAction, TransformResult
+from elspeth.contracts import RoutingAction, TransformErrorReason, TransformResult
 from elspeth.contracts.enums import RoutingKind, RoutingMode
 from tests.property.conftest import (
     branch_names,
@@ -62,11 +62,24 @@ route_labels = st.text(
 ).filter(lambda s: s[0].isalpha())
 
 # Error reason dictionaries for TransformResult.error()
-error_reasons = st.dictionaries(
-    keys=st.text(min_size=1, max_size=20, alphabet="abcdefghijklmnopqrstuvwxyz_"),
-    values=json_primitives,
-    min_size=1,
-    max_size=5,
+# Valid TransformErrorReason requires "reason" field with Literal-typed value
+# Use a subset of common error categories for property testing
+_test_error_categories = [
+    "api_error",
+    "missing_field",
+    "validation_failed",
+    "test_error",
+    "property_test_error",
+]
+
+error_reasons = st.fixed_dictionaries(
+    {"reason": st.sampled_from(_test_error_categories)},
+    optional={
+        "error": st.text(min_size=1, max_size=100),
+        "field": st.text(min_size=1, max_size=50, alphabet="abcdefghijklmnopqrstuvwxyz_"),
+        "status_code": st.integers(min_value=100, max_value=599),
+        "query": st.text(min_size=1, max_size=50),
+    },
 )
 
 
@@ -128,7 +141,7 @@ class TestTransformResultProperties:
 
     @given(reason=error_reasons, retryable=st.booleans())
     @settings(max_examples=100)
-    def test_error_result_preserves_reason_intact(self, reason: dict[str, Any], retryable: bool) -> None:
+    def test_error_result_preserves_reason_intact(self, reason: TransformErrorReason, retryable: bool) -> None:
         """Property: TransformResult.error() preserves reason dict unchanged.
 
         Error reasons must be preserved exactly for audit trail integrity.
@@ -146,7 +159,7 @@ class TestTransformResultProperties:
 
     @given(reason=error_reasons)
     @settings(max_examples=100)
-    def test_error_result_reason_is_same_object(self, reason: dict[str, Any]) -> None:
+    def test_error_result_reason_is_same_object(self, reason: TransformErrorReason) -> None:
         """Property: error() does not copy the reason dict.
 
         Like success(), error() passes the reason by reference.
