@@ -1038,3 +1038,41 @@ class TestBackpressureMode:
 
         # Verify the reentrant call happened (or was handled)
         assert len(reentrant_exporter.reentrant_calls) > 0
+
+    def test_close_processes_all_queued_events(self, base_timestamp: datetime) -> None:
+        """close() processes all queued events before returning."""
+        exporter = MockExporter("test")
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[exporter])
+
+        # Queue several events
+        for i in range(5):
+            event = make_run_started(f"run-{i}", base_timestamp)
+            manager.handle_event(event)
+
+        # Close should process all events
+        manager.close()
+
+        # Verify all events were exported
+        assert len(exporter.exports) == 5
+        assert [e.run_id for e in exporter.exports] == [f"run-{i}" for i in range(5)]
+
+    def test_thread_death_disables_telemetry(self, base_timestamp: datetime) -> None:
+        """If export thread dies, handle_event disables telemetry."""
+        exporter = MockExporter("test")
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[exporter])
+
+        # Force thread to exit by sending sentinel directly
+        manager._queue.put(None)
+        manager._export_thread.join(timeout=1.0)
+        assert not manager._export_thread.is_alive()
+
+        # Now handle_event should detect dead thread and disable
+        event = make_run_started("test", base_timestamp)
+        manager.handle_event(event)
+
+        assert manager._disabled is True
+
+        # Cleanup (close won't try to stop already-dead thread)
+        manager._shutdown_event.set()
