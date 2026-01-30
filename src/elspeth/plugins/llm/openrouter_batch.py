@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import Field
@@ -138,9 +138,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         self._on_error = cfg.on_error
 
         # Schema from config
-        assert cfg.schema_config is not None
+        # TransformDataConfig validates schema_config is not None
+        schema_config = cast(SchemaConfig, cfg.schema_config)
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,  # Transforms do NOT coerce
         )
@@ -152,16 +153,16 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         audit = get_llm_audit_fields(self._response_field)
 
         # Merge with any existing fields from base schema
-        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
-        base_audit = cfg.schema_config.audit_fields or ()
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
-            mode=cfg.schema_config.mode,
-            fields=cfg.schema_config.fields,
-            is_dynamic=cfg.schema_config.is_dynamic,
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
-            required_fields=cfg.schema_config.required_fields,
+            required_fields=schema_config.required_fields,
         )
 
     def process(
@@ -209,7 +210,17 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         elif result.status == "error":
             return result
         else:
-            return TransformResult.success(row)
+            # Defense-in-depth: _process_batch() should always return either:
+            # - success_multi(rows) with non-empty rows
+            # - error()
+            # If we reach here, something unexpected happened - crash rather than
+            # silently passing through the original row unprocessed.
+            raise RuntimeError(
+                f"Unexpected result from _process_batch: status={result.status}, "
+                f"row={result.row}, rows={result.rows}. "
+                f"Expected success with rows or error. This indicates a bug in "
+                f"_process_batch or an upstream change that broke the contract."
+            )
 
     def _process_batch(
         self,
@@ -226,7 +237,14 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             TransformResult with all processed rows
         """
         if not rows:
-            return TransformResult.success({"batch_empty": True, "row_count": 0})
+            # Engine invariant: AggregationExecutor.execute_flush() guards against empty buffers.
+            # If we reach here, something bypassed that guard - this is a bug, not a valid state.
+            # Per CLAUDE.md "crash on plugin bugs" principle, fail fast rather than emit garbage.
+            raise RuntimeError(
+                f"Empty batch passed to batch-aware transform '{self.name}'. "
+                f"This should never happen - AggregationExecutor.execute_flush() guards against "
+                f"empty buffers. This indicates a bug in the engine or test setup."
+            )
 
         # Process rows in parallel using a SHARED httpx.Client
         # httpx.Client is thread-safe and reusing it avoids connection overhead
@@ -327,6 +345,24 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         try:
             rendered = self._template.render_with_metadata(row)
         except TemplateError as e:
+            # Record template error to audit trail - every decision must be traceable
+            # per CLAUDE.md auditability standard
+            ctx.record_call(
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data={
+                    "row_index": idx,
+                    "stage": "template_rendering",
+                    "template_hash": self._template.template_hash,
+                },
+                response_data=None,
+                error={
+                    "reason": "template_rendering_failed",
+                    "error": str(e),
+                    "template_hash": self._template.template_hash,
+                },
+                latency_ms=0,  # Template rendering is near-instantaneous
+            )
             return {
                 "error": {
                     "reason": "template_rendering_failed",

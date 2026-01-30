@@ -20,7 +20,7 @@ import json
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic import Field
 
@@ -153,9 +153,10 @@ class AzureBatchLLMTransform(BaseTransform):
         self._on_error = cfg.on_error
 
         # Schema from config
-        assert cfg.schema_config is not None
+        # TransformDataConfig validates schema_config is not None
+        schema_config = cast(SchemaConfig, cfg.schema_config)
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             "AzureBatchSchema",
             allow_coercion=False,  # Transforms do NOT coerce
         )
@@ -167,16 +168,16 @@ class AzureBatchLLMTransform(BaseTransform):
         audit = get_llm_audit_fields(self._response_field)
 
         # Merge with any existing fields from base schema
-        base_guaranteed = cfg.schema_config.guaranteed_fields or ()
-        base_audit = cfg.schema_config.audit_fields or ()
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
 
         self._output_schema_config = SchemaConfig(
-            mode=cfg.schema_config.mode,
-            fields=cfg.schema_config.fields,
-            is_dynamic=cfg.schema_config.is_dynamic,
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
-            required_fields=cfg.schema_config.required_fields,
+            required_fields=schema_config.required_fields,
         )
 
         # Azure OpenAI client (lazy init)
@@ -273,8 +274,14 @@ class AzureBatchLLMTransform(BaseTransform):
             BatchPendingError: When batch is pending completion
         """
         if not rows:
-            # Empty batch - return success with metadata (matches BatchReplicate pattern)
-            return TransformResult.success({"batch_empty": True, "row_count": 0})
+            # Engine invariant: AggregationExecutor.execute_flush() guards against empty buffers.
+            # If we reach here, something bypassed that guard - this is a bug, not a valid state.
+            # Per CLAUDE.md "crash on plugin bugs" principle, fail fast rather than emit garbage.
+            raise RuntimeError(
+                f"Empty batch passed to batch-aware transform '{self.name}'. "
+                f"This should never happen - AggregationExecutor.execute_flush() guards against "
+                f"empty buffers. This indicates a bug in the engine or test setup."
+            )
 
         # Check checkpoint for resume
         checkpoint = self._get_checkpoint(ctx)

@@ -20,7 +20,7 @@ from unittest.mock import Mock, patch
 import httpx
 import pytest
 
-from elspeth.contracts import CallStatus, CallType, Determinism
+from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter_batch import (
@@ -229,19 +229,21 @@ class TestOpenRouterBatchLLMTransformInit:
 
 
 class TestOpenRouterBatchEmptyBatch:
-    """Tests for empty batch handling."""
+    """Tests for empty batch handling.
 
-    def test_empty_batch_returns_metadata_row(self) -> None:
-        """Empty batch returns a synthetic metadata row."""
+    Empty batches should never reach batch-aware transforms - the engine
+    guards against flushing empty buffers. If an empty batch does reach
+    the transform, it indicates a bug in the engine and should crash
+    immediately rather than return garbage data.
+    """
+
+    def test_empty_batch_raises_runtime_error(self) -> None:
+        """Empty batch raises RuntimeError - engine invariant violated."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
 
-        result = transform.process([], ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["batch_empty"] is True
-        assert result.row["row_count"] == 0
+        with pytest.raises(RuntimeError, match="Empty batch passed to batch-aware transform"):
+            transform.process([], ctx)
 
 
 class TestOpenRouterBatchSingleRow:
@@ -572,3 +574,72 @@ class TestOpenRouterBatchAllRowsFail:
         assert result.rows is not None
         assert len(result.rows) == 2
         assert all(r.get("llm_response_error") is not None for r in result.rows)
+
+
+class TestOpenRouterBatchTemplateErrorAuditTrail:
+    """Tests for template error audit recording (Bug 56b).
+
+    Template rendering failures must be recorded to the audit trail via
+    ctx.record_call() so that explain() queries can show why rows failed.
+    """
+
+    def test_template_error_records_to_audit_trail(self) -> None:
+        """Template rendering error is recorded to audit trail.
+
+        Per CLAUDE.md auditability: 'Every decision must be traceable.'
+        A template error is a decision to skip processing that row.
+        """
+        transform = OpenRouterBatchLLMTransform(_make_valid_config({"template": "{{ row.nonexistent_field }}"}))
+        ctx = _create_mock_context()
+        rows = [{"text": "Test row"}]  # Template references nonexistent_field
+
+        with mock_httpx_client(_create_mock_response()):
+            transform.process(rows, ctx)
+
+        # Template error should be recorded to audit trail
+        assert ctx.record_call.call_count >= 1
+
+        # Find the template error call
+        template_error_calls = [
+            call for call in ctx.record_call.call_args_list if call.kwargs.get("error", {}).get("reason") == "template_rendering_failed"
+        ]
+        assert len(template_error_calls) == 1, "Template error should be recorded to audit trail"
+
+        call = template_error_calls[0]
+        assert call.kwargs["call_type"] == CallType.LLM
+        assert call.kwargs["status"] == CallStatus.ERROR
+        assert "row_index" in call.kwargs["request_data"]
+
+
+class TestOpenRouterBatchSingleRowFallback:
+    """Tests for _process_single fallback behavior (Bug 9g7).
+
+    The _process_single method converts batch results back to single-row.
+    If _process_batch returns an unexpected state, it should crash rather
+    than silently passing through the original row unprocessed.
+    """
+
+    def test_process_single_crashes_on_unexpected_batch_result(self) -> None:
+        """_process_single raises RuntimeError on unexpected _process_batch result.
+
+        Defense-in-depth: if _process_batch somehow returns success without
+        rows (should never happen), we crash rather than silently pass through.
+        """
+        transform = OpenRouterBatchLLMTransform(_make_valid_config())
+        ctx = _create_mock_context()
+        row = {"text": "Test"}
+
+        # Mock _process_batch to return an invalid state:
+        # status="success" but rows=None (violates contract)
+        invalid_result = TransformResult(
+            status="success",
+            row=None,  # Single-row not set
+            rows=None,  # Multi-row not set either - INVALID for success
+            reason=None,
+        )
+
+        with (
+            patch.object(transform, "_process_batch", return_value=invalid_result),
+            pytest.raises(RuntimeError, match="Unexpected result from _process_batch"),
+        ):
+            transform.process(row, ctx)

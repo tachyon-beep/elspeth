@@ -357,7 +357,13 @@ class TestAzureBatchLLMTransformInit:
 
 
 class TestAzureBatchLLMTransformEmptyBatch:
-    """Tests for empty batch handling."""
+    """Tests for empty batch handling.
+
+    Empty batches should never reach batch-aware transforms - the engine
+    guards against flushing empty buffers. If an empty batch does reach
+    the transform, it indicates a bug in the engine and should crash
+    immediately rather than return garbage data.
+    """
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
@@ -381,14 +387,10 @@ class TestAzureBatchLLMTransformEmptyBatch:
             }
         )
 
-    def test_empty_batch_returns_success_with_metadata(self, ctx: PluginContext, transform: AzureBatchLLMTransform) -> None:
-        """Empty batch returns success with batch_empty metadata."""
-        result = transform.process([], ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["batch_empty"] is True
-        assert result.row["row_count"] == 0
+    def test_empty_batch_raises_runtime_error(self, ctx: PluginContext, transform: AzureBatchLLMTransform) -> None:
+        """Empty batch raises RuntimeError - engine invariant violated."""
+        with pytest.raises(RuntimeError, match="Empty batch passed to batch-aware transform"):
+            transform.process([], ctx)
 
 
 class TestAzureBatchLLMTransformSubmit:
