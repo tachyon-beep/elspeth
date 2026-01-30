@@ -69,6 +69,12 @@ class ExporterProtocol(Protocol):
         Implementations may buffer events for batch export. Use flush() to
         ensure all buffered events are sent.
 
+        Thread Safety:
+            export() is always called from the telemetry export thread, never
+            concurrently with itself. However, export() may run on a different
+            thread than configure() and close(). Implementations should not
+            rely on thread-local state from configure().
+
         Args:
             event: The telemetry event to export
         """
