@@ -356,6 +356,7 @@ class TestElspethSettingsAlignment:
         "checkpoint",  # Crash recovery
         "retry",  # Retry behavior
         "payload_store",  # Large blob storage
+        "telemetry",  # Operational visibility
     }
 
     ALL_EXPECTED: ClassVar[set[str]] = PIPELINE_FIELDS | RUN_MODE_FIELDS | SUBSYSTEM_SETTINGS
@@ -385,6 +386,7 @@ class TestElspethSettingsAlignment:
             "payload_store",  # TestPayloadStoreSettingsAlignment
             "concurrency",  # TestConcurrencySettingsAlignment (xfail - pending)
             "rate_limit",  # TestRateLimitSettingsAlignment (xfail - pending)
+            "telemetry",  # TestTelemetrySettingsAlignment
         }
 
         assert tested_subsystems == self.SUBSYSTEM_SETTINGS, (
@@ -924,6 +926,7 @@ class TestSettingsToRuntimeMapping:
             RuntimeConcurrencyConfig,
             RuntimeRateLimitConfig,
             RuntimeRetryConfig,
+            RuntimeTelemetryConfig,
         )
 
         runtime_classes = {
@@ -931,6 +934,7 @@ class TestSettingsToRuntimeMapping:
             "RuntimeRateLimitConfig": RuntimeRateLimitConfig,
             "RuntimeConcurrencyConfig": RuntimeConcurrencyConfig,
             "RuntimeCheckpointConfig": RuntimeCheckpointConfig,
+            "RuntimeTelemetryConfig": RuntimeTelemetryConfig,
         }
 
         for settings_name, runtime_name in SETTINGS_TO_RUNTIME.items():

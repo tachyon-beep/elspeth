@@ -28,6 +28,7 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -432,7 +433,7 @@ class TestTransformExecutor:
 
         executor = TransformExecutor(recorder, span_factory)
 
-        with pytest.raises(AssertionError, match="node_id must be set"):
+        with pytest.raises(OrchestrationInvariantError, match="executed without node_id"):
             executor.execute_transform(
                 transform=as_transform(transform),
                 token=token,
@@ -722,7 +723,7 @@ class TestGateExecutor:
 
         executor = GateExecutor(recorder, span_factory)
 
-        with pytest.raises(AssertionError, match="node_id must be set"):
+        with pytest.raises(OrchestrationInvariantError, match="executed without node_id"):
             executor.execute_gate(
                 gate=gate,  # type: ignore[arg-type]
                 token=token,
@@ -1224,7 +1225,7 @@ class TestSinkExecutor:
 
         executor = SinkExecutor(recorder, span_factory, run.run_id)
 
-        with pytest.raises(AssertionError, match="node_id must be set"):
+        with pytest.raises(OrchestrationInvariantError, match="executed without node_id"):
             executor.write(
                 sink=as_sink(sink),
                 tokens=tokens,
