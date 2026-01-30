@@ -31,19 +31,31 @@ class TestExecutionErrorSchema:
 
 
 class TestRoutingReasonSchema:
-    """Tests for RoutingReason TypedDict schema introspection."""
+    """Tests for RoutingReason union type schema introspection."""
 
-    def test_routing_reason_required_keys(self) -> None:
-        """RoutingReason has rule and matched_value as required keys."""
-        from elspeth.contracts import RoutingReason
+    def test_routing_reason_is_union_type(self) -> None:
+        """RoutingReason is a union of ConfigGateReason and PluginGateReason."""
+        import types
 
-        assert RoutingReason.__required_keys__ == frozenset({"rule", "matched_value"})
+        from elspeth.contracts import (
+            ConfigGateReason,
+            PluginGateReason,
+            RoutingReason,
+        )
 
-    def test_routing_reason_optional_keys(self) -> None:
-        """RoutingReason has threshold, field, comparison as optional keys."""
-        from elspeth.contracts import RoutingReason
+        assert isinstance(RoutingReason, types.UnionType)
+        # Union contains both variant types
+        assert ConfigGateReason in RoutingReason.__args__
+        assert PluginGateReason in RoutingReason.__args__
 
-        assert RoutingReason.__optional_keys__ == frozenset({"threshold", "field", "comparison"})
+    def test_routing_reason_variants_are_typed_dicts(self) -> None:
+        """Both RoutingReason variants are TypedDicts."""
+        from typing import is_typeddict
+
+        from elspeth.contracts import ConfigGateReason, PluginGateReason
+
+        assert is_typeddict(ConfigGateReason)
+        assert is_typeddict(PluginGateReason)
 
 
 class TestTransformReasonSchema:
@@ -91,30 +103,33 @@ class TestExecutionError:
 
 
 class TestRoutingReason:
-    """Tests for RoutingReason TypedDict."""
+    """Tests for RoutingReason union type usage."""
 
-    def test_routing_reason_has_rule_field(self) -> None:
-        """RoutingReason defines rule field."""
-        from elspeth.contracts import RoutingReason
+    def test_routing_reason_accepts_plugin_gate_reason(self) -> None:
+        """RoutingReason union accepts PluginGateReason variant."""
+        from elspeth.contracts import PluginGateReason, RoutingReason
 
         reason: RoutingReason = {
             "rule": "value > threshold",
             "matched_value": 42,
         }
 
-        assert reason["rule"] == "value > threshold"
+        # At runtime, it's just a dict - cast to access variant-specific fields
+        plugin_reason: PluginGateReason = reason  # type: ignore[assignment]
+        assert plugin_reason["rule"] == "value > threshold"
 
-    def test_routing_reason_accepts_threshold(self) -> None:
-        """RoutingReason can include threshold."""
-        from elspeth.contracts import RoutingReason
+    def test_routing_reason_accepts_config_gate_reason(self) -> None:
+        """RoutingReason union accepts ConfigGateReason variant."""
+        from elspeth.contracts import ConfigGateReason, RoutingReason
 
         reason: RoutingReason = {
-            "rule": "value > threshold",
-            "matched_value": 42,
-            "threshold": 10.0,
+            "condition": "row['score'] > 100",
+            "result": "true",
         }
 
-        assert reason["threshold"] == 10.0
+        # At runtime, it's just a dict - cast to access variant-specific fields
+        config_reason: ConfigGateReason = reason  # type: ignore[assignment]
+        assert config_reason["condition"] == "row['score'] > 100"
 
 
 class TestTransformReason:
@@ -142,3 +157,66 @@ class TestTransformReason:
 
         assert reason["fields_modified"] == ["name", "email"]
         assert reason["validation_errors"] == ["missing_phone"]
+
+
+class TestRoutingReasonVariants:
+    """Tests for RoutingReason 2-variant discriminated union."""
+
+    def test_config_gate_reason_required_keys(self) -> None:
+        """ConfigGateReason has condition and result as required."""
+        from elspeth.contracts import ConfigGateReason
+
+        assert ConfigGateReason.__required_keys__ == frozenset({"condition", "result"})
+
+    def test_plugin_gate_reason_required_keys(self) -> None:
+        """PluginGateReason has rule and matched_value as required."""
+        from elspeth.contracts import PluginGateReason
+
+        assert PluginGateReason.__required_keys__ == frozenset({"rule", "matched_value"})
+
+    def test_plugin_gate_reason_optional_keys(self) -> None:
+        """PluginGateReason has threshold, field, comparison as optional."""
+        from elspeth.contracts import PluginGateReason
+
+        assert PluginGateReason.__optional_keys__ == frozenset({"threshold", "field", "comparison"})
+
+
+class TestRoutingReasonUsage:
+    """Tests for constructing valid RoutingReason variants."""
+
+    def test_config_gate_reason_construction(self) -> None:
+        """ConfigGateReason can be constructed with required fields."""
+        from elspeth.contracts import ConfigGateReason
+
+        reason: ConfigGateReason = {
+            "condition": "row['score'] > 100",
+            "result": "true",
+        }
+        assert reason["condition"] == "row['score'] > 100"
+        assert reason["result"] == "true"
+
+    def test_plugin_gate_reason_minimal(self) -> None:
+        """PluginGateReason works with only required fields."""
+        from elspeth.contracts import PluginGateReason
+
+        reason: PluginGateReason = {
+            "rule": "threshold_exceeded",
+            "matched_value": 150,
+        }
+        assert reason["rule"] == "threshold_exceeded"
+        assert reason["matched_value"] == 150
+
+    def test_plugin_gate_reason_with_optional_fields(self) -> None:
+        """PluginGateReason accepts optional threshold fields."""
+        from elspeth.contracts import PluginGateReason
+
+        reason: PluginGateReason = {
+            "rule": "value exceeds threshold",
+            "matched_value": 150,
+            "threshold": 100.0,
+            "field": "score",
+            "comparison": ">",
+        }
+        assert reason["threshold"] == 100.0
+        assert reason["field"] == "score"
+        assert reason["comparison"] == ">"

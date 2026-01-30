@@ -18,17 +18,49 @@ class ExecutionError(TypedDict):
     traceback: NotRequired[str]  # Optional full traceback
 
 
-class RoutingReason(TypedDict):
-    """Schema for gate routing reason payloads.
+class ConfigGateReason(TypedDict):
+    """Reason from config-driven gate (expression evaluation).
 
-    Used by gates to explain routing decisions in audit trail.
+    Used by gates defined via GateSettings with condition expressions.
+    The executor auto-generates this reason structure at executors.py:739.
+
+    Fields:
+        condition: The expression that was evaluated (e.g., "row['score'] > 100")
+        result: The route label that matched (e.g., "true", "false")
     """
 
-    rule: str  # Human-readable rule description
-    matched_value: Any  # The value that triggered the route
-    threshold: NotRequired[float]  # Threshold value if applicable
-    field: NotRequired[str]  # Field name if applicable
-    comparison: NotRequired[str]  # Comparison operator used
+    condition: str
+    result: str
+
+
+class PluginGateReason(TypedDict):
+    """Reason from plugin-based gate.
+
+    Used by custom gate plugins implementing GateProtocol.
+    Enforces minimum auditability: every routing decision MUST have
+    a rule description and the value that triggered it.
+
+    Required fields:
+        rule: Human-readable description of what logic fired
+        matched_value: The value that triggered the routing decision
+
+    Optional fields (for threshold-style gates):
+        threshold: The threshold value compared against
+        field: The field name that was compared
+        comparison: The comparison operator used (">", "<", ">=", etc.)
+    """
+
+    rule: str
+    matched_value: Any
+    threshold: NotRequired[float]
+    field: NotRequired[str]
+    comparison: NotRequired[str]
+
+
+# Discriminated union - field presence distinguishes variants:
+# - ConfigGateReason has "condition" and "result"
+# - PluginGateReason has "rule" and "matched_value"
+RoutingReason = ConfigGateReason | PluginGateReason
 
 
 class TransformReason(TypedDict):

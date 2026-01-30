@@ -12,15 +12,15 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import (
     Artifact,
     BatchPendingError,
+    ConfigGateReason,
     ExecutionError,
     NodeStateOpen,
     RoutingAction,
-    RoutingReason,
     RoutingSpec,
     RowOutcome,
     TokenInfo,
@@ -538,7 +538,7 @@ class GateExecutor:
             self._record_routing(
                 state_id=state.state_id,
                 node_id=gate.node_id,
-                action=RoutingAction.route("continue", mode=action.mode, reason=dict(action.reason)),
+                action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
             )
 
         elif action.kind == RoutingKind.ROUTE:
@@ -567,7 +567,7 @@ class GateExecutor:
                 self._record_routing(
                     state_id=state.state_id,
                     node_id=gate.node_id,
-                    action=RoutingAction.route("continue", mode=action.mode, reason=dict(action.reason)),
+                    action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
                 )
             else:
                 # Route label resolves to a sink name
@@ -736,7 +736,7 @@ class GateExecutor:
         # Build routing action and process based on destination
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
-        reason = {"condition": gate_config.condition, "result": route_label}
+        reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
 
         if destination == "continue":
             # Continue to next node - record routing event (AUD-002)
@@ -855,7 +855,7 @@ class GateExecutor:
                 state_id=state_id,
                 edge_id=edge_id,
                 mode=action.mode,
-                reason=cast(RoutingReason, dict(action.reason)) if action.reason else None,
+                reason=action.reason,
             )
         else:
             # Multiple destinations (fork)
@@ -869,7 +869,7 @@ class GateExecutor:
             self._recorder.record_routing_events(
                 state_id=state_id,
                 routes=routes,
-                reason=cast(RoutingReason, dict(action.reason)) if action.reason else None,
+                reason=action.reason,
             )
 
 
