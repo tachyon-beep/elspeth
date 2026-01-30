@@ -112,3 +112,42 @@ class BatchPendingError(Exception):
         self.checkpoint = checkpoint
         self.node_id = node_id
         super().__init__(f"Batch {batch_id} is {status}, check after {check_after_seconds}s")
+
+
+class AuditIntegrityError(Exception):
+    """Raised when audit database operations fail unexpectedly.
+
+    This indicates catastrophic failure: database corruption, transaction
+    failure, or bug in Landscape recording code. Per Tier 1 trust model,
+    ELSPETH cannot continue with compromised audit integrity.
+
+    Examples of conditions that trigger this:
+    - Run record not found after INSERT/UPDATE
+    - NodeState not found after completion update
+    - Batch record not found after update
+    - State marked terminal but still shows OPEN status
+
+    Recovery: These errors are NOT recoverable. The pipeline must stop
+    and the database must be investigated for corruption or tampering.
+    """
+
+    pass
+
+
+class OrchestrationInvariantError(Exception):
+    """Raised when orchestration invariants are violated.
+
+    This indicates a bug in the engine: node_id not set before execution,
+    routing to non-existent edges, etc. These are programming errors
+    that must crash immediately.
+
+    Examples of conditions that trigger this:
+    - Transform/Gate/Sink executed without node_id assigned
+    - Edge resolution fails due to missing node_id
+    - Last transform in pipeline has no node_id
+
+    Recovery: These errors indicate bugs in orchestration code that must
+    be fixed. They should never occur in correct operation.
+    """
+
+    pass
