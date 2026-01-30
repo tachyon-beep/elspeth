@@ -36,3 +36,15 @@
 | 2026-01-30T09:22:07+00:00 | ok | src/elspeth/core/dag.py | docs/bugs/generated/core/dag.py.md |  | 667.44 |  |
 | 2026-01-30T09:22:41+00:00 | ok | src/elspeth/engine/processor.py | docs/bugs/generated/engine/processor.py.md |  | 701.09 |  |
 | 2026-01-30T09:23:54+00:00 | ok | src/elspeth/engine/coalesce_executor.py | docs/bugs/generated/engine/coalesce_executor.py.md |  | 774.47 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/landscape/exporter.py | docs/bugs/generated/core/landscape/exporter.py.md |  | 3689.02 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/landscape/schema.py | docs/bugs/generated/core/landscape/schema.py.md |  | 3689.02 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/checkpoint/recovery.py | docs/bugs/generated/core/checkpoint/recovery.py.md |  | 3689.02 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/landscape/recorder.py | docs/bugs/generated/core/landscape/recorder.py.md |  | 3689.02 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/core/landscape/database.py.md |  | 3689.02 |  |
+| 2026-01-30T10:50:50+00:00 | ok | src/elspeth/core/landscape/repositories.py | docs/bugs/generated/core/landscape/repositories.py.md |  | 3689.02 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/exporter.py | docs/bugs/generated/core/landscape/exporter.py.md |  | 2966.03 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/schema.py | docs/bugs/generated/core/landscape/schema.py.md |  | 2966.02 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/checkpoint/recovery.py | docs/bugs/generated/core/checkpoint/recovery.py.md |  | 2966.03 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/recorder.py | docs/bugs/generated/core/landscape/recorder.py.md |  | 2966.03 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/core/landscape/database.py.md |  | 2966.03 |  |
+| 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/repositories.py | docs/bugs/generated/core/landscape/repositories.py.md |  | 2966.03 |  |
