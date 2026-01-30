@@ -111,6 +111,41 @@ class SlowExporter:
         pass
 
 
+class ReentrantExporter:
+    """Exporter that tries to emit telemetry from export() - tests re-entrance."""
+
+    def __init__(self, name: str, manager: "TelemetryManager"):
+        self._name = name
+        self._manager = manager
+        self.reentrant_calls: list[str] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, config: dict[str, Any]) -> None:
+        pass
+
+    def export(self, event: TelemetryEvent) -> None:
+        # Try to call handle_event from export thread - should not deadlock
+        # This simulates buggy exporter that triggers telemetry
+        try:
+            reentrant_event = RunStarted(
+                timestamp=event.timestamp,
+                run_id=f"reentrant-{event.run_id}",
+            )
+            self._manager.handle_event(reentrant_event)
+            self.reentrant_calls.append(event.run_id)
+        except Exception as e:
+            self.reentrant_calls.append(f"error: {e}")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -841,3 +876,121 @@ class TestBackpressureMode:
         finally:
             slow_exporter.can_continue.set()  # Unblock exporter
             manager.close()
+
+    def test_block_mode_blocks_when_queue_full(self, base_timestamp: datetime) -> None:
+        """BLOCK mode blocks handle_event() when queue is full."""
+        slow_exporter = SlowExporter("slow")
+        config = MockConfig(backpressure_mode=BackpressureMode.BLOCK)
+        manager = TelemetryManager(config, exporters=[slow_exporter])
+
+        # Override queue size for testing
+        manager._queue = queue.Queue(maxsize=1)
+
+        event = RunStarted(
+            timestamp=base_timestamp,
+            run_id="test-run",
+            config_hash="test-hash",
+            source_plugin="test-source",
+        )
+        started_blocking = threading.Event()
+        finished_blocking = threading.Event()
+
+        def blocking_put() -> None:
+            manager.handle_event(event)  # First fills queue
+            started_blocking.set()  # Signal we're about to block
+            manager.handle_event(event)  # Second should block
+            finished_blocking.set()  # Signal that we got past blocking
+
+        thread = threading.Thread(target=blocking_put)
+        thread.start()
+
+        # Wait for thread to signal it's about to block
+        assert started_blocking.wait(timeout=5.0), "Thread never started"
+
+        # Give thread a moment to actually enter blocking put()
+        # Then verify it hasn't finished (still blocked)
+        assert not finished_blocking.wait(timeout=0.5), "handle_event should have blocked but didn't"
+
+        # Unblock exporter so queue drains
+        slow_exporter.can_continue.set()
+
+        # Now thread should complete
+        assert finished_blocking.wait(timeout=5.0), "handle_event never unblocked"
+
+        thread.join(timeout=1.0)
+        manager.close()
+
+    def test_concurrent_close_during_export(self, base_timestamp: datetime) -> None:
+        """close() during active export doesn't deadlock or corrupt state."""
+        slow_exporter = SlowExporter("slow")
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[slow_exporter])
+
+        # Queue several events
+        for i in range(5):
+            event = make_run_started(f"run-{i}", base_timestamp)
+            manager.handle_event(event)
+
+        # Wait for export thread to start processing
+        assert slow_exporter.export_started.wait(timeout=5.0), "Export never started"
+
+        # Now call close() while export is blocked
+        close_completed = threading.Event()
+
+        def close_manager():
+            manager.close()
+            close_completed.set()
+
+        close_thread = threading.Thread(target=close_manager)
+        close_thread.start()
+
+        # Give close() a moment to start
+        # Then unblock exporter so everything can complete
+        import time
+
+        time.sleep(0.1)
+        slow_exporter.can_continue.set()
+
+        # Close should complete without deadlock
+        assert close_completed.wait(timeout=5.0), "close() deadlocked during active export"
+
+        close_thread.join(timeout=1.0)
+
+        # Verify no corruption - metrics should be consistent
+        metrics = manager.health_metrics
+        assert isinstance(metrics["events_emitted"], int)
+        assert isinstance(metrics["events_dropped"], int)
+
+    def test_reentrant_handle_event_no_deadlock(self, base_timestamp: datetime) -> None:
+        """Exporter calling handle_event() from export thread doesn't deadlock.
+
+        This tests a buggy exporter that tries to emit telemetry from within
+        the export thread. It should either work or fail gracefully, not deadlock.
+        """
+        config = MockConfig()
+        # Need to create manager first, then exporter (circular dependency)
+        manager = TelemetryManager(config, exporters=[])
+
+        reentrant_exporter = ReentrantExporter("reentrant", manager)
+        manager._exporters = [reentrant_exporter]
+
+        event = RunStarted(timestamp=base_timestamp, run_id="test")
+
+        # This should complete without deadlock
+        manager.handle_event(event)
+
+        # Close with timeout - deadlock would hang here
+        close_completed = threading.Event()
+
+        def close_manager():
+            manager.close()
+            close_completed.set()
+
+        close_thread = threading.Thread(target=close_manager)
+        close_thread.start()
+
+        assert close_completed.wait(timeout=5.0), "Re-entrant handle_event caused deadlock"
+        close_thread.join(timeout=1.0)
+
+        # Verify the reentrant call happened (or was handled)
+        assert len(reentrant_exporter.reentrant_calls) > 0
