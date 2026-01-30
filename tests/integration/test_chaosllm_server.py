@@ -360,11 +360,28 @@ class TestAdminEndpoints:
             json={"error_injection": {"internal_error_pct": 10.0}},
         )
 
-        # Verify response mode unchanged
+        # Verify response mode unchanged, only error_injection updated
         response = chaosllm_server.client.get("/admin/config")
         updated = response.json()
         assert updated["response"]["mode"] == original_mode
         assert updated["error_injection"]["internal_error_pct"] == 10.0
+
+    def test_admin_export_returns_raw_data(self, chaosllm_server):
+        """GET /admin/export returns raw requests and timeseries."""
+        chaosllm_server.post_completion()
+        chaosllm_server.post_completion()
+
+        response = chaosllm_server.client.get("/admin/export")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "run_id" in data
+        assert "started_utc" in data
+        assert "requests" in data
+        assert "timeseries" in data
+        assert isinstance(data["requests"], list)
+        assert isinstance(data["timeseries"], list)
+        assert "config" in data
 
     def test_admin_reset_clears_metrics(self, chaosllm_server):
         """POST /admin/reset clears metrics and generates new run_id."""

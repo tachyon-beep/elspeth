@@ -1,16 +1,13 @@
 # tests/testing/chaosllm_mcp/test_server.py
 """Tests for ChaosLLM MCP server."""
 
-import json
 import sqlite3
-import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from elspeth.testing.chaosllm_mcp.server import ChaosLLMAnalyzer, create_server
-
 
 # === Fixtures ===
 
@@ -31,6 +28,7 @@ def temp_db(tmp_path: Path) -> Path:
             outcome TEXT NOT NULL,
             status_code INTEGER,
             error_type TEXT,
+            injection_type TEXT,
             latency_ms REAL,
             injected_delay_ms REAL,
             message_count INTEGER,
@@ -97,6 +95,7 @@ def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
                 "success",
                 200,
                 None,
+                None,
                 100.0 + i * 10,  # latency varies
                 None,
                 3,
@@ -116,6 +115,7 @@ def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
                 "gpt-4",
                 "error_injected",
                 429,
+                "rate_limit",
                 "rate_limit",
                 None,
                 None,
@@ -137,6 +137,7 @@ def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
                 "error_injected",
                 529,
                 "capacity",
+                "capacity",
                 None,
                 None,
                 3,
@@ -156,6 +157,7 @@ def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
             "error_injected",
             None,
             "timeout",
+            "timeout",
             None,
             None,
             3,
@@ -169,9 +171,9 @@ def populated_analyzer(temp_db: Path) -> ChaosLLMAnalyzer:
         """
         INSERT INTO requests (
             request_id, timestamp_utc, endpoint, deployment, model,
-            outcome, status_code, error_type, latency_ms, injected_delay_ms,
+            outcome, status_code, error_type, injection_type, latency_ms, injected_delay_ms,
             message_count, prompt_tokens_approx, response_tokens, response_mode
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         requests,
     )

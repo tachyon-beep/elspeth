@@ -121,10 +121,10 @@ class TestClassifyOutcome:
         assert is_conn is True
 
     def test_slow_response(self) -> None:
-        """Slow response error type is classified as connection error."""
-        result = _classify_outcome("error_injected", None, "slow_response")
+        """Slow response is not classified as a connection error."""
+        result = _classify_outcome("success", 200, "slow_response")
         _, _, _, _, _, is_conn, _ = result
-        assert is_conn is True
+        assert is_conn is False
 
     def test_malformed_outcome(self) -> None:
         """error_malformed outcome is classified correctly."""
@@ -296,6 +296,7 @@ class TestRecordRequest:
             model="gpt-4-0613",
             status_code=200,
             error_type=None,
+            injection_type="slow_response",
             latency_ms=150.5,
             injected_delay_ms=50.0,
             message_count=3,
@@ -310,6 +311,7 @@ class TestRecordRequest:
         assert req["latency_ms"] == 150.5
         assert req["message_count"] == 3
         assert req["response_mode"] == "random"
+        assert req["injection_type"] == "slow_response"
 
     def test_record_multiple_requests(self, recorder: MetricsRecorder) -> None:
         """Can record multiple requests."""

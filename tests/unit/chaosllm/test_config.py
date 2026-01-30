@@ -8,6 +8,7 @@ import yaml
 from pydantic import ValidationError
 
 from elspeth.testing.chaosllm.config import (
+    DEFAULT_MEMORY_DB,
     BurstConfig,
     ChaosLLMConfig,
     ErrorInjectionConfig,
@@ -65,7 +66,7 @@ class TestMetricsConfig:
     def test_defaults(self) -> None:
         """MetricsConfig has sensible defaults."""
         config = MetricsConfig()
-        assert config.database == "./chaosllm-metrics.db"
+        assert config.database == DEFAULT_MEMORY_DB
         assert config.timeseries_bucket_sec == 1
 
     def test_custom_values(self) -> None:
@@ -270,7 +271,7 @@ class TestChaosLLMConfig:
         assert config.server.port == 9000
         assert config.latency.base_ms == 100
         # Other defaults preserved
-        assert config.metrics.database == "./chaosllm-metrics.db"
+        assert config.metrics.database == DEFAULT_MEMORY_DB
 
     def test_frozen(self) -> None:
         """ChaosLLMConfig is immutable."""

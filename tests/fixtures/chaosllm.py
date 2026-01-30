@@ -128,6 +128,10 @@ class ChaosLLMFixture:
         """
         return self.server.get_stats()
 
+    def export_metrics(self) -> dict[str, Any]:
+        """Export raw metrics data for pushback."""
+        return self.server.export_metrics()
+
     def update_config(
         self,
         *,
@@ -146,6 +150,7 @@ class ChaosLLMFixture:
         empty_body_pct: float | None = None,
         missing_fields_pct: float | None = None,
         wrong_content_type_pct: float | None = None,
+        selection_mode: str | None = None,
         # Latency settings
         base_ms: int | None = None,
         jitter_ms: int | None = None,
@@ -171,6 +176,7 @@ class ChaosLLMFixture:
             empty_body_pct: Empty body response percentage
             missing_fields_pct: Missing fields response percentage
             wrong_content_type_pct: Wrong Content-Type percentage
+            selection_mode: Error selection strategy (priority or weighted)
             base_ms: Base latency in milliseconds
             jitter_ms: Latency jitter in milliseconds
             mode: Response generation mode
@@ -207,6 +213,8 @@ class ChaosLLMFixture:
             error_updates["missing_fields_pct"] = missing_fields_pct
         if wrong_content_type_pct is not None:
             error_updates["wrong_content_type_pct"] = wrong_content_type_pct
+        if selection_mode is not None:
+            error_updates["selection_mode"] = selection_mode
 
         if error_updates:
             updates["error_injection"] = error_updates
@@ -358,6 +366,7 @@ def _build_config_from_marker(
         "empty_body_pct",
         "missing_fields_pct",
         "wrong_content_type_pct",
+        "selection_mode",
     ]:
         if key in marker.kwargs:
             error_overrides[key] = marker.kwargs[key]

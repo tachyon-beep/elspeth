@@ -598,6 +598,23 @@ class TestErrorPriority:
         assert decision.error_type == "rate_limit"
 
 
+class TestWeightedSelection:
+    """Tests for weighted error selection."""
+
+    def test_weighted_mix_selects_multiple_types(self) -> None:
+        """Weighted mode mixes error types instead of strict priority."""
+        config = ErrorInjectionConfig(
+            rate_limit_pct=50.0,
+            capacity_529_pct=50.0,
+            selection_mode="weighted",
+        )
+        injector = ErrorInjector(config, rng=random.Random(123))
+
+        decisions = [injector.decide().error_type for _ in range(20)]
+        assert "rate_limit" in decisions
+        assert "capacity_529" in decisions
+
+
 class TestThreadSafety:
     """Tests for thread-safe operation."""
 

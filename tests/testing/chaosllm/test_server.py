@@ -237,6 +237,27 @@ class TestErrorInjection:
         )
         assert response.status_code == 503
 
+    def test_slow_response_returns_success(self, tmp_metrics_db):
+        """Slow response delays but still returns a successful response."""
+        config = ChaosLLMConfig(
+            metrics=MetricsConfig(database=tmp_metrics_db),
+            latency=LatencyConfig(base_ms=0, jitter_ms=0),
+            error_injection=ErrorInjectionConfig(
+                slow_response_pct=100.0,
+                slow_response_sec=(0, 0),
+            ),
+        )
+        app = create_app(config)
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4", "messages": []},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "chat.completion"
+
 
 class TestMalformedResponses:
     """Tests for malformed response injection."""
