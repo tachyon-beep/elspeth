@@ -32,6 +32,8 @@ class CoalesceOutcome:
         coalesce_metadata: Audit metadata about the merge (branches, policy, etc.)
         failure_reason: Reason for failure if merge failed (timeout, missing branches)
         coalesce_name: Name of the coalesce point that produced this outcome
+        outcomes_recorded: True if terminal outcomes were already recorded by executor.
+            When True, caller MUST NOT record outcomes again (Bug 9z8 fix).
     """
 
     held: bool
@@ -40,6 +42,7 @@ class CoalesceOutcome:
     coalesce_metadata: dict[str, Any] | None = None
     failure_reason: str | None = None
     coalesce_name: str | None = None
+    outcomes_recorded: bool = False
 
 
 @dataclass
@@ -352,6 +355,7 @@ class CoalesceExecutor:
                     "branches_arrived": list(pending.arrived.keys()),
                 },
                 coalesce_name=coalesce_name,
+                outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
 
         # Merge row data according to strategy
@@ -571,6 +575,7 @@ class CoalesceExecutor:
                                 "timeout_seconds": settings.timeout_seconds,
                             },
                             coalesce_name=coalesce_name,
+                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                         )
                     )
 
@@ -678,6 +683,7 @@ class CoalesceExecutor:
                                 "branches_arrived": list(pending.arrived.keys()),
                             },
                             coalesce_name=coalesce_name,
+                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                         )
                     )
 
@@ -728,6 +734,7 @@ class CoalesceExecutor:
                             "branches_arrived": list(pending.arrived.keys()),
                         },
                         coalesce_name=coalesce_name,
+                        outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                     )
                 )
 

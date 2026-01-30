@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryEvent, TelemetryManager
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -622,7 +623,8 @@ class RowProcessor:
                     f"Use TransformResult.success_multi() for passthrough."
                 )
 
-            assert result.rows is not None
+            if result.rows is None:
+                raise RuntimeError("Multi-row result has rows=None")
             if len(result.rows) != len(buffered_tokens):
                 raise ValueError(
                     f"Passthrough mode requires same number of output rows "
@@ -669,7 +671,8 @@ class RowProcessor:
             # Transform mode: N input rows -> M output rows with NEW tokens
             # Get output rows
             if result.is_multi_row:
-                assert result.rows is not None
+                if result.rows is None:
+                    raise RuntimeError("Multi-row result has rows=None")
                 output_rows = result.rows
             else:
                 # Contract: batch-aware transforms in transform mode MUST return output data
@@ -760,7 +763,8 @@ class RowProcessor:
             - List of RowResults for passthrough mode (one per buffered token)
         """
         raw_node_id = transform.node_id
-        assert raw_node_id is not None
+        if raw_node_id is None:
+            raise OrchestrationInvariantError("Node ID is None during edge resolution")
         node_id = NodeID(raw_node_id)
 
         # Get output_mode from aggregation settings
@@ -924,7 +928,8 @@ class RowProcessor:
                     )
 
                 # Validate row count matches
-                assert result.rows is not None  # Guaranteed by is_multi_row
+                if result.rows is None:
+                    raise RuntimeError("Multi-row result has rows=None")
                 if len(result.rows) != len(buffered_tokens):
                     raise ValueError(
                         f"Passthrough mode requires same number of output rows "
@@ -995,7 +1000,8 @@ class RowProcessor:
 
                 # Get output rows - can be single or multi
                 if result.is_multi_row:
-                    assert result.rows is not None  # Guaranteed by is_multi_row
+                    if result.rows is None:
+                        raise RuntimeError("Multi-row result has rows=None")
                     output_rows = result.rows
                 else:
                     # Contract: batch-aware transforms in transform mode MUST return output data
@@ -1501,12 +1507,14 @@ class RowProcessor:
             error_msg = coalesce_outcome.failure_reason
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
-                outcome=RowOutcome.FAILED,
-                error_hash=error_hash,
-            )
+            # Bug 9z8 fix: Only record if CoalesceExecutor didn't already record
+            if not coalesce_outcome.outcomes_recorded:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=current_token.token_id,
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
             # Emit TokenCompleted telemetry AFTER Landscape recording
             self._emit_token_completed(current_token, RowOutcome.FAILED)
 
