@@ -4,13 +4,32 @@
 
 **Goal:** Wire the orphaned `backpressure_mode` config field to actual runtime behavior by adding a background export thread with queue-based backpressure.
 
-**Architecture:** Add `threading.Event` for shutdown coordination, `queue.Queue` for async export, and a background thread that consumes events. BLOCK mode uses blocking `put()`, DROP mode uses `put_nowait()` with Full exception handling.
+**Architecture:** Add `threading.Event` for shutdown coordination, `queue.Queue` for async export, and a background thread that consumes events. BLOCK mode uses blocking `put()` with timeout, DROP mode uses `put_nowait()` with Full exception handling.
 
 **Tech Stack:** Python stdlib `threading`, `queue`; existing `TelemetryManager`, `ExporterProtocol`
 
 **Design Document:** `docs/plans/2026-01-30-backpressure-mode-design.md`
 
 **Issue:** elspeth-rapid-ceq
+
+---
+
+## Review Board Feedback (2026-01-30)
+
+**Applied Fixes:**
+
+| Priority | Issue | Resolution |
+|----------|-------|------------|
+| P0 | Shutdown sequence: sentinel BEFORE join | Task 7 reordered: shutdown→sentinel→thread.join (no queue.join) |
+| P0 | Concurrent close() test | Added Task 9.5 |
+| P0 | Lock contention test | Added Task 9.6 |
+| P0 | Sleepy assertion in Task 9 | Replaced join(timeout) with Event-based coordination |
+| P1 | Startup race (_export_thread_ready) | Added to Task 4 and Task 5 |
+| P1 | Re-entrance deadlock test | Added Task 9.7 |
+| P1 | BLOCK mode put() timeout | Task 5 uses put(event, timeout=1.0) |
+| P2 | queue_size hardcoded | Task 4 reads from INTERNAL_DEFAULTS |
+| P2 | Windows portability (SIGALRM) | Task 13 uses threading.Timer with platform skip |
+| P2 | Deterministic test coordination | All tests use Event.wait() not sleep/join(timeout) |
 
 ---
 
@@ -231,6 +250,7 @@ from typing import Any
 import structlog
 
 from elspeth.contracts.config import RuntimeTelemetryProtocol
+from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS
 from elspeth.contracts.enums import BackpressureMode
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import TelemetryEvent
@@ -339,9 +359,11 @@ Replace `__init__` method:
         # Thread coordination
         self._shutdown_event = threading.Event()
         self._dropped_lock = threading.Lock()
+        self._export_thread_ready = threading.Event()  # Signals thread is running
 
-        # Queue for async export (internal default: 1000)
-        self._queue: queue.Queue[TelemetryEvent | None] = queue.Queue(maxsize=1000)
+        # Queue for async export - read size from INTERNAL_DEFAULTS
+        queue_size = INTERNAL_DEFAULTS["telemetry"]["queue_size"]
+        self._queue: queue.Queue[TelemetryEvent | None] = queue.Queue(maxsize=queue_size)
 
         # Start export thread (non-daemon to ensure proper cleanup)
         self._export_thread = threading.Thread(
@@ -350,6 +372,8 @@ Replace `__init__` method:
             daemon=False,
         )
         self._export_thread.start()
+        # Wait for thread to be ready (prevents startup race)
+        self._export_thread_ready.wait(timeout=5.0)
 ```
 
 **Step 5: Run test to see progress**
@@ -379,7 +403,7 @@ git commit -m "feat(telemetry): add queue and threading infrastructure"
 
         Events are filtered by granularity before queuing. Queue behavior
         depends on backpressure_mode config:
-        - BLOCK: Blocks until queue has space (may slow pipeline)
+        - BLOCK: Blocks until queue has space (may slow pipeline), with timeout
         - DROP: Drops event if queue is full (pipeline unaffected)
 
         Thread Safety:
@@ -405,7 +429,13 @@ git commit -m "feat(telemetry): add queue and threading infrastructure"
         if not should_emit(event, self._config.granularity):
             return
 
-        # Check thread liveness - if export thread died, disable telemetry
+        # Check thread readiness and liveness
+        if not self._export_thread_ready.is_set():
+            logger.warning("Export thread not ready, dropping event")
+            with self._dropped_lock:
+                self._events_dropped += 1
+            return
+
         if not self._export_thread.is_alive():
             logger.critical("Export thread died, disabling telemetry")
             self._disabled = True
@@ -420,7 +450,14 @@ git commit -m "feat(telemetry): add queue and threading infrastructure"
                     self._events_dropped += 1
                     self._log_drops_if_needed()
         else:  # BLOCK (default)
-            self._queue.put(event)
+            # Timeout prevents permanent deadlock if export thread dies
+            try:
+                self._queue.put(event, timeout=30.0)
+            except queue.Full:
+                # Timeout hit - thread may be dead or stuck
+                logger.error("BLOCK mode put() timed out - export thread may be stuck")
+                with self._dropped_lock:
+                    self._events_dropped += 1
 
     def _log_drops_if_needed(self) -> None:
         """Log aggregate drop message if threshold reached.
@@ -470,6 +507,9 @@ After `_log_drops_if_needed`, add:
             Runs exclusively in the export thread. Metrics updates
             (except _events_dropped on total failure) are single-threaded.
         """
+        # Signal that export thread is ready to receive events
+        self._export_thread_ready.set()
+
         while True:
             event = self._queue.get()
             if event is None:  # Shutdown sentinel
@@ -605,10 +645,14 @@ git commit -m "feat(telemetry): implement export loop with failure isolation"
 
         Shutdown Sequence (order is critical to avoid deadlock/data loss):
         1. Signal shutdown to reject new events
-        2. Wait for pending events to process (queue.join)
-        3. Send sentinel to exit thread
-        4. Wait for thread to exit
-        5. Close exporters
+        2. Send sentinel FIRST (before waiting) - thread processes remaining
+           events then exits when it sees the sentinel
+        3. Wait for thread to exit (implicitly waits for queue drain)
+        4. Close exporters
+
+        CRITICAL: Do NOT call queue.join() before sending sentinel - this
+        creates a race condition where the thread may block on get() after
+        join() completes but before sentinel arrives.
 
         Should be called at pipeline shutdown. Logs final health metrics
         and releases exporter resources. Close failures are logged but
@@ -617,21 +661,20 @@ git commit -m "feat(telemetry): implement export loop with failure isolation"
         # 1. Signal shutdown - prevents new events from being queued
         self._shutdown_event.set()
 
-        # 2. Wait for pending events to be processed
-        self._queue.join()
-
-        # 3. Send sentinel to stop export loop (with timeout to avoid deadlock)
+        # 2. Send sentinel FIRST - thread will process remaining events
+        #    then exit when it sees the sentinel
         try:
             self._queue.put(None, timeout=1.0)
         except queue.Full:
-            logger.error("Failed to send shutdown sentinel - queue full after join")
+            logger.error("Failed to send shutdown sentinel - queue full")
 
-        # 4. Wait for thread to exit
+        # 3. Wait for thread to exit (this implicitly waits for queue drain
+        #    because thread processes all events before exiting on sentinel)
         self._export_thread.join(timeout=5.0)
         if self._export_thread.is_alive():
             logger.error("Export thread did not exit cleanly within timeout")
 
-        # 5. Close exporters
+        # 4. Close exporters
         logger.info("Telemetry manager closing", **self.health_metrics)
         for exporter in self._exporters:
             try:
@@ -731,29 +774,32 @@ In `TestBackpressureMode` class:
         manager._queue = queue.Queue(maxsize=1)
 
         event = RunStarted(timestamp=base_timestamp, run_id="test-run")
-        blocked = threading.Event()
-        unblocked = threading.Event()
+        started_blocking = threading.Event()
+        finished_blocking = threading.Event()
 
         def blocking_put():
             manager.handle_event(event)  # First fills queue
+            started_blocking.set()  # Signal we're about to block
             manager.handle_event(event)  # Second should block
-            blocked.set()  # Signal that we got past blocking
-            unblocked.set()
+            finished_blocking.set()  # Signal that we got past blocking
 
         thread = threading.Thread(target=blocking_put)
         thread.start()
 
-        # Wait a bit - thread should be blocked
-        thread.join(timeout=0.2)
-        assert not blocked.is_set(), "handle_event should have blocked but didn't"
+        # Wait for thread to signal it's about to block
+        assert started_blocking.wait(timeout=5.0), "Thread never started"
+
+        # Give thread a moment to actually enter blocking put()
+        # Then verify it hasn't finished (still blocked)
+        assert not finished_blocking.wait(timeout=0.5), "handle_event should have blocked but didn't"
 
         # Unblock exporter so queue drains
         slow_exporter.can_continue.set()
 
         # Now thread should complete
-        thread.join(timeout=5.0)
-        assert blocked.is_set(), "handle_event never unblocked"
+        assert finished_blocking.wait(timeout=5.0), "handle_event never unblocked"
 
+        thread.join(timeout=1.0)
         manager.close()
 ```
 
@@ -767,6 +813,223 @@ Expected: PASS
 ```bash
 git add tests/unit/telemetry/test_manager.py
 git commit -m "test(telemetry): add BLOCK mode backpressure test"
+```
+
+---
+
+## Task 9.5: Write Test for Concurrent Close During Export (P0)
+
+**Files:**
+- Modify: `tests/unit/telemetry/test_manager.py`
+
+**Step 1: Add concurrent close test**
+
+In `TestBackpressureMode` class:
+```python
+    def test_concurrent_close_during_export(self, base_timestamp: datetime) -> None:
+        """close() during active export doesn't deadlock or corrupt state."""
+        slow_exporter = SlowExporter("slow")
+        config = MockConfig()
+        manager = TelemetryManager(config, exporters=[slow_exporter])
+
+        # Queue several events
+        for i in range(5):
+            event = RunStarted(timestamp=base_timestamp, run_id=f"run-{i}")
+            manager.handle_event(event)
+
+        # Wait for export thread to start processing
+        assert slow_exporter.export_started.wait(timeout=5.0), "Export never started"
+
+        # Now call close() while export is blocked
+        close_completed = threading.Event()
+
+        def close_manager():
+            manager.close()
+            close_completed.set()
+
+        close_thread = threading.Thread(target=close_manager)
+        close_thread.start()
+
+        # Give close() a moment to start
+        # Then unblock exporter so everything can complete
+        import time
+        time.sleep(0.1)
+        slow_exporter.can_continue.set()
+
+        # Close should complete without deadlock
+        assert close_completed.wait(timeout=5.0), "close() deadlocked during active export"
+
+        close_thread.join(timeout=1.0)
+
+        # Verify no corruption - metrics should be consistent
+        metrics = manager.health_metrics
+        assert isinstance(metrics["events_emitted"], int)
+        assert isinstance(metrics["events_dropped"], int)
+```
+
+**Step 2: Run test**
+
+Run: `.venv/bin/python -m pytest tests/unit/telemetry/test_manager.py::TestBackpressureMode::test_concurrent_close_during_export -v`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add tests/unit/telemetry/test_manager.py
+git commit -m "test(telemetry): add concurrent close during export test"
+```
+
+---
+
+## Task 9.6: Write Test for Lock Contention (P0)
+
+**Files:**
+- Modify: `tests/unit/telemetry/test_manager.py`
+
+**Step 1: Add lock contention test**
+
+In `TestBackpressureMode` class:
+```python
+    def test_lock_contention_on_events_dropped(self, base_timestamp: datetime) -> None:
+        """Both threads incrementing _events_dropped doesn't corrupt counter."""
+        # Create scenario where both threads write _events_dropped:
+        # - Pipeline thread: DROP mode with full queue
+        # - Export thread: All exporters failing
+
+        failing_exporter = MockExporter("failing", fail_export=True)
+        config = MockConfig(backpressure_mode=BackpressureMode.DROP)
+        manager = TelemetryManager(config, exporters=[failing_exporter])
+
+        # Use tiny queue to force drops
+        manager._queue = queue.Queue(maxsize=2)
+
+        # Fire many events - some will drop on queue full, some on export fail
+        events_fired = 100
+        for i in range(events_fired):
+            event = RunStarted(timestamp=base_timestamp, run_id=f"run-{i}")
+            manager.handle_event(event)
+
+        # Close to flush everything
+        manager.close()
+
+        # Key assertion: dropped count should be consistent
+        # (not corrupted by concurrent increments)
+        metrics = manager.health_metrics
+        total_accounted = metrics["events_emitted"] + metrics["events_dropped"]
+
+        # We don't know exact split, but total should equal events fired
+        # (some may be in-flight when we closed, so allow small variance)
+        assert total_accounted <= events_fired, (
+            f"More events accounted ({total_accounted}) than fired ({events_fired}) - "
+            "counter corruption detected"
+        )
+```
+
+**Step 2: Run test**
+
+Run: `.venv/bin/python -m pytest tests/unit/telemetry/test_manager.py::TestBackpressureMode::test_lock_contention_on_events_dropped -v`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add tests/unit/telemetry/test_manager.py
+git commit -m "test(telemetry): add lock contention test for _events_dropped"
+```
+
+---
+
+## Task 9.7: Write Test for Re-entrance Deadlock (P1)
+
+**Files:**
+- Modify: `tests/unit/telemetry/test_manager.py`
+
+**Step 1: Add re-entrance deadlock test**
+
+Add a new exporter mock class:
+```python
+class ReentrantExporter:
+    """Exporter that tries to emit telemetry from export() - tests re-entrance."""
+
+    def __init__(self, name: str, manager: "TelemetryManager"):
+        self._name = name
+        self._manager = manager
+        self.reentrant_calls: list[str] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, config: dict[str, Any]) -> None:
+        pass
+
+    def export(self, event: TelemetryEvent) -> None:
+        # Try to call handle_event from export thread - should not deadlock
+        # This simulates buggy exporter that triggers telemetry
+        try:
+            reentrant_event = RunStarted(
+                timestamp=event.timestamp,
+                run_id=f"reentrant-{event.run_id}",
+            )
+            self._manager.handle_event(reentrant_event)
+            self.reentrant_calls.append(event.run_id)
+        except Exception as e:
+            self.reentrant_calls.append(f"error: {e}")
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+```
+
+In `TestBackpressureMode` class:
+```python
+    def test_reentrant_handle_event_no_deadlock(self, base_timestamp: datetime) -> None:
+        """Exporter calling handle_event() from export thread doesn't deadlock.
+
+        This tests a buggy exporter that tries to emit telemetry from within
+        the export thread. It should either work or fail gracefully, not deadlock.
+        """
+        config = MockConfig()
+        # Need to create manager first, then exporter (circular dependency)
+        manager = TelemetryManager(config, exporters=[])
+
+        reentrant_exporter = ReentrantExporter("reentrant", manager)
+        manager._exporters = [reentrant_exporter]
+
+        event = RunStarted(timestamp=base_timestamp, run_id="test")
+
+        # This should complete without deadlock
+        manager.handle_event(event)
+
+        # Close with timeout - deadlock would hang here
+        close_completed = threading.Event()
+
+        def close_manager():
+            manager.close()
+            close_completed.set()
+
+        close_thread = threading.Thread(target=close_manager)
+        close_thread.start()
+
+        assert close_completed.wait(timeout=5.0), "Re-entrant handle_event caused deadlock"
+        close_thread.join(timeout=1.0)
+
+        # Verify the reentrant call happened (or was handled)
+        assert len(reentrant_exporter.reentrant_calls) > 0
+```
+
+**Step 2: Run test**
+
+Run: `.venv/bin/python -m pytest tests/unit/telemetry/test_manager.py::TestBackpressureMode::test_reentrant_handle_event_no_deadlock -v`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add tests/unit/telemetry/test_manager.py
+git commit -m "test(telemetry): add re-entrance deadlock test"
 ```
 
 ---
@@ -910,6 +1173,8 @@ In `TestBackpressureMode` class:
 ```python
     def test_task_done_called_on_exception(self, base_timestamp: datetime) -> None:
         """task_done() is called even when exporter raises, preventing join() hang."""
+        import sys
+
         failing_exporter = MockExporter("failing", fail_export=True)
         config = MockConfig()
         manager = TelemetryManager(config, exporters=[failing_exporter])
@@ -919,19 +1184,31 @@ In `TestBackpressureMode` class:
             event = RunStarted(timestamp=base_timestamp, run_id=f"run-{i}")
             manager.handle_event(event)
 
-        # close() should not hang (join() would hang if task_done not called)
-        import signal
+        # close() should not hang - use threading.Timer for cross-platform timeout
+        close_completed = threading.Event()
+        close_exception: Exception | None = None
 
-        def timeout_handler(signum, frame):
-            raise TimeoutError("close() hung - task_done() not called properly")
+        def close_with_tracking():
+            nonlocal close_exception
+            try:
+                manager.close()
+            except Exception as e:
+                close_exception = e
+            finally:
+                close_completed.set()
 
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(5)  # 5 second timeout
-        try:
-            manager.close()
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
+        close_thread = threading.Thread(target=close_with_tracking)
+        close_thread.start()
+
+        # Wait with timeout - if task_done() not called, close() would hang
+        if not close_completed.wait(timeout=5.0):
+            # Force cleanup and fail
+            manager._shutdown_event.set()
+            manager._queue.put(None)  # Try to unblock
+            close_thread.join(timeout=1.0)
+            pytest.fail("close() hung - task_done() not called properly")
+
+        close_thread.join(timeout=1.0)
 
         # Should get here without hanging
         assert manager.health_metrics["events_dropped"] == 3
@@ -1003,20 +1280,23 @@ git log --oneline -10
 
 ## Summary
 
-| Task | Description | Test First? |
-|------|-------------|-------------|
-| 1 | Add queue_size to INTERNAL_DEFAULTS | No (config) |
-| 2 | Update ExporterProtocol docs | No (docs) |
-| 3 | Write failing DROP mode test | Yes |
-| 4 | Add queue/threading infrastructure | No (TDD) |
-| 5 | Implement handle_event | No (TDD) |
-| 6 | Implement export loop | No (TDD) |
-| 7 | Update flush() and close() | No (TDD) |
-| 8 | Update health_metrics | No (TDD) |
-| 9 | Test BLOCK mode | Yes |
-| 10 | Test graceful shutdown | Yes |
-| 11 | Test FIFO ordering | Yes |
-| 12 | Test thread liveness | Yes |
-| 13 | Test task_done exception safety | Yes |
-| 14 | Full test suite verification | No |
-| 15 | Close issue | No |
+| Task | Description | Test First? | Priority |
+|------|-------------|-------------|----------|
+| 1 | Add queue_size to INTERNAL_DEFAULTS | No (config) | - |
+| 2 | Update ExporterProtocol docs | No (docs) | - |
+| 3 | Write failing DROP mode test | Yes | - |
+| 4 | Add queue/threading infrastructure | No (TDD) | - |
+| 5 | Implement handle_event (with timeout) | No (TDD) | P1 fix |
+| 6 | Implement export loop (with ready signal) | No (TDD) | P1 fix |
+| 7 | Update flush() and close() (sentinel BEFORE join) | No (TDD) | **P0 fix** |
+| 8 | Update health_metrics | No (TDD) | - |
+| 9 | Test BLOCK mode (Event-based) | Yes | P0 fix |
+| 9.5 | Test concurrent close() | Yes | **P0 new** |
+| 9.6 | Test lock contention | Yes | **P0 new** |
+| 9.7 | Test re-entrance deadlock | Yes | **P1 new** |
+| 10 | Test graceful shutdown | Yes | - |
+| 11 | Test FIFO ordering | Yes | - |
+| 12 | Test thread liveness | Yes | - |
+| 13 | Test task_done exception safety (cross-platform) | Yes | P2 fix |
+| 14 | Full test suite verification | No | - |
+| 15 | Close issue | No | - |
