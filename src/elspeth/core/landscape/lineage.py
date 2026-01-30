@@ -6,7 +6,7 @@ complete lineage for a token or row.
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from elspeth.contracts import (
     Call,
@@ -136,7 +136,8 @@ def explain(
             token_id = terminal_outcomes[0].token_id
 
     # At this point token_id is guaranteed to be set (either passed in or resolved from row_id)
-    assert token_id is not None  # for type narrowing
+    # The token_id is guaranteed non-None at this point by control flow
+    token_id = cast(str, token_id)
 
     # Get the token
     token = recorder.get_token(token_id)

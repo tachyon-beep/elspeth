@@ -52,6 +52,7 @@ from elspeth.contracts import (
     TriggerType,
     ValidationErrorRecord,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
@@ -235,7 +236,8 @@ class LandscapeRecorder:
         )
 
         result = self.get_run(run_id)
-        assert result is not None, f"Run {run_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"Run {run_id} not found after INSERT/UPDATE - database corruption or transaction failure")
         return result
 
     def get_run(self, run_id: str) -> Run | None:
@@ -1127,9 +1129,11 @@ class LandscapeRecorder:
         )
 
         result = self.get_node_state(state_id)
-        assert result is not None, f"NodeState {state_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"NodeState {state_id} not found after update - database corruption or transaction failure")
         # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
-        assert not isinstance(result, NodeStateOpen), "State should be terminal (PENDING/COMPLETED/FAILED) after completion"
+        if isinstance(result, NodeStateOpen):
+            raise AuditIntegrityError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:
@@ -1409,7 +1413,8 @@ class LandscapeRecorder:
         )
 
         result = self.get_batch(batch_id)
-        assert result is not None, f"Batch {batch_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"Batch {batch_id} not found after update - database corruption or transaction failure")
         return result
 
     def get_batch(self, batch_id: str) -> Batch | None:
