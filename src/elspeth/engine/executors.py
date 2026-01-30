@@ -31,6 +31,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     TriggerType,
 )
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -212,7 +213,8 @@ class TransformExecutor:
             Exception: Re-raised from transform.process() after recording failure
             RuntimeError: Transform returned error but has no on_error configured
         """
-        assert transform.node_id is not None, "node_id must be set by orchestrator"
+        if transform.node_id is None:
+            raise OrchestrationInvariantError(f"Transform '{transform.name}' executed without node_id - orchestrator bug")
         input_hash = stable_hash(token.row_data)
 
         # Begin node state
@@ -335,7 +337,8 @@ class TransformExecutor:
         # Complete node state
         if result.status == "success":
             # TransformResult.success() or success_multi() always sets output data
-            assert result.has_output_data, "success status requires row or rows data"
+            if not result.has_output_data:
+                raise RuntimeError(f"Transform '{transform.name}' returned success but has no output data")
 
             # For single-row: output_data is the row
             # For multi-row: output_data is the rows list (engine handles expansion)
@@ -343,8 +346,8 @@ class TransformExecutor:
             if result.row is not None:
                 output_data = result.row
             else:
-                assert result.rows is not None  # guaranteed by has_output_data
-                output_data = result.rows
+                # result.rows is guaranteed non-None by has_output_data check above
+                output_data = result.rows  # type: ignore[assignment]
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -478,7 +481,8 @@ class GateExecutor:
             MissingEdgeError: If routing refers to an unregistered edge
             Exception: Re-raised from gate.evaluate() after recording failure
         """
-        assert gate.node_id is not None, "node_id must be set by orchestrator"
+        if gate.node_id is None:
+            raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
         input_hash = stable_hash(token.row_data)
 
         # Begin node state
@@ -745,7 +749,9 @@ class GateExecutor:
 
         elif destination == "fork":
             # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-            assert gate_config.fork_to is not None  # Pydantic validation guarantees this
+            # (Pydantic validation ensures fork_to is not None when routes include "fork")
+            # Local binding for type narrowing (mypy can't see Pydantic validation)
+            fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
 
             if token_manager is None:
                 error = {
@@ -763,7 +769,7 @@ class GateExecutor:
                     "Cannot create child tokens - audit integrity would be compromised."
                 )
 
-            action = RoutingAction.fork_to_paths(gate_config.fork_to, reason=reason)
+            action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
 
             # Record routing events for all paths
             self._record_routing(
@@ -775,7 +781,7 @@ class GateExecutor:
             # Create child tokens (ATOMIC: also records parent FORKED outcome)
             child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
-                branches=gate_config.fork_to,
+                branches=fork_branches,
                 step_in_pipeline=step_in_pipeline,
                 run_id=ctx.run_id,
                 row_data=token.row_data,
@@ -1642,7 +1648,8 @@ class SinkExecutor:
 
         # Create node_state for EACH token - this is how we derive COMPLETED terminal state
         # Sink must have node_id assigned by orchestrator before execution
-        assert sink.node_id is not None, "Sink node_id must be set before execution"
+        if sink.node_id is None:
+            raise OrchestrationInvariantError(f"Sink '{sink.name}' executed without node_id - orchestrator bug")
         sink_node_id: str = sink.node_id
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []

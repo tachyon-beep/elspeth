@@ -29,6 +29,7 @@ from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutc
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.enums import TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.events import (
     PhaseAction,
     PhaseCompleted,
@@ -1066,7 +1067,8 @@ class Orchestrator:
             default_last_node_id = config_gate_id_map[GateName(last_gate_name)]
         elif config.transforms:
             transform_node_id = config.transforms[-1].node_id
-            assert transform_node_id is not None
+            if transform_node_id is None:
+                raise OrchestrationInvariantError("Last transform in pipeline has no node_id")
             default_last_node_id = transform_node_id
         else:
             default_last_node_id = source_id
@@ -1269,7 +1271,8 @@ class Orchestrator:
                         elif result.outcome == RowOutcome.ROUTED:
                             rows_routed += 1
                             # GateExecutor contract: ROUTED outcome always has sink_name set
-                            assert result.sink_name is not None
+                            if result.sink_name is None:
+                                raise RuntimeError("ROUTED outcome requires sink_name")
                             routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
                             pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                         elif result.outcome == RowOutcome.FAILED:
@@ -2224,7 +2227,8 @@ class Orchestrator:
                         pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
-                        assert result.sink_name is not None
+                        if result.sink_name is None:
+                            raise RuntimeError("ROUTED outcome requires sink_name")
                         routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
                         pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
                     elif result.outcome == RowOutcome.FAILED:

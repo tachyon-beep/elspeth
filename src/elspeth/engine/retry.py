@@ -125,7 +125,8 @@ class RetryManager:
             # Retries exhausted - wrap in MaxRetriesExceeded
             # last_error is always set because RetryError means at least one attempt failed
             final_error = last_error or e.last_attempt.exception()
-            assert final_error is not None, "RetryError without exception is impossible"
+            if final_error is None:
+                raise RuntimeError("RetryError raised without captured exception") from e
             raise MaxRetriesExceeded(attempt, final_error) from e
 
         # Should not reach here - Retrying always returns or raises
