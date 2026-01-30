@@ -1,0 +1,378 @@
+# tests/plugins/clients/test_http_telemetry.py
+"""Tests for AuditedHTTPClient telemetry integration."""
+
+import itertools
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import httpx
+import pytest
+
+from elspeth.contracts import CallStatus, CallType
+from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.telemetry.events import ExternalCallCompleted
+
+
+class TestHTTPClientTelemetry:
+    """Tests for telemetry emission from AuditedHTTPClient."""
+
+    def _create_mock_recorder(self) -> MagicMock:
+        """Create a mock LandscapeRecorder that returns recorded calls."""
+        recorder = MagicMock()
+        counter = itertools.count()
+        recorder.allocate_call_index.side_effect = lambda _: next(counter)
+
+        # record_call returns a Call object with hashes
+        recorded_call = MagicMock()
+        recorded_call.request_hash = "req_hash_123"
+        recorded_call.response_hash = "resp_hash_456"
+        recorder.record_call.return_value = recorded_call
+
+        return recorder
+
+    def test_successful_post_emits_telemetry(self) -> None:
+        """Successful HTTP POST emits ExternalCallCompleted event."""
+        recorder = self._create_mock_recorder()
+
+        # Track emitted events
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        # Mock the HTTP response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            response = client.post("/endpoint", json={"input": "test"})
+
+        # Verify response
+        assert response.status_code == 200
+
+        # Verify telemetry event
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+
+        assert isinstance(event, ExternalCallCompleted)
+        assert event.run_id == "run_abc"
+        assert event.state_id == "state_123"
+        assert event.call_type == CallType.HTTP
+        assert event.provider == "http"
+        assert event.status == CallStatus.SUCCESS
+        assert event.latency_ms > 0
+        assert event.request_hash == "req_hash_123"
+        assert event.response_hash == "resp_hash_456"
+        assert event.token_usage is None  # Not applicable for HTTP
+        assert isinstance(event.timestamp, datetime)
+
+    def test_failed_post_emits_telemetry_with_error_status(self) -> None:
+        """Failed HTTP POST emits ExternalCallCompleted with ERROR status."""
+        recorder = self._create_mock_recorder()
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.side_effect = httpx.ConnectError("Connection failed")
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            with pytest.raises(httpx.ConnectError):
+                client.post("/endpoint", json={"input": "test"})
+
+        # Verify telemetry event
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+
+        assert event.run_id == "run_abc"
+        assert event.state_id == "state_123"
+        assert event.call_type == CallType.HTTP
+        assert event.status == CallStatus.ERROR
+        assert event.latency_ms >= 0
+        assert event.response_hash is None  # No response on error
+
+    def test_no_telemetry_when_callback_is_none(self) -> None:
+        """No telemetry emitted when telemetry_emit callback is None."""
+        recorder = self._create_mock_recorder()
+
+        # No telemetry callback provided
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=None,  # Explicitly None
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            response = client.post("/endpoint", json={"input": "test"})
+
+        # Call succeeds without error (no exception from missing callback)
+        assert response.status_code == 200
+        # Audit trail is still recorded
+        recorder.record_call.assert_called_once()
+
+    def test_no_telemetry_when_run_id_is_none(self) -> None:
+        """No telemetry emitted when run_id is None."""
+        recorder = self._create_mock_recorder()
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        # run_id is None
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id=None,  # No run_id
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            response = client.post("/endpoint", json={"input": "test"})
+
+        # Call succeeds
+        assert response.status_code == 200
+        # No telemetry emitted (run_id is required)
+        assert len(emitted_events) == 0
+
+    def test_telemetry_emitted_after_landscape_recording(self) -> None:
+        """Telemetry is emitted AFTER Landscape recording succeeds."""
+        recorder = self._create_mock_recorder()
+
+        call_order: list[str] = []
+
+        def mock_record_call(**kwargs):
+            call_order.append("landscape")
+            recorded_call = MagicMock()
+            recorded_call.request_hash = "req_hash"
+            recorded_call.response_hash = "resp_hash"
+            return recorded_call
+
+        recorder.record_call.side_effect = mock_record_call
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            call_order.append("telemetry")
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            client.post("/endpoint", json={"input": "test"})
+
+        # Verify order: Landscape first, then telemetry
+        assert call_order == ["landscape", "telemetry"]
+
+    def test_no_telemetry_when_landscape_recording_fails(self) -> None:
+        """Telemetry is NOT emitted if Landscape recording fails.
+
+        This is a critical invariant: Landscape is the legal record.
+        If audit recording fails, telemetry should NOT be emitted because
+        the event was never properly recorded.
+        """
+        recorder = self._create_mock_recorder()
+
+        # Make record_call raise an exception (simulating DB failure)
+        recorder.record_call.side_effect = Exception("Database connection failed")
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            # The call should fail (Landscape recording fails)
+            with pytest.raises(Exception, match="Database connection failed"):
+                client.post("/endpoint", json={"input": "test"})
+
+        # CRITICAL: No telemetry should have been emitted
+        assert len(emitted_events) == 0, "Telemetry was emitted before Landscape recording!"
+
+    def test_telemetry_failure_does_not_corrupt_successful_call(self) -> None:
+        """Telemetry callback failure should not corrupt audit trail or cause retry.
+
+        Regression test for bug: If telemetry_emit raises (e.g., when
+        fail_on_total_exporter_failure=True), the exception should not:
+        1. Cause a second audit record with ERROR status
+        2. Change the call outcome from SUCCESS to ERROR
+        3. Trigger retry logic for a successful call
+
+        The fix isolates telemetry emission in its own try/except.
+        """
+        recorder = self._create_mock_recorder()
+
+        def failing_telemetry_emit(event: ExternalCallCompleted) -> None:
+            raise RuntimeError("Telemetry exporter failed!")
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=failing_telemetry_emit,  # Will raise!
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            # Call should succeed despite telemetry failure
+            response = client.post("/endpoint", json={"input": "test"})
+
+        # Verify call succeeded
+        assert response.status_code == 200
+
+        # CRITICAL: Only ONE audit record, with SUCCESS status
+        assert recorder.record_call.call_count == 1
+        call_kwargs = recorder.record_call.call_args.kwargs
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+
+    def test_http_error_response_emits_telemetry(self) -> None:
+        """4xx/5xx response emits telemetry with ERROR status."""
+        recorder = self._create_mock_recorder()
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {"error": "Internal Server Error"}
+        mock_response.text = '{"error": "Internal Server Error"}'
+        mock_response.content = b'{"error": "Internal Server Error"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            response = client.post("/endpoint", json={"input": "test"})
+
+        # Response is returned (not raised as exception)
+        assert response.status_code == 500
+
+        # Verify telemetry event with ERROR status
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert event.call_type == CallType.HTTP
+        assert event.status == CallStatus.ERROR
