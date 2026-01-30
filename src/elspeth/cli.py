@@ -21,7 +21,7 @@ from elspeth.contracts.events import (
     PhaseCompleted,
     PhaseError,
     PhaseStarted,
-    RunCompleted,
+    RunSummary,
 )
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
@@ -620,7 +620,7 @@ def _execute_pipeline(
                     err=True,
                 )
 
-            def _format_run_completed_json(event: RunCompleted) -> None:
+            def _format_run_summary_json(event: RunSummary) -> None:
                 typer.echo(
                     json.dumps(
                         {
@@ -657,7 +657,7 @@ def _execute_pipeline(
             event_bus.subscribe(PhaseStarted, _format_phase_started_json)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
             event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(RunSummary, _format_run_summary_json)
             event_bus.subscribe(ProgressEvent, _format_progress_json)
 
         else:  # console format (default)
@@ -674,7 +674,7 @@ def _execute_pipeline(
                 target_info = f" ({event.target})" if event.target else ""
                 typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-            def _format_run_completed(event: RunCompleted) -> None:
+            def _format_run_summary(event: RunSummary) -> None:
                 status_symbols = {
                     "completed": "✓",
                     "partial": "⚠",
@@ -711,7 +711,7 @@ def _execute_pipeline(
             event_bus.subscribe(PhaseStarted, _format_phase_started)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed)
             event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(RunSummary, _format_run_summary)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
         # Create runtime configs for external calls and checkpointing
@@ -883,7 +883,7 @@ def _execute_pipeline_with_instances(
                     err=True,
                 )
 
-            def _format_run_completed_json(event: RunCompleted) -> None:
+            def _format_run_summary_json(event: RunSummary) -> None:
                 typer.echo(
                     json.dumps(
                         {
@@ -920,7 +920,7 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(PhaseStarted, _format_phase_started_json)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
             event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(RunSummary, _format_run_summary_json)
             event_bus.subscribe(ProgressEvent, _format_progress_json)
 
         else:  # console format (default)
@@ -937,7 +937,7 @@ def _execute_pipeline_with_instances(
                 target_info = f" ({event.target})" if event.target else ""
                 typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-            def _format_run_completed(event: RunCompleted) -> None:
+            def _format_run_summary(event: RunSummary) -> None:
                 status_symbols = {
                     "completed": "✓",
                     "partial": "⚠",
@@ -974,7 +974,7 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(PhaseStarted, _format_phase_started)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed)
             event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(RunSummary, _format_run_summary)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
         # Create runtime configs for external calls and checkpointing
@@ -1389,7 +1389,7 @@ def _execute_resume_with_instances(
         PhaseCompleted,
         PhaseError,
         PhaseStarted,
-        RunCompleted,
+        RunSummary,
     )
     from elspeth.core import EventBus
 
@@ -1408,7 +1408,7 @@ def _execute_resume_with_instances(
         target_info = f" ({event.target})" if event.target else ""
         typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-    def _format_run_completed(event: RunCompleted) -> None:
+    def _format_run_summary(event: RunSummary) -> None:
         status_symbols = {
             "completed": "✓",
             "partial": "⚠",
@@ -1445,7 +1445,7 @@ def _execute_resume_with_instances(
     event_bus.subscribe(PhaseStarted, _format_phase_started)
     event_bus.subscribe(PhaseCompleted, _format_phase_completed)
     event_bus.subscribe(PhaseError, _format_phase_error)
-    event_bus.subscribe(RunCompleted, _format_run_completed)
+    event_bus.subscribe(RunSummary, _format_run_summary)
     event_bus.subscribe(ProgressEvent, _format_progress)
 
     # Create runtime configs for external calls and checkpointing

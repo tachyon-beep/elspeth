@@ -21,7 +21,7 @@ from elspeth.telemetry.events import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 
@@ -30,7 +30,7 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
     """Determine whether an event should be emitted based on granularity.
 
     Filter logic:
-    - Lifecycle events (RunStarted, RunCompleted, PhaseChanged): Always emit
+    - Lifecycle events (RunStarted, RunFinished, PhaseChanged): Always emit
     - Row events (RowCreated, TransformCompleted, GateEvaluated, TokenCompleted):
       Emit at ROWS or FULL granularity
     - External call events (ExternalCallCompleted): Emit only at FULL granularity
@@ -57,7 +57,7 @@ def should_emit(event: TelemetryEvent, granularity: TelemetryGranularity) -> boo
     """
     match event:
         # Lifecycle events: always emit at any granularity
-        case RunStarted() | RunCompleted() | PhaseChanged():
+        case RunStarted() | RunFinished() | PhaseChanged():
             return True
 
         # Row-level events: emit at ROWS or FULL

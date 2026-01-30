@@ -37,8 +37,8 @@ from elspeth.contracts.events import (
     PhaseError,
     PhaseStarted,
     PipelinePhase,
-    RunCompleted,
     RunCompletionStatus,
+    RunSummary,
 )
 from elspeth.contracts.types import (
     AggregationName,
@@ -542,13 +542,9 @@ class Orchestrator:
 
         # Local imports for telemetry events - consolidated here to avoid repeated imports
         from elspeth.telemetry import (
-            PhaseChanged as TelemetryPhaseChanged,
-        )
-        from elspeth.telemetry import (
-            RunCompleted as TelemetryRunCompleted,
-        )
-        from elspeth.telemetry import (
-            RunStarted as TelemetryRunStarted,
+            PhaseChanged,
+            RunFinished,
+            RunStarted,
         )
 
         # DATABASE phase - create recorder and begin run
@@ -570,7 +566,7 @@ class Orchestrator:
 
             # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record
             self._emit_telemetry(
-                TelemetryRunStarted(
+                RunStarted(
                     timestamp=datetime.now(UTC),
                     run_id=run.run_id,
                     config_hash=run.config_hash,
@@ -605,7 +601,7 @@ class Orchestrator:
             # Emit telemetry AFTER Landscape finalize succeeds
             run_duration_ms = (time.perf_counter() - run_start_time) * 1000
             self._emit_telemetry(
-                TelemetryRunCompleted(
+                RunFinished(
                     timestamp=datetime.now(UTC),
                     run_id=run.run_id,
                     status=RunStatus.COMPLETED,
@@ -634,7 +630,7 @@ class Orchestrator:
 
                     # Emit telemetry PhaseChanged for EXPORT
                     self._emit_telemetry(
-                        TelemetryPhaseChanged(
+                        PhaseChanged(
                             timestamp=datetime.now(UTC),
                             run_id=run.run_id,
                             phase=PipelinePhase.EXPORT,
@@ -661,10 +657,10 @@ class Orchestrator:
                     # (run is still "completed" in Landscape)
                     raise
 
-            # Emit RunCompleted event with final metrics
+            # Emit RunSummary event with final metrics
             total_duration = time.perf_counter() - run_start_time
             self._events.emit(
-                RunCompleted(
+                RunSummary(
                     run_id=run.run_id,
                     status=RunCompletionStatus.COMPLETED,
                     total_rows=result.rows_processed,
@@ -684,19 +680,19 @@ class Orchestrator:
             # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
             # A batch transform has submitted work that isn't complete yet.
             # DO NOT mark run as failed - it's pending, not failed.
-            # DO NOT emit RunCompleted - run isn't done yet.
+            # DO NOT emit RunSummary - run isn't done yet.
             # Re-raise for caller to schedule retry based on check_after_seconds.
             raise
         except Exception:
-            # Emit RunCompleted with failure status
+            # Emit RunSummary with failure status
             total_duration = time.perf_counter() - run_start_time
 
             if run_completed:
                 # Export failed after successful run - emit PARTIAL status
-                # NOTE: TelemetryRunCompleted was already emitted at lines 604-612
+                # NOTE: RunFinished was already emitted at lines 604-612
                 # before the export attempt, so we only emit the EventBus event here
                 self._events.emit(
-                    RunCompleted(
+                    RunSummary(
                         run_id=run.run_id,
                         status=RunCompletionStatus.PARTIAL,
                         total_rows=result.rows_processed,
@@ -715,7 +711,7 @@ class Orchestrator:
 
                 # Emit telemetry AFTER Landscape finalize succeeds
                 self._emit_telemetry(
-                    TelemetryRunCompleted(
+                    RunFinished(
                         timestamp=datetime.now(UTC),
                         run_id=run.run_id,
                         status=RunStatus.FAILED,
@@ -725,7 +721,7 @@ class Orchestrator:
                 )
 
                 self._events.emit(
-                    RunCompleted(
+                    RunSummary(
                         run_id=run.run_id,
                         status=RunCompletionStatus.FAILED,
                         total_rows=0,
@@ -775,10 +771,8 @@ class Orchestrator:
 
         # Local imports for telemetry events - consolidated here to avoid repeated imports
         from elspeth.telemetry import (
-            PhaseChanged as TelemetryPhaseChanged,
-        )
-        from elspeth.telemetry import (
-            RowCreated as TelemetryRowCreated,
+            PhaseChanged,
+            RowCreated,
         )
 
         # Get execution order from graph
@@ -822,7 +816,7 @@ class Orchestrator:
 
             # Emit telemetry PhaseChanged - we now have run_id from begin_run
             self._emit_telemetry(
-                TelemetryPhaseChanged(
+                PhaseChanged(
                     timestamp=datetime.now(UTC),
                     run_id=run_id,
                     phase=PipelinePhase.GRAPH,
@@ -1080,7 +1074,7 @@ class Orchestrator:
 
         # Emit telemetry PhaseChanged for SOURCE
         self._emit_telemetry(
-            TelemetryPhaseChanged(
+            PhaseChanged(
                 timestamp=datetime.now(UTC),
                 run_id=run_id,
                 phase=PipelinePhase.SOURCE,
@@ -1110,7 +1104,7 @@ class Orchestrator:
 
             # Emit telemetry PhaseChanged for PROCESS
             self._emit_telemetry(
-                TelemetryPhaseChanged(
+                PhaseChanged(
                     timestamp=datetime.now(UTC),
                     run_id=run_id,
                     phase=PipelinePhase.PROCESS,
@@ -1154,7 +1148,7 @@ class Orchestrator:
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
                             self._emit_telemetry(
-                                TelemetryRowCreated(
+                                RowCreated(
                                     timestamp=datetime.now(UTC),
                                     run_id=run_id,
                                     row_id=quarantine_token.row_id,
@@ -1510,7 +1504,7 @@ class Orchestrator:
                             )
 
                 # Emit final progress if we haven't emitted recently or row count not on interval
-                # (RunCompleted will show final summary regardless, but progress shows intermediate state)
+                # (RunSummary will show final summary regardless, but progress shows intermediate state)
                 current_time = time.perf_counter()
                 time_since_last_progress = current_time - last_progress_time
                 # Emit if: not on progress_interval boundary OR >1s since last emission

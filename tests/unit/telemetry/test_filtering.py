@@ -33,7 +33,7 @@ from elspeth.telemetry import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
     should_emit,
 )
@@ -89,9 +89,9 @@ class TestLifecycleEventsAlwaysPass:
             TelemetryGranularity.FULL,
         ],
     )
-    def test_run_completed_always_passes(self, base_timestamp: datetime, base_run_id: str, granularity: TelemetryGranularity) -> None:
-        """RunCompleted passes at any granularity."""
-        event = RunCompleted(
+    def test_run_finished_always_passes(self, base_timestamp: datetime, base_run_id: str, granularity: TelemetryGranularity) -> None:
+        """RunFinished passes at any granularity."""
+        event = RunFinished(
             timestamp=base_timestamp,
             run_id=base_run_id,
             status=RunStatus.COMPLETED,
@@ -318,7 +318,7 @@ class TestGranularityOrdering:
                 config_hash="abc",
                 source_plugin="csv",
             ),
-            RunCompleted(
+            RunFinished(
                 timestamp=base_timestamp,
                 run_id=base_run_id,
                 status=RunStatus.COMPLETED,

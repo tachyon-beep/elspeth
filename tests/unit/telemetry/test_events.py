@@ -34,7 +34,7 @@ from elspeth.telemetry import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 
@@ -120,12 +120,12 @@ class TestRunStarted:
         assert deserialized["source_plugin"] == "csv_source"
 
 
-class TestRunCompleted:
-    """Tests for RunCompleted event."""
+class TestRunFinished:
+    """Tests for RunFinished event."""
 
     def test_instantiation(self, base_timestamp: datetime, base_run_id: str) -> None:
-        """RunCompleted can be instantiated with all required fields."""
-        event = RunCompleted(
+        """RunFinished can be instantiated with all required fields."""
+        event = RunFinished(
             timestamp=base_timestamp,
             run_id=base_run_id,
             status=RunStatus.COMPLETED,
@@ -137,8 +137,8 @@ class TestRunCompleted:
         assert event.duration_ms == 5000.5
 
     def test_json_roundtrip(self, base_timestamp: datetime, base_run_id: str) -> None:
-        """RunCompleted survives JSON roundtrip with enum serialization."""
-        event = RunCompleted(
+        """RunFinished survives JSON roundtrip with enum serialization."""
+        event = RunFinished(
             timestamp=base_timestamp,
             run_id=base_run_id,
             status=RunStatus.FAILED,
@@ -466,7 +466,7 @@ class TestInheritance:
         "event_class",
         [
             RunStarted,
-            RunCompleted,
+            RunFinished,
             PhaseChanged,
             RowCreated,
             TransformCompleted,
@@ -484,7 +484,7 @@ class TestInheritance:
         [
             TelemetryEvent,
             RunStarted,
-            RunCompleted,
+            RunFinished,
             PhaseChanged,
             RowCreated,
             TransformCompleted,
@@ -505,7 +505,7 @@ class TestInheritance:
         [
             TelemetryEvent,
             RunStarted,
-            RunCompleted,
+            RunFinished,
             PhaseChanged,
             RowCreated,
             TransformCompleted,

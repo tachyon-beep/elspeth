@@ -45,7 +45,7 @@ from elspeth.telemetry.events import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 from elspeth.telemetry.exporters.azure_monitor import AzureMonitorExporter
@@ -69,7 +69,7 @@ ALL_EXPORTERS: list[type[ConsoleExporter] | type[OTLPExporter] | type[AzureMonit
 # All telemetry event classes
 ALL_EVENTS = [
     RunStarted,
-    RunCompleted,
+    RunFinished,
     PhaseChanged,
     RowCreated,
     TransformCompleted,
@@ -99,8 +99,8 @@ def _create_sample_event(event_class: type[TelemetryEvent]) -> TelemetryEvent:
             config_hash="abc123def456",
             source_plugin="csv",
         )
-    elif event_class is RunCompleted:
-        return RunCompleted(
+    elif event_class is RunFinished:
+        return RunFinished(
             **base_kwargs,
             status=RunStatus.COMPLETED,
             row_count=100,

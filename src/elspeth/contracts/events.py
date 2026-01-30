@@ -47,7 +47,7 @@ class PhaseAction(str, Enum):
 
 
 class RunCompletionStatus(str, Enum):
-    """Final status for RunCompleted events."""
+    """Final status for RunSummary events."""
 
     COMPLETED = "completed"
     FAILED = "failed"
@@ -107,10 +107,11 @@ class PhaseError:
 
 
 @dataclass(frozen=True, slots=True)
-class RunCompleted:
-    """Emitted when pipeline run finishes (success or failure).
+class RunSummary:
+    """Summary emitted when pipeline run finishes (success or failure).
 
-    Provides final summary for CI integration.
+    Provides final metrics for CI integration: exit codes, row counts,
+    routing breakdown.
 
     Routing breakdown:
     - routed: Total rows routed to non-default sinks (gates or error routing)

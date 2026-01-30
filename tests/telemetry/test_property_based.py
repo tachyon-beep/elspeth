@@ -41,7 +41,7 @@ from elspeth.telemetry import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
     should_emit,
 )
@@ -140,9 +140,9 @@ def make_run_started(run_id: str, timestamp: datetime | None = None) -> RunStart
     )
 
 
-def make_run_completed(run_id: str, timestamp: datetime | None = None) -> RunCompleted:
-    """Create a RunCompleted event for testing."""
-    return RunCompleted(
+def make_run_finished(run_id: str, timestamp: datetime | None = None) -> RunFinished:
+    """Create a RunFinished event for testing."""
+    return RunFinished(
         timestamp=timestamp or datetime.now(tz=UTC),
         run_id=run_id,
         status=RunStatus.COMPLETED,
@@ -264,15 +264,15 @@ granularity_strategy = st.sampled_from(list(TelemetryGranularity))
 # Strategy for event types
 @st.composite
 def lifecycle_event_strategy(draw: st.DrawFn) -> TelemetryEvent:
-    """Generate lifecycle events (RunStarted, RunCompleted, PhaseChanged)."""
+    """Generate lifecycle events (RunStarted, RunFinished, PhaseChanged)."""
     run_id = draw(run_id_strategy)
     timestamp = draw(timestamp_strategy)
-    event_type = draw(st.sampled_from(["run_started", "run_completed", "phase_changed"]))
+    event_type = draw(st.sampled_from(["run_started", "run_finished", "phase_changed"]))
 
     if event_type == "run_started":
         return make_run_started(run_id, timestamp)
-    elif event_type == "run_completed":
-        return make_run_completed(run_id, timestamp)
+    elif event_type == "run_finished":
+        return make_run_finished(run_id, timestamp)
     else:
         return make_phase_changed(run_id, timestamp)
 
@@ -602,7 +602,7 @@ class TestGranularityFilteringMatrix:
             TelemetryGranularity.ROWS: True,
             TelemetryGranularity.FULL: True,
         },
-        RunCompleted: {
+        RunFinished: {
             TelemetryGranularity.LIFECYCLE: True,
             TelemetryGranularity.ROWS: True,
             TelemetryGranularity.FULL: True,
@@ -675,7 +675,7 @@ class TestGranularityFilteringMatrix:
         # Create one instance of each event type
         events_by_type: dict[type, TelemetryEvent] = {
             RunStarted: make_run_started(run_id, base_ts),
-            RunCompleted: make_run_completed(run_id, base_ts),
+            RunFinished: make_run_finished(run_id, base_ts),
             PhaseChanged: make_phase_changed(run_id, base_ts),
             RowCreated: make_row_created(run_id, row_id, base_ts),
             TransformCompleted: make_transform_completed(run_id, row_id, base_ts),

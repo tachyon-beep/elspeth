@@ -27,7 +27,7 @@ from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
 
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.contracts.events import TelemetryEvent
-from elspeth.telemetry import RunCompleted, RunStarted, TelemetryManager
+from elspeth.telemetry import RunFinished, RunStarted, TelemetryManager
 
 # =============================================================================
 # Test Doubles
@@ -173,9 +173,9 @@ def make_run_started(run_id: str, timestamp: datetime | None = None) -> RunStart
     )
 
 
-def make_run_completed(run_id: str, timestamp: datetime | None = None) -> RunCompleted:
-    """Create a RunCompleted event for testing."""
-    return RunCompleted(
+def make_run_finished(run_id: str, timestamp: datetime | None = None) -> RunFinished:
+    """Create a RunFinished event for testing."""
+    return RunFinished(
         timestamp=timestamp or datetime.now(tz=UTC),
         run_id=run_id,
         status=RunStatus.COMPLETED,

@@ -27,7 +27,7 @@ Usage:
     from elspeth.telemetry import (
         # Events
         RunStarted,
-        RunCompleted,
+        RunFinished,
         PhaseChanged,
         RowCreated,
         ExternalCallCompleted,
@@ -51,7 +51,7 @@ from elspeth.telemetry.events import (
     ExternalCallCompleted,
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 from elspeth.telemetry.exporters import ConsoleExporter
@@ -66,7 +66,7 @@ __all__ = [
     "ExternalCallCompleted",
     "PhaseChanged",
     "RowCreated",
-    "RunCompleted",
+    "RunFinished",
     "RunStarted",
     "TelemetryExporterError",
     "TelemetryManager",

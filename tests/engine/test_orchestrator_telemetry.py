@@ -27,7 +27,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager
-from elspeth.telemetry.events import PhaseChanged, RunCompleted, RunStarted
+from elspeth.telemetry.events import PhaseChanged, RunFinished, RunStarted
 
 # =============================================================================
 # Test Fixtures
@@ -177,7 +177,7 @@ class TestTelemetryEventEmission:
         assert event.run_id is not None
 
     def test_run_completed_emitted_after_finalize_run(self, landscape_db: LandscapeDB) -> None:
-        """RunCompleted telemetry event is emitted after finalize_run succeeds."""
+        """RunFinished telemetry event is emitted after finalize_run succeeds."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
 
@@ -191,8 +191,8 @@ class TestTelemetryEventEmission:
 
         orchestrator.run(config, graph=create_minimal_graph())
 
-        # Verify RunCompleted was emitted
-        run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        # Verify RunFinished was emitted
+        run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_completed_events) == 1
 
         event = run_completed_events[0]
@@ -227,7 +227,7 @@ class TestTelemetryEventEmission:
         assert PipelinePhase.PROCESS in phases
 
     def test_events_emitted_in_correct_order(self, landscape_db: LandscapeDB) -> None:
-        """Events are emitted in correct lifecycle order: RunStarted, phases, RunCompleted."""
+        """Events are emitted in correct lifecycle order: RunStarted, phases, RunFinished."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
 
@@ -241,10 +241,10 @@ class TestTelemetryEventEmission:
 
         orchestrator.run(config, graph=create_minimal_graph())
 
-        # Verify order: RunStarted must be first, RunCompleted must be last
+        # Verify order: RunStarted must be first, RunFinished must be last
         assert len(exporter.events) >= 2
         assert isinstance(exporter.events[0], RunStarted)
-        assert isinstance(exporter.events[-1], RunCompleted)
+        assert isinstance(exporter.events[-1], RunFinished)
 
 
 class TestTelemetryDisabledByDefault:
@@ -332,10 +332,10 @@ class TestNoTelemetryOnLandscapeFailure:
         """If finalize_run fails, the successful completion telemetry should not be emitted.
 
         Note: If processing succeeds but finalize fails, an exception is raised.
-        The telemetry RunCompleted event for success is only emitted after
+        The telemetry RunFinished event for success is only emitted after
         finalize_run succeeds.
         """
-        # This test verifies the code structure - that RunCompleted telemetry
+        # This test verifies the code structure - that RunFinished telemetry
         # emission is AFTER finalize_run in the code path
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -353,8 +353,8 @@ class TestNoTelemetryOnLandscapeFailure:
         # Verify the run completed successfully
         assert result.status == RunStatus.COMPLETED
 
-        # Verify RunCompleted was emitted with COMPLETED status
-        run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        # Verify RunFinished was emitted with COMPLETED status
+        run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_completed_events) == 1
         assert run_completed_events[0].status == RunStatus.COMPLETED
 
@@ -363,7 +363,7 @@ class TestTelemetryOnRunFailure:
     """Tests for telemetry emission when runs fail."""
 
     def test_run_completed_emitted_with_failed_status(self, landscape_db: LandscapeDB) -> None:
-        """RunCompleted telemetry event is emitted with FAILED status when run fails."""
+        """RunFinished telemetry event is emitted with FAILED status when run fails."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
 
@@ -400,8 +400,8 @@ class TestTelemetryOnRunFailure:
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
         assert len(run_started_events) == 1
 
-        # Verify RunCompleted was emitted with FAILED status
-        run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        # Verify RunFinished was emitted with FAILED status
+        run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_completed_events) == 1
         assert run_completed_events[0].status == RunStatus.FAILED
 
@@ -434,7 +434,7 @@ class TestTelemetryEventContent:
         assert len(run_started.config_hash) > 0
 
     def test_run_completed_contains_accurate_metrics(self, landscape_db: LandscapeDB) -> None:
-        """RunCompleted event contains accurate row count and timing."""
+        """RunFinished event contains accurate row count and timing."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
 
@@ -449,7 +449,7 @@ class TestTelemetryEventContent:
 
         orchestrator.run(config, graph=create_minimal_graph())
 
-        run_completed = next(e for e in exporter.events if isinstance(e, RunCompleted))
+        run_completed = next(e for e in exporter.events if isinstance(e, RunFinished))
         assert run_completed.row_count == 3
         assert run_completed.duration_ms > 0  # Must have positive duration
 
@@ -630,17 +630,17 @@ class TestTelemetryPartialStatus:
     When a run completes successfully but export fails:
     - Landscape status is COMPLETED (processing succeeded)
     - CLI EventBus gets PARTIAL status (export failed)
-    - TelemetryRunCompleted should be emitted with status=COMPLETED
+    - RunFinished should be emitted with status=COMPLETED
     """
 
-    def test_telemetry_run_completed_emitted_when_export_fails(self, landscape_db: LandscapeDB) -> None:
-        """TelemetryRunCompleted is emitted with COMPLETED status even when export fails.
+    def test_run_finished_emitted_when_export_fails(self, landscape_db: LandscapeDB) -> None:
+        """RunFinished is emitted with COMPLETED status even when export fails.
 
         The telemetry event reflects the Landscape status (COMPLETED), not the
         export outcome. This test verifies that export failure doesn't prevent
         telemetry emission.
 
-        The implementation correctly emits exactly one TelemetryRunCompleted
+        The implementation correctly emits exactly one RunFinished
         event before the export attempt. If export fails, the EventBus receives
         a separate PARTIAL status event for CLI observability, but telemetry
         is not duplicated.
@@ -682,12 +682,12 @@ class TestTelemetryPartialStatus:
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
         assert len(run_started_events) == 1
 
-        # Verify TelemetryRunCompleted was emitted with COMPLETED status
+        # Verify RunFinished was emitted with COMPLETED status
         # This is the key assertion: even though export failed, the run itself completed
-        run_completed_events = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_completed_events) == 1  # Exactly one emitted (no duplicates)
 
-        # All RunCompleted events should have status=COMPLETED (Landscape status)
+        # All RunFinished events should have status=COMPLETED (Landscape status)
         # and correct row count
         for event in run_completed_events:
             assert event.status == RunStatus.COMPLETED  # Landscape status, not PARTIAL

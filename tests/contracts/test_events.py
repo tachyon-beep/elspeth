@@ -64,12 +64,12 @@ def test_telemetry_events_inherit_from_contracts_base():
         ExternalCallCompleted,
         PhaseChanged,
         RowCreated,
-        RunCompleted,
+        RunFinished,
         RunStarted,
     )
 
     assert issubclass(RunStarted, TelemetryEvent)
-    assert issubclass(RunCompleted, TelemetryEvent)
+    assert issubclass(RunFinished, TelemetryEvent)
     assert issubclass(PhaseChanged, TelemetryEvent)
     assert issubclass(RowCreated, TelemetryEvent)
     assert issubclass(ExternalCallCompleted, TelemetryEvent)

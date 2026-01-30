@@ -42,8 +42,10 @@ class RunStarted(TelemetryEvent):
 
 
 @dataclass(frozen=True, slots=True)
-class RunCompleted(TelemetryEvent):
+class RunFinished(TelemetryEvent):
     """Emitted when a pipeline run finishes (success or failure).
+
+    Pairs with RunStarted for telemetry lifecycle tracking.
 
     Attributes:
         status: Final run status (completed, failed)

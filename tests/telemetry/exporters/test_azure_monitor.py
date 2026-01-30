@@ -24,7 +24,7 @@ from elspeth.contracts import TokenCompleted
 from elspeth.contracts.enums import RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 
@@ -358,7 +358,7 @@ class TestAzureMonitorExporterSpanConversion:
         """Enum fields are serialized as their string values."""
         exporter, mock_sdk = self._create_configured_exporter()
 
-        event = RunCompleted(
+        event = RunFinished(
             timestamp=datetime.now(UTC),
             run_id="run-123",
             status=RunStatus.COMPLETED,

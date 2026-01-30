@@ -21,7 +21,7 @@ from elspeth.contracts import GateEvaluated, TokenCompleted
 from elspeth.contracts.enums import RoutingMode, RowOutcome, RunStatus
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 from elspeth.telemetry.exporters.datadog import DatadogExporter
@@ -422,7 +422,7 @@ class TestDatadogExporterTagSerialization:
         """Enum fields are serialized as their string values."""
         exporter, _mock_tracer, mock_span = self._create_configured_exporter()
 
-        event = RunCompleted(
+        event = RunFinished(
             timestamp=datetime.now(UTC),
             run_id="run-123",
             status=RunStatus.COMPLETED,
@@ -495,7 +495,7 @@ class TestDatadogExporterTagSerialization:
         """Integer fields are set directly as tags."""
         exporter, _mock_tracer, mock_span = self._create_configured_exporter()
 
-        event = RunCompleted(
+        event = RunFinished(
             timestamp=datetime.now(UTC),
             run_id="run-123",
             status=RunStatus.COMPLETED,
@@ -510,7 +510,7 @@ class TestDatadogExporterTagSerialization:
         """Float fields are set directly as tags."""
         exporter, _mock_tracer, mock_span = self._create_configured_exporter()
 
-        event = RunCompleted(
+        event = RunFinished(
             timestamp=datetime.now(UTC),
             run_id="run-123",
             status=RunStatus.COMPLETED,

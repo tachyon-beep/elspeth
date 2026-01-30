@@ -28,7 +28,7 @@ from elspeth.contracts.events import (
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     PhaseChanged,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 from elspeth.telemetry.exporters.console import ConsoleExporter
@@ -88,9 +88,9 @@ def make_run_started(run_id: str, timestamp: datetime) -> RunStarted:
     )
 
 
-def make_run_completed(run_id: str, timestamp: datetime) -> RunCompleted:
-    """Create a RunCompleted event."""
-    return RunCompleted(
+def make_run_finished(run_id: str, timestamp: datetime) -> RunFinished:
+    """Create a RunFinished event."""
+    return RunFinished(
         timestamp=timestamp,
         run_id=run_id,
         status=RunStatus.COMPLETED,
@@ -300,7 +300,7 @@ class TestJsonOutput:
         base_timestamp: datetime,
     ) -> None:
         """JSON output serializes Enum to its value."""
-        event = make_run_completed(base_run_id, base_timestamp)
+        event = make_run_finished(base_run_id, base_timestamp)
 
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             json_exporter._stream = mock_stdout
@@ -462,7 +462,7 @@ class TestPrettyOutput:
         base_timestamp: datetime,
     ) -> None:
         """Pretty output shows enum values, not enum names."""
-        event = make_run_completed(base_run_id, base_timestamp)
+        event = make_run_finished(base_run_id, base_timestamp)
 
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             pretty_exporter._stream = mock_stdout

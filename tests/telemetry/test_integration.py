@@ -38,7 +38,7 @@ from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     PhaseChanged,
     RowCreated,
-    RunCompleted,
+    RunFinished,
     RunStarted,
 )
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
@@ -280,12 +280,12 @@ class TestTelemetryEmittedAlongsideLandscape:
 
         # Should have lifecycle events
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
-        run_completed = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        run_completed = [e for e in exporter.events if isinstance(e, RunFinished)]
 
         assert len(run_started) == 1
         assert len(run_completed) == 1
 
-        # RunCompleted should match Landscape result
+        # RunFinished should match Landscape result
         completed_event = run_completed[0]
         assert completed_event.status == result.status
         assert completed_event.run_id == result.run_id
@@ -338,7 +338,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 
         This test proves the ordering by showing that in normal operation:
         1. begin_run succeeds -> RunStarted emitted
-        2. finalize_run succeeds -> RunCompleted emitted
+        2. finalize_run succeeds -> RunFinished emitted
 
         By inspection of the Orchestrator code, if either fails, the
         corresponding telemetry is not reached.
@@ -360,18 +360,18 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 
         # Both should exist (proves the normal path works)
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
-        run_completed = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        run_completed = [e for e in exporter.events if isinstance(e, RunFinished)]
 
         assert len(run_started) == 1, "RunStarted should be emitted after begin_run"
-        assert len(run_completed) == 1, "RunCompleted should be emitted after finalize_run"
+        assert len(run_completed) == 1, "RunFinished should be emitted after finalize_run"
 
         # Events should be in correct order
         started_idx = exporter.events.index(run_started[0])
         completed_idx = exporter.events.index(run_completed[0])
-        assert started_idx < completed_idx, "RunStarted must precede RunCompleted"
+        assert started_idx < completed_idx, "RunStarted must precede RunFinished"
 
-    def test_failed_run_still_emits_run_completed_with_failed_status(self, landscape_db: LandscapeDB) -> None:
-        """When a run fails, RunCompleted is emitted with FAILED status.
+    def test_failed_run_still_emits_run_finished_with_failed_status(self, landscape_db: LandscapeDB) -> None:
+        """When a run fails, RunFinished is emitted with FAILED status.
 
         The telemetry system records failures - the key is that it only
         records AFTER Landscape has recorded the failure.
@@ -406,8 +406,8 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
         assert len(run_started) == 1
 
-        # RunCompleted should be present with FAILED status
-        run_completed = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        # RunFinished should be present with FAILED status
+        run_completed = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_completed) == 1
         assert run_completed[0].status == RunStatus.FAILED
 
@@ -421,7 +421,7 @@ class TestGranularityFiltering:
     """Verify events are filtered correctly at each granularity level."""
 
     def test_lifecycle_granularity_only_emits_lifecycle_events(self, landscape_db: LandscapeDB) -> None:
-        """At LIFECYCLE granularity, only RunStarted/RunCompleted/PhaseChanged emitted."""
+        """At LIFECYCLE granularity, only RunStarted/RunFinished/PhaseChanged emitted."""
         config_lifecycle = MockTelemetryConfig(granularity=TelemetryGranularity.LIFECYCLE)
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(config_lifecycle, exporters=[exporter])
@@ -440,7 +440,7 @@ class TestGranularityFiltering:
 
         # Should only have lifecycle events
         for event in exporter.events:
-            assert isinstance(event, (RunStarted, RunCompleted, PhaseChanged)), (
+            assert isinstance(event, (RunStarted, RunFinished, PhaseChanged)), (
                 f"Non-lifecycle event at LIFECYCLE granularity: {type(event).__name__}"
             )
 
@@ -467,7 +467,7 @@ class TestGranularityFiltering:
         orchestrator.run(config, graph=create_minimal_graph())
 
         # Should have both lifecycle and row events
-        has_lifecycle = any(isinstance(e, (RunStarted, RunCompleted)) for e in exporter.events)
+        has_lifecycle = any(isinstance(e, (RunStarted, RunFinished)) for e in exporter.events)
 
         assert has_lifecycle, "Should have lifecycle events at ROWS granularity"
         # Row events may or may not be present depending on RowProcessor emission
@@ -492,7 +492,7 @@ class TestGranularityFiltering:
         orchestrator.run(config, graph=create_minimal_graph())
 
         # Should have lifecycle events at minimum
-        has_lifecycle = any(isinstance(e, (RunStarted, RunCompleted)) for e in exporter.events)
+        has_lifecycle = any(isinstance(e, (RunStarted, RunFinished)) for e in exporter.events)
         assert has_lifecycle, "Should have lifecycle events at FULL granularity"
 
         # At FULL, external call events would also be allowed (if any were emitted)
@@ -673,7 +673,7 @@ class TestTotalExporterFailure:
         10-failure threshold. This test verifies the failure counting works
         in the pipeline context, even if we don't reach the threshold.
         """
-        # Use LIFECYCLE granularity to limit events to ~5 (RunStarted, PhaseChanged x N, RunCompleted)
+        # Use LIFECYCLE granularity to limit events to ~5 (RunStarted, PhaseChanged x N, RunFinished)
         # FULL granularity would emit 10+ row-level events and hit the failure threshold
         config_fail = MockTelemetryConfig(
             fail_on_total_exporter_failure=True,
@@ -745,15 +745,15 @@ class TestHighVolumeFlooding:
         assert result.rows_processed == num_rows
 
         # Telemetry should have captured events
-        assert len(exporter.events) >= 2  # At least RunStarted and RunCompleted
+        assert len(exporter.events) >= 2  # At least RunStarted and RunFinished
 
         # Should have lifecycle events
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
-        run_completed = [e for e in exporter.events if isinstance(e, RunCompleted)]
+        run_completed = [e for e in exporter.events if isinstance(e, RunFinished)]
         assert len(run_started) == 1
         assert len(run_completed) == 1
 
-        # RunCompleted should have correct row count
+        # RunFinished should have correct row count
         assert run_completed[0].row_count == num_rows
 
     def test_high_volume_with_granularity_filter_reduces_memory(self, landscape_db: LandscapeDB) -> None:
@@ -792,7 +792,7 @@ class TestHighVolumeFlooding:
         orchestrator2.run(config2, graph=create_minimal_graph())
 
         # LIFECYCLE should have significantly fewer events than FULL
-        # (FULL could have row events, LIFECYCLE only has RunStarted/RunCompleted/PhaseChanged)
+        # (FULL could have row events, LIFECYCLE only has RunStarted/RunFinished/PhaseChanged)
         lifecycle_count = len(exporter_lifecycle.events)
 
         # LIFECYCLE should have only lifecycle events (<=10 typically)
@@ -800,7 +800,7 @@ class TestHighVolumeFlooding:
 
         # All lifecycle events should be lifecycle types
         for event in exporter_lifecycle.events:
-            assert isinstance(event, (RunStarted, RunCompleted, PhaseChanged))
+            assert isinstance(event, (RunStarted, RunFinished, PhaseChanged))
 
     def test_high_volume_metrics_accurate(self, landscape_db: LandscapeDB) -> None:
         """Health metrics are accurate after high-volume processing."""
