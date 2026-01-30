@@ -541,3 +541,173 @@ class TestJSONSourceParseErrors:
         # Should not crash, should yield nothing
         results = list(source.load(ctx))
         assert len(results) == 0
+
+
+class TestJSONSourceNonFiniteConstants:
+    """Tests for JSON source rejection of NaN/Infinity constants.
+
+    Per CLAUDE.md Three-Tier Trust Model and canonical JSON policy:
+    - NaN/Infinity are non-standard JSON constants
+    - Python's json module accepts them by default
+    - They must be rejected at the source boundary (Tier 3)
+    - Rows with these values should be quarantined, not crash downstream
+
+    Bug: P2-2026-01-21-jsonsource-nonfinite-constants-allowed
+    """
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_jsonl_nan_constant_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSONL with NaN constant is quarantined at parse time.
+
+        NaN is a non-standard JSON constant that Python's json module accepts
+        by default. It must be rejected at the source boundary to prevent
+        downstream crashes in canonical hashing.
+        """
+        from elspeth.contracts import SourceRow
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # JSONL with NaN constant (non-standard JSON)
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_text(
+            '{"id": 1, "name": "alice"}\n'
+            '{"id": 2, "score": NaN}\n'  # Non-standard: NaN constant
+            '{"id": 3, "name": "carol"}\n'
+        )
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should NOT raise - NaN should be quarantined at parse time
+        results = list(source.load(ctx))
+
+        # All 3 lines should be processed: 2 valid + 1 quarantined
+        assert len(results) == 3
+
+        # First and third are valid
+        assert results[0].is_quarantined is False
+        assert results[0].row == {"id": 1, "name": "alice"}
+        assert results[2].is_quarantined is False
+        assert results[2].row == {"id": 3, "name": "carol"}
+
+        # Second is quarantined with NaN rejection error
+        quarantined = results[1]
+        assert isinstance(quarantined, SourceRow)
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_destination == "quarantine"
+        assert quarantined.quarantine_error is not None
+        # Error should mention NaN or non-standard constant
+        assert "NaN" in quarantined.quarantine_error or "non-standard" in quarantined.quarantine_error.lower()
+
+    def test_jsonl_infinity_constant_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSONL with Infinity constant is quarantined at parse time."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_text(
+            '{"id": 1, "value": 42}\n'
+            '{"id": 2, "value": Infinity}\n'  # Non-standard: Infinity constant
+            '{"id": 3, "value": -Infinity}\n'  # Non-standard: -Infinity constant
+        )
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # 1 valid + 2 quarantined
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[1].is_quarantined is True
+        assert results[2].is_quarantined is True
+
+        # Both Infinity values should be rejected
+        assert "Infinity" in results[1].quarantine_error or "non-standard" in results[1].quarantine_error.lower()
+
+    def test_json_array_nan_constant_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSON array with NaN constant is quarantined at parse time."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        # Note: We write raw text since Python's json.dumps would convert NaN to null
+        json_file = tmp_path / "data.json"
+        json_file.write_text('[{"id": 1, "score": NaN}]')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # File-level quarantine since NaN is in the whole array parse
+        assert len(results) == 1
+        assert results[0].is_quarantined is True
+        assert "NaN" in results[0].quarantine_error or "non-standard" in results[0].quarantine_error.lower()
+
+    def test_nan_with_discard_mode_not_yielded(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """With on_validation_failure='discard', NaN rows are dropped silently."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        jsonl_file.write_text('{"id": 1, "value": 42}\n{"id": 2, "score": NaN}\n{"id": 3, "value": 100}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "on_validation_failure": "discard",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # Only 2 valid rows - NaN row discarded
+        assert len(results) == 2
+        assert all(not r.is_quarantined for r in results)
+        assert results[0].row == {"id": 1, "value": 42}
+        assert results[1].row == {"id": 3, "value": 100}
+
+    def test_nan_quarantine_contains_raw_line(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Quarantined NaN row should contain raw line for audit traceability."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "data.jsonl"
+        nan_line = '{"id": 2, "score": NaN}'
+        jsonl_file.write_text(f'{{"id": 1}}\n{nan_line}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        results = list(source.load(ctx))
+        quarantined = results[1]
+
+        # The quarantined row should contain the raw line for audit traceability
+        assert quarantined.is_quarantined is True
+        assert "__raw_line__" in quarantined.row
+        assert nan_line in quarantined.row["__raw_line__"]

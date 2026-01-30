@@ -5,6 +5,9 @@ Loads rows from JSON files. Supports JSON array and JSONL formats.
 
 IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
+
+NOTE: Non-standard JSON constants (NaN, Infinity, -Infinity) are rejected
+at parse time per canonical JSON policy. Use null for missing values.
 """
 
 import json
@@ -18,6 +21,25 @@ from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import SourceDataConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
+
+
+def _reject_nonfinite_constant(value: str) -> None:
+    """Reject non-standard JSON constants (NaN, Infinity, -Infinity).
+
+    Python's json module accepts these by default, but they violate:
+    1. RFC 8259 (JSON standard) - only allows null, true, false
+    2. Canonical JSON policy - non-finite floats crash hashing
+
+    This function is passed to json.loads/json.load via parse_constant
+    parameter to reject these values at parse time.
+
+    Args:
+        value: The constant string (NaN, Infinity, or -Infinity)
+
+    Raises:
+        ValueError: Always - these constants are not allowed
+    """
+    raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values, not NaN/Infinity.")
 
 
 class JSONSourceConfig(SourceDataConfig):
@@ -120,9 +142,10 @@ class JSONSource(BaseSource):
                     continue
 
                 # Catch JSON parse errors at the trust boundary
+                # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
                 try:
-                    row = json.loads(line)
-                except json.JSONDecodeError as e:
+                    row = json.loads(line, parse_constant=_reject_nonfinite_constant)
+                except (json.JSONDecodeError, ValueError) as e:
                     # External data parse failure - quarantine, don't crash
                     # Store raw line + metadata for audit traceability
                     raw_row = {"__raw_line__": line, "__line_number__": line_num}
@@ -148,12 +171,17 @@ class JSONSource(BaseSource):
     def _load_json_array(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load from JSON array format."""
         with open(self._path, encoding=self._encoding) as f:
+            # parse_constant rejects NaN/Infinity at parse time (canonical JSON policy)
             try:
-                data = json.load(f)
-            except json.JSONDecodeError as e:
+                data = json.load(f, parse_constant=_reject_nonfinite_constant)
+            except (json.JSONDecodeError, ValueError) as e:
                 # File-level parse error - treat as Tier 3 boundary
                 # External data can be malformed; don't crash the pipeline
-                error_msg = f"JSON parse error at line {e.lineno} col {e.colno}: {e.msg}"
+                if isinstance(e, json.JSONDecodeError):
+                    error_msg = f"JSON parse error at line {e.lineno} col {e.colno}: {e.msg}"
+                else:
+                    # ValueError from _reject_nonfinite_constant (NaN/Infinity)
+                    error_msg = f"JSON parse error: {e}"
                 ctx.record_validation_error(
                     row={"file_path": str(self._path), "error": error_msg},
                     error=error_msg,
