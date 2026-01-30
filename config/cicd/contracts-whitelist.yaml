@@ -6,23 +6,6 @@ allowed_external_types:
   # Plugin execution context - framework infrastructure, not a data contract
   - "plugins/context:PluginContext"
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # BATCH ADAPTER TYPES
-  # ExceptionResult is used by the batching system to track per-row exceptions
-  # during batch processing. Used by plugins/batching/ for mixin error handling.
-  # ═══════════════════════════════════════════════════════════════════════════
-  - "engine/batch_adapter:ExceptionResult"
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # TELEMETRY EVENTS
-  # These events are emitted by the engine and consumed by telemetry exporters.
-  # They're defined in telemetry/ because they're part of the telemetry domain,
-  # not the engine's core contracts. The engine imports them to emit events.
-  # ═══════════════════════════════════════════════════════════════════════════
-  - "telemetry/events:TransformCompleted"
-  - "telemetry/events:GateEvaluated"
-  - "telemetry/events:TokenCompleted"
-
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
 allowed_dict_patterns:
