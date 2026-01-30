@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
@@ -290,8 +288,6 @@ ELSPETH uses `pluggy` for clean architecture (hooks, extensibility), NOT to acce
 - Plugin bugs are system bugs - they get fixed in the codebase
 - Users configure which plugins to use, they don't write their own
 
-If a future version supports user-authored plugins, those would be sandboxed and treated as untrusted - but that's not the current architecture.
-
 ## Core Architecture
 
 ### The SDA Model
@@ -332,7 +328,7 @@ USER YAML → Settings (Pydantic) → Runtime*Config (dataclass) → Engine Comp
 
 The P2-2026-01-21 bug showed the problem: `exponential_base` was added to `RetrySettings` but never mapped to the engine. Users configured it, Pydantic validated it, but it was silently ignored at runtime.
 
-**The solution: Protocol-based verification**
+### The solution: Protocol-based verification
 
 ```python
 # contracts/config/protocols.py
@@ -467,10 +463,12 @@ The DAG validates that upstream `guaranteed_fields` satisfy downstream `required
 #### Aggregation Timeout Behavior
 
 Aggregation triggers fire in two ways:
+
 - **Count trigger**: Fires immediately when row count threshold is reached
 - **Timeout trigger**: Checked **before** each row is processed
 
 **Known Limitation (True Idle):** Timeout triggers fire when the next row arrives, not during completely idle periods. If no rows arrive, buffered data won't flush until either:
+
 1. A new row arrives (triggering the timeout check)
 2. The source completes (triggering end-of-source flush)
 
@@ -497,13 +495,6 @@ uv pip freeze                   # Show installed packages
 .venv/bin/python -m mypy src/
 .venv/bin/python -m ruff check src/
 ```
-
-**Why uv:**
-
-- 10-100x faster than pip
-- Deterministic resolution
-- Better conflict detection
-- Drop-in pip replacement
 
 ## Development Commands
 
@@ -546,6 +537,7 @@ elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db
 The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` directories (pipeline outputs) and sorting by most recently modified.
 
 **Key tools for emergencies:**
+
 - `diagnose()` - First tool when something is broken. Finds failed runs, stuck runs, high error rates
 - `get_failure_context(run_id)` - Deep dive on a specific failure
 - `explain_token(run_id, token_id)` - Complete lineage for a specific row
@@ -592,6 +584,7 @@ The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` d
 Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
 
 **Key distinction:**
+
 - **Landscape**: Legal record, complete lineage, persisted forever, source of truth
 - **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
 
@@ -612,6 +605,7 @@ telemetry:
 ```
 
 **Granularity levels:**
+
 - `lifecycle`: Run start/complete, phase transitions (~10-20 events/run)
 - `rows`: Above + row creation, transform completion, gate routing (N x M events)
 - `full`: Above + external call details (LLM, HTTP, SQL)
@@ -836,16 +830,6 @@ The following are **strictly prohibited** under all circumstances:
 - Don't keep old code in comments - delete it (git history exists)
 - Don't add compatibility layers - change all call sites
 - Don't create abstractions to hide breaking changes - make the breaking change
-
-### Rationale
-
-Legacy code and backwards compatibility create:
-
-- **Complexity:** Multiple code paths doing the same thing
-- **Confusion:** Unclear which version is "correct"
-- **Technical Debt:** Old code that never gets removed
-- **Testing Burden:** Must test all combinations
-- **Maintenance Cost:** Changes must update both paths
 
 **Default stance:** If old code needs to be removed, delete it completely. If call sites need updating, update them all in the same commit.
 
