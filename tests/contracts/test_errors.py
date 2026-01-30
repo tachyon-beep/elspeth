@@ -220,3 +220,230 @@ class TestRoutingReasonUsage:
         assert reason["threshold"] == 100.0
         assert reason["field"] == "score"
         assert reason["comparison"] == ">"
+
+
+class TestTransformErrorReasonSchema:
+    """Tests for TransformErrorReason TypedDict schema."""
+
+    def test_transform_error_reason_required_keys(self) -> None:
+        """TransformErrorReason has reason as required."""
+        from elspeth.contracts import TransformErrorReason
+
+        assert TransformErrorReason.__required_keys__ == frozenset({"reason"})
+
+    def test_transform_error_reason_has_expected_optional_keys(self) -> None:
+        """TransformErrorReason has expected optional keys."""
+        from elspeth.contracts import TransformErrorReason
+
+        # Check a subset of important optional keys
+        optional = TransformErrorReason.__optional_keys__
+        assert "error" in optional
+        assert "field" in optional
+        assert "error_type" in optional
+        assert "query" in optional
+        assert "max_tokens" in optional
+        assert "status_code" in optional
+        assert "template_errors" in optional
+        assert "row_errors" in optional
+
+    def test_transform_error_category_literal_values(self) -> None:
+        """TransformErrorCategory contains expected error types."""
+        from typing import get_args
+
+        from elspeth.contracts import TransformErrorCategory
+
+        categories = get_args(TransformErrorCategory)
+        # Verify key categories exist
+        assert "api_error" in categories
+        assert "missing_field" in categories
+        assert "template_rendering_failed" in categories
+        assert "response_truncated" in categories
+        assert "batch_failed" in categories
+
+
+class TestTransformErrorReasonUsage:
+    """Tests for constructing valid TransformErrorReason values."""
+
+    def test_minimal_error_reason(self) -> None:
+        """TransformErrorReason works with only required field."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {"reason": "api_error"}
+        assert reason["reason"] == "api_error"
+
+    def test_api_error_pattern(self) -> None:
+        """Common API error pattern with error and error_type."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "api_error",
+            "error": "Connection refused",
+            "error_type": "network_error",
+        }
+        assert reason["reason"] == "api_error"
+        assert reason["error"] == "Connection refused"
+        assert reason["error_type"] == "network_error"
+
+    def test_field_error_pattern(self) -> None:
+        """Common field-related error pattern."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "missing_field",
+            "field": "customer_id",
+        }
+        assert reason["reason"] == "missing_field"
+        assert reason["field"] == "customer_id"
+
+    def test_llm_truncation_pattern(self) -> None:
+        """LLM response truncation with token counts."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "response_truncated",
+            "error": "Response truncated at 1000 tokens",
+            "query": "sentiment",
+            "max_tokens": 1000,
+            "completion_tokens": 1000,
+            "prompt_tokens": 500,
+        }
+        assert reason["reason"] == "response_truncated"
+        assert reason["max_tokens"] == 1000
+
+    def test_type_mismatch_pattern(self) -> None:
+        """Type validation error pattern."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "type_mismatch",
+            "field": "score",
+            "expected": "float",
+            "actual": "str",
+            "value": "not_a_number",
+        }
+        assert reason["reason"] == "type_mismatch"
+        assert reason["expected"] == "float"
+        assert reason["actual"] == "str"
+
+    def test_rate_limit_pattern(self) -> None:
+        """Rate limiting/timeout error pattern."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "retry_timeout",
+            "error": "Max retry time exceeded",
+            "elapsed_seconds": 60.5,
+            "max_seconds": 60.0,
+            "status_code": 429,
+        }
+        assert reason["reason"] == "retry_timeout"
+        assert reason["status_code"] == 429
+
+    def test_batch_job_error_pattern(self) -> None:
+        """Azure/OpenRouter batch job failure."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "batch_failed",
+            "batch_id": "batch_abc123",
+            "error": "Job expired",
+            "queries_completed": 42,
+        }
+        assert reason["batch_id"] == "batch_abc123"
+        assert reason["queries_completed"] == 42
+
+    def test_batch_template_errors_pattern(self) -> None:
+        """Template errors in batch processing with nested TypedDict."""
+        from elspeth.contracts import TemplateErrorEntry, TransformErrorReason
+
+        error1: TemplateErrorEntry = {"row_index": 0, "error": "Missing field 'customer_id'"}
+        error2: TemplateErrorEntry = {"row_index": 5, "error": "Invalid template syntax"}
+
+        reason: TransformErrorReason = {
+            "reason": "all_templates_failed",
+            "template_errors": [error1, error2],
+        }
+        assert len(reason["template_errors"]) == 2
+        assert reason["template_errors"][0]["row_index"] == 0
+
+    def test_content_safety_violation_pattern(self) -> None:
+        """Content safety API violation."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "content_safety_violation",
+            "field": "user_input",
+            "categories": ["Violence", "SelfHarm"],
+            "message": "Content violates safety policy",
+        }
+        assert reason["reason"] == "content_safety_violation"
+        assert "Violence" in reason["categories"]
+
+    def test_json_parsing_failure_pattern(self) -> None:
+        """JSON parsing failure with response preview."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "invalid_json_type",
+            "expected": "object",
+            "actual": "list",
+            "raw_response_preview": "[1, 2, 3]",
+            "query": "classification",
+        }
+        assert reason["expected"] == "object"
+        assert reason["actual"] == "list"
+
+    def test_template_rendering_failure_pattern(self) -> None:
+        """Jinja2 template rendering failure."""
+        from elspeth.contracts import TransformErrorReason
+
+        reason: TransformErrorReason = {
+            "reason": "template_rendering_failed",
+            "error": "UndefinedError: 'customer_id' is undefined",
+            "query": "sentiment_analysis",
+            "template_hash": "sha256:abc123def456",
+        }
+        assert reason["template_hash"] is not None
+
+    def test_usage_stats_nested_typeddict(self) -> None:
+        """UsageStats nested TypedDict works correctly."""
+        from elspeth.contracts import TransformErrorReason, UsageStats
+
+        usage: UsageStats = {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+        }
+        reason: TransformErrorReason = {
+            "reason": "response_truncated",
+            "usage": usage,
+        }
+        assert reason["usage"]["total_tokens"] == 150
+
+
+class TestNestedTypeDicts:
+    """Tests for nested TypedDict structures."""
+
+    def test_template_error_entry_structure(self) -> None:
+        """TemplateErrorEntry has correct fields."""
+        from elspeth.contracts import TemplateErrorEntry
+
+        entry: TemplateErrorEntry = {"row_index": 5, "error": "Missing field"}
+        assert entry["row_index"] == 5
+        assert entry["error"] == "Missing field"
+
+    def test_row_error_entry_structure(self) -> None:
+        """RowErrorEntry has correct fields."""
+        from elspeth.contracts import RowErrorEntry
+
+        entry: RowErrorEntry = {"row_index": 3, "reason": "api_error", "error": "Timeout"}
+        assert entry["row_index"] == 3
+        assert entry["reason"] == "api_error"
+
+    def test_usage_stats_partial(self) -> None:
+        """UsageStats allows partial fields (total=False)."""
+        from elspeth.contracts import UsageStats
+
+        # Only some fields provided
+        usage: UsageStats = {"prompt_tokens": 100}
+        assert usage["prompt_tokens"] == 100
