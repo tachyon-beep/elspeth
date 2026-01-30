@@ -294,18 +294,29 @@ class TelemetryManager:
 
         Returns a snapshot of telemetry health:
         - events_emitted: Successfully delivered to at least one exporter
-        - events_dropped: Failed to deliver to any exporter
+        - events_dropped: Failed to deliver (queue full or all exporters failed)
         - exporter_failures: Per-exporter failure counts
         - consecutive_total_failures: Current streak of total failures
+        - queue_depth: Current number of events in queue
+        - queue_maxsize: Maximum queue capacity
+
+        Thread Safety:
+            Reads are approximately consistent. _events_dropped uses lock
+            for consistency with concurrent writes. Other metrics may be
+            slightly stale but this is acceptable for operational monitoring.
 
         Returns:
             Dictionary of health metrics
         """
+        with self._dropped_lock:
+            events_dropped = self._events_dropped
         return {
             "events_emitted": self._events_emitted,
-            "events_dropped": self._events_dropped,
+            "events_dropped": events_dropped,
             "exporter_failures": self._exporter_failures.copy(),
             "consecutive_total_failures": self._consecutive_total_failures,
+            "queue_depth": self._queue.qsize(),
+            "queue_maxsize": self._queue.maxsize,
         }
 
     def flush(self) -> None:

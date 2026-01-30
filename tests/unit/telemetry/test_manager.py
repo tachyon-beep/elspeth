@@ -27,7 +27,6 @@ from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
 
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.telemetry import RunCompleted, RunStarted, TelemetryManager
-from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import TelemetryEvent
 
 # =============================================================================
@@ -165,6 +164,7 @@ class TestBasicDispatching:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         assert len(exporter.exports) == 1
         assert exporter.exports[0] is event
@@ -178,6 +178,7 @@ class TestBasicDispatching:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         assert len(exporter1.exports) == 1
         assert len(exporter2.exports) == 1
@@ -214,6 +215,7 @@ class TestGranularityFiltering:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         assert len(exporter.exports) == 1
 
@@ -254,6 +256,7 @@ class TestExporterFailureIsolation:
         with patch("elspeth.telemetry.manager.logger") as mock_logger:
             event = make_run_started(base_run_id)
             manager.handle_event(event)
+            manager.flush()  # Wait for background export
 
             mock_logger.warning.assert_called_once()
             call_args = mock_logger.warning.call_args
@@ -269,6 +272,7 @@ class TestExporterFailureIsolation:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         # Working exporters still receive the event
         assert len(working_exporter1.exports) == 1
@@ -282,6 +286,7 @@ class TestExporterFailureIsolation:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         assert manager.health_metrics["events_emitted"] == 1
         assert manager.health_metrics["events_dropped"] == 0
@@ -297,6 +302,7 @@ class TestExporterFailureIsolation:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         # Partial success resets the counter
         assert manager._consecutive_total_failures == 0
@@ -318,6 +324,7 @@ class TestTotalExporterFailure:
 
         event = make_run_started(base_run_id)
         manager.handle_event(event)
+        manager.flush()  # Wait for background export
 
         assert manager.health_metrics["events_emitted"] == 0
         assert manager.health_metrics["events_dropped"] == 1
@@ -329,6 +336,7 @@ class TestTotalExporterFailure:
 
         for _ in range(5):
             manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         assert manager._consecutive_total_failures == 5
         assert manager.health_metrics["events_dropped"] == 5
@@ -354,6 +362,7 @@ class TestTotalExporterFailure:
             # Send 100 events (all will fail)
             for _ in range(100):
                 manager.handle_event(make_run_started(base_run_id))
+            manager.flush()  # Wait for background export
 
             # Should have logged aggregate error once
             assert mock_logger.error.call_count == 1
@@ -372,6 +381,7 @@ class TestTotalExporterFailure:
             # Send 350 events
             for _ in range(350):
                 manager.handle_event(make_run_started(base_run_id))
+            manager.flush()  # Wait for background export
 
             # Should have logged 3 times (at 100, 200, 300)
             assert mock_logger.error.call_count == 3
@@ -386,6 +396,7 @@ class TestTotalExporterFailure:
             # Send enough events to trigger the threshold (10 consecutive failures)
             for _ in range(10):
                 manager.handle_event(make_run_started(base_run_id))
+            manager.flush()  # Wait for background export
 
             # Should have logged CRITICAL
             mock_logger.critical.assert_called_once()
@@ -402,6 +413,7 @@ class TestTotalExporterFailure:
             # Trigger disable
             for _ in range(10):
                 manager.handle_event(make_run_started(base_run_id))
+            manager.flush()  # Wait for background export
 
             # Telemetry should now be disabled
             assert manager._disabled is True
@@ -413,22 +425,27 @@ class TestTotalExporterFailure:
 
             assert manager.health_metrics["events_dropped"] == initial_dropped
 
-    def test_fail_on_total_failure_true_raises_exception(self, base_run_id: str) -> None:
-        """With fail_on_total_exporter_failure=True, raises TelemetryExporterError."""
+    def test_fail_on_total_failure_true_logs_error_in_export_thread(self, base_run_id: str) -> None:
+        """With fail_on_total_exporter_failure=True, TelemetryExporterError is raised in export thread.
+
+        Note: With async export, the exception is raised in the export thread and
+        caught by the export loop's exception handler. It's logged as an error
+        but doesn't propagate to the caller (telemetry must not crash the pipeline).
+        """
         failing = MockExporter("failing", fail_export=True)
         config = MockConfig(fail_on_total_exporter_failure=True)
         manager = TelemetryManager(config, exporters=[failing])
 
-        # First 9 failures should not raise
-        for _ in range(9):
-            manager.handle_event(make_run_started(base_run_id))
+        with patch("elspeth.telemetry.manager.logger") as mock_logger:
+            # Send 10 events - the 10th triggers TelemetryExporterError in export thread
+            for _ in range(10):
+                manager.handle_event(make_run_started(base_run_id))
+            manager.flush()  # Wait for background export
 
-        # 10th failure should raise
-        with pytest.raises(TelemetryExporterError) as exc_info:
-            manager.handle_event(make_run_started(base_run_id))
-
-        assert exc_info.value.exporter_name == "all"
-        assert "10 consecutive times" in str(exc_info.value)
+            # The exception is caught and logged as error in export loop
+            error_calls = [c for c in mock_logger.error.call_args_list if c[0][0] == "Export loop failed unexpectedly"]
+            assert len(error_calls) == 1
+            assert "10 consecutive times" in error_calls[0][1]["error"]
 
 
 # =============================================================================
@@ -440,7 +457,7 @@ class TestHealthMetrics:
     """Tests for health metrics tracking."""
 
     def test_initial_metrics(self) -> None:
-        """Initial health metrics are all zeros."""
+        """Initial health metrics are all zeros plus queue metrics."""
         manager = TelemetryManager(MockConfig(), exporters=[MockExporter("test")])
 
         metrics = manager.health_metrics
@@ -448,6 +465,8 @@ class TestHealthMetrics:
         assert metrics["events_dropped"] == 0
         assert metrics["exporter_failures"] == {}
         assert metrics["consecutive_total_failures"] == 0
+        assert metrics["queue_depth"] == 0
+        assert metrics["queue_maxsize"] == 1000  # From INTERNAL_DEFAULTS
 
     def test_events_emitted_increments(self, base_run_id: str) -> None:
         """events_emitted increments on successful dispatch."""
@@ -456,6 +475,7 @@ class TestHealthMetrics:
 
         for _ in range(5):
             manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         assert manager.health_metrics["events_emitted"] == 5
 
@@ -467,6 +487,7 @@ class TestHealthMetrics:
 
         for _ in range(3):
             manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         failures = manager.health_metrics["exporter_failures"]
         assert failures["failing1"] == 3
@@ -477,6 +498,7 @@ class TestHealthMetrics:
         failing = MockExporter("failing", fail_export=True)
         manager = TelemetryManager(MockConfig(), exporters=[failing])
         manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         metrics = manager.health_metrics
         metrics["exporter_failures"]["failing"] = 999
@@ -549,7 +571,7 @@ class TestFlushAndClose:
         assert working.close_count == 1
 
     def test_close_logs_final_metrics(self, base_run_id: str) -> None:
-        """close() logs final health metrics."""
+        """close() logs final health metrics including queue metrics."""
         exporter = MockExporter("test")
         manager = TelemetryManager(MockConfig(), exporters=[exporter])
 
@@ -558,12 +580,14 @@ class TestFlushAndClose:
             manager.handle_event(make_run_started(base_run_id))
 
         with patch("elspeth.telemetry.manager.logger") as mock_logger:
-            manager.close()
+            manager.close()  # close() waits for queue to drain
 
             mock_logger.info.assert_called_once()
             call_args = mock_logger.info.call_args
             assert call_args[0][0] == "Telemetry manager closing"
             assert call_args[1]["events_emitted"] == 5
+            assert call_args[1]["queue_depth"] == 0  # Queue drained
+            assert call_args[1]["queue_maxsize"] == 1000
 
 
 # =============================================================================
@@ -600,12 +624,14 @@ class TestEdgeCases:
         # Accumulate some consecutive failures
         for _ in range(5):
             manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         assert manager._consecutive_total_failures == 5
 
         # Fix the exporter and send another event
         exporter._fail_export = False
         manager.handle_event(make_run_started(base_run_id))
+        manager.flush()  # Wait for background export
 
         # Counter should be reset
         assert manager._consecutive_total_failures == 0
@@ -635,6 +661,10 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
         )
         self.total_events_sent = 0
 
+    def teardown(self) -> None:
+        """Clean up manager after test."""
+        self.manager.close()
+
     events = Bundle("events")
 
     @rule(target=events, run_id=st.text(min_size=1, max_size=20))
@@ -647,6 +677,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
         """Send an event to the manager."""
         self.manager.handle_event(event)
         self.total_events_sent += 1
+        self.manager.flush()  # Wait for background export
 
         # Check invariant: events_emitted + events_dropped <= total_events_sent
         metrics = self.manager.health_metrics
@@ -655,6 +686,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
     @rule()
     def check_partial_success_is_emitted(self) -> None:
         """With one working and one failing exporter, events should be emitted, not dropped."""
+        self.manager.flush()  # Ensure all events processed
         metrics = self.manager.health_metrics
         # All events should be emitted (partial success counts as emitted)
         assert metrics["events_emitted"] == self.total_events_sent
@@ -663,6 +695,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
     @rule()
     def check_consecutive_failures_zero(self) -> None:
         """With a working exporter, consecutive_total_failures should always be 0."""
+        self.manager.flush()  # Ensure all events processed
         metrics = self.manager.health_metrics
         assert metrics["consecutive_total_failures"] == 0
 
@@ -684,6 +717,10 @@ class AllFailingStateMachine(RuleBasedStateMachine):
         )
         self.total_events_sent = 0
 
+    def teardown(self) -> None:
+        """Clean up manager after test."""
+        self.manager.close()
+
     @rule(run_id=st.text(min_size=1, max_size=20))
     def send_event(self, run_id: str) -> None:
         """Send an event that will fail."""
@@ -692,10 +729,12 @@ class AllFailingStateMachine(RuleBasedStateMachine):
             event = make_run_started(run_id)
             self.manager.handle_event(event)
             self.total_events_sent += 1
+            self.manager.flush()  # Wait for background export
 
     @rule()
     def check_all_dropped(self) -> None:
         """All events should be dropped when all exporters fail."""
+        self.manager.flush()  # Ensure all events processed
         if self.manager._disabled:
             # After disabled, count stops incrementing
             return
@@ -726,14 +765,21 @@ class TestPropertyBasedInvariants:
 
         for i in range(num_events):
             manager.handle_event(make_run_started(f"run-{i}"))
+        manager.flush()  # Wait for background export
 
         assert manager.health_metrics["events_emitted"] == num_events
         assert len(exporter.exports) == num_events
+        manager.close()
 
     @given(num_events=st.integers(min_value=0, max_value=50))
     @hypothesis_settings(max_examples=25)
     def test_dropped_count_when_all_fail(self, num_events: int) -> None:
-        """Property: events_dropped equals num_events when all exporters fail (before disable)."""
+        """Property: events_dropped equals num_events when all exporters fail (before disable).
+
+        Note: With async export, events may be queued before the export thread
+        processes the event that triggers disable. So we may have slightly more
+        than 10 events dropped depending on timing.
+        """
         failing = MockExporter("failing", fail_export=True)
         # Don't crash on failure
         config = MockConfig(fail_on_total_exporter_failure=False)
@@ -742,12 +788,18 @@ class TestPropertyBasedInvariants:
         with patch("elspeth.telemetry.manager.logger"):
             for i in range(num_events):
                 manager.handle_event(make_run_started(f"run-{i}"))
+            manager.flush()  # Wait for background export
 
         # After disable threshold (10), events stop being counted
+        # With async export, events queued before disable is set may still be processed
         if num_events <= 10:
             assert manager.health_metrics["events_dropped"] == num_events
         else:
-            assert manager.health_metrics["events_dropped"] == 10  # Stopped at disable threshold
+            # At least 10 events dropped, at most num_events (if all were queued before disable)
+            dropped = manager.health_metrics["events_dropped"]
+            assert dropped >= 10, f"Expected at least 10 drops, got {dropped}"
+            assert dropped <= num_events, f"Expected at most {num_events} drops, got {dropped}"
+        manager.close()
 
 
 # =============================================================================

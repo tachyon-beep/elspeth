@@ -1037,12 +1037,12 @@ allow_hits:
   reason: 'Counter accumulation pattern: _exporter_failures counts failures per exporter name'
   safety: Default 0 for first failure of an exporter is correct initialization
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:flush:line=325
+- key: telemetry/manager.py:R4:TelemetryManager:flush:line=336
   owner: architecture
   reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still flushed
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:close:line=371
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=382
   owner: architecture
   reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still closed
