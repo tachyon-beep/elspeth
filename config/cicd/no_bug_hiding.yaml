@@ -1088,3 +1088,70 @@ allow_hits:
   reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
+# Azure Monitor Exporter - telemetry exporters must never crash the pipeline
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:line=101
+  owner: architecture
+  reason: 'Optional config field: batch_size has sensible default of 100'
+  safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:line=156
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - buffered events dropped, pipeline continues
+  expires: null
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:line=186
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning, buffer cleared - pipeline continues
+  expires: null
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:line=297
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:line=315
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  safety: Caught, logged with warning - other cleanup continues
+  expires: null
+# Datadog Exporter - telemetry exporters must never crash the pipeline
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=91
+  owner: architecture
+  reason: 'Optional config field: service_name has sensible default of "elspeth"'
+  safety: Default "elspeth" is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=100
+  owner: architecture
+  reason: 'Optional config field: env has sensible default of "production"'
+  safety: Default "production" is documented behavior - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=109
+  owner: architecture
+  reason: 'Optional config field: version is not required for Datadog tracing'
+  safety: None default is safe - version tag not set if not provided
+  expires: null
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=118
+  owner: architecture
+  reason: 'Optional config field: agent_host has sensible default of "localhost"'
+  safety: Default "localhost" matches Datadog agent default - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=126
+  owner: architecture
+  reason: 'Optional config field: agent_port has sensible default of 8126'
+  safety: Default 8126 matches Datadog agent default port - configured via pipeline.yaml if needed
+  expires: null
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:export:line=184
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:flush:line=282
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  safety: Caught, logged with warning - pipeline continues
+  expires: null
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:close:line=301
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  safety: Caught, logged with warning - other cleanup continues
+  expires: null
