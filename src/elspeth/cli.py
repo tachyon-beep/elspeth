@@ -29,7 +29,9 @@ from elspeth.core.dag import ExecutionGraph, GraphValidationError
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 __all__ = [
     "app",
@@ -482,7 +484,6 @@ def _execute_pipeline(
     """
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseSink, BaseTransform
 
     # Get plugin manager for dynamic plugin lookup
     manager = _get_plugin_manager()
@@ -492,16 +493,16 @@ def _execute_pipeline(
     source_options = dict(config.source.options)
 
     source_cls = manager.get_source_by_name(source_plugin)
-    source = source_cls(source_options)
+    source: SourceProtocol = source_cls(source_options)
 
     # Instantiate sinks via PluginManager
-    sinks: dict[str, BaseSink] = {}
+    sinks: dict[str, SinkProtocol] = {}
     for sink_name, sink_settings in config.sinks.items():
         sink_plugin = sink_settings.plugin
         sink_options = dict(sink_settings.options)
 
         sink_cls = manager.get_sink_by_name(sink_plugin)
-        sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
+        sinks[sink_name] = sink_cls(sink_options)
 
     # Get database URL from settings
     db_url = config.landscape.url
@@ -524,13 +525,13 @@ def _execute_pipeline(
 
     try:
         # Instantiate transforms from transforms via PluginManager
-        transforms: list[BaseTransform] = []
+        transforms: list[RowPlugin] = []
         for plugin_config in config.transforms:
             plugin_name = plugin_config.plugin
             plugin_options = dict(plugin_config.options)
 
             transform_cls = manager.get_transform_by_name(plugin_name)
-            transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
+            transforms.append(transform_cls(plugin_options))
 
         # Use the validated graph passed from run() command
         # NOTE: Graph is already validated - do not rebuild it here
@@ -556,17 +557,13 @@ def _execute_pipeline(
             transform.node_id = node_id
 
             # Add to transforms list (after row_plugins transforms)
-            transforms.append(transform)  # type: ignore[arg-type]
+            transforms.append(transform)
 
         # Build PipelineConfig with resolved configuration for audit
-        # NOTE: Type ignores needed because:
-        # - Source plugins implement SourceProtocol structurally but mypy doesn't recognize it
-        # - list is invariant so list[BaseTransform] != list[TransformLike]
-        # - Sinks implement SinkProtocol structurally but mypy doesn't recognize it
         pipeline_config = PipelineConfig(
-            source=source,  # type: ignore[arg-type]
-            transforms=transforms,  # type: ignore[arg-type]
-            sinks=sinks,  # type: ignore[arg-type]
+            source=source,
+            transforms=transforms,
+            sinks=sinks,
             config=resolve_config(config),
             gates=list(config.gates),  # Config-driven gates
             aggregation_settings=aggregation_settings,  # Aggregation configurations
@@ -784,14 +781,13 @@ def _execute_pipeline_with_instances(
     from elspeth.core.config import AggregationSettings
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseTransform
 
-    # Use pre-instantiated plugins
-    source = plugins["source"]
-    sinks = plugins["sinks"]
+    # Use pre-instantiated plugins with explicit protocol types
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[BaseTransform] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = list(plugins["transforms"])
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -803,7 +799,7 @@ def _execute_pipeline_with_instances(
 
         # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
-        transforms.append(transform)  # type: ignore[arg-type]
+        transforms.append(transform)
 
     # Get database
     db_url = config.landscape.url
@@ -827,9 +823,9 @@ def _execute_pipeline_with_instances(
     try:
         # Build PipelineConfig with pre-instantiated plugins
         pipeline_config = PipelineConfig(
-            source=source,  # type: ignore[arg-type]
-            transforms=transforms,  # type: ignore[arg-type]
-            sinks=sinks,  # type: ignore[arg-type]
+            source=source,
+            transforms=transforms,
+            sinks=sinks,
             config=resolve_config(config),
             gates=list(config.gates),
             aggregation_settings=aggregation_settings,
@@ -1354,14 +1350,13 @@ def _execute_resume_with_instances(
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import AggregationSettings
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseTransform
 
-    # Use pre-instantiated plugins
-    source = plugins["source"]
-    sinks = plugins["sinks"]
+    # Use pre-instantiated plugins with explicit protocol types
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[BaseTransform] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = list(plugins["transforms"])
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -1373,13 +1368,13 @@ def _execute_resume_with_instances(
 
         # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
-        transforms.append(transform)  # type: ignore[arg-type]
+        transforms.append(transform)
 
     # Build PipelineConfig with pre-instantiated plugins
     pipeline_config = PipelineConfig(
-        source=source,  # type: ignore[arg-type]
-        transforms=transforms,  # type: ignore[arg-type]
-        sinks=sinks,  # type: ignore[arg-type]
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
         config=resolve_config(config),
         gates=list(config.gates),
         aggregation_settings=aggregation_settings,
