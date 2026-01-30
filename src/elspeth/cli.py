@@ -27,6 +27,7 @@ from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 if TYPE_CHECKING:
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
     from elspeth.plugins.manager import PluginManager
 
@@ -1332,7 +1333,7 @@ def _execute_resume_with_instances(
     graph: ExecutionGraph,
     plugins: dict[str, Any],
     resume_point: Any,
-    payload_store: Any,
+    payload_store: PayloadStore | None,
     db: LandscapeDB,
 ) -> Any:  # Returns RunResult from orchestrator.resume()
     """Execute resume using pre-instantiated plugins.

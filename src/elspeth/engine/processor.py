@@ -20,6 +20,7 @@ from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 if TYPE_CHECKING:
     from elspeth.contracts.enums import RoutingMode
     from elspeth.contracts.events import TelemetryEvent
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
     from elspeth.engine.executors import GateOutcome
@@ -105,7 +106,7 @@ class RowProcessor:
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         coalesce_step_map: dict[CoalesceName, int] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
-        payload_store: Any = None,
+        payload_store: "PayloadStore | None" = None,
         clock: "Clock | None" = None,
         max_workers: int | None = None,
         telemetry_manager: "TelemetryManager | None" = None,

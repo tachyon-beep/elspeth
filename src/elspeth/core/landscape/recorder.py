@@ -11,6 +11,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
@@ -116,7 +117,7 @@ class LandscapeRecorder:
         recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
     """
 
-    def __init__(self, db: LandscapeDB, *, payload_store: Any | None = None) -> None:
+    def __init__(self, db: LandscapeDB, *, payload_store: PayloadStore | None = None) -> None:
         """Initialize recorder with database connection.
 
         Args:

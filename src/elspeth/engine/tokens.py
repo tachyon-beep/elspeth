@@ -5,8 +5,13 @@ Provides a simplified interface over LandscapeRecorder for managing
 tokens (row instances flowing through the DAG).
 """
 
+from __future__ import annotations
+
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from elspeth.contracts.payload_store import PayloadStore
 
 from elspeth.contracts import TokenInfo
 from elspeth.core.landscape import LandscapeRecorder
@@ -43,7 +48,7 @@ class TokenManager:
         )
     """
 
-    def __init__(self, recorder: LandscapeRecorder, *, payload_store: Any = None) -> None:
+    def __init__(self, recorder: LandscapeRecorder, *, payload_store: PayloadStore | None = None) -> None:
         """Initialize with recorder and optional payload store.
 
         Args:

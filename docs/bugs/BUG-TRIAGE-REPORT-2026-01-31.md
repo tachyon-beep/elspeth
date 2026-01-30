@@ -42,9 +42,14 @@ All critical P1 bugs have been filed in `docs/bugs/open/`:
 | P1-2026-01-31-azure-blob-sink-no-audit-calls | plugins-sinks/ | Azure Blob operations not audited |
 | P1-2026-01-31-settings-path-missing-silent-fallback | cli/ | Missing settings file silently falls back |
 
-## Remaining Valid Bugs (48 pending)
+## All Valid Bugs Filed ✓
 
-### P2 Bugs (not yet filed)
+All 73 valid bugs from the triage have been filed:
+- **25 P1 bugs** (critical)
+- **36 P2 bugs** (moderate)
+- **12 P3 bugs** (minor)
+
+### P2 Bugs Filed (36 total)
 
 | Area | Count | Examples |
 |------|-------|----------|

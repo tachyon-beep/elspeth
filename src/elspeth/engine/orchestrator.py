@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.events import EventBusProtocol
     from elspeth.telemetry import TelemetryManager
 
@@ -516,7 +517,7 @@ class Orchestrator:
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: Any = None,
+        payload_store: "PayloadStore | None" = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -748,7 +749,7 @@ class Orchestrator:
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: Any = None,
+        payload_store: "PayloadStore | None" = None,
     ) -> RunResult:
         """Execute the run using the execution graph.
 
@@ -1850,7 +1851,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         *,
-        payload_store: Any = None,
+        payload_store: "PayloadStore | None" = None,
         settings: "ElspethSettings | None" = None,
     ) -> RunResult:
         """Resume a failed run from a checkpoint.
@@ -1957,7 +1958,7 @@ class Orchestrator:
         restored_aggregation_state: dict[str, dict[str, Any]],
         settings: "ElspethSettings | None" = None,
         *,
-        payload_store: Any = None,
+        payload_store: "PayloadStore | None" = None,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
