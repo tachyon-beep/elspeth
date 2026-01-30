@@ -12,6 +12,8 @@ Tests cover:
 - Property-based state machine tests
 """
 
+import queue
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -23,7 +25,7 @@ from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
 
-from elspeth.contracts.enums import RunStatus, TelemetryGranularity
+from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.telemetry import RunCompleted, RunStarted, TelemetryManager
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import TelemetryEvent
@@ -40,11 +42,7 @@ class MockConfig:
     enabled: bool = True
     granularity: TelemetryGranularity = TelemetryGranularity.FULL
     fail_on_total_exporter_failure: bool = False
-
-    # Not used by TelemetryManager but required by protocol
-    @property
-    def backpressure_mode(self) -> Any:
-        return None
+    backpressure_mode: BackpressureMode = BackpressureMode.BLOCK
 
     @property
     def exporter_configs(self) -> tuple:
@@ -84,6 +82,34 @@ class MockExporter:
         if self._fail_close:
             raise RuntimeError(f"Simulated close failure in {self._name}")
         self.close_count += 1
+
+
+class SlowExporter:
+    """Exporter that blocks on export until signaled."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self.export_started = threading.Event()
+        self.can_continue = threading.Event()
+        self.exports: list[TelemetryEvent] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, config: dict[str, Any]) -> None:
+        pass
+
+    def export(self, event: TelemetryEvent) -> None:
+        self.export_started.set()
+        self.can_continue.wait(timeout=10.0)
+        self.exports.append(event)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 # =============================================================================
@@ -722,3 +748,44 @@ class TestPropertyBasedInvariants:
             assert manager.health_metrics["events_dropped"] == num_events
         else:
             assert manager.health_metrics["events_dropped"] == 10  # Stopped at disable threshold
+
+
+# =============================================================================
+# Backpressure Mode Tests
+# =============================================================================
+
+
+class TestBackpressureMode:
+    """Tests for backpressure_mode config wiring."""
+
+    def test_drop_mode_drops_when_queue_full(self, base_timestamp: datetime) -> None:
+        """DROP mode drops events when queue is full instead of blocking."""
+        # Use a tiny queue to make it fill quickly
+        slow_exporter = SlowExporter("slow")
+        config = MockConfig(backpressure_mode=BackpressureMode.DROP)
+        manager = TelemetryManager(config, exporters=[slow_exporter])
+
+        # Override queue size for testing (access internal for test)
+        # This tests the behavior, not the default size
+        manager._queue = queue.Queue(maxsize=2)
+
+        event = RunStarted(
+            timestamp=base_timestamp,
+            run_id="test-run",
+            config_hash="test-hash",
+            source_plugin="test-source",
+        )
+
+        try:
+            # Fill queue: 2 events should queue, 3rd should drop
+            manager.handle_event(event)
+            manager.handle_event(event)
+            manager.handle_event(event)  # Should drop, not block
+
+            # Verify drop was counted
+            assert manager.health_metrics["events_dropped"] == 1
+
+            # Verify we didn't block (test would timeout if we blocked)
+        finally:
+            slow_exporter.can_continue.set()  # Unblock exporter
+            manager.close()
