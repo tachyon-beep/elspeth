@@ -18,7 +18,7 @@ See alignment.py for complete field mapping documentation.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts.config.defaults import INTERNAL_DEFAULTS, POLICY_DEFAULTS
 from elspeth.contracts.engine import RetryPolicy
@@ -46,7 +46,7 @@ def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
     Policy values override defaults. The result has all POLICY_DEFAULTS keys
     with values from either policy (if present) or defaults.
     """
-    return {**POLICY_DEFAULTS, **cast(dict[str, Any], policy)}
+    return {**POLICY_DEFAULTS, **policy}
 
 
 @dataclass(frozen=True, slots=True)
