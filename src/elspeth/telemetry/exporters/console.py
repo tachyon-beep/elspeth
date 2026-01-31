@@ -12,7 +12,7 @@ import sys
 from dataclasses import asdict, fields
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, TextIO
+from typing import TYPE_CHECKING, Any, Literal, TextIO, TypeGuard
 
 import structlog
 
@@ -22,6 +22,16 @@ if TYPE_CHECKING:
     from elspeth.contracts.events import TelemetryEvent
 
 logger = structlog.get_logger(__name__)
+
+
+def _is_valid_format(v: str) -> TypeGuard[Literal["json", "pretty"]]:
+    """TypeGuard for format validation - enables mypy type narrowing."""
+    return v in {"json", "pretty"}
+
+
+def _is_valid_output(v: str) -> TypeGuard[Literal["stdout", "stderr"]]:
+    """TypeGuard for output validation - enables mypy type narrowing."""
+    return v in {"stdout", "stderr"}
 
 
 class ConsoleExporter:
@@ -45,7 +55,7 @@ class ConsoleExporter:
 
     _name = "console"
 
-    # Valid configuration values
+    # Valid configuration values (kept for error messages)
     _VALID_FORMATS: frozenset[str] = frozenset({"json", "pretty"})
     _VALID_OUTPUTS: frozenset[str] = frozenset({"stdout", "stderr"})
 
@@ -76,12 +86,13 @@ class ConsoleExporter:
                 self._name,
                 f"'format' must be a string, got {type(format_value).__name__}",
             )
-        if format_value not in self._VALID_FORMATS:
+        if _is_valid_format(format_value):
+            self._format = format_value  # TypeGuard narrows type in this branch
+        else:
             raise TelemetryExporterError(
                 self._name,
                 f"Invalid format '{format_value}'. Must be one of: {', '.join(sorted(self._VALID_FORMATS))}",
             )
-        self._format = format_value  # type: ignore[assignment]
 
         # Validate type and value for output stream
         output_value = config.get("output", "stdout")
@@ -90,12 +101,13 @@ class ConsoleExporter:
                 self._name,
                 f"'output' must be a string, got {type(output_value).__name__}",
             )
-        if output_value not in self._VALID_OUTPUTS:
+        if _is_valid_output(output_value):
+            self._output = output_value  # TypeGuard narrows type in this branch
+        else:
             raise TelemetryExporterError(
                 self._name,
                 f"Invalid output '{output_value}'. Must be one of: {', '.join(sorted(self._VALID_OUTPUTS))}",
             )
-        self._output = output_value  # type: ignore[assignment]
         self._stream = sys.stdout if self._output == "stdout" else sys.stderr
 
         logger.debug(
