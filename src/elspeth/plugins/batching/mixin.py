@@ -78,7 +78,7 @@ class BatchTransformMixin:
             ) -> TransformResult:
                 # Actual processing here (runs in worker thread)
                 result = self._call_llm(row)
-                return TransformResult.success(result)
+                return TransformResult.success(result, success_reason={"action": "processed"})
 
             def close(self) -> None:
                 self.shutdown_batch_processing()

@@ -194,112 +194,112 @@ allow_hits:
   reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error recording'
   safety: Caught, logged with warning - error already recorded in Landscape, telemetry is secondary
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=308
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=315
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:line=325
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:line=332
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:line=341
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:line=348
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:line=289
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:line=296
   owner: architecture
   reason: Checkpoint may be None or empty dict - checking for batch_id existence
   safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=447
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=454
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=488
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=495
   owner: architecture
   reason: 'Trust boundary: Azure batches.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=566
+- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=573
   owner: architecture
   reason: 'Trust boundary: Azure batch.output_file_id only exists on completed batches'
   safety: Recorded as None in audit trail - field is informational only
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=571
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=578
   owner: architecture
   reason: 'Trust boundary: Azure batches.retrieve API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=604
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=611
   owner: architecture
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=632
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=639
   owner: architecture
   reason: submitted_at may not exist in old checkpoint format
   safety: Missing submitted_at skips timeout check - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=677
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=684
   owner: architecture
   reason: row_mapping may not exist in corrupted checkpoint
   safety: Empty dict default allows graceful recovery - rows return with error
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=678
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=685
   owner: architecture
   reason: template_errors may not exist in old checkpoint format
   safety: Empty list default means no template errors tracked - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=701
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=708
   owner: architecture
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=738
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=745
   owner: architecture
   reason: 'Trust boundary: Azure JSONL result custom_id field validated as external data'
   safety: None check follows on next line - returns error row if missing
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=803
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=810
   owner: architecture
   reason: 'Intentional Optional API: rows with template errors aren''t in mapping'
   safety: None is checked explicitly on next line with 'if custom_id is None'
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=819
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=826
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''error'' field is optional'
   safety: Graceful handling - checks for error before extracting response
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=831
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=838
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=832
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=839
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=833
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=840
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''choices'' field may be missing'
   safety: Graceful default to [] - explicit check for empty choices follows
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=836
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=843
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=837
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=844
   owner: architecture
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=848
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=855
   owner: architecture
   reason: 'Trust boundary: Azure batch response may return different model'
   safety: Graceful fallback to deployment name - audit still captures actual value
@@ -389,37 +389,37 @@ allow_hits:
   reason: 'Optional field: required_input_fields may not be in aggregation options'
   safety: Returns frozenset of fields if present, falls through to schema check if not
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=161
+- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=162
   owner: architecture
   reason: 'Optional protocol extension: checking if transform supports batch adapter pattern'
   safety: Fallback to non-batch processing if attribute missing
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=167
+- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=168
   owner: architecture
   reason: 'Optional protocol extension: pool_size is optional on batch-aware transforms'
   safety: Default value 30 is safe - used for concurrency limiting
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=239
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=240
   owner: architecture
   reason: 'Optional protocol extension: checking if transform has accept() method'
   safety: Non-batch transforms use process() instead - documented fallback
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=239
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=240
   owner: architecture
   reason: 'Optional protocol extension: accept method check paired with hasattr'
   safety: Callable check ensures method is usable if present
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=280
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=281
   owner: architecture
   reason: 'Optional protocol extension: batch_wait_timeout is optional on transforms'
   safety: Default 3600.0 seconds is generous timeout for batch results
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=310
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=311
   owner: architecture
   reason: 'Optional protocol extension: evict_submission is optional on batch transforms'
   safety: None means transform doesn't support submission eviction - gracefully skipped
   expires: null
-- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=314
+- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=315
   owner: architecture
   reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
   safety: Logged with warning - original timeout error still raised
@@ -444,92 +444,92 @@ allow_hits:
   reason: 'Trust boundary: SQLAlchemy inspector FK dict structure from external library'
   safety: Graceful handling of missing fields in FK metadata
   expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:line=554
+- key: engine/executors.py:R1:GateExecutor:execute_gate:line=556
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=857
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=859
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=871
+- key: engine/executors.py:R1:GateExecutor:_record_routing:line=873
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=962
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=964
   owner: architecture
   reason: Checking if batch exists to decide whether to create one
   safety: None means create new batch - explicit conditional logic follows
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=987
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=989
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=1000
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=1002
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=1011
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=1013
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1026
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1028
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1027
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1029
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1061
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1063
   owner: architecture
   reason: 'Explicit existence check: raises RuntimeError if batch_id is None'
   safety: Raises immediately with node_id for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1066
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1068
   owner: architecture
   reason: Existence check paired with explicit RuntimeError if empty
   safety: Raises immediately if buffer is empty
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1067
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1069
   owner: architecture
   reason: Token buffer lookup matches row buffer lookup pattern
   safety: Empty list default paired with row buffer check
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1459
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1462
   owner: architecture
   reason: 'Intentional Optional API: returns None if no batch exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1470
+- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1473
   owner: architecture
   reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
   safety: False return is safe default - no flush needed
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1484
+- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1487
   owner: architecture
   reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1504
+- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1507
   owner: architecture
   reason: 'Intentional Optional API: returns (False, None) if no evaluator exists for node_id'
   safety: False return is safe default - no flush needed when no trigger config
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1536
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1539
   owner: architecture
   reason: 'Intentional Optional API: returns None if no state was restored for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1762
+- key: engine/executors.py:R4:SinkExecutor:write:line=1782
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -549,47 +549,47 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to requested model - audit still captures actual value
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1244
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1247
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have trigger config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1256
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1259
   owner: architecture
   reason: 'Idempotent cleanup: batch_id may not exist if already reset'
   safety: None means already cleaned up or never existed - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1271
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1274
   owner: architecture
   reason: 'Intentional Optional API: returns 0 for unknown node_id'
   safety: 0 is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1311
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1314
   owner: architecture
   reason: Optional trigger evaluator lookup for elapsed time - not all aggregations have trigger config
   safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1325
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1328
   owner: architecture
   reason: 'Intentional Optional API: batch_id lookup for node_id'
   safety: None is safe - means no batch exists yet, recorded as null in checkpoint
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1373
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1376
   owner: architecture
   reason: 'Optional field: _version in checkpoint state for migration compatibility'
   safety: None check with explicit fallback to legacy format
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1422
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1425
   owner: architecture
   reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
   safety: None default handled by dataclass
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1431
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1434
   owner: architecture
   reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
   safety: None check with explicit handling
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1437
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1440
   owner: architecture
   reason: Optional trigger evaluator lookup - node may not have trigger config
   safety: None check with conditional elapsed time restoration
@@ -654,44 +654,44 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
   expires: null
 # Orchestrator cleanup and routed_destinations counting
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=270
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=271
   owner: architecture
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
 # _execute_run: routed_destinations counter accumulation (6 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1239
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1258
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1273
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1292
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1340
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1359
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1412
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1431
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1450
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1469
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
 # _process_resumed_rows: routed_destinations counter accumulation (5 usages)
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2202
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2224
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2228
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2250
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
@@ -1333,4 +1333,189 @@ allow_hits:
   owner: architecture
   reason: 'MCP protocol: tool errors must return error response, not raise'
   safety: Caught, returns MCP error response with error message; required by MCP protocol
+  expires: null
+# Database sink environment variable access
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=97
+  owner: architecture
+  reason: 'Environment variable: os.environ.get() is the standard pattern for optional env vars'
+  safety: Default empty string, explicit comparison to "true" - missing env var is normal
+  expires: null
+# MCP server additional patterns (line number updates)
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:line=765
+  owner: architecture
+  reason: 'Aggregate dict: counting failures by node, missing entry means 0 failures'
+  safety: Default of 0 is semantically correct - no failures recorded for this node
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1030
+  owner: architecture
+  reason: 'SQLAlchemy inspector API: nullable info may be missing in some database backends'
+  safety: Default True is safe - conservative assumption for schema display
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1036
+  owner: architecture
+  reason: 'SQLAlchemy inspector API: primary key info may be empty or None for some tables'
+  safety: Empty list default is correct - no PK columns if info not available
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:line=1541
+  owner: architecture
+  reason: 'Aggregate dict: counting runs by status, missing entry means 0 runs'
+  safety: Default of 0 is semantically correct - no runs with this status
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1852
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1864
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1870
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1877
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+# OpenRouter batch patterns
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:line=285
+  owner: architecture
+  reason: 'Trust boundary: batch results dict keyed by index, missing index means row was not processed'
+  safety: Returns None which is handled as error case
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=525
+  owner: architecture
+  reason: 'Trust boundary: OpenRouter API response usage field is optional'
+  safety: Default {} - usage is metadata, not critical for correctness
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=526
+  owner: architecture
+  reason: 'Trust boundary: OpenRouter may return different model than requested'
+  safety: Fallback to configured model - audit still captures actual value
+  expires: null
+# Base gate config
+- key: plugins/base.py:R1:BaseGate:__init__:line=178
+  owner: architecture
+  reason: 'Optional config field: fork_to may not be specified in gate config'
+  safety: None is valid - gate may not support forking
+  expires: null
+# Azure multi-query patterns
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_row_internal:line=615
+  owner: architecture
+  reason: 'Trust boundary: error reason may be dict or string from Azure API'
+  safety: Safe extraction with fallback to str(reason)
+  expires: null
+# Orchestrator aggregate dicts
+- key: engine/orchestrator.py:R1:Orchestrator:run:line=1250
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:run:line=1345
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:run:line=1392
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:run:line=1449
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2250
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2306
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2353
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2389
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2670
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2839
+  owner: architecture
+  reason: 'Aggregate dict: counting routed destinations, missing entry means 0 routes'
+  safety: Default of 0 is semantically correct
+  expires: null
+# Azure blob source
+- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:line=434
+  owner: architecture
+  reason: 'Trust boundary: Azure blob download may fail with various exceptions'
+  safety: Caught, logged, wrapped in SourceLoadError with context
+  expires: null
+# MCP server call_tool - additional argument handling (line number updates)
+- key: mcp/server.py:R1:create_server:call_tool:line=1886
+  owner: architecture
+  reason: 'MCP protocol: optional sink filter parameter for explain_token disambiguation'
+  safety: None is valid - selects first matching sink if not specified
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1892
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1899
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1906
+  owner: architecture
+  reason: 'MCP protocol: optional SQL query parameters, None means no parameters'
+  safety: None is valid - SQL query executed without parameters
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1927
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1931
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R4:create_server:call_tool:line=1938
+  owner: architecture
+  reason: 'MCP protocol: tool errors must return error response, not raise'
+  safety: Caught, returns MCP error response with error message; required by MCP protocol
+  expires: null
+# OpenRouter multi-query error reason handling
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_row_internal:line=803
+  owner: architecture
+  reason: 'Optional TypedDict field: TransformErrorReason.error is NotRequired - may not be present'
+  safety: Fallback to str(r.reason) provides full error context when error field is missing
+  expires: null
+# contracts/results.py - Security boundary for sanitized URLs (line updates for hasattr)
+- key: contracts/results.py:R3:ArtifactDescriptor:for_database:line=331
+  owner: architecture
+  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials in audit trail'
+  safety: Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()
+  expires: null
+- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=362
+  owner: architecture
+  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit trail'
+  safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
   expires: null

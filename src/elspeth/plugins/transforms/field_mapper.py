@@ -121,7 +121,24 @@ class FieldMapper(BaseTransform):
 
             output[target] = value
 
-        return TransformResult.success(output)
+        # Track field changes
+        fields_modified: list[str] = []
+        fields_added: list[str] = []
+        for source, target in self._mapping.items():
+            if get_nested_field(row, source) is not MISSING:
+                if target in row:
+                    fields_modified.append(target)
+                else:
+                    fields_added.append(target)
+
+        return TransformResult.success(
+            output,
+            success_reason={
+                "action": "mapped",
+                "fields_modified": fields_modified,
+                "fields_added": fields_added,
+            },
+        )
 
     def close(self) -> None:
         """No resources to release."""

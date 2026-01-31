@@ -36,7 +36,7 @@ class TestTransformResultMultiRow:
     def test_transform_result_multi_row_success(self) -> None:
         """TransformResult.success_multi returns multiple rows."""
         rows = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}]
-        result = TransformResult.success_multi(rows)
+        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row is None  # Single row field is None
@@ -45,7 +45,7 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_success_single_sets_rows_none(self) -> None:
         """TransformResult.success() sets rows to None for single-row output."""
-        result = TransformResult.success({"id": 1})
+        result = TransformResult.success({"id": 1}, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row == {"id": 1}
@@ -53,8 +53,8 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_is_multi_row(self) -> None:
         """is_multi_row property distinguishes single vs multi output."""
-        single = TransformResult.success({"id": 1})
-        multi = TransformResult.success_multi([{"id": 1}, {"id": 2}])
+        single = TransformResult.success({"id": 1}, success_reason={"action": "test"})
+        multi = TransformResult.success_multi([{"id": 1}, {"id": 2}], success_reason={"action": "test"})
 
         assert single.is_multi_row is False
         assert multi.is_multi_row is True
@@ -62,7 +62,7 @@ class TestTransformResultMultiRow:
     def test_transform_result_success_multi_rejects_empty_list(self) -> None:
         """success_multi raises ValueError for empty list."""
         with pytest.raises(ValueError, match="at least one row"):
-            TransformResult.success_multi([])
+            TransformResult.success_multi([], success_reason={"action": "test"})
 
     def test_transform_result_error_has_rows_none(self) -> None:
         """TransformResult.error() sets rows to None."""
@@ -74,8 +74,8 @@ class TestTransformResultMultiRow:
 
     def test_transform_result_has_output_data(self) -> None:
         """has_output_data property checks if ANY output exists."""
-        single = TransformResult.success({"id": 1})
-        multi = TransformResult.success_multi([{"id": 1}])
+        single = TransformResult.success({"id": 1}, success_reason={"action": "test"})
+        multi = TransformResult.success_multi([{"id": 1}], success_reason={"action": "test"})
         error = TransformResult.error({"reason": "test_error"})
 
         assert single.has_output_data is True
@@ -89,12 +89,23 @@ class TestTransformResult:
     def test_success_factory(self) -> None:
         """Success factory creates result with status='success' and row data."""
         row = {"field": "value", "count": 42}
-        result = TransformResult.success(row)
+        result = TransformResult.success(row, success_reason={"action": "processed"})
 
         assert result.status == "success"
         assert result.row == row
         assert result.reason is None
         assert result.retryable is False
+        assert result.success_reason == {"action": "processed"}
+
+    def test_success_factory_requires_success_reason(self) -> None:
+        """Success factory raises ValueError without success_reason.
+
+        This validates the invariant: success results MUST have success_reason.
+        Missing success_reason is a plugin bug.
+        """
+        with pytest.raises(ValueError, match="MUST provide success_reason"):
+            # Using the dataclass directly to bypass factory's keyword-only arg
+            TransformResult(status="success", row={"x": 1}, reason=None)
 
     def test_error_factory(self) -> None:
         """Error factory creates result with status='error' and reason."""
@@ -116,7 +127,7 @@ class TestTransformResult:
 
     def test_status_is_literal_not_enum(self) -> None:
         """Status is Literal string, not enum - can compare directly to string."""
-        success = TransformResult.success({"x": 1})
+        success = TransformResult.success({"x": 1}, success_reason={"action": "test"})
         error = TransformResult.error({"reason": "test_error", "error": "msg"})
 
         # Direct string comparison works (not .value)
@@ -129,7 +140,7 @@ class TestTransformResult:
 
     def test_audit_fields_default_to_none(self) -> None:
         """Audit fields default to None, set by executor."""
-        result = TransformResult.success({"x": 1})
+        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
 
         assert result.input_hash is None
         assert result.output_hash is None
@@ -137,7 +148,7 @@ class TestTransformResult:
 
     def test_audit_fields_can_be_set(self) -> None:
         """Audit fields can be set after creation."""
-        result = TransformResult.success({"x": 1})
+        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
         result.input_hash = "abc123"
         result.output_hash = "def456"
         result.duration_ms = 12.5
@@ -148,7 +159,7 @@ class TestTransformResult:
 
     def test_audit_fields_not_in_repr(self) -> None:
         """Audit fields have repr=False for cleaner output."""
-        result = TransformResult.success({"x": 1})
+        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
         result.input_hash = "abc123"
 
         # audit fields should not appear in repr

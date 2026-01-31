@@ -246,12 +246,19 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            return TransformResult.success(result.rows[0])
+            # Propagate success_reason from batch result
+            return TransformResult.success(
+                result.rows[0],
+                success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
+            )
         elif result.status == "error":
             return result
         else:
             # Empty rows from empty batch - shouldn't happen for single row
-            return TransformResult.success(row)
+            return TransformResult.success(
+                row,
+                success_reason={"action": "passthrough"},
+            )
 
     def _process_batch(
         self,
@@ -913,7 +920,10 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
             )
 
-        return TransformResult.success_multi(output_rows)
+        return TransformResult.success_multi(
+            output_rows,
+            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+        )
 
     @property
     def azure_config(self) -> dict[str, Any]:

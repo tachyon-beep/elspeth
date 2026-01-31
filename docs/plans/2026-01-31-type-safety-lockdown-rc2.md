@@ -170,44 +170,21 @@ EOF
 
 ---
 
-## Task 2: Fix Blob Source Row Parameter
+## Task 2: ~~Fix Blob Source Row Parameter~~ SKIPPED
 
-**Files:**
-- `src/elspeth/plugins/azure/blob_source.py:526`
+**Status:** ⏭️ **SKIPPED - Intentionally Correct**
 
-**Context:** The `_validate_and_yield` method takes `row: Any` but should be `row: dict[str, Any]` for consistency with other source plugins.
+**Analysis:** The `row: Any` parameter in `_validate_and_yield` is **correct** because:
 
-### Step 1: Update type annotation
+1. **Tier 3 Trust Boundary** - This is a source plugin processing external data
+2. **SourceRow.row: Any** - The contract explicitly uses `Any` with comment:
+   *"row is Any (not dict) because quarantined rows from external data may not be dicts (e.g., JSON arrays containing primitives like numbers)"*
+3. **Method docstring** confirms: *"May be non-dict for malformed external data"*
+4. **Valid JSON can be non-dict**: `[1,2,3]` (list), `"string"`, `42`, `null`
 
-Change line 526 from:
-```python
-    def _validate_and_yield(self, row: Any, ctx: PluginContext) -> Iterator[SourceRow]:
-```
+The source must accept non-dict inputs to quarantine them properly. Changing to `dict[str, Any]` would **break** the ability to handle malformed JSON.
 
-To:
-```python
-    def _validate_and_yield(self, row: dict[str, Any], ctx: PluginContext) -> Iterator[SourceRow]:
-```
-
-### Step 2: Verify
-
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/azure/blob_source.py --no-error-summary`
-Expected: No errors
-
-### Step 3: Commit
-
-```bash
-git add src/elspeth/plugins/azure/blob_source.py
-git commit -m "$(cat <<'EOF'
-fix(blob_source): type row parameter as dict[str, Any]
-
-Change _validate_and_yield(row: Any) to row: dict[str, Any] for
-consistency with other source plugins and proper type checking.
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-EOF
-)"
-```
+**No action required.**
 
 ---
 
@@ -543,7 +520,7 @@ bd close <bead-id> --reason="Type safety lockdown complete: PayloadStore properl
 | Task | Files | Change | Impact |
 |------|-------|--------|--------|
 | Task 1 | 5 files | PayloadStore forward refs | -8 `Any` usages |
-| Task 2 | 1 file | blob_source row param | -1 `Any` usage |
+| Task 2 | — | ~~blob_source row param~~ | ⏭️ SKIPPED (correct as-is) |
 | Task 3 | 2 files | Telemetry exporter types | -2 `Any` usages |
 | Task 4 | 1 file | CLI explicit typing | -15 type ignores |
 | Task 5 | All | Document remaining | Clarity |

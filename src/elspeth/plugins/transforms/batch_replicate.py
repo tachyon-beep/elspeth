@@ -120,7 +120,10 @@ class BatchReplicate(BaseTransform):
         if not rows:
             # Empty batch - should not happen in normal operation
             # Return success with single empty-marker row
-            return TransformResult.success({"batch_empty": True})
+            return TransformResult.success(
+                {"batch_empty": True},
+                success_reason={"action": "processed", "metadata": {"empty_batch": True}},
+            )
 
         output_rows: list[dict[str, Any]] = []
 
@@ -157,7 +160,13 @@ class BatchReplicate(BaseTransform):
                 output_rows.append(output)
 
         # Return multiple rows - engine will create new tokens for each
-        return TransformResult.success_multi(output_rows)
+        return TransformResult.success_multi(
+            output_rows,
+            success_reason={
+                "action": "processed",
+                "fields_added": ["copy_index"] if self._include_copy_index else [],
+            },
+        )
 
     def close(self) -> None:
         """No resources to release."""

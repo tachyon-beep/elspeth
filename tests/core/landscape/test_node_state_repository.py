@@ -46,6 +46,7 @@ class NodeStateRow:
     completed_at: datetime | None = None
     context_after_json: str | None = None
     error_json: str | None = None
+    success_reason_json: str | None = None  # TransformSuccessReason for successful transforms
 
 
 class TestNodeStateRepositoryOpen:

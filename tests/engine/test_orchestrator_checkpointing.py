@@ -122,7 +122,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -221,7 +221,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -311,7 +311,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -411,7 +411,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class GoodSink(_TestSinkBase):
             """Sink that succeeds."""
@@ -592,7 +592,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -676,7 +676,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"

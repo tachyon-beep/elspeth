@@ -55,6 +55,7 @@ from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.core.operations import track_operation
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -1085,95 +1086,292 @@ class Orchestrator:
         )
 
         try:
-            # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
-            try:
-                with self._span_factory.source_span(config.source.name):
-                    # Invoke load() to get iterator - any immediate failures (file not found) happen here
-                    source_iterator = config.source.load(ctx)
-            except Exception as e:
-                # SOURCE phase error (file not found, auth failure, etc.)
-                self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
-                raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
+            # Begin source_load operation to track external calls during load/iteration
+            # This operation covers the entire source consumption lifecycle
+            with track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_id,
+                operation_type="source_load",
+                ctx=ctx,
+                input_data={"source_plugin": config.source.name},
+            ):
+                # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
+                try:
+                    with self._span_factory.source_span(config.source.name):
+                        # Invoke load() to get iterator - any immediate failures (file not found) happen here
+                        source_iterator = config.source.load(ctx)
+                except Exception as e:
+                    # SOURCE phase error (file not found, auth failure, etc.)
+                    self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
+                    raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
 
-            self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+                self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
 
-            # Track whether field resolution has been recorded (must happen after first iteration)
-            field_resolution_recorded = False
+                # CRITICAL: Clear operation_id before PROCESS phase begins.
+                # The operation context is still open (for proper completion tracking),
+                # but we must clear operation_id so transforms can set their own state_id
+                # without triggering the XOR constraint violation.
+                # External calls during source.load() are already recorded with operation_id.
+                # External calls during transform.process() will use state_id instead.
+                ctx.operation_id = None
 
-            # PROCESS phase - iterate through rows
-            phase_start = time.perf_counter()
-            self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
+                # Track whether field resolution has been recorded (must happen after first iteration)
+                field_resolution_recorded = False
 
-            # Emit telemetry PhaseChanged for PROCESS
-            self._emit_telemetry(
-                PhaseChanged(
-                    timestamp=datetime.now(UTC),
-                    run_id=run_id,
-                    phase=PipelinePhase.PROCESS,
-                    action=PhaseAction.PROCESSING,
+                # PROCESS phase - iterate through rows
+                phase_start = time.perf_counter()
+                self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
+
+                # Emit telemetry PhaseChanged for PROCESS
+                self._emit_telemetry(
+                    PhaseChanged(
+                        timestamp=datetime.now(UTC),
+                        run_id=run_id,
+                        phase=PipelinePhase.PROCESS,
+                        action=PhaseAction.PROCESSING,
+                    )
                 )
-            )
 
-            # Nested try for PROCESS phase to catch iteration/processing failures
-            try:
-                for row_index, source_item in enumerate(source_iterator):
-                    rows_processed += 1
+                # Nested try for PROCESS phase to catch iteration/processing failures
+                try:
+                    for row_index, source_item in enumerate(source_iterator):
+                        rows_processed += 1
 
-                    # Record field resolution mapping on first iteration
-                    # Must happen AFTER iterator advances because generators (like CSVSource.load())
-                    # only execute their body when iterated. The _field_resolution assignment in
-                    # CSVSource happens inside the generator, not when load() is called.
-                    if not field_resolution_recorded:
-                        field_resolution_recorded = True
-                        field_resolution = config.source.get_field_resolution()
-                        if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
-                            resolution_mapping, normalization_version = field_resolution
-                            recorder.record_source_field_resolution(
-                                run_id=run_id,
-                                resolution_mapping=resolution_mapping,
-                                normalization_version=normalization_version,
-                            )
-
-                    # Handle quarantined source rows - route directly to sink
-                    if source_item.is_quarantined:
-                        rows_quarantined += 1
-                        # Route quarantined row to configured sink if it exists
-                        quarantine_sink = source_item.quarantine_destination
-                        if quarantine_sink and quarantine_sink in config.sinks:
-                            # Create a token for the quarantined row
-                            quarantine_token = processor.token_manager.create_initial_token(
-                                run_id=run_id,
-                                source_node_id=source_id,
-                                row_index=row_index,
-                                row_data=source_item.row,
-                            )
-
-                            # Emit RowCreated telemetry AFTER Landscape recording succeeds
-                            self._emit_telemetry(
-                                RowCreated(
-                                    timestamp=datetime.now(UTC),
+                        # Record field resolution mapping on first iteration
+                        # Must happen AFTER iterator advances because generators (like CSVSource.load())
+                        # only execute their body when iterated. The _field_resolution assignment in
+                        # CSVSource happens inside the generator, not when load() is called.
+                        if not field_resolution_recorded:
+                            field_resolution_recorded = True
+                            field_resolution = config.source.get_field_resolution()
+                            if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                                resolution_mapping, normalization_version = field_resolution
+                                recorder.record_source_field_resolution(
                                     run_id=run_id,
-                                    row_id=quarantine_token.row_id,
-                                    token_id=quarantine_token.token_id,
-                                    content_hash=stable_hash(source_item.row),
+                                    resolution_mapping=resolution_mapping,
+                                    normalization_version=normalization_version,
                                 )
-                            )
 
-                            # Record QUARANTINED outcome with error_hash for audit trail
-                            # Per CLAUDE.md: every row must reach exactly one terminal state
-                            error_detail = source_item.quarantine_error or "unknown_validation_error"
-                            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-                            recorder.record_token_outcome(
-                                run_id=run_id,
-                                token_id=quarantine_token.token_id,
-                                outcome=RowOutcome.QUARANTINED,
-                                error_hash=quarantine_error_hash,
-                                sink_name=quarantine_sink,
-                            )
+                        # Handle quarantined source rows - route directly to sink
+                        if source_item.is_quarantined:
+                            rows_quarantined += 1
+                            # Route quarantined row to configured sink if it exists
+                            quarantine_sink = source_item.quarantine_destination
+                            if quarantine_sink and quarantine_sink in config.sinks:
+                                # Create a token for the quarantined row
+                                quarantine_token = processor.token_manager.create_initial_token(
+                                    run_id=run_id,
+                                    source_node_id=source_id,
+                                    row_index=row_index,
+                                    row_data=source_item.row,
+                                )
 
-                            # QUARANTINED outcome already recorded above - pass None to skip re-recording
-                            pending_tokens[quarantine_sink].append((quarantine_token, None))
-                        # Emit progress before continue (ensures quarantined rows trigger updates)
+                                # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                                self._emit_telemetry(
+                                    RowCreated(
+                                        timestamp=datetime.now(UTC),
+                                        run_id=run_id,
+                                        row_id=quarantine_token.row_id,
+                                        token_id=quarantine_token.token_id,
+                                        content_hash=stable_hash(source_item.row),
+                                    )
+                                )
+
+                                # Record QUARANTINED outcome with error_hash for audit trail
+                                # Per CLAUDE.md: every row must reach exactly one terminal state
+                                error_detail = source_item.quarantine_error or "unknown_validation_error"
+                                quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
+                                recorder.record_token_outcome(
+                                    run_id=run_id,
+                                    token_id=quarantine_token.token_id,
+                                    outcome=RowOutcome.QUARANTINED,
+                                    error_hash=quarantine_error_hash,
+                                    sink_name=quarantine_sink,
+                                )
+
+                                # QUARANTINED outcome already recorded above - pass None to skip re-recording
+                                pending_tokens[quarantine_sink].append((quarantine_token, None))
+                            # Emit progress before continue (ensures quarantined rows trigger updates)
+                            # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                            current_time = time.perf_counter()
+                            time_since_last_progress = current_time - last_progress_time
+                            should_emit = (
+                                rows_processed == 1  # First row - immediate feedback
+                                or rows_processed % progress_interval == 0  # Every 100 rows
+                                or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                            )
+                            if should_emit:
+                                elapsed = current_time - start_time
+                                self._events.emit(
+                                    ProgressEvent(
+                                        rows_processed=rows_processed,
+                                        # Include routed rows in success count - they reached their destination
+                                        rows_succeeded=rows_succeeded + rows_routed,
+                                        rows_failed=rows_failed,
+                                        rows_quarantined=rows_quarantined,
+                                        elapsed_seconds=elapsed,
+                                    )
+                                )
+                                last_progress_time = current_time
+                            # Skip normal processing - row is already handled
+                            continue
+
+                        # Extract row data from SourceRow (all source items are SourceRow)
+                        row_data: dict[str, Any] = source_item.row
+
+                        # ─────────────────────────────────────────────────────────────────
+                        # Check for timed-out aggregations BEFORE processing this row
+                        # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
+                        #
+                        # This is the critical fix: checking timeout BEFORE buffering the
+                        # new row ensures the timed-out batch contains only previously
+                        # buffered rows, not the row that just arrived.
+                        # ─────────────────────────────────────────────────────────────────
+                        (
+                            pre_agg_succ,
+                            pre_agg_fail,
+                            pre_agg_routed,
+                            pre_agg_quarantined,
+                            pre_agg_coalesced,
+                            pre_agg_forked,
+                            pre_agg_expanded,
+                            pre_agg_buffered,
+                            pre_agg_routed_dests,
+                        ) = self._check_aggregation_timeouts(
+                            config=config,
+                            processor=processor,
+                            ctx=ctx,
+                            pending_tokens=pending_tokens,
+                            default_sink_name=default_sink_name,
+                            agg_transform_lookup=agg_transform_lookup,
+                        )
+                        rows_succeeded += pre_agg_succ
+                        rows_failed += pre_agg_fail
+                        rows_routed += pre_agg_routed
+                        rows_quarantined += pre_agg_quarantined
+                        rows_coalesced += pre_agg_coalesced
+                        rows_forked += pre_agg_forked
+                        rows_expanded += pre_agg_expanded
+                        rows_buffered += pre_agg_buffered
+                        for dest, count in pre_agg_routed_dests.items():
+                            routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+
+                        results = processor.process_row(
+                            row_index=row_index,
+                            row_data=row_data,
+                            transforms=config.transforms,
+                            ctx=ctx,
+                        )
+
+                        # Handle all results from this source row (includes fork children)
+                        #
+                        # Note: Counters track processing outcomes (how many rows reached each state).
+                        # Sink durability is tracked separately via checkpoints, which are created
+                        # AFTER successful sink writes. A crash before sink write means:
+                        # - Counters may be inflated (row counted but not persisted)
+                        # - But recovery will correctly identify the unwritten rows
+                        for result in results:
+                            if result.outcome == RowOutcome.COMPLETED:
+                                rows_succeeded += 1
+                                # Fork children route to branch-named sink if it exists
+                                sink_name = default_sink_name
+                                if result.token.branch_name is not None and result.token.branch_name in config.sinks:
+                                    sink_name = result.token.branch_name
+
+                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                                # sink durability is achieved. Do NOT record here - that would violate
+                                # Invariant 3: "COMPLETED implies token has completed sink node_state"
+
+                                pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
+                            elif result.outcome == RowOutcome.ROUTED:
+                                rows_routed += 1
+                                # GateExecutor contract: ROUTED outcome always has sink_name set
+                                if result.sink_name is None:
+                                    raise RuntimeError("ROUTED outcome requires sink_name")
+                                routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
+                                pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
+                            elif result.outcome == RowOutcome.FAILED:
+                                rows_failed += 1
+                            elif result.outcome == RowOutcome.QUARANTINED:
+                                rows_quarantined += 1
+                            elif result.outcome == RowOutcome.FORKED:
+                                rows_forked += 1
+                                # Children are counted separately when they reach terminal state
+                                pass
+                            elif result.outcome == RowOutcome.CONSUMED_IN_BATCH:
+                                # Aggregated - will be counted when batch flushes
+                                pass
+                            elif result.outcome == RowOutcome.COALESCED:
+                                # Merged token from coalesce - route to output sink
+                                rows_coalesced += 1
+                                rows_succeeded += 1
+                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
+                                # sink durability is achieved. Consumed tokens have COALESCED recorded
+                                # by CoalesceExecutor. The merged token's lineage is in join_group_id.
+                                pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                            elif result.outcome == RowOutcome.EXPANDED:
+                                # Deaggregation parent token - children counted separately
+                                rows_expanded += 1
+                            elif result.outcome == RowOutcome.BUFFERED:
+                                # Passthrough mode buffered token
+                                rows_buffered += 1
+
+                        # ─────────────────────────────────────────────────────────────────
+                        # Check for timed-out coalesces after processing each row
+                        # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
+                        # ─────────────────────────────────────────────────────────────────
+                        if coalesce_executor is not None:
+                            total_steps = len(config.transforms) + len(config.gates)
+                            for coalesce_name_str in coalesce_executor.get_registered_names():
+                                coalesce_name = CoalesceName(coalesce_name_str)
+                                coalesce_step = coalesce_step_map[coalesce_name]
+                                timed_out = coalesce_executor.check_timeouts(
+                                    coalesce_name=coalesce_name_str,
+                                    step_in_pipeline=coalesce_step,
+                                )
+                                for outcome in timed_out:
+                                    if outcome.merged_token is not None:
+                                        rows_coalesced += 1
+                                        # Check if merged token should continue downstream processing
+                                        if coalesce_step < total_steps:
+                                            # Continue processing through downstream nodes
+                                            continuation_results = processor.process_token(
+                                                token=outcome.merged_token,
+                                                transforms=config.transforms,
+                                                ctx=ctx,
+                                                start_step=coalesce_step,
+                                            )
+                                            for cont_result in continuation_results:
+                                                if cont_result.outcome == RowOutcome.COMPLETED:
+                                                    rows_succeeded += 1
+                                                    sink_name = default_sink_name
+                                                    if (
+                                                        cont_result.token.branch_name is not None
+                                                        and cont_result.token.branch_name in config.sinks
+                                                    ):
+                                                        sink_name = cont_result.token.branch_name
+                                                    pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                                elif cont_result.outcome == RowOutcome.ROUTED:
+                                                    rows_routed += 1
+                                                    # sink_name is guaranteed non-None for ROUTED outcome
+                                                    routed_sink = cont_result.sink_name or default_sink_name
+                                                    routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                                    pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                                elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                                    rows_quarantined += 1
+                                                elif cont_result.outcome == RowOutcome.FAILED:
+                                                    rows_failed += 1
+                                        else:
+                                            # No downstream nodes - send directly to sink
+                                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                            # AFTER sink durability is achieved.
+                                            rows_succeeded += 1
+                                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                    elif outcome.failure_reason:
+                                        rows_coalesce_failed += 1
+
+                        # Emit progress every N rows or every M seconds (after outcome counters are updated)
                         # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                         current_time = time.perf_counter()
                         time_since_last_progress = current_time - last_progress_time
@@ -1195,173 +1393,146 @@ class Orchestrator:
                                 )
                             )
                             last_progress_time = current_time
-                        # Skip normal processing - row is already handled
-                        continue
-
-                    # Extract row data from SourceRow (all source items are SourceRow)
-                    row_data: dict[str, Any] = source_item.row
 
                     # ─────────────────────────────────────────────────────────────────
-                    # Check for timed-out aggregations BEFORE processing this row
-                    # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
-                    #
-                    # This is the critical fix: checking timeout BEFORE buffering the
-                    # new row ensures the timed-out batch contains only previously
-                    # buffered rows, not the row that just arrived.
+                    # CRITICAL: Flush remaining aggregation buffers at end-of-source
                     # ─────────────────────────────────────────────────────────────────
-                    (
-                        pre_agg_succ,
-                        pre_agg_fail,
-                        pre_agg_routed,
-                        pre_agg_quarantined,
-                        pre_agg_coalesced,
-                        pre_agg_forked,
-                        pre_agg_expanded,
-                        pre_agg_buffered,
-                        pre_agg_routed_dests,
-                    ) = self._check_aggregation_timeouts(
-                        config=config,
-                        processor=processor,
-                        ctx=ctx,
-                        pending_tokens=pending_tokens,
-                        default_sink_name=default_sink_name,
-                        agg_transform_lookup=agg_transform_lookup,
-                    )
-                    rows_succeeded += pre_agg_succ
-                    rows_failed += pre_agg_fail
-                    rows_routed += pre_agg_routed
-                    rows_quarantined += pre_agg_quarantined
-                    rows_coalesced += pre_agg_coalesced
-                    rows_forked += pre_agg_forked
-                    rows_expanded += pre_agg_expanded
-                    rows_buffered += pre_agg_buffered
-                    for dest, count in pre_agg_routed_dests.items():
-                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                    if config.aggregation_settings:
+                        (
+                            agg_succeeded,
+                            agg_failed,
+                            agg_routed,
+                            agg_quarantined,
+                            agg_coalesced,
+                            agg_forked,
+                            agg_expanded,
+                            agg_buffered,
+                            agg_routed_dests,
+                        ) = self._flush_remaining_aggregation_buffers(
+                            config=config,
+                            processor=processor,
+                            ctx=ctx,
+                            pending_tokens=pending_tokens,
+                            default_sink_name=default_sink_name,
+                            run_id=run_id,
+                            recorder=recorder,
+                            checkpoint=False,  # Checkpointing now happens after sink write
+                            last_node_id=default_last_node_id,
+                        )
+                        rows_succeeded += agg_succeeded
+                        rows_failed += agg_failed
+                        rows_routed += agg_routed
+                        rows_quarantined += agg_quarantined
+                        rows_coalesced += agg_coalesced
+                        rows_forked += agg_forked
+                        rows_expanded += agg_expanded
+                        rows_buffered += agg_buffered
+                        for dest, count in agg_routed_dests.items():
+                            routed_destinations[dest] = routed_destinations.get(dest, 0) + count
 
-                    results = processor.process_row(
-                        row_index=row_index,
-                        row_data=row_data,
-                        transforms=config.transforms,
-                        ctx=ctx,
-                    )
-
-                    # Handle all results from this source row (includes fork children)
-                    #
-                    # Note: Counters track processing outcomes (how many rows reached each state).
-                    # Sink durability is tracked separately via checkpoints, which are created
-                    # AFTER successful sink writes. A crash before sink write means:
-                    # - Counters may be inflated (row counted but not persisted)
-                    # - But recovery will correctly identify the unwritten rows
-                    for result in results:
-                        if result.outcome == RowOutcome.COMPLETED:
-                            rows_succeeded += 1
-                            # Fork children route to branch-named sink if it exists
-                            sink_name = default_sink_name
-                            if result.token.branch_name is not None and result.token.branch_name in config.sinks:
-                                sink_name = result.token.branch_name
-
-                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                            # sink durability is achieved. Do NOT record here - that would violate
-                            # Invariant 3: "COMPLETED implies token has completed sink node_state"
-
-                            pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
-                        elif result.outcome == RowOutcome.ROUTED:
-                            rows_routed += 1
-                            # GateExecutor contract: ROUTED outcome always has sink_name set
-                            if result.sink_name is None:
-                                raise RuntimeError("ROUTED outcome requires sink_name")
-                            routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
-                            pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
-                        elif result.outcome == RowOutcome.FAILED:
-                            rows_failed += 1
-                        elif result.outcome == RowOutcome.QUARANTINED:
-                            rows_quarantined += 1
-                        elif result.outcome == RowOutcome.FORKED:
-                            rows_forked += 1
-                            # Children are counted separately when they reach terminal state
-                            pass
-                        elif result.outcome == RowOutcome.CONSUMED_IN_BATCH:
-                            # Aggregated - will be counted when batch flushes
-                            pass
-                        elif result.outcome == RowOutcome.COALESCED:
-                            # Merged token from coalesce - route to output sink
-                            rows_coalesced += 1
-                            rows_succeeded += 1
-                            # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
-                            # sink durability is achieved. Consumed tokens have COALESCED recorded
-                            # by CoalesceExecutor. The merged token's lineage is in join_group_id.
-                            pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
-                        elif result.outcome == RowOutcome.EXPANDED:
-                            # Deaggregation parent token - children counted separately
-                            rows_expanded += 1
-                        elif result.outcome == RowOutcome.BUFFERED:
-                            # Passthrough mode buffered token
-                            rows_buffered += 1
-
-                    # ─────────────────────────────────────────────────────────────────
-                    # Check for timed-out coalesces after processing each row
-                    # (BUG FIX: P1-2026-01-22 - check_timeouts was never called)
-                    # ─────────────────────────────────────────────────────────────────
+                    # Flush pending coalesce operations at end-of-source
                     if coalesce_executor is not None:
                         total_steps = len(config.transforms) + len(config.gates)
-                        for coalesce_name_str in coalesce_executor.get_registered_names():
-                            coalesce_name = CoalesceName(coalesce_name_str)
-                            coalesce_step = coalesce_step_map[coalesce_name]
-                            timed_out = coalesce_executor.check_timeouts(
-                                coalesce_name=coalesce_name_str,
-                                step_in_pipeline=coalesce_step,
-                            )
-                            for outcome in timed_out:
-                                if outcome.merged_token is not None:
-                                    rows_coalesced += 1
-                                    # Check if merged token should continue downstream processing
-                                    if coalesce_step < total_steps:
-                                        # Continue processing through downstream nodes
-                                        continuation_results = processor.process_token(
-                                            token=outcome.merged_token,
-                                            transforms=config.transforms,
-                                            ctx=ctx,
-                                            start_step=coalesce_step,
-                                        )
-                                        for cont_result in continuation_results:
-                                            if cont_result.outcome == RowOutcome.COMPLETED:
-                                                rows_succeeded += 1
-                                                sink_name = default_sink_name
-                                                if (
-                                                    cont_result.token.branch_name is not None
-                                                    and cont_result.token.branch_name in config.sinks
-                                                ):
-                                                    sink_name = cont_result.token.branch_name
-                                                pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
-                                            elif cont_result.outcome == RowOutcome.ROUTED:
-                                                rows_routed += 1
-                                                # sink_name is guaranteed non-None for ROUTED outcome
-                                                routed_sink = cont_result.sink_name or default_sink_name
-                                                routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                                pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
-                                            elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                                rows_quarantined += 1
-                                            elif cont_result.outcome == RowOutcome.FAILED:
-                                                rows_failed += 1
-                                    else:
-                                        # No downstream nodes - send directly to sink
-                                        # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                        # AFTER sink durability is achieved.
-                                        rows_succeeded += 1
-                                        pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
-                                elif outcome.failure_reason:
-                                    rows_coalesce_failed += 1
+                        # Convert CoalesceName -> str for CoalesceExecutor API
+                        flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
+                        pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
 
-                    # Emit progress every N rows or every M seconds (after outcome counters are updated)
-                    # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                        # Handle any merged tokens from flush
+                        for outcome in pending_outcomes:
+                            if outcome.merged_token is not None:
+                                # Successful merge
+                                rows_coalesced += 1
+                                # Get the correct step for this coalesce
+                                # outcome.coalesce_name is guaranteed non-None when merged_token is not None
+                                coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
+                                coalesce_step = coalesce_step_map[coalesce_name]
+                                # Check if merged token should continue downstream processing
+                                if coalesce_step < total_steps:
+                                    # Continue processing through downstream nodes
+                                    continuation_results = processor.process_token(
+                                        token=outcome.merged_token,
+                                        transforms=config.transforms,
+                                        ctx=ctx,
+                                        start_step=coalesce_step,
+                                    )
+                                    for cont_result in continuation_results:
+                                        if cont_result.outcome == RowOutcome.COMPLETED:
+                                            rows_succeeded += 1
+                                            sink_name = default_sink_name
+                                            if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
+                                                sink_name = cont_result.token.branch_name
+                                            pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                        elif cont_result.outcome == RowOutcome.ROUTED:
+                                            rows_routed += 1
+                                            # sink_name is guaranteed non-None for ROUTED outcome
+                                            routed_sink = cont_result.sink_name or default_sink_name
+                                            routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                            pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                        elif cont_result.outcome == RowOutcome.QUARANTINED:
+                                            rows_quarantined += 1
+                                        elif cont_result.outcome == RowOutcome.FAILED:
+                                            rows_failed += 1
+                                else:
+                                    # No downstream nodes - send directly to sink
+                                    # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
+                                    # AFTER sink durability is achieved.
+                                    rows_succeeded += 1
+                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                            elif outcome.failure_reason:
+                                # Coalesce failed (quorum_not_met, incomplete_branches)
+                                # Audit trail recorded by executor: each consumed token has
+                                # node_state with status="failed" and error_json explaining why.
+                                # Count failed coalesces for observability.
+                                rows_coalesce_failed += 1
+
+                    # Source consumption complete - track_operation will close here
+                    # Sink writing happens outside source_load operation (has its own sink_write operations in Phase 7)
+
+                    # Write to sinks using SinkExecutor
+                    sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+                    # Step = transforms + config gates + 1 (for sink)
+                    step = len(config.transforms) + len(config.gates) + 1
+
+                    # Create checkpoint callback for post-sink checkpointing
+                    def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
+                        def callback(token: TokenInfo) -> None:
+                            self._maybe_checkpoint(
+                                run_id=run_id,
+                                token_id=token.token_id,
+                                node_id=sink_node_id,
+                            )
+
+                        return callback
+
+                    for sink_name, token_outcome_pairs in pending_tokens.items():
+                        if token_outcome_pairs and sink_name in config.sinks:
+                            sink = config.sinks[sink_name]
+                            sink_node_id = sink_id_map[SinkName(sink_name)]
+
+                            # Group tokens by outcome for separate write() calls
+                            # (sink_executor.write() takes a single outcome for all tokens in a batch)
+                            from itertools import groupby
+
+                            # Sort by outcome to enable groupby (None sorts first)
+                            sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
+                            for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                                group_tokens = [token for token, _ in group]
+                                sink_executor.write(
+                                    sink=sink,
+                                    tokens=group_tokens,
+                                    ctx=ctx,
+                                    step_in_pipeline=step,
+                                    sink_name=sink_name,
+                                    outcome=outcome,
+                                    on_token_written=checkpoint_after_sink(sink_node_id),
+                                )
+
+                    # Emit final progress if we haven't emitted recently or row count not on interval
+                    # (RunSummary will show final summary regardless, but progress shows intermediate state)
                     current_time = time.perf_counter()
                     time_since_last_progress = current_time - last_progress_time
-                    should_emit = (
-                        rows_processed == 1  # First row - immediate feedback
-                        or rows_processed % progress_interval == 0  # Every 100 rows
-                        or time_since_last_progress >= progress_time_interval  # Every 5 seconds
-                    )
-                    if should_emit:
+                    # Emit if: not on progress_interval boundary OR >1s since last emission
+                    if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
                         elapsed = current_time - start_time
                         self._events.emit(
                             ProgressEvent(
@@ -1373,167 +1544,18 @@ class Orchestrator:
                                 elapsed_seconds=elapsed,
                             )
                         )
-                        last_progress_time = current_time
 
-                # ─────────────────────────────────────────────────────────────────
-                # CRITICAL: Flush remaining aggregation buffers at end-of-source
-                # ─────────────────────────────────────────────────────────────────
-                if config.aggregation_settings:
-                    (
-                        agg_succeeded,
-                        agg_failed,
-                        agg_routed,
-                        agg_quarantined,
-                        agg_coalesced,
-                        agg_forked,
-                        agg_expanded,
-                        agg_buffered,
-                        agg_routed_dests,
-                    ) = self._flush_remaining_aggregation_buffers(
-                        config=config,
-                        processor=processor,
-                        ctx=ctx,
-                        pending_tokens=pending_tokens,
-                        default_sink_name=default_sink_name,
-                        run_id=run_id,
-                        recorder=recorder,
-                        checkpoint=False,  # Checkpointing now happens after sink write
-                        last_node_id=default_last_node_id,
-                    )
-                    rows_succeeded += agg_succeeded
-                    rows_failed += agg_failed
-                    rows_routed += agg_routed
-                    rows_quarantined += agg_quarantined
-                    rows_coalesced += agg_coalesced
-                    rows_forked += agg_forked
-                    rows_expanded += agg_expanded
-                    rows_buffered += agg_buffered
-                    for dest, count in agg_routed_dests.items():
-                        routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                    # PROCESS phase completed successfully
+                    self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
-                # Flush pending coalesce operations at end-of-source
-                if coalesce_executor is not None:
-                    total_steps = len(config.transforms) + len(config.gates)
-                    # Convert CoalesceName -> str for CoalesceExecutor API
-                    flush_step_map = {str(name): step for name, step in coalesce_step_map.items()}
-                    pending_outcomes = coalesce_executor.flush_pending(flush_step_map)
-
-                    # Handle any merged tokens from flush
-                    for outcome in pending_outcomes:
-                        if outcome.merged_token is not None:
-                            # Successful merge
-                            rows_coalesced += 1
-                            # Get the correct step for this coalesce
-                            # outcome.coalesce_name is guaranteed non-None when merged_token is not None
-                            coalesce_name = CoalesceName(outcome.coalesce_name)  # type: ignore[arg-type]
-                            coalesce_step = coalesce_step_map[coalesce_name]
-                            # Check if merged token should continue downstream processing
-                            if coalesce_step < total_steps:
-                                # Continue processing through downstream nodes
-                                continuation_results = processor.process_token(
-                                    token=outcome.merged_token,
-                                    transforms=config.transforms,
-                                    ctx=ctx,
-                                    start_step=coalesce_step,
-                                )
-                                for cont_result in continuation_results:
-                                    if cont_result.outcome == RowOutcome.COMPLETED:
-                                        rows_succeeded += 1
-                                        sink_name = default_sink_name
-                                        if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
-                                            sink_name = cont_result.token.branch_name
-                                        pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
-                                    elif cont_result.outcome == RowOutcome.ROUTED:
-                                        rows_routed += 1
-                                        # sink_name is guaranteed non-None for ROUTED outcome
-                                        routed_sink = cont_result.sink_name or default_sink_name
-                                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                        pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
-                                    elif cont_result.outcome == RowOutcome.QUARANTINED:
-                                        rows_quarantined += 1
-                                    elif cont_result.outcome == RowOutcome.FAILED:
-                                        rows_failed += 1
-                            else:
-                                # No downstream nodes - send directly to sink
-                                # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
-                                # AFTER sink durability is achieved.
-                                rows_succeeded += 1
-                                pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
-                        elif outcome.failure_reason:
-                            # Coalesce failed (quorum_not_met, incomplete_branches)
-                            # Audit trail recorded by executor: each consumed token has
-                            # node_state with status="failed" and error_json explaining why.
-                            # Count failed coalesces for observability.
-                            rows_coalesce_failed += 1
-
-                # Write to sinks using SinkExecutor
-                sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-                # Step = transforms + config gates + 1 (for sink)
-                step = len(config.transforms) + len(config.gates) + 1
-
-                # Create checkpoint callback for post-sink checkpointing
-                def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                    def callback(token: TokenInfo) -> None:
-                        self._maybe_checkpoint(
-                            run_id=run_id,
-                            token_id=token.token_id,
-                            node_id=sink_node_id,
-                        )
-
-                    return callback
-
-                for sink_name, token_outcome_pairs in pending_tokens.items():
-                    if token_outcome_pairs and sink_name in config.sinks:
-                        sink = config.sinks[sink_name]
-                        sink_node_id = sink_id_map[SinkName(sink_name)]
-
-                        # Group tokens by outcome for separate write() calls
-                        # (sink_executor.write() takes a single outcome for all tokens in a batch)
-                        from itertools import groupby
-
-                        # Sort by outcome to enable groupby (None sorts first)
-                        sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
-                        for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                            group_tokens = [token for token, _ in group]
-                            sink_executor.write(
-                                sink=sink,
-                                tokens=group_tokens,
-                                ctx=ctx,
-                                step_in_pipeline=step,
-                                sink_name=sink_name,
-                                outcome=outcome,
-                                on_token_written=checkpoint_after_sink(sink_node_id),
-                            )
-
-                # Emit final progress if we haven't emitted recently or row count not on interval
-                # (RunSummary will show final summary regardless, but progress shows intermediate state)
-                current_time = time.perf_counter()
-                time_since_last_progress = current_time - last_progress_time
-                # Emit if: not on progress_interval boundary OR >1s since last emission
-                if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
-                    elapsed = current_time - start_time
-                    self._events.emit(
-                        ProgressEvent(
-                            rows_processed=rows_processed,
-                            # Include routed rows in success count - they reached their destination
-                            rows_succeeded=rows_succeeded + rows_routed,
-                            rows_failed=rows_failed,
-                            rows_quarantined=rows_quarantined,
-                            elapsed_seconds=elapsed,
-                        )
-                    )
-
-                # PROCESS phase completed successfully
-                self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
-
-            except BatchPendingError:
-                # BatchPendingError is a control-flow signal, not an error.
-                # Don't emit PhaseError - the run isn't failing, it's just waiting.
-                raise  # Re-raise immediately for caller to handle retry
-            except Exception as e:
-                # PROCESS phase error (iteration or processing failures)
-                self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
-                raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
+                except BatchPendingError:
+                    # BatchPendingError is a control-flow signal, not an error.
+                    # Don't emit PhaseError - the run isn't failing, it's just waiting.
+                    raise  # Re-raise immediately for caller to handle retry
+                except Exception as e:
+                    # PROCESS phase error (iteration or processing failures)
+                    self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
+                    raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
 
         finally:
             # Call on_complete for all plugins (even on error)

@@ -631,11 +631,14 @@ class TestOpenRouterBatchSingleRowFallback:
 
         # Mock _process_batch to return an invalid state:
         # status="success" but rows=None (violates contract)
+        # Note: We must provide success_reason to pass __post_init__ validation,
+        # but the result is still invalid because neither row nor rows is set.
         invalid_result = TransformResult(
             status="success",
             row=None,  # Single-row not set
             rows=None,  # Multi-row not set either - INVALID for success
             reason=None,
+            success_reason={"action": "processed"},  # Required for success status
         )
 
         with (

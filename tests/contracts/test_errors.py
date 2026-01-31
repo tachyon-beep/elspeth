@@ -58,20 +58,40 @@ class TestRoutingReasonSchema:
         assert is_typeddict(PluginGateReason)
 
 
-class TestTransformReasonSchema:
-    """Tests for TransformReason TypedDict schema introspection."""
+class TestTransformSuccessReasonSchema:
+    """Tests for TransformSuccessReason TypedDict schema introspection."""
 
-    def test_transform_reason_required_keys(self) -> None:
-        """TransformReason has action as required key."""
-        from elspeth.contracts import TransformReason
+    def test_transform_success_reason_required_keys(self) -> None:
+        """TransformSuccessReason has action as required key."""
+        from elspeth.contracts import TransformSuccessReason
 
-        assert TransformReason.__required_keys__ == frozenset({"action"})
+        assert TransformSuccessReason.__required_keys__ == frozenset({"action"})
 
-    def test_transform_reason_optional_keys(self) -> None:
-        """TransformReason has fields_modified and validation_errors as optional keys."""
-        from elspeth.contracts import TransformReason
+    def test_transform_success_reason_optional_keys(self) -> None:
+        """TransformSuccessReason has expected optional keys."""
+        from elspeth.contracts import TransformSuccessReason
 
-        assert TransformReason.__optional_keys__ == frozenset({"fields_modified", "validation_errors"})
+        assert TransformSuccessReason.__optional_keys__ == frozenset(
+            {
+                "fields_modified",
+                "fields_added",
+                "fields_removed",
+                "validation_warnings",
+                "metadata",
+            }
+        )
+
+    def test_transform_action_category_values(self) -> None:
+        """TransformActionCategory contains expected action types."""
+        from typing import get_args
+
+        from elspeth.contracts import TransformActionCategory
+
+        categories = get_args(TransformActionCategory)
+        assert "processed" in categories
+        assert "mapped" in categories
+        assert "skipped" in categories
+        assert "enriched" in categories
 
 
 class TestExecutionError:
@@ -132,31 +152,45 @@ class TestRoutingReason:
         assert config_reason["condition"] == "row['score'] > 100"
 
 
-class TestTransformReason:
-    """Tests for TransformReason TypedDict."""
+class TestTransformSuccessReason:
+    """Tests for TransformSuccessReason TypedDict."""
 
-    def test_transform_reason_has_action_field(self) -> None:
-        """TransformReason defines action field."""
-        from elspeth.contracts import TransformReason
+    def test_transform_success_reason_has_action_field(self) -> None:
+        """TransformSuccessReason defines action field."""
+        from elspeth.contracts import TransformSuccessReason
 
-        reason: TransformReason = {
+        reason: TransformSuccessReason = {
             "action": "normalized_field",
         }
 
         assert reason["action"] == "normalized_field"
 
-    def test_transform_reason_accepts_optional_fields(self) -> None:
-        """TransformReason can include optional fields_modified and validation_errors."""
-        from elspeth.contracts import TransformReason
+    def test_transform_success_reason_accepts_optional_fields(self) -> None:
+        """TransformSuccessReason can include optional field tracking and warnings."""
+        from elspeth.contracts import TransformSuccessReason
 
-        reason: TransformReason = {
+        reason: TransformSuccessReason = {
             "action": "validated_and_normalized",
             "fields_modified": ["name", "email"],
-            "validation_errors": ["missing_phone"],
+            "fields_added": ["normalized_name"],
+            "validation_warnings": ["phone format non-standard"],
         }
 
         assert reason["fields_modified"] == ["name", "email"]
-        assert reason["validation_errors"] == ["missing_phone"]
+        assert reason["fields_added"] == ["normalized_name"]
+        assert reason["validation_warnings"] == ["phone format non-standard"]
+
+    def test_transform_success_reason_accepts_metadata(self) -> None:
+        """TransformSuccessReason can include plugin-specific metadata."""
+        from elspeth.contracts import TransformSuccessReason
+
+        reason: TransformSuccessReason = {
+            "action": "enriched",
+            "metadata": {"source": "external_api", "latency_ms": 42},
+        }
+
+        assert reason["metadata"]["source"] == "external_api"
+        assert reason["metadata"]["latency_ms"] == 42
 
 
 class TestRoutingReasonVariants:

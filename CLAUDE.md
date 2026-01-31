@@ -588,6 +588,25 @@ Telemetry provides **real-time operational visibility** alongside the Landscape 
 - **Landscape**: Legal record, complete lineage, persisted forever, source of truth
 - **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
 
+**No Silent Failures (Critical Principle):**
+
+Any time an object is polled or has an opportunity to emit telemetry, it MUST either:
+
+1. **Send what it has** - emit the telemetry event normally, OR
+2. **Explicitly acknowledge "I have nothing"** - log that telemetry was requested but unavailable
+
+If an exception occurs during emission, the acknowledgment must include the failure reason:
+
+- "Telemetry emission failed: [exception details]"
+- Never silently swallow events or exceptions
+
+This applies to:
+
+- `telemetry_emit` callbacks in audited clients (HTTP, LLM)
+- `TelemetryManager.emit()` calls
+- Exporter failures
+- Disabled telemetry states (log once at startup that telemetry is disabled)
+
 **Available exporters:** Console (debugging), OTLP (Jaeger/Tempo/Honeycomb), Azure Monitor, Datadog
 
 **Basic configuration:**
@@ -919,5 +938,7 @@ Ask yourself:
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
 
 ## FINAL COMMENT
+
+If you are thinking to yourself 'we can't break the schema because it will disrupt users' or 'we need to support old data formats', STOP. This codebase has a NO LEGACY CODE POLICY. We do not support backwards compatibility, legacy shims, or compatibility layers. When something is removed or changed, DELETE THE OLD CODE COMPLETELY. Fix all call sites in the same commit. Do not create adapters or compatibility modes. If you need to change a schema, change it fully and update all code that uses it. WE HAVE NO USERS. WE WILL HAVE USERS IN THE FUTURE, DEFERRING BREAKING CHANGES UNTIL WE HAVE USERS IS THE OPPOSITE OF WHAT WE WANT.
 
 If you are proposing or implementing a fix and it involves 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW. Saying 'I didn't cause this' is not an excuse for disregarding lint, failing tests or CICD. They all must be resolved to merge code, no exceptions. Refusing to do the work now is false economy.

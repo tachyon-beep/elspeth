@@ -84,7 +84,10 @@ class PassThrough(BaseTransform):
         if self._validate_input and not self._schema_config.is_dynamic:
             self.input_schema.model_validate(row)  # Raises on failure
 
-        return TransformResult.success(copy.deepcopy(row))
+        return TransformResult.success(
+            copy.deepcopy(row),
+            success_reason={"action": "passthrough"},
+        )
 
     def close(self) -> None:
         """No resources to release."""

@@ -135,7 +135,10 @@ class KeywordFilter(BaseTransform):
                     )
 
         # No matches - pass through unchanged
-        return TransformResult.success(row)
+        return TransformResult.success(
+            row,
+            success_reason={"action": "filtered"},
+        )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
         """Determine which fields to scan based on config."""

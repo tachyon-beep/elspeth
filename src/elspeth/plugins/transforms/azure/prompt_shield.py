@@ -342,7 +342,10 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
 
-        return TransformResult.success(row)
+        return TransformResult.success(
+            row,
+            success_reason={"action": "validated"},
+        )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
         """Determine which fields to scan based on config."""

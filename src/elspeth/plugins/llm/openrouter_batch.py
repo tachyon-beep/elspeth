@@ -206,7 +206,11 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
         # Convert multi-row result back to single-row
         if result.status == "success" and result.rows:
-            return TransformResult.success(result.rows[0])
+            # Propagate success_reason from batch result
+            return TransformResult.success(
+                result.rows[0],
+                success_reason=result.success_reason or {"action": "enriched", "fields_added": [self._response_field]},
+            )
         elif result.status == "error":
             return result
         else:
@@ -319,7 +323,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 # Success
                 output_rows.append(result)
 
-        return TransformResult.success_multi(output_rows)
+        return TransformResult.success_multi(
+            output_rows,
+            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+        )
 
     def _process_single_row(
         self,

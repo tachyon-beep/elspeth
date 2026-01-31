@@ -8,6 +8,7 @@ output correct types. Wrong types = upstream bug = crash.
 """
 
 import os
+import time
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json, stable_hash
@@ -306,10 +307,45 @@ class DatabaseSink(BaseSink):
         # Ensure table exists (infer from first row)
         self._ensure_table(rows[0])
 
-        # Insert all rows in batch
-        if self._engine is not None and self._table is not None:
-            with self._engine.begin() as conn:
-                conn.execute(insert(self._table), rows)
+        # Insert all rows in batch with call recording for audit trail
+        # (ctx.operation_id is set by executor)
+        start_time = time.perf_counter()
+        try:
+            if self._engine is not None and self._table is not None:
+                with self._engine.begin() as conn:
+                    conn.execute(insert(self._table), rows)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record successful INSERT in audit trail
+            ctx.record_call(
+                call_type=CallType.SQL,
+                status=CallStatus.SUCCESS,
+                request_data={
+                    "operation": "INSERT",
+                    "table": self._table_name,
+                    "row_count": len(rows),
+                },
+                response_data={"rows_inserted": len(rows)},
+                latency_ms=latency_ms,
+                provider="sqlalchemy",
+            )
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record failed INSERT in audit trail
+            ctx.record_call(
+                call_type=CallType.SQL,
+                status=CallStatus.ERROR,
+                request_data={
+                    "operation": "INSERT",
+                    "table": self._table_name,
+                    "row_count": len(rows),
+                },
+                error={"type": type(e).__name__, "message": str(e)},
+                latency_ms=latency_ms,
+                provider="sqlalchemy",
+            )
+            raise
 
         return ArtifactDescriptor.for_database(
             url=self._sanitized_url,

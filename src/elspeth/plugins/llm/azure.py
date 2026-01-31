@@ -343,7 +343,10 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
             output[f"{self._response_field}_model"] = response.model
 
-            return TransformResult.success(output)
+            return TransformResult.success(
+                output,
+                success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            )
         finally:
             # Clean up cached client for this state_id to prevent unbounded growth
             with self._llm_clients_lock:

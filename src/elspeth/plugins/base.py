@@ -51,7 +51,10 @@ class BaseTransform(ABC):
             output_schema = OutputSchema
 
             def process(self, row: dict, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "new_field": "value"})
+                return TransformResult.success(
+                    {**row, "new_field": "value"},
+                    success_reason={"action": "processed"},
+                )
     """
 
     name: str

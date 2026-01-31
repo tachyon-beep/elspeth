@@ -415,7 +415,7 @@ class TestSinkExecutor:
         assert artifact is not None
         assert artifact.produced_by_state_id == first_state_id
 
-    def test_sink_context_has_state_id_for_call_recording(self) -> None:
+    def test_sink_external_calls_attributed_to_operation(self) -> None:
         """BUG-RECORDER-01: Sink execution sets state_id on context for external call recording."""
         from elspeth.contracts import CallStatus, CallType, TokenInfo
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -493,14 +493,34 @@ class TestSinkExecutor:
         # Verify sink succeeded
         assert artifact is not None
 
-        # Verify external call was recorded
-        # Should be associated with first token's state (bulk operations)
-        first_token_states = recorder.get_node_states_for_token(tokens[0].token_id)
-        assert len(first_token_states) == 1
-        first_state = first_token_states[0]
+        # Verify external call was recorded via operation (not token state)
+        # With the operations model, sink I/O calls are attributed to the sink_write operation
+        from sqlalchemy import select
 
-        calls = recorder.get_calls(first_state.state_id)
+        from elspeth.core.landscape.schema import operations_table
+
+        # Query operations for this run and sink node
+        query = (
+            select(operations_table)
+            .where(operations_table.c.run_id == run.run_id)
+            .where(operations_table.c.node_id == sink_node.node_id)
+            .where(operations_table.c.operation_type == "sink_write")
+        )
+        with db.connection() as conn:
+            ops_rows = conn.execute(query).fetchall()
+        assert len(ops_rows) == 1
+        sink_op = ops_rows[0]
+
+        # Get calls for this operation
+        calls = recorder.get_operation_calls(sink_op.operation_id)
         assert len(calls) == 1
         assert calls[0].call_type == CallType.HTTP
         assert calls[0].status == CallStatus.SUCCESS
         assert calls[0].latency_ms == 150.0
+
+        # Verify the operation itself was recorded correctly
+        operation = recorder.get_operation(sink_op.operation_id)
+        assert operation is not None
+        assert operation.operation_type == "sink_write"
+        assert operation.status == "completed"
+        assert operation.node_id == sink_node.node_id

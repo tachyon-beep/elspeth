@@ -70,7 +70,7 @@ class TestOrchestratorAuditTrail:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -710,7 +710,7 @@ class TestOrchestratorConfigRecording:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -892,7 +892,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "versioned"})
 
         class VersionedSink(_TestSinkBase):
             name = "versioned_sink"
@@ -1008,7 +1008,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "nondeterministic"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -1128,8 +1128,8 @@ class TestNodeMetadataFromPlugin:
                 # Batch-aware: handles list or single row
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"value": total})
-                return TransformResult.success(row)
+                    return TransformResult.success({"value": total}, success_reason={"action": "batch_aggregated"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"

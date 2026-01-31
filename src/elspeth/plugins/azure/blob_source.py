@@ -12,13 +12,14 @@ from __future__ import annotations
 import io
 import json
 import logging
+import time
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
@@ -324,13 +325,46 @@ class AzureBlobSource(BaseSource):
             azure.core.exceptions.ClientAuthenticationError: If connection fails.
         """
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
+        # Record call for audit trail (ctx.operation_id is set by orchestrator)
+        start_time = time.perf_counter()
         try:
             blob_client = self._get_blob_client()
             blob_data = blob_client.download_blob().readall()
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record successful blob download in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data={
+                    "operation": "download_blob",
+                    "container": self._container,
+                    "blob_path": self._blob_path,
+                },
+                response_data={"size_bytes": len(blob_data)},
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
         except Exception as e:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record failed blob download in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data={
+                    "operation": "download_blob",
+                    "container": self._container,
+                    "blob_path": self._blob_path,
+                },
+                error={"type": type(e).__name__, "message": str(e)},
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
+
             # Azure SDK errors (ResourceNotFoundError, ClientAuthenticationError, etc.)
             # are external system errors - propagate with context
             raise type(e)(f"Failed to download blob '{self._blob_path}' from container '{self._container}': {e}") from e

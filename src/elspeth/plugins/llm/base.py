@@ -340,7 +340,10 @@ class BaseLLMTransform(BaseTransform):
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
 
-        return TransformResult.success(output)
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+        )
 
     def close(self) -> None:
         """Release resources."""

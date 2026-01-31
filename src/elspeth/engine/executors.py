@@ -37,6 +37,7 @@ from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.operations import track_operation
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
@@ -355,6 +356,7 @@ class TransformExecutor:
                 status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
+                success_reason=result.success_reason,
             )
             # Update token with new row data
             # For multi-row results, keep original row_data (engine will expand tokens later)
@@ -1201,6 +1203,7 @@ class AggregationExecutor:
                 status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
+                success_reason=result.success_reason,
             )
 
             # Transition batch to completed
@@ -1671,38 +1674,55 @@ class SinkExecutor:
             )
             states.append((token, state))
 
-        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
-        # Sinks may make external calls (e.g., HTTP POST, database INSERT)
-        # Use first token's state_id since sink operations are typically bulk operations
-        ctx.state_id = states[0][1].state_id
-        ctx.node_id = sink_node_id
-        ctx._call_index = 0  # Reset call index for this sink operation
+        # CRITICAL: Clear state_id before entering operation context.
+        # The ctx.state_id may still be set from the last transform that processed
+        # these tokens. Sinks use operation_id for call attribution, and having both
+        # state_id AND operation_id set would trigger the XOR constraint violation.
+        ctx.state_id = None
+        ctx._call_index = 0  # Reset call index for operation calls
 
-        # Execute sink write with timing and span
-        with self._spans.sink_span(sink.name):
-            start = time.perf_counter()
-            try:
-                artifact_info = sink.write(rows, ctx)
-                duration_ms = (time.perf_counter() - start) * 1000
-            except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-                # Mark all token states as failed
-                error: ExecutionError = {
-                    "exception": str(e),
-                    "type": type(e).__name__,
-                }
-                for _, state in states:
-                    self._recorder.complete_node_state(
-                        state_id=state.state_id,
-                        status=NodeStateStatus.FAILED,
-                        duration_ms=duration_ms,
-                        error=error,
-                    )
-                raise
+        # Wrap sink I/O in operation for external call tracking
+        # External calls during sink.write() are attributed to the operation (not token states)
+        # The track_operation context manager sets ctx.operation_id automatically
+        with track_operation(
+            recorder=self._recorder,
+            run_id=self._run_id,
+            node_id=sink_node_id,
+            operation_type="sink_write",
+            ctx=ctx,
+            input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
+        ) as handle:
+            # Execute sink write with timing and span
+            with self._spans.sink_span(sink.name):
+                start = time.perf_counter()
+                try:
+                    artifact_info = sink.write(rows, ctx)
+                    duration_ms = (time.perf_counter() - start) * 1000
+                except Exception as e:
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    # Mark all token states as failed
+                    error: ExecutionError = {
+                        "exception": str(e),
+                        "type": type(e).__name__,
+                    }
+                    for _, state in states:
+                        self._recorder.complete_node_state(
+                            state_id=state.state_id,
+                            status=NodeStateStatus.FAILED,
+                            duration_ms=duration_ms,
+                            error=error,
+                        )
+                    raise
 
-        # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
-        # If this fails, we want to crash - can't checkpoint non-durable data
-        sink.flush()
+            # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
+            # If this fails, we want to crash - can't checkpoint non-durable data
+            sink.flush()
+
+            # Set output data on operation handle for audit trail
+            handle.output_data = {
+                "artifact_path": artifact_info.path_or_uri,
+                "content_hash": artifact_info.content_hash,
+            }
 
         # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference

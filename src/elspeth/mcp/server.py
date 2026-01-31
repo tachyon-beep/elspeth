@@ -437,8 +437,9 @@ class LandscapeAnalyzer:
                 "call_type": row.call_type,
                 "status": row.status,
                 "latency_ms": row.latency_ms,
-                "provider": row.provider,
-                "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
+                "request_hash": row.request_hash,
+                "response_hash": row.response_hash,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
         ]

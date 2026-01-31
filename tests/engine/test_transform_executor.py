@@ -132,7 +132,7 @@ class TestTransformExecutor:
         )
 
         assert result.status == "error"
-        assert result.reason == {"message": "validation failed"}
+        assert result.reason == {"reason": "validation_failed", "message": "validation failed"}
 
         # Verify audit trail records the error
         states = recorder.get_node_states_for_token(token.token_id)

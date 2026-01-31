@@ -7,7 +7,7 @@
 **Value:**
 - `action`: Distinguishes conditional paths ("enriched" vs "skipped - data present")
 - `fields_modified`: Efficient audit queries without diffing input/output
-- `validation_errors`: Non-blocking warnings for data quality monitoring
+- `validation_warnings`: Non-blocking warnings for data quality monitoring
 
 **Bead:** TBD (create with `bd create --title="Wire up TransformReason for success metadata" --type=feature --priority=2`)
 
@@ -22,7 +22,11 @@
 
 **Context:** Rename for clarity - distinguishes from `TransformErrorReason`. Also add a Literal type for common actions.
 
-**Step 1: Update TypedDict in errors.py**
+**Step 1: Verify Literal is imported in errors.py**
+
+Check that `Literal` is already imported from typing. If not, add it to the imports.
+
+**Step 2: Update TypedDict in errors.py**
 
 Replace lines 84-92 with:
 
@@ -51,7 +55,7 @@ class TransformSuccessReason(TypedDict):
     Provides structured audit information about what a transform did,
     beyond just the input/output data. This enables:
     - Efficient audit queries (fields_modified without diffing)
-    - Data quality monitoring (validation_errors for non-blocking warnings)
+    - Data quality monitoring (validation_warnings for non-blocking warnings)
     - Conditional path tracking (action distinguishes code paths)
 
     Used when transforms return TransformResult.success() with optional
@@ -100,7 +104,7 @@ class TransformSuccessReason(TypedDict):
     metadata: NotRequired[dict[str, Any]]
 ```
 
-**Step 2: Update exports in __init__.py**
+**Step 3: Update exports in __init__.py**
 
 Change import:
 ```python
@@ -120,7 +124,7 @@ Change `__all__`:
     "TransformSuccessReason",
 ```
 
-**Step 3: Update tests**
+**Step 4: Update tests**
 
 In `tests/contracts/test_errors.py`, rename test classes:
 - `TestTransformReasonSchema` → `TestTransformSuccessReasonSchema`
@@ -142,12 +146,12 @@ def test_transform_action_category_values(self) -> None:
     assert "enriched" in categories
 ```
 
-**Step 4: Verify**
+**Step 5: Verify**
 
 Run: `.venv/bin/python -c "from elspeth.contracts import TransformSuccessReason, TransformActionCategory; print('OK')"`
 Expected: `OK`
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add src/elspeth/contracts/errors.py src/elspeth/contracts/__init__.py tests/contracts/test_errors.py
@@ -175,14 +179,19 @@ EOF
 **Files:**
 - Modify: `src/elspeth/contracts/results.py`
 
-**Step 1: Add import**
+**Step 1: Ensure deferred annotations**
+
+Verify `from __future__ import annotations` is at the top of the file (after docstring).
+If missing, add it.
+
+**Step 2: Add import**
 
 Add to imports:
 ```python
 from elspeth.contracts.errors import TransformErrorReason, TransformSuccessReason
 ```
 
-**Step 2: Add field to dataclass**
+**Step 3: Add field to dataclass**
 
 Add after line 101 (`rows: list[dict[str, Any]] | None = None`):
 
@@ -191,7 +200,7 @@ Add after line 101 (`rows: list[dict[str, Any]] | None = None`):
     success_reason: TransformSuccessReason | None = None
 ```
 
-**Step 3: Update success() factory method**
+**Step 4: Update success() factory method**
 
 Change lines 118-121:
 
@@ -202,7 +211,7 @@ Change lines 118-121:
         row: dict[str, Any],
         *,
         success_reason: TransformSuccessReason | None = None,
-    ) -> "TransformResult":
+    ) -> TransformResult:
         """Create successful result with single output row.
 
         Args:
@@ -222,7 +231,7 @@ Change lines 118-121:
         )
 ```
 
-**Step 4: Update success_multi() factory method**
+**Step 5: Update success_multi() factory method**
 
 Change lines 123-138:
 
@@ -233,7 +242,7 @@ Change lines 123-138:
         rows: list[dict[str, Any]],
         *,
         success_reason: TransformSuccessReason | None = None,
-    ) -> "TransformResult":
+    ) -> TransformResult:
         """Create successful result with multiple output rows.
 
         Args:
@@ -258,12 +267,12 @@ Change lines 123-138:
         )
 ```
 
-**Step 5: Run tests**
+**Step 6: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/contracts/test_results.py -v`
 Expected: PASS
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add src/elspeth/contracts/results.py
@@ -292,7 +301,8 @@ EOF
 
 **Files:**
 - Modify: `src/elspeth/core/landscape/schema.py`
-- Create: `alembic/versions/xxxx_add_success_reason_json.py`
+
+**Context:** No migration needed - we have no deployed databases requiring migration.
 
 **Step 1: Update schema.py**
 
@@ -302,57 +312,21 @@ Add after line 199 (`Column("error_json", Text),`):
     Column("success_reason_json", Text),  # TransformSuccessReason for successful transforms
 ```
 
-**Step 2: Create Alembic migration**
+**Step 2: Verify schema**
 
-Run: `cd /home/john/elspeth-rapid && alembic revision -m "add_success_reason_json_to_node_states"`
+Run: `.venv/bin/python -c "from elspeth.core.landscape.schema import node_states_table; print([c.name for c in node_states_table.columns])"`
+Expected: Shows `success_reason_json` in column list
 
-Edit the generated migration file:
-
-```python
-"""add_success_reason_json_to_node_states
-
-Revision ID: <auto-generated>
-Revises: <previous>
-Create Date: 2026-01-31 ...
-"""
-from alembic import op
-import sqlalchemy as sa
-
-# revision identifiers
-revision = '<auto-generated>'
-down_revision = '<previous>'
-branch_labels = None
-depends_on = None
-
-
-def upgrade() -> None:
-    op.add_column(
-        'node_states',
-        sa.Column('success_reason_json', sa.Text(), nullable=True)
-    )
-
-
-def downgrade() -> None:
-    op.drop_column('node_states', 'success_reason_json')
-```
-
-**Step 3: Verify migration**
-
-Run: `alembic upgrade head` (on a test database)
-Expected: Migration applies successfully
-
-**Step 4: Commit**
+**Step 3: Commit**
 
 ```bash
-git add src/elspeth/core/landscape/schema.py alembic/versions/*_add_success_reason_json*.py
+git add src/elspeth/core/landscape/schema.py
 git commit -m "$(cat <<'EOF'
 feat(schema): add success_reason_json column to node_states
 
 New column stores TransformSuccessReason JSON for successful
-transform operations. Nullable for backwards compatibility -
-existing rows and transforms without success_reason work unchanged.
-
-Migration: alembic upgrade head
+transform operations. Nullable - transforms without success_reason
+will have NULL in this column.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -396,21 +370,84 @@ EOF
 
 ---
 
-## Task 5: Update LandscapeRecorder.complete_node_state()
+## Task 5: Update NodeStateRepository to Load success_reason_json
+
+**Files:**
+- Modify: `src/elspeth/core/landscape/repositories.py`
+
+**Context:** The recorder uses a repository pattern. `complete_node_state()` calls `get_node_state()` which uses `NodeStateRepository.load()` to construct dataclasses from database rows. We must update the repository to include the new field.
+
+**Step 1: Update COMPLETED branch in load() method**
+
+Find the `NodeStateCompleted` constructor at line 341-355. Add `success_reason_json`:
+
+```python
+        elif status == NodeStateStatus.COMPLETED:
+            # COMPLETED states must have output_hash, completed_at, duration_ms
+            # Validate required fields - None indicates audit integrity violation
+            if row.output_hash is None:
+                raise ValueError(f"COMPLETED state {row.state_id} has NULL output_hash - audit integrity violation")
+            if row.duration_ms is None:
+                raise ValueError(f"COMPLETED state {row.state_id} has NULL duration_ms - audit integrity violation")
+            if row.completed_at is None:
+                raise ValueError(f"COMPLETED state {row.state_id} has NULL completed_at - audit integrity violation")
+            return NodeStateCompleted(
+                state_id=row.state_id,
+                token_id=row.token_id,
+                node_id=row.node_id,
+                step_index=row.step_index,
+                attempt=row.attempt,
+                status=NodeStateStatus.COMPLETED,
+                input_hash=row.input_hash,
+                started_at=row.started_at,
+                output_hash=row.output_hash,
+                completed_at=row.completed_at,
+                duration_ms=row.duration_ms,
+                context_before_json=row.context_before_json,
+                context_after_json=row.context_after_json,
+                success_reason_json=row.success_reason_json,  # ADD THIS
+            )
+```
+
+**Step 2: Verify**
+
+Run: `.venv/bin/python -c "from elspeth.core.landscape.repositories import NodeStateRepository; print('OK')"`
+Expected: `OK`
+
+**Step 3: Commit**
+
+```bash
+git add src/elspeth/core/landscape/repositories.py
+git commit -m "$(cat <<'EOF'
+feat(repositories): load success_reason_json in NodeStateRepository
+
+NodeStateRepository.load() now reads success_reason_json from
+database rows and includes it in NodeStateCompleted instances.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 6: Update LandscapeRecorder.complete_node_state()
 
 **Files:**
 - Modify: `src/elspeth/core/landscape/recorder.py`
 
 **Step 1: Add import**
 
-Add to imports:
+Add to TYPE_CHECKING imports (recorder.py already uses this pattern):
 ```python
-from elspeth.contracts.errors import TransformSuccessReason
+if TYPE_CHECKING:
+    ...
+    from elspeth.contracts.errors import TransformSuccessReason
 ```
 
 **Step 2: Update method signature and overloads**
 
-Update the COMPLETED overload (around line 1060):
+Update the COMPLETED overload (lines 1062-1072):
 
 ```python
     @overload
@@ -429,7 +466,7 @@ Update the COMPLETED overload (around line 1060):
 
 **Step 3: Update main implementation**
 
-Update the main `complete_node_state` method signature (around line 1083):
+Update the main `complete_node_state` method signature (line 1086):
 
 ```python
     def complete_node_state(
@@ -445,20 +482,20 @@ Update the main `complete_node_state` method signature (around line 1083):
     ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
 ```
 
-**Step 4: Serialize and store success_reason**
+**Step 4: Serialize success_reason**
 
-In the method body, after error_json handling, add:
+In the method body, after line 1122 (`context_json = canonical_json(context_after) if context_after is not None else None`), add:
 
 ```python
-        # Serialize success reason if provided
-        success_reason_json: str | None = None
-        if success_reason is not None:
-            success_reason_json = json.dumps(success_reason)
+        # Serialize success reason if provided (use canonical_json for audit consistency)
+        success_reason_json = canonical_json(success_reason) if success_reason is not None else None
 ```
+
+**Note:** We use `canonical_json()` (not `json.dumps()`) to maintain consistency with `error_json` and `context_json` serialization. This ensures deterministic output and rejects NaN/Infinity values per the audit integrity requirements.
 
 **Step 5: Update the UPDATE statement**
 
-Find the `node_states_table.update()` call and add `success_reason_json`:
+Find the `node_states_table.update()` call (lines 1124-1134) and add `success_reason_json`:
 
 ```python
         self._ops.execute_update(
@@ -467,45 +504,21 @@ Find the `node_states_table.update()` call and add `success_reason_json`:
             .values(
                 status=status.value,
                 output_hash=output_hash,
-                completed_at=timestamp,
                 duration_ms=duration_ms,
                 error_json=error_json,
                 success_reason_json=success_reason_json,  # ADD THIS
                 context_after_json=context_json,
+                completed_at=timestamp,
             )
         )
 ```
 
-**Step 6: Update NodeStateCompleted return**
-
-Update the return statement for COMPLETED status to include success_reason_json:
-
-```python
-        if status == NodeStateStatus.COMPLETED:
-            return NodeStateCompleted(
-                state_id=state_id,
-                token_id=existing.token_id,
-                node_id=existing.node_id,
-                step_index=existing.step_index,
-                attempt=existing.attempt,
-                status=NodeStateStatus.COMPLETED,
-                input_hash=existing.input_hash,
-                started_at=existing.started_at,
-                output_hash=output_hash or "",
-                completed_at=timestamp,
-                duration_ms=duration_ms,
-                context_before_json=existing.context_before_json,
-                context_after_json=context_json,
-                success_reason_json=success_reason_json,  # ADD THIS
-            )
-```
-
-**Step 7: Run tests**
+**Step 6: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/core/landscape/ -v -k "complete_node_state or recorder"`
 Expected: PASS
 
-**Step 8: Commit**
+**Step 7: Commit**
 
 ```bash
 git add src/elspeth/core/landscape/recorder.py
@@ -523,14 +536,14 @@ EOF
 
 ---
 
-## Task 6: Update Executors to Pass Through success_reason
+## Task 7: Update Executors to Pass Through success_reason
 
 **Files:**
 - Modify: `src/elspeth/engine/executors.py`
 
-**Step 1: Update TransformExecutor**
+**Step 1: Update TransformExecutor success path**
 
-Find the success path (around lines 353-358) and update:
+Find line 353 (the COMPLETED path in TransformExecutor) and update:
 
 ```python
             self._recorder.complete_node_state(
@@ -542,9 +555,9 @@ Find the success path (around lines 353-358) and update:
             )
 ```
 
-**Step 2: Update AggregationExecutor**
+**Step 2: Update AggregationExecutor success path**
 
-Find the aggregation success path (around lines 1199-1204) and update:
+Find line 1199 (the COMPLETED path in AggregationExecutor) and update:
 
 ```python
             self._recorder.complete_node_state(
@@ -586,45 +599,41 @@ EOF
 
 ---
 
-## Task 7: Update MCP Server to Expose success_reason
+## Task 8: Verify MCP Server Exposes success_reason (No Code Changes Needed)
 
 **Files:**
-- Modify: `src/elspeth/mcp/server.py` (or wherever explain_token is implemented)
+- No modifications required
 
-**Step 1: Find explain_token implementation**
+**Context:** The MCP server's `explain_token` uses `dataclass_to_dict()` from `formatters.py` which recursively serializes all dataclass fields. Since `NodeStateCompleted` now has `success_reason_json`, it will automatically appear in the output.
 
-Search for where node state data is returned in explain queries.
-
-**Step 2: Include success_reason_json in output**
-
-When returning node state details, include:
-```python
-"success_reason": json.loads(state.success_reason_json) if state.success_reason_json else None
+**Important:** The field will appear as a **raw JSON string**, not parsed JSON:
+```json
+{
+  "node_states": [{
+    "status": "COMPLETED",
+    "success_reason_json": "{\"action\": \"processed\"}"
+  }]
+}
 ```
 
-**Step 3: Test MCP server**
+This is consistent with how `error_json` and `context_after_json` are exposed.
 
-Run the MCP server and test `explain_token` on a run with transforms.
+**Step 1: Verify output**
 
-**Step 4: Commit**
-
+Run the MCP server and test `explain_token` on a run with transforms:
 ```bash
-git add src/elspeth/mcp/
-git commit -m "$(cat <<'EOF'
-feat(mcp): expose success_reason in explain_token output
-
-The explain_token tool now includes success_reason for completed
-transform states, enabling audit queries to see what action a
-transform took without diffing input/output.
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-EOF
-)"
+elspeth-mcp
 ```
+
+Then use the `explain_token` tool and verify the response includes `success_reason_json` field for completed transform states.
+
+**Step 2: No commit needed**
+
+No code changes required - the formatter handles it automatically.
 
 ---
 
-## Task 8: Add Integration Tests
+## Task 9: Add Integration Tests
 
 **Files:**
 - Create: `tests/engine/test_transform_success_reason.py`
@@ -638,95 +647,258 @@ Verifies that success_reason flows from transform through executor
 to Landscape audit trail correctly.
 """
 
+from __future__ import annotations
+
+import json
 from typing import Any
 
 import pytest
 
 from elspeth.contracts import TransformResult, TransformSuccessReason
-from elspeth.contracts.enums import NodeStateStatus
-from elspeth.plugins.base import PluginContext
-
-
-class FieldTrackingTransform:
-    """Test transform that reports fields it modified."""
-
-    node_id: str = ""
-    _on_error: str = "discard"
-
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-        # Modify some fields
-        result = {**row, "processed": True, "amount_usd": row.get("amount", 0) * 1.0}
-
-        success_reason: TransformSuccessReason = {
-            "action": "processed",
-            "fields_added": ["processed", "amount_usd"],
-        }
-        return TransformResult.success(result, success_reason=success_reason)
-
-
-class DataQualityTransform:
-    """Test transform that reports validation warnings."""
-
-    node_id: str = ""
-    _on_error: str = "discard"
-
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-        warnings = []
-        amount = row.get("amount", 0)
-        if amount > 900:
-            warnings.append(f"amount near threshold ({amount} of 1000 limit)")
-
-        success_reason: TransformSuccessReason = {
-            "action": "validated",
-            "validation_warnings": warnings if warnings else None,
-        }
-        # Remove None values
-        success_reason = {k: v for k, v in success_reason.items() if v is not None}
-
-        return TransformResult.success(row, success_reason=success_reason)
+from elspeth.contracts.audit import NodeStateCompleted
+from elspeth.contracts.enums import NodeStateStatus, NodeType
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
 class TestTransformSuccessReasonAudit:
     """Tests for success_reason in audit trail."""
 
+    @pytest.fixture
+    def landscape_db(self, tmp_path) -> LandscapeDB:
+        """Create in-memory landscape database."""
+        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+        db.create_all()
+        return db
+
+    @pytest.fixture
+    def recorder(self, landscape_db: LandscapeDB) -> LandscapeRecorder:
+        """Create recorder."""
+        return LandscapeRecorder(landscape_db)
+
     def test_success_reason_stored_in_node_state(
         self,
-        minimal_pipeline_with_transform,  # Fixture that sets up pipeline
-        landscape_recorder,
+        recorder: LandscapeRecorder,
     ) -> None:
         """success_reason is stored in node_states table."""
-        # Run pipeline with FieldTrackingTransform
-        # Query node_states for the transform's state
-        # Assert success_reason_json is populated
-        # Assert it contains expected fields
-        pass  # Implementation depends on test fixtures
+        # Setup run
+        run_id = recorder.create_run(
+            settings_hash="test",
+            settings_snapshot={},
+            code_version="test",
+        )
+        recorder.register_node(
+            node_id="transform_1",
+            run_id=run_id,
+            node_type=NodeType.TRANSFORM,
+            plugin_name="field_tracking_transform",
+            config={},
+        )
+        row_id = recorder.create_source_row(
+            run_id=run_id,
+            row_index=0,
+            raw_data={"amount": 100},
+        )
+        token = recorder.create_token(
+            run_id=run_id,
+            row_id=row_id,
+            row_data={"amount": 100},
+        )
+
+        # Create and complete node state with success_reason
+        state = recorder.create_node_state(
+            token_id=token.token_id,
+            node_id="transform_1",
+            run_id=run_id,
+            step_index=0,
+            input_data={"amount": 100},
+        )
+
+        success_reason: TransformSuccessReason = {
+            "action": "processed",
+            "fields_added": ["processed", "amount_usd"],
+        }
+
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"amount": 100, "processed": True, "amount_usd": 100.0},
+            duration_ms=5.0,
+            success_reason=success_reason,
+        )
+
+        # Verify
+        assert isinstance(completed, NodeStateCompleted)
+        assert completed.success_reason_json is not None
+        parsed = json.loads(completed.success_reason_json)
+        assert parsed["action"] == "processed"
+        assert parsed["fields_added"] == ["processed", "amount_usd"]
 
     def test_success_reason_none_when_not_provided(
         self,
-        minimal_pipeline_with_transform,
-        landscape_recorder,
+        recorder: LandscapeRecorder,
     ) -> None:
         """success_reason_json is NULL when transform doesn't provide it."""
-        # Run pipeline with PassthroughTransform (no success_reason)
-        # Assert success_reason_json is None
-        pass
+        run_id = recorder.create_run(
+            settings_hash="test",
+            settings_snapshot={},
+            code_version="test",
+        )
+        recorder.register_node(
+            node_id="transform_1",
+            run_id=run_id,
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={},
+        )
+        row_id = recorder.create_source_row(
+            run_id=run_id,
+            row_index=0,
+            raw_data={"x": 1},
+        )
+        token = recorder.create_token(
+            run_id=run_id,
+            row_id=row_id,
+            row_data={"x": 1},
+        )
+        state = recorder.create_node_state(
+            token_id=token.token_id,
+            node_id="transform_1",
+            run_id=run_id,
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        # Complete WITHOUT success_reason
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"x": 1},
+            duration_ms=1.0,
+        )
+
+        assert isinstance(completed, NodeStateCompleted)
+        assert completed.success_reason_json is None
 
     def test_validation_warnings_captured(
         self,
-        minimal_pipeline_with_transform,
-        landscape_recorder,
+        recorder: LandscapeRecorder,
     ) -> None:
         """validation_warnings flow through to audit trail."""
-        # Run pipeline with DataQualityTransform
-        # Query node_states
-        # Assert validation_warnings present in success_reason_json
-        pass
+        run_id = recorder.create_run(
+            settings_hash="test",
+            settings_snapshot={},
+            code_version="test",
+        )
+        recorder.register_node(
+            node_id="transform_1",
+            run_id=run_id,
+            node_type=NodeType.TRANSFORM,
+            plugin_name="data_quality_transform",
+            config={},
+        )
+        row_id = recorder.create_source_row(
+            run_id=run_id,
+            row_index=0,
+            raw_data={"amount": 950},
+        )
+        token = recorder.create_token(
+            run_id=run_id,
+            row_id=row_id,
+            row_data={"amount": 950},
+        )
+        state = recorder.create_node_state(
+            token_id=token.token_id,
+            node_id="transform_1",
+            run_id=run_id,
+            step_index=0,
+            input_data={"amount": 950},
+        )
+
+        success_reason: TransformSuccessReason = {
+            "action": "validated",
+            "validation_warnings": ["amount near threshold (950 of 1000 limit)"],
+        }
+
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"amount": 950},
+            duration_ms=2.0,
+            success_reason=success_reason,
+        )
+
+        assert isinstance(completed, NodeStateCompleted)
+        assert completed.success_reason_json is not None
+        parsed = json.loads(completed.success_reason_json)
+        assert parsed["action"] == "validated"
+        assert len(parsed["validation_warnings"]) == 1
+        assert "950" in parsed["validation_warnings"][0]
+
+    def test_success_reason_round_trips_through_repository(
+        self,
+        recorder: LandscapeRecorder,
+    ) -> None:
+        """success_reason survives write → read via repository."""
+        run_id = recorder.create_run(
+            settings_hash="test",
+            settings_snapshot={},
+            code_version="test",
+        )
+        recorder.register_node(
+            node_id="transform_1",
+            run_id=run_id,
+            node_type=NodeType.TRANSFORM,
+            plugin_name="test_transform",
+            config={},
+        )
+        row_id = recorder.create_source_row(
+            run_id=run_id,
+            row_index=0,
+            raw_data={"x": 1},
+        )
+        token = recorder.create_token(
+            run_id=run_id,
+            row_id=row_id,
+            row_data={"x": 1},
+        )
+        state = recorder.create_node_state(
+            token_id=token.token_id,
+            node_id="transform_1",
+            run_id=run_id,
+            step_index=0,
+            input_data={"x": 1},
+        )
+
+        success_reason: TransformSuccessReason = {
+            "action": "enriched",
+            "fields_added": ["enrichment_score"],
+            "metadata": {"source": "external_api"},
+        }
+
+        # Write
+        recorder.complete_node_state(
+            state_id=state.state_id,
+            status=NodeStateStatus.COMPLETED,
+            output_data={"x": 1, "enrichment_score": 0.95},
+            duration_ms=10.0,
+            success_reason=success_reason,
+        )
+
+        # Read back via get_node_state (uses repository)
+        loaded = recorder.get_node_state(state.state_id)
+        assert isinstance(loaded, NodeStateCompleted)
+        assert loaded.success_reason_json is not None
+        parsed = json.loads(loaded.success_reason_json)
+        assert parsed["action"] == "enriched"
+        assert parsed["fields_added"] == ["enrichment_score"]
+        assert parsed["metadata"]["source"] == "external_api"
 ```
 
 **Step 2: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/engine/test_transform_success_reason.py -v`
-Expected: PASS (after implementing fixtures)
+Expected: PASS
 
 **Step 3: Commit**
 
@@ -735,8 +907,12 @@ git add tests/engine/test_transform_success_reason.py
 git commit -m "$(cat <<'EOF'
 test(engine): add integration tests for TransformSuccessReason
 
-Verify success_reason flows from transform through executor to
-audit trail correctly.
+Verify success_reason flows from transform through recorder to
+audit trail correctly. Tests cover:
+- success_reason stored when provided
+- success_reason_json NULL when not provided
+- validation_warnings captured correctly
+- Round-trip through repository (write → read)
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -745,11 +921,11 @@ EOF
 
 ---
 
-## Task 9: Final Verification
+## Task 10: Final Verification
 
 **Step 1: Run full test suite**
 
-Run: `.venv/bin/python -m pytest tests/ -v`
+Run: `.venv/bin/python -m pytest tests/ -x --tb=short`
 Expected: PASS
 
 **Step 2: Run mypy**
@@ -762,38 +938,10 @@ Expected: No new errors
 Run: `.venv/bin/python -m ruff check src/elspeth/`
 Expected: No errors
 
-**Step 4: Verify end-to-end**
-
-Create a test pipeline with a transform that uses success_reason:
-```yaml
-source:
-  plugin: csv
-  options:
-    path: test_data.csv
-
-transforms:
-  - plugin: passthrough  # Or a custom transform with success_reason
-
-sinks:
-  output:
-    plugin: csv
-    options:
-      path: output.csv
-```
-
-Run: `elspeth run --settings test_pipeline.yaml --execute`
-
-Query the audit database:
-```sql
-SELECT state_id, status, success_reason_json
-FROM node_states
-WHERE success_reason_json IS NOT NULL;
-```
-
-**Step 5: Close bead**
+**Step 4: Close bead**
 
 ```bash
-bd close <bead-id> --reason="Wired up TransformSuccessReason: schema, recorder, executors, MCP. Transforms can now report action, fields_modified, validation_warnings."
+bd close <bead-id> --reason="Wired up TransformSuccessReason: schema, repository, recorder, executors. Transforms can now report action, fields_modified, validation_warnings."
 ```
 
 ---
@@ -806,10 +954,9 @@ bd close <bead-id> --reason="Wired up TransformSuccessReason: schema, recorder, 
 | `contracts/results.py` | Add `success_reason` field and factory parameters |
 | `contracts/audit.py` | Add `success_reason_json` to `NodeStateCompleted` |
 | `core/landscape/schema.py` | Add `success_reason_json` column |
+| `core/landscape/repositories.py` | Load `success_reason_json` in `NodeStateRepository` |
 | `core/landscape/recorder.py` | Accept and store `success_reason` |
-| `engine/executors.py` | Pass `success_reason` through to recorder |
-| `mcp/server.py` | Expose in `explain_token` output |
-| Alembic migration | Add column to existing databases |
+| `engine/executors.py` | Pass `success_reason` through to recorder (lines 353, 1199) |
 
 **Key Design Decisions:**
 
@@ -822,6 +969,8 @@ bd close <bead-id> --reason="Wired up TransformSuccessReason: schema, recorder, 
 4. **Renamed to TransformSuccessReason** - Avoids confusion with `TransformErrorReason`.
 
 5. **validation_warnings not validation_errors** - Emphasizes these are non-blocking (warnings that don't fail the row).
+
+6. **Raw JSON string in MCP output** - Consistent with `error_json` and `context_after_json`. Consumers parse as needed.
 
 **Audit Trail Value:**
 

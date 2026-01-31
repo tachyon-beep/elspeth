@@ -692,7 +692,12 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
         output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
 
-        return TransformResult.success(output)
+        # Build fields_added from output_mapping suffixes for this query
+        fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": fields_added},
+        )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -813,7 +818,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             if result.row is not None:
                 output.update(result.row)
 
-        return TransformResult.success(output)
+        # Collect all fields added across all queries
+        all_fields_added = [
+            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
+        ]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": all_fields_added},
+        )
 
     def _execute_queries_parallel(
         self,

@@ -158,7 +158,10 @@ class TransformProtocol(Protocol):
 
             def process(self, row: dict, ctx: PluginContext) -> TransformResult:
                 enriched = {**row, "timestamp": datetime.now().isoformat()}
-                return TransformResult.success(enriched)
+                return TransformResult.success(
+                    enriched,
+                    success_reason={"action": "enriched", "fields_added": ["timestamp"]},
+                )
     """
 
     name: str

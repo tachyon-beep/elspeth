@@ -159,7 +159,7 @@ class TestRowProcessorWorkQueue:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "processed": True})
+                return TransformResult.success({**row, "processed": True}, success_reason={"action": "processed"})
 
         # Config-driven fork gate
         splitter_gate = GateSettings(
@@ -254,7 +254,7 @@ class TestRowProcessorRetry:
                 raise ConnectionError("Transient network error")
             # Return success on 3rd attempt
             return (
-                TransformResult.success({"result": "ok"}),
+                TransformResult.success({"result": "ok"}, success_reason={"action": "test"}),
                 Mock(
                     token_id="t1",
                     row_id="r1",
