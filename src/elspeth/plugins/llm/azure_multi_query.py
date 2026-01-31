@@ -10,6 +10,7 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -188,6 +189,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Client caching (same pattern as AzureLLMTransform)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
@@ -225,8 +228,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""
@@ -249,6 +254,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
                 )

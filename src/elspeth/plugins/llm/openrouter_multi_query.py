@@ -15,6 +15,7 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -335,6 +336,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Client caching (same pattern as OpenRouterLLMTransform)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._http_clients: dict[str, AuditedHTTPClient] = {}
         self._http_clients_lock = Lock()
 
@@ -371,8 +374,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -390,6 +395,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     timeout=self._timeout,
                     base_url=self._base_url,
                     headers={

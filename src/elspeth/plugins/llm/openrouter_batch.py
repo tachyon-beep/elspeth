@@ -294,6 +294,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     response_data=None,
                     error={"reason": "result_missing", "row_index": idx},
                     latency_ms=None,
+                    provider="openrouter",
                 )
 
             elif isinstance(result, Exception):
@@ -359,19 +360,13 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 error={
                     "reason": "template_rendering_failed",
                     "error": str(e),
-                    "template_hash": self._template.template_hash,
                 },
-                latency_ms=0,  # Template rendering is near-instantaneous
+                latency_ms=None,
+                provider="openrouter",
             )
-            return {
-                "error": {
-                    "reason": "template_rendering_failed",
-                    "error": str(e),
-                    "template_hash": self._template.template_hash,
-                }
-            }
+            return {"error": {"reason": "template_rendering_failed", "error": str(e)}}
 
-        # 2. Build request
+        # 2. Build request body (OUR CODE - let exceptions crash)
         messages: list[dict[str, str]] = []
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
@@ -385,8 +380,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         if self._max_tokens:
             request_body["max_tokens"] = self._max_tokens
 
-        # 3. Make HTTP request (EXTERNAL - wrap)
-        # Use the actual batch state_id, not synthetic per-row IDs
+        # 3. Make API call (EXTERNAL BOUNDARY - wrap and audit)
+        # We need state_id to record the call - batch transforms should always have it
         # (synthetic IDs would fail foreign key constraints in calls table)
         state_id = ctx.state_id
         if state_id is None:
@@ -413,6 +408,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 response_data=None,
                 error={"status_code": e.response.status_code, "error": str(e)},
                 latency_ms=latency_ms,
+                provider="openrouter",
             )
             return {
                 "error": {
@@ -431,6 +427,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 response_data=None,
                 error={"error": str(e), "error_type": type(e).__name__},
                 latency_ms=latency_ms,
+                provider="openrouter",
             )
             return {
                 "error": {
@@ -451,6 +448,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 response_data=None,
                 error={"reason": "invalid_json", "error": str(e)},
                 latency_ms=latency_ms,
+                provider="openrouter",
             )
             return {
                 "error": {
@@ -469,6 +467,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 response_data=None,
                 error={"reason": "invalid_json_type", "actual": type(data).__name__},
                 latency_ms=latency_ms,
+                provider="openrouter",
             )
             return {
                 "error": {
@@ -489,6 +488,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                     response_data=data,
                     error={"reason": "empty_choices"},
                     latency_ms=latency_ms,
+                    provider="openrouter",
                 )
                 return {"error": {"reason": "empty_choices", "response": data}}
 
@@ -501,6 +501,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 response_data=data,
                 error={"reason": "malformed_response", "error": str(e)},
                 latency_ms=latency_ms,
+                provider="openrouter",
             )
             return {
                 "error": {
@@ -522,6 +523,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             request_data={"row_index": idx, **request_body},
             response_data={"content": content, "usage": usage, "model": response_model},
             latency_ms=latency_ms,
+            provider="openrouter",
         )
 
         # 7. Build output row (OUR CODE - let exceptions crash)

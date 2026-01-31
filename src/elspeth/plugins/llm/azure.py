@@ -8,6 +8,7 @@ concurrent row processing with FIFO output ordering.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -176,8 +177,10 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             required_fields=schema_config.required_fields,
         )
 
-        # Recorder reference (set in on_start or first accept)
+        # Recorder and telemetry context (set in on_start)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
 
         # LLM client cache - ensures call_index uniqueness
         # Each state_id gets its own client with monotonically increasing call indices
@@ -219,12 +222,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference.
+        """Capture recorder and telemetry context.
 
         Called by the engine at pipeline start. Captures the landscape
-        recorder reference for use in worker threads.
+        recorder, run_id, and telemetry callback for use in worker threads.
         """
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -376,6 +381,8 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
                 )

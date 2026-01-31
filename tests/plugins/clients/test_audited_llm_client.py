@@ -136,6 +136,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
             provider="openai",
         )
@@ -171,6 +173,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -199,6 +203,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -225,6 +231,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -247,6 +255,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -264,6 +274,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -286,6 +298,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
             provider="azure",
         )
@@ -306,6 +320,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -357,6 +373,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -424,6 +442,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -497,6 +517,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -576,6 +598,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 
@@ -625,6 +649,8 @@ class TestAuditedLLMClient:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=openai_client,
         )
 

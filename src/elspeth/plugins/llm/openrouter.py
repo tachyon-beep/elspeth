@@ -7,6 +7,7 @@ Uses BatchTransformMixin for concurrent row processing with FIFO output ordering
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -158,6 +159,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Recorder reference (set in on_start or first accept)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
 
         # HTTP client cache - ensures call_index uniqueness across retries
         # Each state_id gets its own client with monotonically increasing call indices
@@ -197,12 +200,14 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference.
+        """Capture recorder and telemetry context.
 
         Called by the engine at pipeline start. Captures the landscape
-        recorder reference for use in worker threads.
+        recorder, run_id, and telemetry callback for use in worker threads.
         """
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -380,6 +385,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     timeout=self._timeout,
                     base_url=self._base_url,
                     headers={

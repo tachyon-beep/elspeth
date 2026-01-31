@@ -442,6 +442,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=upload_request,
                 response_data={"file_id": batch_file.id, "status": batch_file.status},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
         except Exception as e:
             # External API failure - record error and return structured result
@@ -451,6 +452,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=upload_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
             return TransformResult.error(
                 {
@@ -481,6 +483,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=batch_request,
                 response_data={"batch_id": batch.id, "status": batch.status},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
         except Exception as e:
             # External API failure - record error and return structured result
@@ -490,6 +493,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=batch_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
             return TransformResult.error(
                 {
@@ -562,6 +566,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     "output_file_id": getattr(batch, "output_file_id", None),
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
         except Exception as e:
             # External API failure - record error and return structured result
@@ -571,6 +576,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=retrieve_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
             # DON'T clear checkpoint - batch exists on Azure, retry should resume checking
             return TransformResult.error(
@@ -690,6 +696,7 @@ class AzureBatchLLMTransform(BaseTransform):
                     "content_length": len(output_content.text),
                 },
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
         except Exception as e:
             # External API failure - record error and return structured result
@@ -699,6 +706,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 request_data=download_request,
                 response_data={"error": str(e), "error_type": type(e).__name__},
                 latency_ms=(time.perf_counter() - start) * 1000,
+                provider="azure",
             )
             # DON'T clear checkpoint - batch completed on Azure, retry should re-attempt download
             return TransformResult.error(
@@ -889,6 +897,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 },
                 response_data=response_data,
                 error=error_data,
+                provider="azure",
             )
 
         # Clear checkpoint after successful completion

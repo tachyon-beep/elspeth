@@ -15,6 +15,7 @@ with FIFO output ordering) and PooledExecutor for internal concurrency.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -187,11 +188,10 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         # BatchTransformMixin processes rows individually, output schema matches input
         self.output_schema = schema
 
-        # Underlying HTTP client (stateless, can be shared)
-        self._underlying_http_client: httpx.Client | None = None
-
         # Recorder reference for pooled execution (set in on_start or first accept)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
 
         # Create pooled executor if pool_size > 1 (for internal concurrency)
         if cfg.pool_config is not None:
@@ -208,8 +208,10 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         self._batch_initialized = False
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def connect_output(
         self,
@@ -380,12 +382,6 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         else:
             return self._fields
 
-    def _get_underlying_http_client(self) -> httpx.Client:
-        """Get or create the underlying HTTP client (stateless, shared across all calls)."""
-        if self._underlying_http_client is None:
-            self._underlying_http_client = httpx.Client(timeout=30.0)
-        return self._underlying_http_client
-
     def _get_http_client(self, state_id: str) -> Any:  # Returns AuditedHTTPClient
         """Get or create audited HTTP client for a state_id.
 
@@ -410,133 +406,62 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     timeout=30.0,
+                    headers={
+                        "Ocp-Apim-Subscription-Key": self._api_key,
+                        "Content-Type": "application/json",
+                    },
                 )
             return self._http_clients[state_id]
 
     def _analyze_content(
         self,
         text: str,
-        state_id: str | None,
+        state_id: str,
     ) -> dict[str, int]:
         """Call Azure Content Safety API.
 
         Args:
             text: Text to analyze for content safety
-            state_id: State ID for audit trail recording (None if no audit)
+            state_id: State ID for audit trail recording
 
         Returns dict with category -> severity mapping.
 
-        Records all API calls to audit trail for full traceability.
+        Uses AuditedHTTPClient for automatic audit recording and telemetry emission.
         """
-        import time
-
-        from elspeth.contracts import CallStatus, CallType
-
-        # Always use underlying client - we'll record manually to ensure correct status
-        client = self._get_underlying_http_client()
+        # Use AuditedHTTPClient - handles recording and telemetry automatically
+        http_client = self._get_http_client(state_id)
 
         url = f"{self._endpoint}/contentsafety/text:analyze?api-version={self.API_VERSION}"
 
-        # Build request data for audit
-        request_data = {
-            "method": "POST",
-            "url": url,
-            "json": {"text": text},
-            "headers": {"Content-Type": "application/json"},  # Don't record API key
-        }
+        # Make HTTP call - AuditedHTTPClient records to Landscape and emits telemetry
+        response = http_client.post(url, json={"text": text})
+        response.raise_for_status()
 
-        start = time.perf_counter()
-
+        # Parse response into category -> severity mapping
+        # Azure API responses are external data (Tier 3: Zero Trust) - wrap parsing
         try:
-            # Make HTTP call (without automatic audit recording)
-            response = client.post(
-                url,
-                json={"text": text},
-                headers={
-                    "Ocp-Apim-Subscription-Key": self._api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
+            data = response.json()
+            # Initialize all categories to 0 (safe) - Azure only returns categories
+            # where content was detected, missing = no harmful content
+            result: dict[str, int] = {
+                "hate": 0,
+                "violence": 0,
+                "sexual": 0,
+                "self_harm": 0,
+            }
+            for item in data["categoriesAnalysis"]:
+                category = item["category"].lower().replace("selfharm", "self_harm")
+                result[category] = item["severity"]
 
-            latency_ms = (time.perf_counter() - start) * 1000
+            return result
 
-            # Parse response into category -> severity mapping
-            # Azure API responses are external data (Tier 3: Zero Trust) - wrap parsing
-            try:
-                data = response.json()
-                # Initialize all categories to 0 (safe) - Azure only returns categories
-                # where content was detected, missing = no harmful content
-                result: dict[str, int] = {
-                    "hate": 0,
-                    "violence": 0,
-                    "sexual": 0,
-                    "self_harm": 0,
-                }
-                for item in data["categoriesAnalysis"]:
-                    category = item["category"].lower().replace("selfharm", "self_harm")
-                    result[category] = item["severity"]
-
-                # SUCCESS - response was valid and parseable
-                if state_id is not None and self._recorder is not None:
-                    response_data = {
-                        "status_code": response.status_code,
-                        "body_size": len(response.content),
-                        "body": data,
-                    }
-                    self._recorder.record_call(
-                        state_id=state_id,
-                        call_index=self._recorder.allocate_call_index(state_id),
-                        call_type=CallType.HTTP,
-                        status=CallStatus.SUCCESS,
-                        request_data=request_data,
-                        response_data=response_data,
-                        latency_ms=latency_ms,
-                    )
-
-                return result
-
-            except (KeyError, TypeError, ValueError) as e:
-                # Malformed response - record as ERROR since we can't use the response
-                if state_id is not None and self._recorder is not None:
-                    response_data = {
-                        "status_code": response.status_code,
-                        "body_size": len(response.content),
-                        "body": response.text,  # Store raw text for debugging
-                    }
-                    self._recorder.record_call(
-                        state_id=state_id,
-                        call_index=self._recorder.allocate_call_index(state_id),
-                        call_type=CallType.HTTP,
-                        status=CallStatus.ERROR,
-                        request_data=request_data,
-                        response_data=response_data,
-                        error={
-                            "type": "MalformedResponse",
-                            "message": f"Response parsing failed: {e}",
-                        },
-                        latency_ms=latency_ms,
-                    )
-                raise httpx.RequestError(f"Malformed API response: {e}") from e
-
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            # Network/HTTP errors - record as ERROR
-            latency_ms = (time.perf_counter() - start) * 1000
-            if state_id is not None and self._recorder is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=self._recorder.allocate_call_index(state_id),
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data=request_data,
-                    error={
-                        "type": type(e).__name__,
-                        "message": str(e),
-                    },
-                    latency_ms=latency_ms,
-                )
-            raise
+        except (KeyError, TypeError, ValueError) as e:
+            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
+            # (because we got a 200), but the response is unusable at the application level
+            raise httpx.RequestError(f"Malformed API response: {e}") from e
 
     def _check_thresholds(
         self,
@@ -589,10 +514,5 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
             for client in self._http_clients.values():
                 client.close()
             self._http_clients.clear()
-
-        # Close underlying stateless client
-        if self._underlying_http_client is not None:
-            self._underlying_http_client.close()
-            self._underlying_http_client = None
 
         self._recorder = None

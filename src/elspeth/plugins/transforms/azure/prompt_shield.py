@@ -14,6 +14,7 @@ with FIFO output ordering) and PooledExecutor for internal concurrency.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -161,12 +162,13 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         # Per-state_id HTTP client cache for audit trail
         # Each AuditedHTTPClient has its own call_index counter, ensuring
         # (state_id, call_index) uniqueness even across retries.
-        self._underlying_http_client: httpx.Client | None = None
         self._http_clients: dict[str, Any] = {}  # state_id -> AuditedHTTPClient
         self._http_clients_lock = Lock()
 
         # Recorder reference for pooled execution (set in on_start or first accept)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
 
         # Create pooled executor if pool_size > 1 (for internal concurrency)
         if cfg.pool_config is not None:
@@ -178,8 +180,10 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._batch_initialized = False
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def connect_output(
         self,
@@ -349,12 +353,6 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         else:
             return self._fields
 
-    def _get_underlying_http_client(self) -> httpx.Client:
-        """Get or create stateless HTTP client for API calls without audit recording."""
-        if self._underlying_http_client is None:
-            self._underlying_http_client = httpx.Client(timeout=30.0)
-        return self._underlying_http_client
-
     def _get_http_client(self, state_id: str) -> Any:
         """Get or create audited HTTP client for a state_id.
 
@@ -377,130 +375,62 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     timeout=30.0,
+                    headers={
+                        "Ocp-Apim-Subscription-Key": self._api_key,
+                        "Content-Type": "application/json",
+                    },
                 )
             return self._http_clients[state_id]
 
     def _analyze_prompt(
         self,
         text: str,
-        state_id: str | None,
+        state_id: str,
     ) -> dict[str, bool]:
         """Call Azure Prompt Shield API.
 
         Args:
             text: Text to analyze for prompt injection
-            state_id: State ID for audit trail recording (None if no audit)
+            state_id: State ID for audit trail recording
 
         Returns dict with:
             user_prompt_attack: True if jailbreak detected in user prompt
             document_attack: True if prompt injection detected in any document
 
-        Records all API calls to audit trail for full traceability.
+        Uses AuditedHTTPClient for automatic audit recording and telemetry emission.
         """
-        import time
-
-        from elspeth.contracts import CallStatus, CallType
-
-        # Always use underlying client - we'll record manually to ensure correct status
-        client = self._get_underlying_http_client()
+        # Use AuditedHTTPClient - handles recording and telemetry automatically
+        http_client = self._get_http_client(state_id)
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
 
-        # Build request data for audit
-        request_data_for_audit = {
-            "method": "POST",
-            "url": url,
-            "json": {"userPrompt": text, "documents": [text]},
-            "headers": {"Content-Type": "application/json"},  # Don't record API key
-        }
+        # Make HTTP call - AuditedHTTPClient records to Landscape and emits telemetry
+        response = http_client.post(
+            url,
+            json={"userPrompt": text, "documents": [text]},
+        )
+        response.raise_for_status()
 
-        start = time.perf_counter()
-
+        # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
+        # Security transform: fail CLOSED on malformed response
         try:
-            # Make HTTP call (without automatic audit recording)
-            response = client.post(
-                url,
-                json={"userPrompt": text, "documents": [text]},
-                headers={
-                    "Ocp-Apim-Subscription-Key": self._api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
+            data = response.json()
+            user_attack = data["userPromptAnalysis"]["attackDetected"]
+            documents_analysis = data["documentsAnalysis"]
+            doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
 
-            latency_ms = (time.perf_counter() - start) * 1000
+            return {
+                "user_prompt_attack": user_attack,
+                "document_attack": doc_attack,
+            }
 
-            # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
-            # Security transform: fail CLOSED on malformed response
-            try:
-                data = response.json()
-                user_attack = data["userPromptAnalysis"]["attackDetected"]
-                documents_analysis = data["documentsAnalysis"]
-                doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
-
-                # SUCCESS - response was valid and parseable
-                if state_id is not None and self._recorder is not None:
-                    response_data = {
-                        "status_code": response.status_code,
-                        "body_size": len(response.content),
-                        "body": data,
-                    }
-                    self._recorder.record_call(
-                        state_id=state_id,
-                        call_index=self._recorder.allocate_call_index(state_id),
-                        call_type=CallType.HTTP,
-                        status=CallStatus.SUCCESS,
-                        request_data=request_data_for_audit,
-                        response_data=response_data,
-                        latency_ms=latency_ms,
-                    )
-
-                return {
-                    "user_prompt_attack": user_attack,
-                    "document_attack": doc_attack,
-                }
-
-            except (KeyError, TypeError) as e:
-                # Malformed response - record as ERROR since we can't use the response
-                if state_id is not None and self._recorder is not None:
-                    response_data = {
-                        "status_code": response.status_code,
-                        "body_size": len(response.content),
-                        "body": response.text,  # Store raw text for debugging
-                    }
-                    self._recorder.record_call(
-                        state_id=state_id,
-                        call_index=self._recorder.allocate_call_index(state_id),
-                        call_type=CallType.HTTP,
-                        status=CallStatus.ERROR,
-                        request_data=request_data_for_audit,
-                        response_data=response_data,
-                        error={
-                            "type": "MalformedResponse",
-                            "message": f"Response parsing failed: {e}",
-                        },
-                        latency_ms=latency_ms,
-                    )
-                raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
-
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            # Network/HTTP errors - record as ERROR
-            latency_ms = (time.perf_counter() - start) * 1000
-            if state_id is not None and self._recorder is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=self._recorder.allocate_call_index(state_id),
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data=request_data_for_audit,
-                    error={
-                        "type": type(e).__name__,
-                        "message": str(e),
-                    },
-                    latency_ms=latency_ms,
-                )
-            raise
+        except (KeyError, TypeError) as e:
+            # Malformed response - the HTTP call was recorded as SUCCESS by AuditedHTTPClient
+            # (because we got a 200), but the response is unusable at the application level
+            raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
 
     def close(self) -> None:
         """Release resources."""
@@ -517,10 +447,5 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
             for client in self._http_clients.values():
                 client.close()
             self._http_clients.clear()
-
-        # Close underlying stateless client
-        if self._underlying_http_client is not None:
-            self._underlying_http_client.close()
-            self._underlying_http_client = None
 
         self._recorder = None

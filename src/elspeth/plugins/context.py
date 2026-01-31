@@ -11,8 +11,10 @@ Phase 3 Integration Points:
 """
 
 import logging
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -110,6 +112,12 @@ class PluginContext:
     # Set by executor when processing LLM transforms
     llm_client: "AuditedLLMClient | None" = None
     http_client: "AuditedHTTPClient | None" = None
+
+    # === Phase 6: Telemetry Callback ===
+    # Callback to emit telemetry events for external calls.
+    # Always present - when telemetry is disabled, orchestrator sets this to a no-op.
+    # Plugins ALWAYS call this after successful Landscape recording - no None checks.
+    telemetry_emit: Callable[[Any], None] = field(default=lambda event: None)
 
     # === Phase 6: Checkpoint API ===
     # Used by batch transforms (e.g., azure_batch_llm) for crash recovery.
@@ -220,11 +228,16 @@ class PluginContext:
         response_data: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
         latency_ms: float | None = None,
+        *,
+        provider: str = "unknown",
     ) -> "Call | None":
-        """Record an external API call to the audit trail.
+        """Record an external API call to the audit trail and emit telemetry.
 
         Provides a convenient way for transforms to record external calls
         without managing call indices manually. Requires state_id to be set.
+
+        After recording to Landscape (the legal record), emits an
+        ExternalCallCompleted telemetry event for operational visibility.
 
         Args:
             call_type: Type of call (LLM, HTTP, SQL, FILESYSTEM)
@@ -233,6 +246,7 @@ class PluginContext:
             response_data: Response payload (optional for errors)
             error: Error details if status is ERROR
             latency_ms: Call duration in milliseconds
+            provider: Provider name for telemetry (e.g., "openrouter", "azure")
 
         Returns:
             The recorded Call, or None if landscape not configured
@@ -253,7 +267,7 @@ class PluginContext:
             call_index = self._call_index
             self._call_index += 1
 
-        return self.landscape.record_call(
+        recorded_call = self.landscape.record_call(
             state_id=self.state_id,
             call_index=call_index,
             call_type=call_type,
@@ -263,6 +277,47 @@ class PluginContext:
             error=error,
             latency_ms=latency_ms,
         )
+
+        # Emit telemetry AFTER successful Landscape recording
+        # Wrapped in try/except to prevent telemetry failures from affecting callers
+        try:
+            from elspeth.core.canonical import stable_hash
+            from elspeth.telemetry.events import ExternalCallCompleted
+
+            # Extract token usage for LLM calls if available
+            token_usage = None
+            if call_type.value == "LLM" and response_data is not None:
+                usage = response_data.get("usage")
+                if usage and isinstance(usage, dict):
+                    token_usage = usage
+
+            self.telemetry_emit(
+                ExternalCallCompleted(
+                    timestamp=datetime.now(UTC),
+                    run_id=self.run_id,
+                    state_id=self.state_id,
+                    call_type=call_type,
+                    provider=provider,
+                    status=status,
+                    latency_ms=latency_ms or 0.0,
+                    request_hash=stable_hash(request_data),
+                    response_hash=stable_hash(response_data) if response_data else None,
+                    token_usage=token_usage,
+                )
+            )
+        except Exception as tel_err:
+            # Telemetry failure must not corrupt the call recording
+            logger.warning(
+                "telemetry_emit_failed in record_call",
+                extra={
+                    "error": str(tel_err),
+                    "error_type": type(tel_err).__name__,
+                    "run_id": self.run_id,
+                    "state_id": self.state_id,
+                },
+            )
+
+        return recorded_call
 
     def record_validation_error(
         self,

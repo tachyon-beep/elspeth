@@ -3,6 +3,7 @@
 
 import itertools
 from datetime import datetime
+from typing import Any
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -101,8 +102,11 @@ class TestLLMClientTelemetry:
         assert event.provider == "azure"
         assert event.status == CallStatus.SUCCESS
         assert event.latency_ms > 0
-        assert event.request_hash == "req_hash_123"
-        assert event.response_hash == "resp_hash_456"
+        # Hashes are computed from request/response data
+        assert event.request_hash is not None
+        assert len(event.request_hash) == 64  # SHA-256 hex digest
+        assert event.response_hash is not None
+        assert len(event.response_hash) == 64  # SHA-256 hex digest
         assert event.token_usage == {"prompt_tokens": 10, "completion_tokens": 5}
         assert isinstance(event.timestamp, datetime)
 
@@ -142,23 +146,28 @@ class TestLLMClientTelemetry:
         assert event.provider == "openai"
         assert event.status == CallStatus.ERROR
         assert event.latency_ms > 0
-        assert event.request_hash == "req_hash_123"
+        # Hash is computed from request data
+        assert event.request_hash is not None
+        assert len(event.request_hash) == 64  # SHA-256 hex digest
         assert event.response_hash is None  # No response on error
         assert event.token_usage is None
 
-    def test_no_telemetry_when_callback_is_none(self) -> None:
-        """No telemetry emitted when telemetry_emit callback is None."""
+    def test_noop_callback_works(self) -> None:
+        """No-op callback (telemetry disabled) works without error."""
         recorder = self._create_mock_recorder()
         openai_client = self._create_mock_openai_client()
 
-        # No telemetry callback provided
+        # No-op callback (simulates telemetry disabled)
+        def noop_callback(event: Any) -> None:
+            pass
+
         client = AuditedLLMClient(
             recorder=recorder,
             state_id="state_123",
             underlying_client=openai_client,
             provider="openai",
             run_id="run_abc",
-            telemetry_emit=None,
+            telemetry_emit=noop_callback,
         )
 
         response = client.chat_completion(
@@ -166,40 +175,10 @@ class TestLLMClientTelemetry:
             messages=[{"role": "user", "content": "Hello"}],
         )
 
-        # Call succeeds without error (no exception from missing callback)
+        # Call succeeds without error
         assert response.content == "Hello!"
         # Audit trail is still recorded
         recorder.record_call.assert_called_once()
-
-    def test_no_telemetry_when_run_id_is_none(self) -> None:
-        """No telemetry emitted when run_id is None."""
-        recorder = self._create_mock_recorder()
-        openai_client = self._create_mock_openai_client()
-
-        emitted_events: list[ExternalCallCompleted] = []
-
-        def telemetry_emit(event: ExternalCallCompleted) -> None:
-            emitted_events.append(event)
-
-        # run_id is None
-        client = AuditedLLMClient(
-            recorder=recorder,
-            state_id="state_123",
-            underlying_client=openai_client,
-            provider="openai",
-            run_id=None,
-            telemetry_emit=telemetry_emit,
-        )
-
-        response = client.chat_completion(
-            model="gpt-4",
-            messages=[{"role": "user", "content": "Hello"}],
-        )
-
-        # Call succeeds
-        assert response.content == "Hello!"
-        # No telemetry emitted (run_id is required)
-        assert len(emitted_events) == 0
 
     def test_telemetry_emitted_after_landscape_recording(self) -> None:
         """Telemetry is emitted AFTER Landscape recording succeeds."""
