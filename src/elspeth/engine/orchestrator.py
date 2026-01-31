@@ -1545,7 +1545,24 @@ class Orchestrator:
                                 rows_coalesce_failed += 1
 
                     # Source iteration complete - for loop ends here
-                    pass  # Explicit pass before exception handlers
+
+                    # ─────────────────────────────────────────────────────────────────
+                    # Record field resolution for empty sources (header-only files).
+                    # For sources with rows, this is recorded inside the loop on the
+                    # first iteration. For empty sources, the loop never executes, but
+                    # the source may still have computed field resolution (e.g., CSV
+                    # sources read headers before yielding data rows).
+                    # ─────────────────────────────────────────────────────────────────
+                    if not field_resolution_recorded:
+                        field_resolution = config.source.get_field_resolution()
+                        if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                            resolution_mapping, normalization_version = field_resolution
+                            recorder.record_source_field_resolution(
+                                run_id=run_id,
+                                resolution_mapping=resolution_mapping,
+                                normalization_version=normalization_version,
+                            )
+                            field_resolution_recorded = True
 
                 except BatchPendingError:
                     # BatchPendingError is a control-flow signal, not an error.

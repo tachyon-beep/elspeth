@@ -165,7 +165,10 @@ class TransformExecutor:
 
             # Connect output (one-time setup)
             # Use _pool_size stored by LLM transforms, default to 30
+            # Cap to max_workers if configured (enforces global concurrency limit)
             max_pending = getattr(transform, "_pool_size", 30)
+            if self._max_workers is not None:
+                max_pending = min(max_pending, self._max_workers)
             transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
             transform._batch_initialized = True  # type: ignore[attr-defined]
 

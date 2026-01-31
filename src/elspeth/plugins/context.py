@@ -341,7 +341,7 @@ class PluginContext:
                     status=status,
                     latency_ms=latency_ms or 0.0,
                     request_hash=stable_hash(request_data),
-                    response_hash=stable_hash(response_data) if response_data else None,
+                    response_hash=stable_hash(response_data) if response_data is not None else None,
                     token_usage=token_usage,
                 )
             )

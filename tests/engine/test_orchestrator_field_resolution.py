@@ -192,3 +192,89 @@ class TestFieldResolutionRecording:
         # Verify sink received data unchanged
         assert len(sink.results) == 2
         assert "user_id" in sink.results[0]
+
+    def test_field_resolution_recorded_for_empty_source(self, tmp_path: Path, payload_store) -> None:
+        """Field resolution is recorded even when source yields zero rows.
+
+        This tests the edge case of header-only CSV files - the source plugin
+        reads headers (and computes field resolution) but yields no data rows.
+        The audit trail must still capture the header normalization mapping.
+
+        Regression test for: P3 review comment about empty source field resolution.
+        """
+        # Create CSV with headers ONLY - no data rows
+        csv_input = tmp_path / "input.csv"
+        csv_input.write_text("User ID,Amount $,Email Address\n")  # Header only!
+
+        # Create in-memory database
+        db = LandscapeDB.in_memory()
+
+        # Create source with normalize_fields=True
+        source = CSVSource(
+            {
+                "path": str(csv_input),
+                "normalize_fields": True,
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "discard",
+            }
+        )
+
+        class CollectSink(_TestSinkBase):
+            name = "collect"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+        sink = CollectSink()
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[],
+            sinks={"default": sink},
+        )
+
+        from tests.engine.orchestrator_test_helpers import build_production_graph
+
+        graph = build_production_graph(config)
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config=config, graph=graph, payload_store=payload_store)
+
+        # Query the audit database for field resolution
+        with db.engine.connect() as conn:
+            row = conn.execute(select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == result.run_id)).fetchone()
+
+            resolution_json = row[0]
+
+        # KEY ASSERTION: Resolution must be recorded even for empty sources
+        assert resolution_json is not None, (
+            "source_field_resolution_json was not recorded for header-only CSV. "
+            "Field resolution should be captured after the loop when no rows were processed."
+        )
+
+        # Verify the content - normalization still happened on headers
+        resolution_data = json.loads(resolution_json)
+        mapping = resolution_data["resolution_mapping"]
+        version = resolution_data["normalization_version"]
+
+        assert mapping["User ID"] == "user_id"
+        assert mapping["Amount $"] == "amount"
+        assert mapping["Email Address"] == "email_address"
+        assert version == "1.0.0"
+
+        # Verify no rows were processed
+        assert len(sink.results) == 0
+        assert result.rows_processed == 0
