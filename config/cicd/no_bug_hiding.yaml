@@ -578,42 +578,42 @@ allow_hits:
   reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
   safety: Default empty string when unset is intentional; enables dev mode without fingerprint key (consistent with config.py and database_sink.py)
   expires: null
-- key: cli.py:R1:_execute_pipeline:_format_run_summary:line=681
+- key: cli.py:R1:_execute_pipeline:_format_run_summary:line=684
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_summary:line=943
+- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_summary:line=953
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:_execute_resume_with_instances:_format_run_summary:line=1413
+- key: cli.py:R1:_execute_resume_with_instances:_format_run_summary:line=1430
   owner: architecture
   reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
-- key: cli.py:R1:health:line=1838
+- key: cli.py:R1:health:line=1862
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1850
+- key: cli.py:R4:health:line=1874
   owner: architecture
   reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1866
+- key: cli.py:R1:health:line=1890
   owner: architecture
   reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1878
+- key: cli.py:R4:health:line=1902
   owner: architecture
   reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
   safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1942
+- key: cli.py:R4:health:line=1966
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
@@ -623,62 +623,62 @@ allow_hits:
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1309
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1310
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1343
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1344
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1410
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1411
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1490
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1491
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1528
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1529
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2311
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2313
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2337
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2339
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2393
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2395
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2440
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2442
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2476
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2478
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2757
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2759
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2926
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2928
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
@@ -968,22 +968,22 @@ allow_hits:
   reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=73
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=83
   owner: architecture
   reason: 'Optional config field: format has sensible default of "json"'
   safety: Default "json" is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=87
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=98
   owner: architecture
   reason: 'Optional config field: output has sensible default of "stdout"'
   safety: Default "stdout" is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:line=123
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:line=135
   owner: architecture
   reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:line=216
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:line=228
   owner: architecture
   reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - pipeline continues

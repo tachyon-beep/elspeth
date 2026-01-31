@@ -473,6 +473,9 @@ def _execute_pipeline(
 ) -> ExecutionResult:
     """Execute a pipeline from configuration.
 
+    NOTE: This function is deprecated in favor of _execute_pipeline_with_instances.
+    Telemetry wiring added for P3-2026-02-01 fix.
+
     Args:
         config: Validated ElspethSettings instance.
         graph: Validated ExecutionGraph instance (must be pre-validated).
@@ -717,14 +720,18 @@ def _execute_pipeline(
             RuntimeCheckpointConfig,
             RuntimeConcurrencyConfig,
             RuntimeRateLimitConfig,
+            RuntimeTelemetryConfig,
         )
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.rate_limit import RateLimitRegistry
+        from elspeth.telemetry import create_telemetry_manager
 
         rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
         rate_limit_registry = RateLimitRegistry(rate_limit_config)
         concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
         checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
 
         # Create checkpoint manager if checkpointing is enabled
         checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
@@ -737,6 +744,7 @@ def _execute_pipeline(
             concurrency_config=concurrency_config,
             checkpoint_manager=checkpoint_manager,
             checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
         )
         result = orchestrator.run(
             pipeline_config,
@@ -753,6 +761,8 @@ def _execute_pipeline(
     finally:
         if rate_limit_registry is not None:
             rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
         db.close()
 
 
@@ -979,14 +989,18 @@ def _execute_pipeline_with_instances(
             RuntimeCheckpointConfig,
             RuntimeConcurrencyConfig,
             RuntimeRateLimitConfig,
+            RuntimeTelemetryConfig,
         )
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.rate_limit import RateLimitRegistry
+        from elspeth.telemetry import create_telemetry_manager
 
         rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
         rate_limit_registry = RateLimitRegistry(rate_limit_config)
         concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
         checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
 
         # Create checkpoint manager if checkpointing is enabled
         checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
@@ -999,6 +1013,7 @@ def _execute_pipeline_with_instances(
             concurrency_config=concurrency_config,
             checkpoint_manager=checkpoint_manager,
             checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
         )
         result = orchestrator.run(
             pipeline_config,
@@ -1015,6 +1030,8 @@ def _execute_pipeline_with_instances(
     finally:
         if rate_limit_registry is not None:
             rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
         db.close()
 
 
@@ -1449,13 +1466,17 @@ def _execute_resume_with_instances(
         RuntimeCheckpointConfig,
         RuntimeConcurrencyConfig,
         RuntimeRateLimitConfig,
+        RuntimeTelemetryConfig,
     )
     from elspeth.core.rate_limit import RateLimitRegistry
+    from elspeth.telemetry import create_telemetry_manager
 
     rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
     rate_limit_registry = RateLimitRegistry(rate_limit_config)
     concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
     checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+    telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+    telemetry_manager = create_telemetry_manager(telemetry_config)
 
     # Create checkpoint manager and orchestrator for resume
     checkpoint_manager = CheckpointManager(db)
@@ -1466,6 +1487,7 @@ def _execute_resume_with_instances(
         checkpoint_config=checkpoint_config,
         rate_limit_registry=rate_limit_registry,
         concurrency_config=concurrency_config,
+        telemetry_manager=telemetry_manager,
     )
 
     # Execute resume (payload_store is required for resume)
@@ -1479,8 +1501,10 @@ def _execute_resume_with_instances(
         settings=config,
     )
 
-    # Clean up rate limit registry
+    # Clean up rate limit registry and telemetry
     rate_limit_registry.close()
+    if telemetry_manager is not None:
+        telemetry_manager.close()
 
     return result
 

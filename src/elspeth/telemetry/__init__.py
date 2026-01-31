@@ -55,6 +55,7 @@ from elspeth.telemetry.events import (
     RunStarted,
 )
 from elspeth.telemetry.exporters import ConsoleExporter
+from elspeth.telemetry.factory import create_telemetry_manager
 from elspeth.telemetry.filtering import should_emit
 from elspeth.telemetry.manager import TelemetryManager
 from elspeth.telemetry.protocols import ExporterProtocol
@@ -70,5 +71,6 @@ __all__ = [
     "RunStarted",
     "TelemetryExporterError",
     "TelemetryManager",
+    "create_telemetry_manager",
     "should_emit",
 ]

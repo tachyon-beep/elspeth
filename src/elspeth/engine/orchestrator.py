@@ -1058,6 +1058,7 @@ class Orchestrator:
             coalesce_step_map=coalesce_step_map,
             payload_store=payload_store,
             clock=self._clock,
+            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
             telemetry_manager=self._telemetry,
         )
 
@@ -2232,6 +2233,7 @@ class Orchestrator:
             restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
             clock=self._clock,
+            max_workers=self._concurrency_config.max_workers if self._concurrency_config else None,
             telemetry_manager=self._telemetry,
         )
 
