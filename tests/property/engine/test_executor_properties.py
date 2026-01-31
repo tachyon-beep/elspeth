@@ -117,7 +117,7 @@ class TestTransformResultProperties:
         was passed in. This is critical for audit integrity - any corruption
         would break lineage queries.
         """
-        result = TransformResult.success(data)
+        result = TransformResult.success(data, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row == data
@@ -135,7 +135,7 @@ class TestTransformResultProperties:
         This means mutations to the original dict would affect the result.
         Plugins must not mutate input data after returning.
         """
-        result = TransformResult.success(data)
+        result = TransformResult.success(data, success_reason={"action": "test"})
 
         # Same object identity
         assert result.row is data
@@ -147,7 +147,7 @@ class TestTransformResultProperties:
 
         Multi-row output must preserve each row exactly as provided.
         """
-        result = TransformResult.success_multi(rows)
+        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
 
         assert result.status == "success"
         assert result.row is None
@@ -195,7 +195,7 @@ class TestTransformResultProperties:
         import pytest
 
         with pytest.raises(ValueError, match="at least one row"):
-            TransformResult.success_multi([])
+            TransformResult.success_multi([], success_reason={"action": "test"})
 
 
 # =============================================================================

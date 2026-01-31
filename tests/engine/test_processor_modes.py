@@ -51,9 +51,9 @@ class TestProcessorPassthroughMode:
                     # Batch mode: enrich each row with batch_size
                     batch_size = len(rows)
                     enriched = [{**row, "batch_size": batch_size, "enriched": True} for row in rows]
-                    return TransformResult.success_multi(enriched)
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
                 # Single row mode
-                return TransformResult.success(rows)
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -172,8 +172,8 @@ class TestProcessorPassthroughMode:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Wrong: returns fewer rows than input
-                    return TransformResult.success_multi([rows[0]])
-                return TransformResult.success(rows)
+                    return TransformResult.success_multi([rows[0]], success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -255,8 +255,8 @@ class TestProcessorPassthroughMode:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     enriched = [{**row, "batch_enriched": True} for row in rows]
-                    return TransformResult.success_multi(enriched)
-                return TransformResult.success(rows)
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleTransform(BaseTransform):
             """Doubles the value field."""
@@ -272,7 +272,7 @@ class TestProcessorPassthroughMode:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "value": row["value"] * 2})
+                return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -393,9 +393,9 @@ class TestProcessorTransformMode:
                             groups[cat] = {"category": cat, "count": 0, "total": 0}
                         groups[cat]["count"] += 1
                         groups[cat]["total"] += row.get("value", 0)
-                    return TransformResult.success_multi(list(groups.values()))
+                    return TransformResult.success_multi(list(groups.values()), success_reason={"action": "test"})
                 # Single row mode - not used in this test
-                return TransformResult.success(rows)
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -515,8 +515,8 @@ class TestProcessorTransformMode:
                 if isinstance(rows, list):
                     # Single aggregated output
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total, "count": len(rows)})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total, "count": len(rows)}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -621,8 +621,8 @@ class TestProcessorTransformMode:
                         if cat not in groups:
                             groups[cat] = {"category": cat, "count": 0}
                         groups[cat]["count"] += 1
-                    return TransformResult.success_multi(list(groups.values()))
-                return TransformResult.success(rows)
+                    return TransformResult.success_multi(list(groups.values()), success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         class DoubleCount(BaseTransform):
             """Doubles the count field."""
@@ -638,7 +638,7 @@ class TestProcessorTransformMode:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "count": row["count"] * 2, "doubled": True})
+                return TransformResult.success({**row, "count": row["count"] * 2, "doubled": True}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -769,8 +769,8 @@ class TestProcessorSingleMode:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         class AddMarker(BaseTransform):
             """Adds a marker field to prove it was executed."""
@@ -786,7 +786,7 @@ class TestProcessorSingleMode:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "marker": "DOWNSTREAM_EXECUTED"})
+                return TransformResult.success({**row, "marker": "DOWNSTREAM_EXECUTED"}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -897,8 +897,8 @@ class TestProcessorSingleMode:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

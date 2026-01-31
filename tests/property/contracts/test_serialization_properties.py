@@ -297,7 +297,7 @@ class TestTransformResultJsonSerializationProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success() serializes to valid JSON."""
-        result = TransformResult.success(data)
+        result = TransformResult.success(data, success_reason={"action": "test"})
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)
@@ -312,7 +312,7 @@ class TestTransformResultJsonSerializationProperties:
         data: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success() JSON round-trip preserves row."""
-        result = TransformResult.success(data)
+        result = TransformResult.success(data, success_reason={"action": "test"})
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)
@@ -359,7 +359,7 @@ class TestTransformResultJsonSerializationProperties:
         rows: list[dict[str, Any]],
     ) -> None:
         """Property: TransformResult.success_multi() JSON round-trip preserves rows."""
-        result = TransformResult.success_multi(rows)
+        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)

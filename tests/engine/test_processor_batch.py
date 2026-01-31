@@ -53,8 +53,8 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -144,9 +144,9 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode - sum all values
-                    return TransformResult.success({"value": sum(r["value"] for r in rows)})
+                    return TransformResult.success({"value": sum(r["value"] for r in rows)}, success_reason={"action": "test"})
                 # Single-row mode - double
-                return TransformResult.success({"value": rows["value"] * 2})
+                return TransformResult.success({"value": rows["value"] * 2}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -221,8 +221,8 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -355,7 +355,8 @@ class TestProcessorDeaggregation:
                     [
                         {**row, "copy": 1},
                         {**row, "copy": 2},
-                    ]
+                    ],
+                    success_reason={"action": "test"},
                 )
 
         # Setup real recorder
@@ -436,7 +437,7 @@ class TestProcessorDeaggregation:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success_multi([row, row])  # But returns multi!
+                return TransformResult.success_multi([row, row], success_reason={"action": "test"})  # But returns multi!
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -514,7 +515,13 @@ class TestProcessorDeaggregation:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 # This should NOT be masked by defensive {} substitution
-                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                result = TransformResult(
+                    status="success",
+                    row=None,
+                    reason=None,
+                    rows=None,
+                    success_reason={"action": "test"},  # Required, but row=None is still the bug
+                )
                 return result
 
         db = LandscapeDB.in_memory()
@@ -611,7 +618,13 @@ class TestProcessorDeaggregation:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
-                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                result = TransformResult(
+                    status="success",
+                    row=None,
+                    reason=None,
+                    rows=None,
+                    success_reason={"action": "test"},  # Required, but row=None is still the bug
+                )
                 return result
 
         db = LandscapeDB.in_memory()

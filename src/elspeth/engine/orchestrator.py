@@ -1095,7 +1095,13 @@ class Orchestrator:
                 operation_type="source_load",
                 ctx=ctx,
                 input_data={"source_plugin": config.source.name},
-            ):
+            ) as source_op_handle:
+                # Capture operation_id for restoration during iteration
+                # Generator-based sources execute code during next() calls, so we need
+                # to restore operation_id at the end of each iteration before the for
+                # loop calls enumerate() again.
+                source_operation_id = source_op_handle.operation.operation_id
+
                 # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
                 try:
                     with self._span_factory.source_span(config.source.name):
@@ -1206,6 +1212,9 @@ class Orchestrator:
                                     )
                                 )
                                 last_progress_time = current_time
+                            # Restore operation_id before next iteration
+                            # (generator may execute external calls on next() call)
+                            ctx.operation_id = source_operation_id
                             # Skip normal processing - row is already handled
                             continue
 
@@ -1396,6 +1405,14 @@ class Orchestrator:
                                 )
                             )
                             last_progress_time = current_time
+
+                        # ─────────────────────────────────────────────────────────────────
+                        # CRITICAL: Restore operation_id before next iteration.
+                        # Generator-based sources execute during next() calls in the for
+                        # loop. Any external calls (blob downloads, API fetches) must be
+                        # attributed to the source_load operation.
+                        # ─────────────────────────────────────────────────────────────────
+                        ctx.operation_id = source_operation_id
 
                     # ─────────────────────────────────────────────────────────────────
                     # CRITICAL: Flush remaining aggregation buffers at end-of-source
