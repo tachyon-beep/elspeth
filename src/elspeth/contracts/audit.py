@@ -282,6 +282,11 @@ class Call:
     error_json: str | None = None
     latency_ms: float | None = None
 
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.call_type, CallType, "call_type")
+        _validate_enum(self.status, CallStatus, "status")
+
 
 @dataclass
 class Artifact:
@@ -316,6 +321,10 @@ class RoutingEvent:
     reason_hash: str | None = None
     reason_ref: str | None = None
 
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.mode, RoutingMode, "mode")
+
 
 @dataclass
 class Batch:
@@ -334,6 +343,10 @@ class Batch:
     trigger_type: str | None = None  # TriggerType enum value (count, time, end_of_source, manual)
     trigger_reason: str | None = None
     completed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        """Validate enum fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.status, BatchStatus, "status")
 
 
 @dataclass
@@ -576,6 +589,13 @@ class TokenOutcome:
     error_hash: str | None = None
     context_json: str | None = None
     expected_branches_json: str | None = None  # Branch contract for FORKED/EXPANDED
+
+    def __post_init__(self) -> None:
+        """Validate enum and bool fields - Tier 1 crash on invalid types."""
+        _validate_enum(self.outcome, RowOutcome, "outcome")
+        # is_terminal must be bool, not int or other truthy/falsy value
+        if not isinstance(self.is_terminal, bool):
+            raise TypeError(f"is_terminal must be bool, got {type(self.is_terminal).__name__}: {self.is_terminal!r}")
 
 
 @dataclass(frozen=True, slots=True)

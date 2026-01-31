@@ -318,12 +318,13 @@ class PluginContext:
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
         try:
+            from elspeth.contracts.enums import CallType as CallTypeEnum
             from elspeth.core.canonical import stable_hash
             from elspeth.telemetry.events import ExternalCallCompleted
 
             # Extract token usage for LLM calls if available
             token_usage = None
-            if call_type.value == "LLM" and response_data is not None:
+            if call_type == CallTypeEnum.LLM and response_data is not None:
                 usage = response_data.get("usage")
                 if usage and isinstance(usage, dict):
                     token_usage = usage
@@ -332,7 +333,9 @@ class PluginContext:
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
                     run_id=self.run_id,
-                    state_id=parent_id,  # Use parent_id for both state and operation
+                    # Use correct field based on context type
+                    state_id=self.state_id if has_state else None,
+                    operation_id=self.operation_id if has_operation else None,
                     call_type=call_type,
                     provider=provider,
                     status=status,

@@ -32,6 +32,7 @@ from elspeth.core.dag import ExecutionGraph, GraphValidationError
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.conftest import (
+    MockPayloadStore,
     as_sink,
     as_source,
     as_transform,
@@ -331,6 +332,7 @@ class TestForkJoinRuntimeBalance:
         from elspeth.core.config import ElspethSettings
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
         source = ListSource(rows)
@@ -371,7 +373,7 @@ class TestForkJoinRuntimeBalance:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify fork audit integrity
         missing_parents = count_fork_children_missing_parents(db, run.run_id)
@@ -418,6 +420,7 @@ class TestForkJoinEdgeCases:
     def test_no_fork_no_fork_groups(self) -> None:
         """Pipeline without forks should have no fork groups."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         source = ListSource([{"value": 1}, {"value": 2}])
         transform = PassTransform()
@@ -430,7 +433,7 @@ class TestForkJoinEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         stats = get_fork_group_stats(db, run.run_id)
         assert stats["total_fork_groups"] == 0
@@ -439,6 +442,7 @@ class TestForkJoinEdgeCases:
     def test_empty_source_no_fork_issues(self) -> None:
         """Empty source with fork config should not cause issues."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         source = ListSource([])  # Empty
         sink_a = CollectSink("sink_a")
@@ -478,7 +482,7 @@ class TestForkJoinEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # No rows means no forks
         stats = get_fork_group_stats(db, run.run_id)
@@ -511,6 +515,7 @@ class TestForkRecoveryInvariant:
         from elspeth.core.landscape.schema import token_outcomes_table
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
         source = ListSource(rows)
@@ -550,7 +555,7 @@ class TestForkRecoveryInvariant:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Pipeline completed successfully - all rows processed
         # Now simulate partial failure by deleting ONE child outcome per row

@@ -12,6 +12,7 @@ These tests verify Phase 9 requirements from the source-sink-audit-design.md:
 
 import logging
 import time
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +114,9 @@ class TestOperationLifecycle:
         assert operation.started_at is not None
         assert operation.completed_at is None
 
-    def test_begin_operation_stores_input_data(self, recorder: LandscapeRecorder, run_id: str, source_node_id: str, tmp_path: Any) -> None:
+    def test_begin_operation_stores_input_data(
+        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str, tmp_path: Any, payload_store
+    ) -> None:
         """begin_operation stores input_data via payload store."""
         from pathlib import Path
 
@@ -557,6 +560,7 @@ class TestTrackOperationContextManager:
         sink_node_id: str,
         plugin_context: PluginContext,
         tmp_path: Path,
+        payload_store,
     ) -> None:
         """track_operation records handle.output_data on completion."""
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -637,6 +641,68 @@ class TestTrackOperationExceptionSafety:
 
         assert plugin_context.operation_id is None
 
+    def test_db_failure_on_successful_operation_raises_db_error(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """When operation succeeds but audit write fails, the DB error is raised.
+
+        This enforces Tier-1 audit integrity: a successful operation with a
+        missing audit record must fail the run, not silently continue.
+        """
+
+        def failing_complete(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("DB connection lost")
+
+        with (
+            pytest.raises(RuntimeError, match="DB connection lost"),
+            track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_node_id,
+                operation_type="source_load",
+                ctx=plugin_context,
+            ),
+        ):
+            # Inject failing complete AFTER operation starts
+            recorder.complete_operation = failing_complete  # type: ignore[method-assign]
+            # Operation "succeeds" - no exception raised here
+
+        # Verify critical log was emitted
+        assert any("Failed to complete operation" in record.message for record in caplog.records if record.levelno >= logging.CRITICAL)
+
+    def test_context_cleared_on_db_failure_with_successful_operation(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+    ) -> None:
+        """Context operation_id is cleared even when complete fails on successful operation."""
+
+        def failing_complete(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("DB failure")
+
+        try:
+            with track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_node_id,
+                operation_type="source_load",
+                ctx=plugin_context,
+            ):
+                recorder.complete_operation = failing_complete  # type: ignore[method-assign]
+                # No exception - operation succeeds
+        except RuntimeError:
+            pass
+
+        # Context must be cleaned up even when DB error is raised
+        assert plugin_context.operation_id is None
+
 
 class TestGetOperationsForRun:
     """Tests for get_operations_for_run query method."""
@@ -692,10 +758,8 @@ class TestGetOperationsForRun:
 class TestXORConstraintAtDatabaseLevel:
     """Tests for XOR constraint on calls table (state_id XOR operation_id)."""
 
-    def test_call_with_both_state_and_operation_id_violates_constraint(
-        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str
-    ) -> None:
-        """Calls with both state_id and operation_id should violate DB constraint."""
+    def test_xor_constraint_exists_in_schema(self, recorder: LandscapeRecorder) -> None:
+        """Verify XOR constraint is defined in schema."""
         from sqlalchemy import text
 
         with recorder._db.connection() as conn:
@@ -703,3 +767,496 @@ class TestXORConstraintAtDatabaseLevel:
             schema = result.scalar()
             assert schema is not None
             assert "calls_has_parent" in schema
+
+    def test_call_with_both_state_and_operation_id_raises_integrity_error(
+        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str
+    ) -> None:
+        """Calls with both state_id and operation_id should raise IntegrityError.
+
+        The XOR constraint requires exactly one parent: state_id XOR operation_id.
+        Setting both violates the constraint at the database level.
+        """
+        from datetime import datetime
+
+        from sqlalchemy import insert
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape.schema import calls_table
+
+        # Create a valid state and operation to reference
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+        operation = recorder.begin_operation(
+            run_id=run_id,
+            node_id=source_node_id,
+            operation_type="source_load",
+        )
+
+        # Attempt to insert a call with BOTH state_id AND operation_id (violates XOR)
+        with recorder._db.connection() as conn, pytest.raises(IntegrityError, match="calls_has_parent"):
+            conn.execute(
+                insert(calls_table).values(
+                    call_id="xor_violation_test",
+                    state_id=state.state_id,  # Both set!
+                    operation_id=operation.operation_id,  # Both set!
+                    call_index=0,
+                    call_type=CallType.HTTP.value,
+                    status=CallStatus.SUCCESS.value,
+                    request_hash="abc123",
+                    created_at=datetime.now(UTC),
+                )
+            )
+
+    def test_call_with_neither_state_nor_operation_id_raises_integrity_error(self, recorder: LandscapeRecorder) -> None:
+        """Calls with neither state_id nor operation_id should raise IntegrityError.
+
+        The XOR constraint requires exactly one parent: state_id XOR operation_id.
+        Setting neither violates the constraint at the database level.
+        """
+        from datetime import datetime
+
+        from sqlalchemy import insert
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape.schema import calls_table
+
+        # Attempt to insert a call with NEITHER state_id NOR operation_id (violates XOR)
+        with recorder._db.connection() as conn, pytest.raises(IntegrityError, match="calls_has_parent"):
+            conn.execute(
+                insert(calls_table).values(
+                    call_id="xor_violation_neither",
+                    state_id=None,  # Neither set!
+                    operation_id=None,  # Neither set!
+                    call_index=0,
+                    call_type=CallType.HTTP.value,
+                    status=CallStatus.SUCCESS.value,
+                    request_hash="abc123",
+                    created_at=datetime.now(UTC),
+                )
+            )
+
+
+class TestCallIndexUniquenessConstraints:
+    """Tests for partial unique indexes on call_index.
+
+    The calls table has two partial unique indexes:
+    - (state_id, call_index) WHERE state_id IS NOT NULL
+    - (operation_id, call_index) WHERE operation_id IS NOT NULL
+
+    These ensure call ordering is unambiguous for replay/verification.
+    """
+
+    def test_partial_unique_indexes_exist_in_schema(self, db: LandscapeDB) -> None:
+        """Verify partial unique indexes are created in the schema."""
+        from sqlalchemy import text
+
+        with db.connection() as conn:
+            result = conn.execute(text("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='calls'"))
+            indexes = {row[0]: row[1] for row in result.fetchall()}
+
+            # Verify state_id partial unique index
+            assert "ix_calls_state_call_index_unique" in indexes
+            state_sql = indexes["ix_calls_state_call_index_unique"]
+            assert "UNIQUE" in state_sql
+            assert "state_id IS NOT NULL" in state_sql
+
+            # Verify operation_id partial unique index
+            assert "ix_calls_operation_call_index_unique" in indexes
+            op_sql = indexes["ix_calls_operation_call_index_unique"]
+            assert "UNIQUE" in op_sql
+            assert "operation_id IS NOT NULL" in op_sql
+
+    def test_duplicate_state_call_index_raises_integrity_error(self, recorder: LandscapeRecorder, run_id: str, source_node_id: str) -> None:
+        """Duplicate (state_id, call_index) should raise IntegrityError."""
+        from sqlalchemy.exc import IntegrityError
+
+        # Create a row and token to get a valid state_id
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+
+        # First call should succeed
+        recorder.record_call(
+            state_id=state.state_id,
+            call_index=0,
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example.com"},
+            response_data={"status": 200},
+        )
+
+        # Second call with same call_index should fail
+        with pytest.raises(IntegrityError):
+            recorder.record_call(
+                state_id=state.state_id,
+                call_index=0,  # Duplicate!
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data={"url": "http://example2.com"},
+                response_data={"status": 200},
+            )
+
+    def test_duplicate_operation_call_index_raises_integrity_error(
+        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str
+    ) -> None:
+        """Duplicate (operation_id, call_index) should raise IntegrityError."""
+        from datetime import datetime
+
+        from sqlalchemy import insert
+        from sqlalchemy.exc import IntegrityError
+
+        from elspeth.core.landscape.schema import calls_table
+
+        # Create an operation
+        operation = recorder.begin_operation(
+            run_id=run_id,
+            node_id=source_node_id,
+            operation_type="source_load",
+        )
+
+        # First call should succeed
+        recorder.record_operation_call(
+            operation_id=operation.operation_id,
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example.com"},
+            response_data={"status": 200},
+        )
+
+        # Manually insert a duplicate call_index (bypassing allocator)
+        with recorder._db.connection() as conn, pytest.raises(IntegrityError):
+            conn.execute(
+                insert(calls_table).values(
+                    call_id="dup_call_123",
+                    operation_id=operation.operation_id,
+                    call_index=0,  # Duplicate!
+                    call_type=CallType.HTTP.value,
+                    status=CallStatus.SUCCESS.value,
+                    request_hash="abc123",
+                    created_at=datetime.now(UTC),
+                )
+            )
+
+    def test_same_call_index_allowed_for_different_parents(self, recorder: LandscapeRecorder, run_id: str, source_node_id: str) -> None:
+        """Same call_index is allowed for different state_ids or operation_ids."""
+        # Create two states
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token1 = recorder.create_token(row_id=row.row_id)
+        token2 = recorder.create_token(row_id=row.row_id)
+
+        state1 = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token1.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+        state2 = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token2.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+
+        # Both can have call_index=0
+        recorder.record_call(
+            state_id=state1.state_id,
+            call_index=0,
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example.com"},
+            response_data={"status": 200},
+        )
+        recorder.record_call(
+            state_id=state2.state_id,
+            call_index=0,  # Same index, different state - OK!
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example.com"},
+            response_data={"status": 200},
+        )
+
+        # Verify both recorded
+        calls1 = recorder.get_calls(state1.state_id)
+        calls2 = recorder.get_calls(state2.state_id)
+        assert len(calls1) == 1
+        assert len(calls2) == 1
+
+
+class TestConcurrentCallIndexAllocation:
+    """Tests for thread-safe call index allocation.
+
+    The allocate_call_index and allocate_operation_call_index methods must be
+    thread-safe to ensure unique call indices when multiple threads allocate
+    concurrently. These tests verify the lock mechanism works correctly.
+
+    Note: These tests verify the allocator logic only, not full DB writes,
+    because SQLite in-memory databases don't support multi-threaded access.
+    """
+
+    def test_concurrent_operation_call_index_allocation_is_unique(
+        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str
+    ) -> None:
+        """Multiple threads allocating operation call indices get unique values.
+
+        This verifies the thread-safety of allocate_operation_call_index().
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Create an operation
+        operation = recorder.begin_operation(
+            run_id=run_id,
+            node_id=source_node_id,
+            operation_type="source_load",
+        )
+
+        num_threads = 100
+        allocated_indices: list[int] = []
+        lock = threading.Lock()
+
+        def allocate_task() -> int:
+            """Task that allocates an index and returns it."""
+            idx = recorder.allocate_operation_call_index(operation.operation_id)
+            with lock:
+                allocated_indices.append(idx)
+            return idx
+
+        # Execute concurrent allocations
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(allocate_task) for _ in range(num_threads)]
+            for future in as_completed(futures):
+                future.result()  # Raise any exceptions
+
+        # Verify all indices are unique
+        assert len(allocated_indices) == num_threads
+        assert len(set(allocated_indices)) == num_threads, f"Duplicate indices found: {sorted(allocated_indices)}"
+
+        # Verify indices are 0 through num_threads-1 (no gaps)
+        assert set(allocated_indices) == set(range(num_threads))
+
+    def test_concurrent_state_call_index_allocation_is_unique(self, recorder: LandscapeRecorder, run_id: str, source_node_id: str) -> None:
+        """Multiple threads allocating state call indices get unique values.
+
+        This verifies the thread-safety of allocate_call_index() for state calls.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Create a state
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+
+        num_threads = 100
+        allocated_indices: list[int] = []
+        lock = threading.Lock()
+
+        def allocate_task() -> int:
+            """Task that allocates an index and returns it."""
+            idx = recorder.allocate_call_index(state.state_id)
+            with lock:
+                allocated_indices.append(idx)
+            return idx
+
+        # Execute concurrent allocations
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(allocate_task) for _ in range(num_threads)]
+            for future in as_completed(futures):
+                future.result()  # Raise any exceptions
+
+        # Verify all indices are unique
+        assert len(allocated_indices) == num_threads
+        assert len(set(allocated_indices)) == num_threads, f"Duplicate indices found: {sorted(allocated_indices)}"
+
+        # Verify indices are 0 through num_threads-1 (no gaps)
+        assert set(allocated_indices) == set(range(num_threads))
+
+    def test_independent_state_allocators_do_not_interfere(self, recorder: LandscapeRecorder, run_id: str, source_node_id: str) -> None:
+        """Allocations for different state_ids should be independent.
+
+        Each state_id should have its own counter starting at 0.
+        """
+        # Create two states
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token1 = recorder.create_token(row_id=row.row_id)
+        token2 = recorder.create_token(row_id=row.row_id)
+
+        state1 = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token1.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+        state2 = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token2.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+
+        # Allocate indices for state1
+        idx1_0 = recorder.allocate_call_index(state1.state_id)
+        idx1_1 = recorder.allocate_call_index(state1.state_id)
+        idx1_2 = recorder.allocate_call_index(state1.state_id)
+
+        # Allocate indices for state2 (should start at 0, not 3)
+        idx2_0 = recorder.allocate_call_index(state2.state_id)
+        idx2_1 = recorder.allocate_call_index(state2.state_id)
+
+        # Each state has independent counter
+        assert [idx1_0, idx1_1, idx1_2] == [0, 1, 2]
+        assert [idx2_0, idx2_1] == [0, 1]
+
+
+class TestTrackOperationContextGuards:
+    """Tests for context manager guard conditions."""
+
+    def test_track_operation_restores_previous_operation_id(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+    ) -> None:
+        """track_operation should restore previous operation_id after completion.
+
+        This is important when operations are nested or when the context is
+        reused across multiple operations.
+        """
+        # Set a "previous" operation_id on the context
+        plugin_context.operation_id = "previous_operation_123"
+
+        with track_operation(
+            recorder=recorder,
+            run_id=run_id,
+            node_id=source_node_id,
+            operation_type="source_load",
+            ctx=plugin_context,
+        ):
+            # During the operation, context has the new operation_id
+            assert plugin_context.operation_id is not None
+            assert plugin_context.operation_id != "previous_operation_123"
+
+        # After completion, previous operation_id is restored
+        assert plugin_context.operation_id == "previous_operation_123"
+
+    def test_track_operation_restores_previous_operation_id_on_exception(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+    ) -> None:
+        """Previous operation_id is restored even when operation fails."""
+        plugin_context.operation_id = "previous_operation_456"
+
+        with (
+            pytest.raises(ValueError, match="Test failure"),
+            track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_node_id,
+                operation_type="source_load",
+                ctx=plugin_context,
+            ),
+        ):
+            raise ValueError("Test failure")
+
+        # Previous operation_id restored despite exception
+        assert plugin_context.operation_id == "previous_operation_456"
+
+    def test_context_reusable_after_track_operation_exception(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        plugin_context: PluginContext,
+    ) -> None:
+        """PluginContext should be reusable after a track_operation raises.
+
+        This verifies that the context is properly cleaned up and can be
+        used in subsequent track_operation calls.
+        """
+        # First operation fails
+        with (
+            pytest.raises(ValueError),
+            track_operation(
+                recorder=recorder,
+                run_id=run_id,
+                node_id=source_node_id,
+                operation_type="source_load",
+                ctx=plugin_context,
+            ),
+        ):
+            raise ValueError("First operation failed")
+
+        # Context should be clean (operation_id was None before)
+        assert plugin_context.operation_id is None
+
+        # Second operation should work normally
+        with track_operation(
+            recorder=recorder,
+            run_id=run_id,
+            node_id=source_node_id,
+            operation_type="sink_write",
+            ctx=plugin_context,
+        ) as handle:
+            # Operation succeeds
+            handle.output_data = {"result": "success"}
+
+        # Context should be clean again
+        assert plugin_context.operation_id is None
+
+        # Verify both operations were recorded
+        operations = recorder.get_operations_for_run(run_id)
+        assert len(operations) == 2
+        assert operations[0].status == "failed"
+        assert operations[1].status == "completed"

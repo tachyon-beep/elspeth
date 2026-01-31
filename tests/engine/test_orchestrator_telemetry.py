@@ -52,7 +52,7 @@ class PassthroughTransform(BaseTransform):
         super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 @dataclass
@@ -152,7 +152,7 @@ def create_mock_sink() -> MagicMock:
 class TestTelemetryEventEmission:
     """Tests verifying telemetry events are emitted correctly."""
 
-    def test_run_started_emitted_after_begin_run(self, landscape_db: LandscapeDB) -> None:
+    def test_run_started_emitted_after_begin_run(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunStarted telemetry event is emitted after begin_run succeeds."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -165,7 +165,7 @@ class TestTelemetryEventEmission:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify RunStarted was emitted
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -176,7 +176,7 @@ class TestTelemetryEventEmission:
         assert event.config_hash is not None
         assert event.run_id is not None
 
-    def test_run_completed_emitted_after_finalize_run(self, landscape_db: LandscapeDB) -> None:
+    def test_run_completed_emitted_after_finalize_run(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunFinished telemetry event is emitted after finalize_run succeeds."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -189,7 +189,7 @@ class TestTelemetryEventEmission:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify RunFinished was emitted
         run_completed_events = [e for e in exporter.events if isinstance(e, RunFinished)]
@@ -200,7 +200,7 @@ class TestTelemetryEventEmission:
         assert event.row_count == 2
         assert event.duration_ms > 0
 
-    def test_phase_changed_events_emitted_for_all_phases(self, landscape_db: LandscapeDB) -> None:
+    def test_phase_changed_events_emitted_for_all_phases(self, landscape_db: LandscapeDB, payload_store) -> None:
         """PhaseChanged telemetry events are emitted for GRAPH, SOURCE, and PROCESS phases."""
         from elspeth.contracts.events import PipelinePhase
 
@@ -215,7 +215,7 @@ class TestTelemetryEventEmission:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify PhaseChanged events were emitted
         phase_events = [e for e in exporter.events if isinstance(e, PhaseChanged)]
@@ -226,7 +226,7 @@ class TestTelemetryEventEmission:
         assert PipelinePhase.SOURCE in phases
         assert PipelinePhase.PROCESS in phases
 
-    def test_events_emitted_in_correct_order(self, landscape_db: LandscapeDB) -> None:
+    def test_events_emitted_in_correct_order(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Events are emitted in correct lifecycle order: RunStarted, phases, RunFinished."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -239,7 +239,7 @@ class TestTelemetryEventEmission:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify order: RunStarted must be first, RunFinished must be last
         assert len(exporter.events) >= 2
@@ -250,7 +250,7 @@ class TestTelemetryEventEmission:
 class TestTelemetryDisabledByDefault:
     """Tests verifying telemetry is optional and disabled by default."""
 
-    def test_no_telemetry_when_manager_not_provided(self, landscape_db: LandscapeDB) -> None:
+    def test_no_telemetry_when_manager_not_provided(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No telemetry emitted when TelemetryManager is not provided."""
         # No telemetry_manager provided
         orchestrator = Orchestrator(landscape_db)
@@ -262,10 +262,10 @@ class TestTelemetryDisabledByDefault:
         )
 
         # Should complete without error
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
-    def test_no_telemetry_when_manager_is_none(self, landscape_db: LandscapeDB) -> None:
+    def test_no_telemetry_when_manager_is_none(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Explicitly passing None for telemetry_manager works."""
         orchestrator = Orchestrator(landscape_db, telemetry_manager=None)
 
@@ -275,7 +275,7 @@ class TestTelemetryDisabledByDefault:
             sinks={"output": create_mock_sink()},
         )
 
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
 
@@ -291,7 +291,7 @@ class TestNoTelemetryOnLandscapeFailure:
     If Landscape fails, telemetry MUST NOT be emitted for that operation.
     """
 
-    def test_no_run_started_if_begin_run_fails(self, landscape_db: LandscapeDB) -> None:
+    def test_no_run_started_if_begin_run_fails(self, landscape_db: LandscapeDB, payload_store) -> None:
         """If begin_run fails, NO RunStarted telemetry event should be emitted.
 
         This test verifies the code structure: RunStarted is emitted AFTER
@@ -317,7 +317,7 @@ class TestNoTelemetryOnLandscapeFailure:
         )
 
         # Run successfully - this verifies the normal path works
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify RunStarted was emitted (confirming telemetry is working)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -328,7 +328,7 @@ class TestNoTelemetryOnLandscapeFailure:
         # 2. _emit_telemetry(RunStarted) is called at line ~557-566
         # If begin_run raises, the exception propagates before reaching _emit_telemetry
 
-    def test_no_run_completed_if_finalize_fails(self, landscape_db: LandscapeDB) -> None:
+    def test_no_run_completed_if_finalize_fails(self, landscape_db: LandscapeDB, payload_store) -> None:
         """If finalize_run fails, the successful completion telemetry should not be emitted.
 
         Note: If processing succeeds but finalize fails, an exception is raised.
@@ -348,7 +348,7 @@ class TestNoTelemetryOnLandscapeFailure:
             sinks={"output": create_mock_sink()},
         )
 
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify the run completed successfully
         assert result.status == RunStatus.COMPLETED
@@ -362,7 +362,7 @@ class TestNoTelemetryOnLandscapeFailure:
 class TestTelemetryOnRunFailure:
     """Tests for telemetry emission when runs fail."""
 
-    def test_run_completed_emitted_with_failed_status(self, landscape_db: LandscapeDB) -> None:
+    def test_run_completed_emitted_with_failed_status(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunFinished telemetry event is emitted with FAILED status when run fails."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -394,7 +394,7 @@ class TestTelemetryOnRunFailure:
         )
 
         with pytest.raises(RuntimeError, match="Simulated transform failure"):
-            orchestrator.run(config, graph=create_minimal_graph())
+            orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify RunStarted was emitted (before failure)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -414,7 +414,7 @@ class TestTelemetryOnRunFailure:
 class TestTelemetryEventContent:
     """Tests verifying the content of emitted telemetry events."""
 
-    def test_run_started_contains_config_hash(self, landscape_db: LandscapeDB) -> None:
+    def test_run_started_contains_config_hash(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunStarted event contains the pipeline config hash."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -427,13 +427,13 @@ class TestTelemetryEventContent:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         run_started = next(e for e in exporter.events if isinstance(e, RunStarted))
         assert run_started.config_hash is not None
         assert len(run_started.config_hash) > 0
 
-    def test_run_completed_contains_accurate_metrics(self, landscape_db: LandscapeDB) -> None:
+    def test_run_completed_contains_accurate_metrics(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunFinished event contains accurate row count and timing."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -447,13 +447,13 @@ class TestTelemetryEventContent:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         run_completed = next(e for e in exporter.events if isinstance(e, RunFinished))
         assert run_completed.row_count == 3
         assert run_completed.duration_ms > 0  # Must have positive duration
 
-    def test_all_events_share_same_run_id(self, landscape_db: LandscapeDB) -> None:
+    def test_all_events_share_same_run_id(self, landscape_db: LandscapeDB, payload_store) -> None:
         """All telemetry events from a single run share the same run_id."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -466,7 +466,7 @@ class TestTelemetryEventContent:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # All events should have the same run_id
         run_ids = {e.run_id for e in exporter.events}
@@ -489,7 +489,7 @@ class TestRowCreatedTelemetry:
     These tests verify the Orchestrator quarantine path.
     """
 
-    def test_row_created_emitted_for_quarantined_row(self, landscape_db: LandscapeDB) -> None:
+    def test_row_created_emitted_for_quarantined_row(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RowCreated telemetry event is emitted for quarantined source rows.
 
         When a source yields SourceRow.quarantined(), the Orchestrator:
@@ -552,7 +552,7 @@ class TestRowCreatedTelemetry:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=build_production_graph(config))
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify RowCreated was emitted
         row_created_events = [e for e in exporter.events if isinstance(e, RowCreated)]
@@ -565,7 +565,7 @@ class TestRowCreatedTelemetry:
         expected_hash = stable_hash({"id": 1, "name": "invalid", "extra": "bad_data"})
         assert event.content_hash == expected_hash
 
-    def test_row_created_not_emitted_without_telemetry_manager(self, landscape_db: LandscapeDB) -> None:
+    def test_row_created_not_emitted_without_telemetry_manager(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No RowCreated event when telemetry manager is not configured."""
         from collections.abc import Iterator
 
@@ -612,7 +612,7 @@ class TestRowCreatedTelemetry:
 
         # No telemetry manager
         orchestrator = Orchestrator(landscape_db, telemetry_manager=None)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Should complete without error
         assert result.status == RunStatus.COMPLETED
@@ -633,7 +633,7 @@ class TestTelemetryPartialStatus:
     - RunFinished should be emitted with status=COMPLETED
     """
 
-    def test_run_finished_emitted_when_export_fails(self, landscape_db: LandscapeDB) -> None:
+    def test_run_finished_emitted_when_export_fails(self, landscape_db: LandscapeDB, payload_store) -> None:
         """RunFinished is emitted with COMPLETED status even when export fails.
 
         The telemetry event reflects the Landscape status (COMPLETED), not the
@@ -676,7 +676,7 @@ class TestTelemetryPartialStatus:
             patch.object(orchestrator, "_export_landscape", side_effect=RuntimeError("Simulated export failure")),
             pytest.raises(RuntimeError, match="Simulated export failure"),
         ):
-            orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings)
+            orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings, payload_store=payload_store)
 
         # Verify RunStarted was emitted (before failure)
         run_started_events = [e for e in exporter.events if isinstance(e, RunStarted)]

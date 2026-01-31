@@ -28,6 +28,7 @@ from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.contracts.events import TelemetryEvent
 from elspeth.telemetry import RunFinished, RunStarted, TelemetryManager
+from elspeth.telemetry.errors import TelemetryExporterError
 
 # =============================================================================
 # Test Doubles
@@ -460,27 +461,29 @@ class TestTotalExporterFailure:
 
             assert manager.health_metrics["events_dropped"] == initial_dropped
 
-    def test_fail_on_total_failure_true_logs_error_in_export_thread(self, base_run_id: str) -> None:
-        """With fail_on_total_exporter_failure=True, TelemetryExporterError is raised in export thread.
+    def test_fail_on_total_failure_true_raises_on_flush(self, base_run_id: str) -> None:
+        """With fail_on_total_exporter_failure=True, TelemetryExporterError is raised on flush().
 
-        Note: With async export, the exception is raised in the export thread and
-        caught by the export loop's exception handler. It's logged as an error
-        but doesn't propagate to the caller (telemetry must not crash the pipeline).
+        The exception is raised in the background export thread and stored. When
+        flush() is called, it waits for the queue to drain and then re-raises
+        the stored exception. This provides the "loud failure" semantics that
+        fail_on_total=True promises.
         """
         failing = MockExporter("failing", fail_export=True)
         config = MockConfig(fail_on_total_exporter_failure=True)
         manager = TelemetryManager(config, exporters=[failing])
 
-        with patch("elspeth.telemetry.manager.logger") as mock_logger:
+        with patch("elspeth.telemetry.manager.logger"):
             # Send 10 events - the 10th triggers TelemetryExporterError in export thread
             for _ in range(10):
                 manager.handle_event(make_run_started(base_run_id))
-            manager.flush()  # Wait for background export
 
-            # The exception is caught and logged as error in export loop
-            error_calls = [c for c in mock_logger.error.call_args_list if c[0][0] == "Export loop failed unexpectedly"]
-            assert len(error_calls) == 1
-            assert "10 consecutive times" in error_calls[0][1]["error"]
+            # flush() re-raises the stored exception
+            with pytest.raises(TelemetryExporterError) as exc_info:
+                manager.flush()
+
+            assert exc_info.value.exporter_name == "all"
+            assert "10 consecutive times" in str(exc_info.value)
 
 
 # =============================================================================

@@ -1716,7 +1716,26 @@ class SinkExecutor:
 
             # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
             # If this fails, we want to crash - can't checkpoint non-durable data
-            sink.flush()
+            # But first we must complete node_states as FAILED to maintain audit integrity
+            try:
+                sink.flush()
+            except Exception as e:
+                # Flush failed - complete all node_states as FAILED before crashing
+                # Without this, states remain OPEN permanently (audit integrity violation)
+                flush_error: ExecutionError = {
+                    "exception": str(e),
+                    "type": type(e).__name__,
+                    "phase": "flush",
+                }
+                flush_duration_ms = (time.perf_counter() - start) * 1000
+                for _, state in states:
+                    self._recorder.complete_node_state(
+                        state_id=state.state_id,
+                        status=NodeStateStatus.FAILED,
+                        duration_ms=flush_duration_ms,
+                        error=flush_error,
+                    )
+                raise
 
             # Set output data on operation handle for audit trail
             handle.output_data = {

@@ -36,7 +36,7 @@ class RateLimitAwareTransform(BaseTransform):
         # Record the time of this call
         self._call_times.append(time.perf_counter())
 
-        return TransformResult.success({"processed": True, **row})
+        return TransformResult.success({"processed": True, **row}, success_reason={"action": "processed"})
 
     @property
     def call_times(self) -> list[float]:
@@ -50,7 +50,7 @@ class TestRateLimitRegistryInOrchestrator:
     def test_orchestrator_accepts_rate_limit_registry(self) -> None:
         """Orchestrator constructor accepts rate_limit_registry parameter."""
         db = LandscapeDB.in_memory()
-        settings = RateLimitSettings(enabled=True, default_requests_per_second=10)
+        settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
 
@@ -78,7 +78,7 @@ class TestRateLimitRegistryInContext:
 
     def test_context_has_rate_limit_registry_field(self) -> None:
         """PluginContext has rate_limit_registry field."""
-        settings = RateLimitSettings(enabled=True, default_requests_per_second=10)
+        settings = RateLimitSettings(enabled=True, default_requests_per_minute=60)
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
 
@@ -108,13 +108,13 @@ class TestRateLimitThrottling:
     def test_rate_limiter_throttles_excess_requests(self) -> None:
         """Verify rate limiter blocks when bucket is full.
 
-        The bucket can hold requests_per_second tokens. With 10 req/s:
+        The bucket can hold requests_per_minute tokens. With 10 req/min:
         - First 10 calls go through immediately (filling the bucket)
         - 11th call must wait for a token to leak (the bucket to drain)
         """
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,  # 10 per second
+            default_requests_per_minute=10,  # 10 per minute
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -140,7 +140,7 @@ class TestRateLimitThrottling:
             assert first_10_delta < 0.1, f"First 10 calls took {first_10_delta * 1000:.0f}ms (expected instant)"
 
             # 11th call should have waited for a token leak
-            # With 10 req/s, leak rate is 100ms per token
+            # With 10 req/min, we need to wait for tokens to leak
             wait_for_11th = call_times[10] - call_times[9]
             assert wait_for_11th >= 0.05, f"11th call should have waited, only waited {wait_for_11th * 1000:.0f}ms"
         finally:
@@ -150,7 +150,7 @@ class TestRateLimitThrottling:
         """Verify disabled rate limiting doesn't throttle."""
         settings = RateLimitSettings(
             enabled=False,
-            default_requests_per_second=1,  # Would be slow if enabled
+            default_requests_per_minute=1,  # Would be slow if enabled
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -186,10 +186,10 @@ class TestRateLimitServiceConfig:
 
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=60,
             services={
-                "slow_service": ServiceRateLimit(requests_per_second=1),
-                "fast_service": ServiceRateLimit(requests_per_second=100),
+                "slow_service": ServiceRateLimit(requests_per_minute=10),
+                "fast_service": ServiceRateLimit(requests_per_minute=600),
             },
         )
         config = RuntimeRateLimitConfig.from_settings(settings)

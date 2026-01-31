@@ -167,7 +167,6 @@ class TestRateLimitSettingsAlignment:
     # Fields wired through RateLimitRegistry
     WIRED_FIELDS: ClassVar[set[str]] = {
         "enabled",
-        "default_requests_per_second",
         "default_requests_per_minute",
         "persistence_path",
         "services",
@@ -195,7 +194,7 @@ class TestRateLimitSettingsAlignment:
         # Verify the registry can be created from settings via RuntimeRateLimitConfig
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=5,
+            default_requests_per_minute=5,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -567,7 +566,6 @@ class TestExplicitFieldMappings:
 
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=15,
             default_requests_per_minute=500,
             persistence_path="/tmp/limits.db",
             services={},
@@ -576,8 +574,8 @@ class TestExplicitFieldMappings:
 
         # All direct mappings (no renames in RateLimitSettings)
         assert config.enabled == settings.enabled, "enabled: direct mapping"
-        assert config.default_requests_per_second == float(settings.default_requests_per_second), (
-            "default_requests_per_second: direct mapping (int->float)"
+        assert config.default_requests_per_minute == float(settings.default_requests_per_minute), (
+            "default_requests_per_minute: direct mapping (int->float)"
         )
         # We set default_requests_per_minute=500 above, so this is safe
         assert settings.default_requests_per_minute is not None  # For mypy
@@ -805,31 +803,24 @@ class TestPropertyBasedRoundtrip:
 
         @given(
             enabled=st.booleans(),
-            rps=st.integers(min_value=1, max_value=10000),
-            rpm=st.one_of(st.none(), st.integers(min_value=1, max_value=100000)),
+            rpm=st.integers(min_value=1, max_value=100000),
             path=st.one_of(st.none(), st.text(min_size=1, max_size=50).filter(lambda s: "/" not in s or s.startswith("/"))),
         )
         @settings(max_examples=100)
         def check_roundtrip(
             enabled: bool,
-            rps: int,
-            rpm: int | None,
+            rpm: int,
             path: str | None,
         ) -> None:
             settings_obj = RateLimitSettings(
                 enabled=enabled,
-                default_requests_per_second=rps,
                 default_requests_per_minute=rpm,
                 persistence_path=path,
             )
             config = RuntimeRateLimitConfig.from_settings(settings_obj)
 
             assert config.enabled == enabled
-            assert config.default_requests_per_second == float(rps)
-            if rpm is not None:
-                assert config.default_requests_per_minute == float(rpm)
-            else:
-                assert config.default_requests_per_minute is None
+            assert config.default_requests_per_minute == rpm
             assert config.persistence_path == path
 
         check_roundtrip()

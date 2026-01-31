@@ -269,7 +269,7 @@ class PassTransform(BaseTransform):
         super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class ConditionalErrorTransform(BaseTransform):
@@ -291,7 +291,7 @@ class ConditionalErrorTransform(BaseTransform):
         # Direct access - no defensive .get() per CLAUDE.md
         if row["fail"]:
             return TransformResult.error({"reason": "property_test_error"})
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "test"})
 
 
 class CollectSink(_TestSinkBase):

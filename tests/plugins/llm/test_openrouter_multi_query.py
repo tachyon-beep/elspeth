@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator
-from contextlib import contextmanager
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -17,6 +16,8 @@ from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTransform
+
+from .conftest import chaosllm_openrouter_http_responses
 
 # Common schema config
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
@@ -50,58 +51,17 @@ def make_config(**overrides: Any) -> dict[str, Any]:
     return config
 
 
-def make_openrouter_response(content: dict[str, Any] | str) -> dict[str, Any]:
-    """Create an OpenRouter API response structure."""
-    if isinstance(content, dict):
-        content_str = json.dumps(content)
-    else:
-        content_str = content
-
-    return {
-        "choices": [
-            {
-                "message": {
-                    "content": content_str,
-                    "role": "assistant",
-                }
-            }
-        ],
-        "model": "anthropic/claude-3-opus",
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 5,
-            "total_tokens": 15,
-        },
-    }
+def make_openrouter_response(content: dict[str, Any] | str) -> dict[str, Any] | str:
+    """Create an OpenRouter message content payload."""
+    return content
 
 
-@contextmanager
 def mock_openrouter_http_responses(
-    responses: list[dict[str, Any]],
+    chaosllm_server,
+    responses: list[dict[str, Any] | str | httpx.Response],
 ) -> Generator[Mock, None, None]:
-    """Mock HTTP client to return sequence of JSON responses."""
-    call_count = 0
-
-    def make_response(*args: Any, **kwargs: Any) -> Mock:
-        nonlocal call_count
-        response_data = responses[call_count % len(responses)]
-        call_count += 1
-
-        mock_response = Mock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = response_data
-        mock_response.text = json.dumps(response_data)
-        mock_response.raise_for_status = Mock()
-        mock_response.content = b""
-        return mock_response
-
-    with patch("httpx.Client") as mock_client_class:
-        mock_client = Mock()
-        mock_client.post.side_effect = make_response
-        mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-        mock_client_class.return_value.__exit__ = Mock(return_value=None)
-        yield mock_client
+    """Mock HTTP client to return ChaosLLM-generated responses."""
+    return chaosllm_openrouter_http_responses(chaosllm_server, responses)
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -190,11 +150,11 @@ class TestOpenRouterMultiQueryLLMTransformInit:
 class TestSingleQueryProcessing:
     """Tests for _process_single_query method."""
 
-    def test_process_single_query_renders_template(self) -> None:
+    def test_process_single_query_renders_template(self, chaosllm_server) -> None:
         """Single query renders template with input fields and criterion."""
         responses = [make_openrouter_response({"score": 85, "rationale": "Good diagnosis"})]
 
-        with mock_openrouter_http_responses(responses) as mock_client:
+        with mock_openrouter_http_responses(chaosllm_server, responses) as mock_client:
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             # Call on_start to set up the recorder
@@ -223,11 +183,11 @@ class TestSingleQueryProcessing:
             assert "45yo male" in user_message
             assert "diagnosis" in user_message.lower()
 
-    def test_process_single_query_parses_json_response(self) -> None:
+    def test_process_single_query_parses_json_response(self, chaosllm_server) -> None:
         """Single query parses JSON and returns mapped fields."""
         responses = [make_openrouter_response({"score": 85, "rationale": "Excellent assessment"})]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -244,12 +204,12 @@ class TestSingleQueryProcessing:
             assert result.row["cs1_diagnosis_score"] == 85
             assert result.row["cs1_diagnosis_rationale"] == "Excellent assessment"
 
-    def test_process_single_query_handles_invalid_json(self) -> None:
+    def test_process_single_query_handles_invalid_json(self, chaosllm_server) -> None:
         """Single query returns error on invalid JSON response from LLM content."""
         # LLM returns valid HTTP JSON but content is not JSON
         responses = [make_openrouter_response("not json")]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -331,13 +291,13 @@ class TestSingleQueryProcessing:
 
             assert exc_info.value.status_code == 503
 
-    def test_process_single_query_handles_template_error(self) -> None:
+    def test_process_single_query_handles_template_error(self, chaosllm_server) -> None:
         """Template rendering errors return error result with details."""
         from elspeth.plugins.llm.templates import TemplateError
 
         responses = [make_openrouter_response({"score": 85, "rationale": "ok"})]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -367,13 +327,13 @@ class TestSingleQueryProcessing:
 
         assert "recorder" in str(exc_info.value).lower()
 
-    def test_process_single_query_strips_markdown_code_blocks(self) -> None:
+    def test_process_single_query_strips_markdown_code_blocks(self, chaosllm_server) -> None:
         """LLM responses wrapped in markdown code blocks are handled correctly."""
         # LLM returns JSON wrapped in ```json ... ```
         content_with_fence = '```json\n{"score": 90, "rationale": "Great"}\n```'
         responses = [make_openrouter_response(content_with_fence)]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -389,12 +349,12 @@ class TestSingleQueryProcessing:
             assert result.row["cs1_diagnosis_score"] == 90
             assert result.row["cs1_diagnosis_rationale"] == "Great"
 
-    def test_process_single_query_validates_json_is_dict(self) -> None:
+    def test_process_single_query_validates_json_is_dict(self, chaosllm_server) -> None:
         """LLM JSON response must be an object, not array or primitive."""
         # Valid JSON but not an object
         responses = [make_openrouter_response("[1, 2, 3]")]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             transform = OpenRouterMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -457,6 +417,7 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: OpenRouterMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Process executes all (case_study x criterion) queries."""
         # 2 case studies x 2 criteria = 4 queries
@@ -467,7 +428,7 @@ class TestRowProcessingWithPipelining:
             make_openrouter_response({"score": 80, "rationale": "CS2 treatment"}),
         ]
 
-        with mock_openrouter_http_responses(responses) as mock_client:
+        with mock_openrouter_http_responses(chaosllm_server, responses) as mock_client:
             row = {
                 "cs1_bg": "case1 bg",
                 "cs1_sym": "case1 sym",
@@ -492,6 +453,7 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: OpenRouterMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """All query results are merged into single output row."""
         responses = [
@@ -501,7 +463,7 @@ class TestRowProcessingWithPipelining:
             make_openrouter_response({"score": 80, "rationale": "R4"}),
         ]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             row = {
                 "cs1_bg": "bg1",
                 "cs1_sym": "sym1",
@@ -596,6 +558,7 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: OpenRouterMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Each query result includes audit metadata (usage, model, template_hash)."""
         responses = [
@@ -605,7 +568,7 @@ class TestRowProcessingWithPipelining:
             make_openrouter_response({"score": 80, "rationale": "R4"}),
         ]
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             row = {
                 "cs1_bg": "bg",
                 "cs1_sym": "sym",
@@ -648,7 +611,12 @@ class TestMultiRowPipelining:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
-    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_multiple_rows_processed_in_fifo_order(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """Multiple rows are emitted in submission order (FIFO).
 
         Uses sequential execution (no pool_size) to avoid mock threading issues.
@@ -699,7 +667,7 @@ class TestMultiRowPipelining:
         responses = [make_openrouter_response({"score": i, "rationale": f"R{i}"}) for i in range(12)]
 
         try:
-            with mock_openrouter_http_responses(responses):
+            with mock_openrouter_http_responses(chaosllm_server, responses):
                 for i, row in enumerate(rows):
                     token = make_token(f"row-{i}")
                     ctx = PluginContext(
@@ -884,12 +852,13 @@ class TestHTTPSpecificBehavior:
         ctx: PluginContext,
         transform: OpenRouterMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Missing expected field in LLM JSON response returns appropriate error."""
         # Response missing 'rationale' field that output_mapping expects
         responses = [make_openrouter_response({"score": 85})]  # Missing 'rationale'
 
-        with mock_openrouter_http_responses(responses):
+        with mock_openrouter_http_responses(chaosllm_server, responses):
             row = {
                 "cs1_bg": "data",
                 "cs1_sym": "data",

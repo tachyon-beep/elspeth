@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 class TestOrchestratorAuditTrail:
     """Verify audit trail is recorded correctly."""
 
-    def test_run_records_landscape_entries(self) -> None:
+    def test_run_records_landscape_entries(self, payload_store) -> None:
         """Verify that run creates proper audit trail."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -102,7 +102,7 @@ class TestOrchestratorAuditTrail:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify audit trail
         from elspeth.core.canonical import stable_hash
@@ -167,7 +167,7 @@ class TestOrchestratorAuditTrail:
 class TestOrchestratorLandscapeExport:
     """Test landscape export integration."""
 
-    def test_orchestrator_exports_landscape_when_configured(self, plugin_manager) -> None:
+    def test_orchestrator_exports_landscape_when_configured(self, plugin_manager, payload_store) -> None:
         """Orchestrator should export audit trail after run completes."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
@@ -288,7 +288,7 @@ class TestOrchestratorLandscapeExport:
 
         # Run with settings
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(pipeline, graph=graph, settings=settings)
+        result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         # Run should complete
         assert result.status == RunStatus.COMPLETED
@@ -300,7 +300,7 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "run" in record_types, f"Expected 'run' record type, got: {record_types}"
 
-    def test_orchestrator_export_with_signing(self, plugin_manager) -> None:
+    def test_orchestrator_export_with_signing(self, plugin_manager, payload_store) -> None:
         """Orchestrator should sign records when export.sign is True."""
         import os
         from unittest.mock import patch
@@ -419,7 +419,7 @@ class TestOrchestratorLandscapeExport:
 
         # Set signing key environment variable
         with patch.dict(os.environ, {"ELSPETH_SIGNING_KEY": "test-signing-key-12345"}):
-            result = orchestrator.run(pipeline, graph=graph, settings=settings)
+            result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
         assert len(export_sink.captured_rows) > 0
@@ -432,7 +432,7 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "manifest" in record_types
 
-    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self, plugin_manager) -> None:
+    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self, plugin_manager, payload_store) -> None:
         """Should raise error when sign=True but ELSPETH_SIGNING_KEY not set."""
         import os
         from unittest.mock import patch
@@ -551,9 +551,9 @@ class TestOrchestratorLandscapeExport:
             patch.dict(os.environ, env_without_key, clear=True),
             pytest.raises(ValueError, match="ELSPETH_SIGNING_KEY"),
         ):
-            orchestrator.run(pipeline, graph=graph, settings=settings)
+            orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
-    def test_orchestrator_no_export_when_disabled(self, plugin_manager) -> None:
+    def test_orchestrator_no_export_when_disabled(self, plugin_manager, payload_store) -> None:
         """Should not export when export.enabled is False."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
@@ -657,7 +657,7 @@ class TestOrchestratorLandscapeExport:
             coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(pipeline, graph=graph, settings=settings)
+        result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
         # Output sink should have the row
@@ -669,7 +669,7 @@ class TestOrchestratorLandscapeExport:
 class TestOrchestratorConfigRecording:
     """Test that runs record the resolved configuration."""
 
-    def test_run_records_resolved_config(self) -> None:
+    def test_run_records_resolved_config(self, payload_store) -> None:
         """Run should record the full resolved configuration in Landscape."""
         import json
 
@@ -750,7 +750,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify config was recorded
         recorder = LandscapeRecorder(db)
@@ -763,7 +763,7 @@ class TestOrchestratorConfigRecording:
         assert "source" in settings
         assert settings["source"]["plugin"] == "csv"
 
-    def test_run_with_empty_config_records_empty(self) -> None:
+    def test_run_with_empty_config_records_empty(self, payload_store) -> None:
         """Run with no config passed should record empty dict (current behavior)."""
         import json
 
@@ -825,7 +825,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify empty config was recorded
         recorder = LandscapeRecorder(db)
@@ -845,7 +845,7 @@ class TestNodeMetadataFromPlugin:
     instead of reading from the actual plugin class attributes.
     """
 
-    def test_node_metadata_records_plugin_version(self) -> None:
+    def test_node_metadata_records_plugin_version(self, payload_store) -> None:
         """Node registration should use actual plugin metadata.
 
         Verifies that the node's plugin_version in Landscape matches
@@ -937,7 +937,7 @@ class TestNodeMetadataFromPlugin:
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify node metadata
         recorder = LandscapeRecorder(db)
@@ -961,7 +961,7 @@ class TestNodeMetadataFromPlugin:
         sink_node = nodes_by_name["versioned_sink"]
         assert sink_node.plugin_version == "4.1.0", f"Sink plugin_version should be '4.1.0', got '{sink_node.plugin_version}'"
 
-    def test_node_metadata_records_determinism(self) -> None:
+    def test_node_metadata_records_determinism(self, payload_store) -> None:
         """Node registration should record plugin determinism.
 
         Verifies that nondeterministic plugins are recorded correctly
@@ -1053,7 +1053,7 @@ class TestNodeMetadataFromPlugin:
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify determinism recorded
         recorder = LandscapeRecorder(db)
@@ -1067,7 +1067,7 @@ class TestNodeMetadataFromPlugin:
             f"Transform determinism should be 'external_call', got '{transform_node.determinism}'"
         )
 
-    def test_aggregation_node_uses_transform_metadata(self) -> None:
+    def test_aggregation_node_uses_transform_metadata(self, payload_store) -> None:
         """Aggregation nodes should use metadata from their batch-aware transform.
 
         BUG FIX: P2-2026-01-21-orchestrator-aggregation-metadata-hardcoded
@@ -1194,7 +1194,7 @@ class TestNodeMetadataFromPlugin:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify aggregation node metadata
         recorder = LandscapeRecorder(db)
@@ -1213,7 +1213,7 @@ class TestNodeMetadataFromPlugin:
             f"got '{agg_node.determinism}' (was hardcoded to 'deterministic')"
         )
 
-    def test_config_gate_node_uses_engine_version(self) -> None:
+    def test_config_gate_node_uses_engine_version(self, payload_store) -> None:
         """Config gate nodes should use engine version, not hardcoded '1.0.0'.
 
         BUG FIX: P2-2026-01-15-node-metadata-hardcoded
@@ -1302,7 +1302,7 @@ class TestNodeMetadataFromPlugin:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify config gate node metadata
         recorder = LandscapeRecorder(db)
@@ -1326,7 +1326,7 @@ class TestNodeMetadataFromPlugin:
             f"Config gate determinism should be DETERMINISTIC, got '{config_gate_node.determinism}'"
         )
 
-    def test_coalesce_node_uses_engine_version(self) -> None:
+    def test_coalesce_node_uses_engine_version(self, payload_store) -> None:
         """Coalesce nodes should use engine version, not hardcoded '1.0.0'.
 
         BUG FIX: P2-2026-01-15-node-metadata-hardcoded (related)
@@ -1409,7 +1409,7 @@ class TestNodeMetadataFromPlugin:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph, settings=settings)
+        run_result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query Landscape to verify coalesce node metadata
         recorder = LandscapeRecorder(db)

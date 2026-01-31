@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class TestOrchestratorRetry:
     """Tests for retry configuration in Orchestrator."""
 
-    def test_orchestrator_creates_retry_manager_from_settings(self) -> None:
+    def test_orchestrator_creates_retry_manager_from_settings(self, payload_store) -> None:
         """Orchestrator creates RetryManager when settings.retry is configured."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
@@ -79,7 +79,7 @@ class TestOrchestratorRetry:
                 # Fail with retryable error on first attempt
                 if attempt_count["count"] == 1:
                     raise ConnectionError("Transient failure")
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -133,7 +133,7 @@ class TestOrchestratorRetry:
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Row should succeed after retry
         assert result.status == "completed"
@@ -143,7 +143,7 @@ class TestOrchestratorRetry:
         assert attempt_count["count"] == 2, f"Expected 2 attempts (1 failure + 1 success), got {attempt_count['count']}"
         assert len(sink.results) == 1
 
-    def test_orchestrator_retry_exhausted_marks_row_failed(self) -> None:
+    def test_orchestrator_retry_exhausted_marks_row_failed(self, payload_store) -> None:
         """When all retry attempts fail, row should be marked FAILED."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
@@ -241,7 +241,7 @@ class TestOrchestratorRetry:
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Row should be marked failed after exhausting retries
         assert result.status == "completed"

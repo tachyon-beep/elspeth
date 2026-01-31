@@ -16,117 +16,64 @@ class TestRateLimiterValidation:
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="", requests_per_second=10)
+            RateLimiter(name="", requests_per_minute=60)
 
     def test_rejects_name_starting_with_number(self) -> None:
         """Name starting with number is rejected."""
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="123api", requests_per_second=10)
+            RateLimiter(name="123api", requests_per_minute=60)
 
     def test_rejects_name_with_special_characters(self) -> None:
         """Name with special characters is rejected."""
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="my-api", requests_per_second=10)
+            RateLimiter(name="my-api", requests_per_minute=60)
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="my.api", requests_per_second=10)
+            RateLimiter(name="my.api", requests_per_minute=60)
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="my api", requests_per_second=10)
+            RateLimiter(name="my api", requests_per_minute=60)
 
     def test_rejects_sql_injection_attempt(self) -> None:
         """SQL injection attempts in name are rejected."""
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name="api; DROP TABLE users;--", requests_per_second=10)
+            RateLimiter(name="api; DROP TABLE users;--", requests_per_minute=60)
 
     def test_accepts_valid_names(self) -> None:
         """Valid names are accepted."""
         from elspeth.core.rate_limit import RateLimiter
 
-        with RateLimiter(name="api", requests_per_second=10) as limiter:
+        with RateLimiter(name="api", requests_per_minute=60) as limiter:
             assert limiter.name == "api"
 
-        with RateLimiter(name="my_api", requests_per_second=10) as limiter:
+        with RateLimiter(name="my_api", requests_per_minute=60) as limiter:
             assert limiter.name == "my_api"
 
-        with RateLimiter(name="MyApi123", requests_per_second=10) as limiter:
+        with RateLimiter(name="MyApi123", requests_per_minute=60) as limiter:
             assert limiter.name == "MyApi123"
 
-        with RateLimiter(name="API_v2_production", requests_per_second=10) as limiter:
+        with RateLimiter(name="API_v2_production", requests_per_minute=60) as limiter:
             assert limiter.name == "API_v2_production"
-
-    def test_rejects_zero_requests_per_second(self) -> None:
-        """Zero requests_per_second is rejected."""
-        from elspeth.core.rate_limit import RateLimiter
-
-        with pytest.raises(ValueError, match="requests_per_second must be positive"):
-            RateLimiter(name="test", requests_per_second=0)
-
-    def test_rejects_negative_requests_per_second(self) -> None:
-        """Negative requests_per_second is rejected."""
-        from elspeth.core.rate_limit import RateLimiter
-
-        with pytest.raises(ValueError, match="requests_per_second must be positive"):
-            RateLimiter(name="test", requests_per_second=-5)
 
     def test_rejects_zero_requests_per_minute(self) -> None:
         """Zero requests_per_minute is rejected."""
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="requests_per_minute must be positive"):
-            RateLimiter(name="test", requests_per_second=10, requests_per_minute=0)
+            RateLimiter(name="test", requests_per_minute=0)
 
     def test_rejects_negative_requests_per_minute(self) -> None:
         """Negative requests_per_minute is rejected."""
         from elspeth.core.rate_limit import RateLimiter
 
         with pytest.raises(ValueError, match="requests_per_minute must be positive"):
-            RateLimiter(name="test", requests_per_second=10, requests_per_minute=-1)
-
-    def test_accepts_none_requests_per_minute(self) -> None:
-        """None requests_per_minute is accepted (no per-minute limit)."""
-        from elspeth.core.rate_limit import RateLimiter
-
-        with RateLimiter(name="test", requests_per_second=10, requests_per_minute=None) as limiter:
-            assert limiter._requests_per_minute is None
-
-
-class TestTryAcquireAtomicity:
-    """Tests for try_acquire() atomic behavior across multiple rate limits."""
-
-    def test_try_acquire_does_not_consume_on_partial_failure(self) -> None:
-        """When per-minute limit blocks, per-second tokens are not consumed.
-
-        This test verifies the fix for the partial consumption bug where
-        try_acquire() would consume tokens from the per-second bucket even
-        when the per-minute bucket would reject.
-        """
-        from elspeth.core.rate_limit import RateLimiter
-
-        # Allow 100/second but only 2/minute
-        with RateLimiter(
-            name="atomic_test",
-            requests_per_second=100,
-            requests_per_minute=2,
-        ) as limiter:
-            # Use up the minute quota
-            assert limiter.try_acquire() is True
-            assert limiter.try_acquire() is True
-
-            # This should fail due to per-minute limit
-            assert limiter.try_acquire() is False
-
-            # The per-second bucket should NOT have been consumed
-            # by the failed attempt. Check by examining bucket counts.
-            # We should have exactly 2 items in each bucket.
-            assert limiter._buckets[0].count() == 2  # per-second bucket
-            assert limiter._buckets[1].count() == 2  # per-minute bucket
+            RateLimiter(name="test", requests_per_minute=-5)
 
 
 class TestRateLimiter:
@@ -138,7 +85,7 @@ class TestRateLimiter:
 
         with RateLimiter(
             name="test_api",
-            requests_per_second=10,
+            requests_per_minute=60,
         ) as limiter:
             assert limiter.name == "test_api"
 
@@ -146,7 +93,7 @@ class TestRateLimiter:
         """acquire() succeeds when under limit."""
         from elspeth.core.rate_limit import RateLimiter
 
-        with RateLimiter(name="test", requests_per_second=100) as limiter:
+        with RateLimiter(name="test", requests_per_minute=600) as limiter:
             # Should not raise or block significantly
             start = time.monotonic()
             limiter.acquire()
@@ -154,27 +101,12 @@ class TestRateLimiter:
 
             assert elapsed < 0.1  # Should be near-instant
 
-    def test_acquire_blocks_when_exceeded(self) -> None:
-        """acquire() blocks when rate exceeded."""
-        from elspeth.core.rate_limit import RateLimiter
-
-        # Very restrictive: 1 request per second
-        with RateLimiter(name="test", requests_per_second=1) as limiter:
-            # First request: instant
-            limiter.acquire()
-
-            # Second request: should block ~1 second
-            start = time.monotonic()
-            limiter.acquire()
-            elapsed = time.monotonic() - start
-
-            assert elapsed >= 0.9  # Should have waited ~1s
-
     def test_try_acquire_returns_false_when_exceeded(self) -> None:
         """try_acquire() returns False instead of blocking."""
         from elspeth.core.rate_limit import RateLimiter
 
-        with RateLimiter(name="test", requests_per_second=1) as limiter:
+        # Only 1 request per minute
+        with RateLimiter(name="test", requests_per_minute=1) as limiter:
             # First: succeeds
             assert limiter.try_acquire() is True
 
@@ -190,7 +122,7 @@ class TestRateLimiter:
         # First limiter uses up the quota
         limiter1 = RateLimiter(
             name="persistent",
-            requests_per_second=1,
+            requests_per_minute=1,
             persistence_path=str(db_path),
         )
         limiter1.acquire()
@@ -199,7 +131,7 @@ class TestRateLimiter:
         # Second limiter (same name, same db) should see used quota
         limiter2 = RateLimiter(
             name="persistent",
-            requests_per_second=1,
+            requests_per_minute=1,
             persistence_path=str(db_path),
         )
 
@@ -211,7 +143,7 @@ class TestRateLimiter:
         """RateLimiter can be used as context manager."""
         from elspeth.core.rate_limit import RateLimiter
 
-        with RateLimiter(name="ctx_test", requests_per_second=10) as limiter:
+        with RateLimiter(name="ctx_test", requests_per_minute=60) as limiter:
             limiter.acquire()
             assert limiter.try_acquire() is True
 
@@ -219,7 +151,7 @@ class TestRateLimiter:
         """acquire() respects weight parameter."""
         from elspeth.core.rate_limit import RateLimiter
 
-        with RateLimiter(name="weighted", requests_per_second=5) as limiter:
+        with RateLimiter(name="weighted", requests_per_minute=5) as limiter:
             # Use up all 5 tokens at once
             limiter.acquire(weight=5)
 
@@ -227,22 +159,15 @@ class TestRateLimiter:
             assert limiter.try_acquire(weight=1) is False
 
     def test_requests_per_minute_limit(self) -> None:
-        """Supports per-minute rate limits.
-
-        Note: pyrate-limiter sorts rates by interval and uses an optimization
-        that may skip checking longer-interval rates when the bucket is under
-        the shorter-interval limit. Our implementation uses separate limiters
-        for each rate interval to ensure both limits are properly enforced.
-        """
+        """Per-minute rate limits are enforced."""
         from elspeth.core.rate_limit import RateLimiter
 
-        # Allow many per second but only 3 per minute total
+        # Only 3 requests per minute
         with RateLimiter(
             name="minute_limit",
-            requests_per_second=100,  # Very permissive per-second
-            requests_per_minute=3,  # But only 3 per minute total
+            requests_per_minute=3,
         ) as limiter:
-            # First three should work (under minute limit)
+            # First three should work
             assert limiter.try_acquire() is True
             assert limiter.try_acquire() is True
             assert limiter.try_acquire() is True
@@ -255,11 +180,13 @@ class TestRateLimitRegistry:
     """Tests for rate limiter registry."""
 
     def test_get_or_create_limiter(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        settings = RateLimitSettings(default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        settings = RateLimitSettings(default_requests_per_minute=60)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter1 = registry.get_limiter("api_a")
         limiter2 = registry.get_limiter("api_a")
@@ -268,11 +195,13 @@ class TestRateLimitRegistry:
         assert limiter1 is limiter2
 
     def test_different_services_different_limiters(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        settings = RateLimitSettings(default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        settings = RateLimitSettings(default_requests_per_minute=60)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter_a = registry.get_limiter("api_a")
         limiter_b = registry.get_limiter("api_b")
@@ -280,16 +209,18 @@ class TestRateLimitRegistry:
         assert limiter_a is not limiter_b
 
     def test_registry_respects_service_config(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings, ServiceRateLimit
         from elspeth.core.rate_limit import RateLimiter, RateLimitRegistry
 
         settings = RateLimitSettings(
-            default_requests_per_second=10,
+            default_requests_per_minute=60,
             services={
-                "slow_api": ServiceRateLimit(requests_per_second=1),
+                "slow_api": ServiceRateLimit(requests_per_minute=10),
             },
         )
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         default_limiter = registry.get_limiter("fast_api")
         slow_limiter = registry.get_limiter("slow_api")
@@ -297,15 +228,17 @@ class TestRateLimitRegistry:
         # Type narrowing: enabled registry returns RateLimiter, not NoOpLimiter
         assert isinstance(default_limiter, RateLimiter)
         assert isinstance(slow_limiter, RateLimiter)
-        assert default_limiter._requests_per_second == 10
-        assert slow_limiter._requests_per_second == 1
+        assert default_limiter._requests_per_minute == 60
+        assert slow_limiter._requests_per_minute == 10
 
     def test_registry_disabled(self) -> None:
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import NoOpLimiter, RateLimitRegistry
 
         settings = RateLimitSettings(enabled=False)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter = registry.get_limiter("any_api")
 
@@ -314,11 +247,13 @@ class TestRateLimitRegistry:
 
     def test_registry_disabled_returns_same_noop_instance(self) -> None:
         """When disabled, registry returns the same NoOpLimiter instance."""
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import NoOpLimiter, RateLimitRegistry
 
         settings = RateLimitSettings(enabled=False)
-        registry = RateLimitRegistry(settings)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         limiter1 = registry.get_limiter("api_a")
         limiter2 = registry.get_limiter("api_b")
@@ -329,11 +264,13 @@ class TestRateLimitRegistry:
 
     def test_reset_all_clears_registry(self) -> None:
         """reset_all() clears all limiters from the registry."""
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        settings = RateLimitSettings(default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        settings = RateLimitSettings(default_requests_per_minute=60)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         # Create some limiters
         limiter_a = registry.get_limiter("api_a")
@@ -355,11 +292,13 @@ class TestRateLimitRegistry:
 
     def test_registry_close(self) -> None:
         """close() cleans up all limiters."""
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
         from elspeth.core.config import RateLimitSettings
         from elspeth.core.rate_limit import RateLimitRegistry
 
-        settings = RateLimitSettings(default_requests_per_second=10)
-        registry = RateLimitRegistry(settings)
+        settings = RateLimitSettings(default_requests_per_minute=60)
+        config = RuntimeRateLimitConfig.from_settings(settings)
+        registry = RateLimitRegistry(config)
 
         # Create some limiters
         registry.get_limiter("api_a")
@@ -561,34 +500,29 @@ class TestExcepthookSuppression:
             _suppressed_thread_idents,
         )
 
-        # Create rate limiter which spawns leaker threads
-        limiter = RateLimiter(name="cleanup_test", requests_per_second=10)
+        # Create rate limiter which spawns a leaker thread
+        limiter = RateLimiter(name="cleanup_test", requests_per_minute=60)
 
         # Acquire to ensure leaker thread is active
         limiter.acquire()
 
-        # Get leaker ident before close - leaker is on first bucket's limiter
-        leaker_idents = []
-        for internal_limiter in limiter._limiters:
-            leaker = internal_limiter.bucket_factory._leaker
-            if leaker is not None and leaker.ident is not None:
-                leaker_idents.append(leaker.ident)
+        # Get leaker ident before close
+        leaker = limiter._limiter.bucket_factory._leaker
+        leaker_ident = leaker.ident if leaker is not None else None
 
         # Close the limiter - this should clean up thread idents
         limiter.close()
 
-        # Verify all leaker idents were removed from suppression set
-        with _suppressed_lock:
-            for ident in leaker_idents:
-                assert ident not in _suppressed_thread_idents, f"Stale thread ident {ident} found in suppression set after close()"
+        # Verify leaker ident was removed from suppression set (if it was registered)
+        if leaker_ident is not None:
+            with _suppressed_lock:
+                assert leaker_ident not in _suppressed_thread_idents, (
+                    f"Stale thread ident {leaker_ident} found in suppression set after close()"
+                )
 
 
 class TestAcquireThreadSafety:
-    """Tests for acquire() thread safety and atomicity.
-
-    These tests verify the fix for the thread safety bug where acquire()
-    was not locked and could cause race conditions with concurrent calls.
-    """
+    """Tests for acquire() thread safety."""
 
     def test_acquire_concurrency_no_interleaving(self) -> None:
         """Multiple threads calling acquire() should not interleave incorrectly.
@@ -600,8 +534,8 @@ class TestAcquireThreadSafety:
 
         from elspeth.core.rate_limit import RateLimiter
 
-        # Allow 10 requests total
-        with RateLimiter(name="concurrent_test", requests_per_second=10) as limiter:
+        # Allow 10 requests per minute (enough for this test)
+        with RateLimiter(name="concurrent_test", requests_per_minute=10) as limiter:
             results: list[bool] = []
             errors: list[Exception] = []
 
@@ -627,59 +561,6 @@ class TestAcquireThreadSafety:
             # The 11th acquire should fail (quota exhausted)
             assert limiter.try_acquire() is False
 
-    def test_acquire_atomicity_across_multiple_rate_limits(self) -> None:
-        """acquire() should be atomic across per-second and per-minute limits.
-
-        This test verifies that if per-minute limit blocks, per-second tokens
-        are not consumed. Tests the same atomicity guarantee as try_acquire().
-        """
-        import threading
-
-        from elspeth.core.rate_limit import RateLimiter
-
-        # Allow 100/second but only 2/minute
-        with RateLimiter(
-            name="atomic_acquire_test",
-            requests_per_second=100,
-            requests_per_minute=2,
-        ) as limiter:
-            # Use up the minute quota
-            limiter.acquire(weight=1)
-            limiter.acquire(weight=1)
-
-            # Now attempt a 3rd acquisition in a background thread
-            # This should block waiting for minute quota
-            acquired = threading.Event()
-            error_occurred = threading.Event()
-
-            def blocking_worker() -> None:
-                try:
-                    # This should block because minute limit is exhausted
-                    # Set timeout to prevent infinite wait in test
-                    limiter.acquire(weight=1, timeout=0.5)
-                    acquired.set()
-                except TimeoutError:
-                    # Expected - minute limit exhausted
-                    pass
-                except Exception:
-                    error_occurred.set()
-
-            thread = threading.Thread(target=blocking_worker)
-            thread.start()
-            thread.join(timeout=1.0)
-
-            # Thread should have exited (not still running)
-            assert not thread.is_alive(), "Thread should have terminated but is still running"
-
-            # Thread should have timed out (not acquired)
-            assert not acquired.is_set(), "Should not have acquired (minute limit exhausted)"
-            assert not error_occurred.is_set(), "Should not have raised unexpected error"
-
-            # The per-second bucket should NOT have been consumed by the failed attempt
-            # We should have exactly 2 items in each bucket
-            assert limiter._buckets[0].count() == 2  # per-second bucket
-            assert limiter._buckets[1].count() == 2  # per-minute bucket
-
     def test_acquire_timeout_parameter(self) -> None:
         """acquire() should respect timeout parameter and raise TimeoutError.
 
@@ -690,8 +571,8 @@ class TestAcquireThreadSafety:
 
         from elspeth.core.rate_limit import RateLimiter
 
-        # Very restrictive: 1 request per second
-        with RateLimiter(name="timeout_test", requests_per_second=1) as limiter:
+        # Very restrictive: 1 request per minute
+        with RateLimiter(name="timeout_test", requests_per_minute=1) as limiter:
             # First request: succeeds
             limiter.acquire()
 
@@ -709,7 +590,7 @@ class TestAcquireThreadSafety:
         from elspeth.core.rate_limit import RateLimiter
 
         # Create limiter with capacity
-        with RateLimiter(name="timeout_none_test", requests_per_second=10) as limiter:
+        with RateLimiter(name="timeout_none_test", requests_per_minute=60) as limiter:
             # Should not raise - verifies timeout=None is accepted
             limiter.acquire(weight=1, timeout=None)
 

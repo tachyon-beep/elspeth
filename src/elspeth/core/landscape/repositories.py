@@ -475,13 +475,22 @@ class TokenOutcomeRepository:
 
         Returns:
             TokenOutcome with outcome converted to RowOutcome enum
+
+        Raises:
+            ValueError: If is_terminal is not 0 or 1 (Tier 1 audit integrity violation)
         """
+        # Tier 1 validation: is_terminal must be exactly 0 or 1
+        # Per Data Manifesto: audit DB is OUR data - crash on any anomaly
+        if row.is_terminal not in (0, 1):
+            raise ValueError(
+                f"TokenOutcome {row.outcome_id} has invalid is_terminal={row.is_terminal!r} (expected 0 or 1) - audit integrity violation"
+            )
         return TokenOutcome(
             outcome_id=row.outcome_id,
             run_id=row.run_id,
             token_id=row.token_id,
             outcome=RowOutcome(row.outcome),  # Convert HERE
-            is_terminal=row.is_terminal == 1,  # DB stores as Integer
+            is_terminal=row.is_terminal == 1,  # DB stores as Integer, now validated
             recorded_at=row.recorded_at,
             sink_name=row.sink_name,
             batch_id=row.batch_id,

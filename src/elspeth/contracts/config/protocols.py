@@ -83,8 +83,7 @@ class RuntimeRateLimitProtocol(Protocol):
 
     These fields come from RateLimitSettings:
     - enabled: Whether rate limiting is active
-    - default_requests_per_second: Fallback rate for unconfigured services
-    - default_requests_per_minute: Optional per-minute limit
+    - default_requests_per_minute: Per-minute rate limit for services
 
     Note: services and persistence_path are handled separately
     (services is a nested dict, persistence_path is optional infrastructure).
@@ -96,13 +95,8 @@ class RuntimeRateLimitProtocol(Protocol):
         ...
 
     @property
-    def default_requests_per_second(self) -> float | None:
-        """Default requests per second for unconfigured services."""
-        ...
-
-    @property
-    def default_requests_per_minute(self) -> float | None:
-        """Optional default requests per minute limit."""
+    def default_requests_per_minute(self) -> int:
+        """Default requests per minute for unconfigured services."""
         ...
 
 

@@ -200,13 +200,9 @@ class CSVSource(BaseSource):
                 # Add skip_rows to get true file position (reader counts from 1 after skipped lines)
                 physical_line = reader.line_num + self._skip_rows
 
-                # Column count validation
+                # Column count validation - quarantine malformed rows in both header and headerless modes
+                # Per Three-Tier Trust Model: source data is Tier 3 (zero trust), quarantine bad rows
                 if len(values) != expected_count:
-                    if self._columns is not None:
-                        # Headerless mode - column count mismatch is a hard error
-                        # Row 1 is first data row (no header consumed)
-                        raise ValueError(f"Row {row_num}: column count mismatch - expected {expected_count}, got {len(values)}")
-                    # Header mode - quarantine malformed row
                     raw_row = {
                         "__raw_line__": self._delimiter.join(values),
                         "__line_number__": physical_line,

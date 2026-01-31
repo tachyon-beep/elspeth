@@ -280,7 +280,7 @@ class TestEngineIntegration:
         assert MaxRetriesExceeded is not None
         assert SpanFactory is not None
 
-    def test_full_pipeline_with_audit(self, db: LandscapeDB) -> None:
+    def test_full_pipeline_with_audit(self, db: LandscapeDB, payload_store) -> None:
         """Full pipeline execution with audit trail verification."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
@@ -325,7 +325,8 @@ class TestEngineIntegration:
                     {
                         "value": row["value"],
                         "processed": True,
-                    }
+                    },
+                    success_reason={"action": "test"},
                 )
 
         class CollectSink(_TestSinkBase):
@@ -359,7 +360,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Verify run result
         assert result.status == "completed"
@@ -416,7 +417,7 @@ class TestEngineIntegration:
                 assert outcome is not None, f"Token {token.token_id} has no outcome"
                 assert outcome.is_terminal, f"Token {token.token_id} outcome is not terminal"
 
-    def test_audit_spine_intact(self, db: LandscapeDB) -> None:
+    def test_audit_spine_intact(self, db: LandscapeDB, payload_store) -> None:
         """THE audit spine test: proves chassis doesn't wobble.
 
         For every row:
@@ -460,7 +461,7 @@ class TestEngineIntegration:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"n": row["n"] * 2})
+                return TransformResult.success({"n": row["n"] * 2}, success_reason={"action": "multiply"})
 
         class AddTenTransform(BaseTransform):
             name = "add_ten"
@@ -471,7 +472,7 @@ class TestEngineIntegration:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"n": row["n"] + 10})
+                return TransformResult.success({"n": row["n"] + 10}, success_reason={"action": "add"})
 
         class CollectSink(_TestSinkBase):
             name = "collector"
@@ -505,7 +506,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 5
@@ -549,7 +550,7 @@ class TestEngineIntegration:
         artifacts = recorder.get_artifacts(result.run_id)
         assert len(artifacts) >= 1, "No artifacts recorded - audit spine broken"
 
-    def test_audit_spine_with_routing(self, db: LandscapeDB) -> None:
+    def test_audit_spine_with_routing(self, db: LandscapeDB, payload_store) -> None:
         """Audit spine test with gate routing.
 
         Verifies:
@@ -626,7 +627,7 @@ class TestEngineIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 4
@@ -679,7 +680,7 @@ class TestEngineIntegration:
 class TestNoSilentAuditLoss:
     """Tests that ensure audit errors raise, never skip silently."""
 
-    def test_missing_edge_raises_not_skips(self, db: LandscapeDB) -> None:
+    def test_missing_edge_raises_not_skips(self, db: LandscapeDB, payload_store) -> None:
         """Critical: RouteValidationError must raise, not silently count.
 
         This test ensures that when a config-driven gate routes to a sink that
@@ -758,7 +759,7 @@ class TestNoSilentAuditLoss:
 
         # This MUST raise RouteValidationError at startup, not silently fail
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=_build_production_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Verify error message includes the missing sink name
         assert "phantom" in str(exc_info.value)
@@ -786,7 +787,7 @@ class TestNoSilentAuditLoss:
         assert "nonexistent" in str(error)
         assert "Audit trail would be incomplete" in str(error)
 
-    def test_transform_exception_propagates(self, db: LandscapeDB) -> None:
+    def test_transform_exception_propagates(self, db: LandscapeDB, payload_store) -> None:
         """Transform exceptions must propagate, not be silently caught."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
@@ -857,7 +858,7 @@ class TestNoSilentAuditLoss:
 
         # Exception must propagate
         with pytest.raises(RuntimeError, match="Intentional explosion"):
-            orchestrator.run(config, graph=_build_production_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Run must be marked as failed in audit trail
         from elspeth.contracts import RunStatus
@@ -871,7 +872,7 @@ class TestNoSilentAuditLoss:
         latest_failed = max(failed_runs, key=lambda r: r.started_at)
         assert latest_failed.status == RunStatus.FAILED
 
-    def test_sink_exception_propagates(self, db: LandscapeDB) -> None:
+    def test_sink_exception_propagates(self, db: LandscapeDB, payload_store) -> None:
         """Sink exceptions must propagate, not be silently caught."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
@@ -907,7 +908,7 @@ class TestNoSilentAuditLoss:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class ExplodingSink(_TestSinkBase):
             name = "exploding_sink"
@@ -938,7 +939,7 @@ class TestNoSilentAuditLoss:
 
         # Exception must propagate
         with pytest.raises(OSError, match="Sink explosion"):
-            orchestrator.run(config, graph=_build_production_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Run must be marked as failed in audit trail
         from elspeth.contracts import RunStatus
@@ -956,7 +957,7 @@ class TestNoSilentAuditLoss:
 class TestAuditTrailCompleteness:
     """Tests verifying complete audit trail for complex scenarios."""
 
-    def test_empty_source_still_records_run(self, db: LandscapeDB) -> None:
+    def test_empty_source_still_records_run(self, db: LandscapeDB, payload_store) -> None:
         """Even with no rows, run must be recorded in audit trail."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
@@ -989,7 +990,7 @@ class TestAuditTrailCompleteness:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "sink"
@@ -1021,7 +1022,7 @@ class TestAuditTrailCompleteness:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 0
@@ -1035,7 +1036,7 @@ class TestAuditTrailCompleteness:
         nodes = recorder.get_nodes(result.run_id)
         assert len(nodes) == 3  # source, transform, sink
 
-    def test_multiple_sinks_all_record_artifacts(self, db: LandscapeDB) -> None:
+    def test_multiple_sinks_all_record_artifacts(self, db: LandscapeDB, payload_store) -> None:
         """When multiple sinks receive data, all must record artifacts."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
@@ -1103,7 +1104,7 @@ class TestAuditTrailCompleteness:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
 
@@ -1130,7 +1131,7 @@ class TestForkIntegration:
     rather than relying on graph-based edge registration.
     """
 
-    def test_full_pipeline_with_fork_writes_all_children_to_sink(self, db: LandscapeDB) -> None:
+    def test_full_pipeline_with_fork_writes_all_children_to_sink(self, db: LandscapeDB, payload_store) -> None:
         """Full pipeline should write all fork children to sink.
 
         This test verifies end-to-end fork behavior:
@@ -1352,7 +1353,7 @@ class TestForkCoalescePipelineIntegration:
     - Artifacts recorded with content hashes
     """
 
-    def test_fork_coalesce_writes_merged_to_sink(self, db: LandscapeDB) -> None:
+    def test_fork_coalesce_writes_merged_to_sink(self, db: LandscapeDB, payload_store) -> None:
         """Complete pipeline: source -> fork -> process -> coalesce -> sink.
 
         Verifies:
@@ -1490,7 +1491,7 @@ class TestForkCoalescePipelineIntegration:
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"sentiment": "positive"})
+                return TransformResult.success({"sentiment": "positive"}, success_reason={"action": "test"})
 
         class EntityTransform(BaseTransform):
             """Simulates entity extraction."""
@@ -1504,7 +1505,7 @@ class TestForkCoalescePipelineIntegration:
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"entities": ["ACME"]})
+                return TransformResult.success({"entities": ["ACME"]}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Test sink that collects written rows."""
@@ -1704,7 +1705,7 @@ class TestForkCoalescePipelineIntegration:
         # Parent token, 2 fork children, 1 merged token = 4 total
         assert len(all_tokens) == 4, f"Expected 4 tokens, got {len(all_tokens)}"
 
-    def test_multiple_rows_coalesce_correctly(self, db: LandscapeDB) -> None:
+    def test_multiple_rows_coalesce_correctly(self, db: LandscapeDB, payload_store) -> None:
         """Multiple source rows each fork and coalesce independently.
 
         Verifies:
@@ -1937,7 +1938,7 @@ class TestComplexDAGIntegration:
     - Mixed routing with aggregation
     """
 
-    def test_diamond_dag_fork_transform_coalesce(self, db: LandscapeDB) -> None:
+    def test_diamond_dag_fork_transform_coalesce(self, db: LandscapeDB, payload_store) -> None:
         """Diamond DAG pattern: source -> fork -> [transform_A, transform_B] -> coalesce -> sink.
 
         Pipeline flow:
@@ -2100,7 +2101,7 @@ class TestComplexDAGIntegration:
                 # Simple sentiment: "good" in text means positive
                 text = row["text"]
                 sentiment = "positive" if "good" in text.lower() else "neutral"
-                return TransformResult.success({**row, "sentiment": sentiment})
+                return TransformResult.success({**row, "sentiment": sentiment}, success_reason={"action": "test"})
 
         class EntityTransform(BaseTransform):
             """Extracts entities from text."""
@@ -2117,7 +2118,7 @@ class TestComplexDAGIntegration:
                 # Simple entity extraction: uppercase words are entities
                 text = row["text"]
                 entities = [word for word in text.split() if word.isupper()]
-                return TransformResult.success({**row, "entities": entities})
+                return TransformResult.success({**row, "entities": entities}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Collects written rows for verification."""
@@ -2325,7 +2326,7 @@ class TestComplexDAGIntegration:
 
         assert not hasattr(base, "BaseAggregation"), "BaseAggregation should be deleted - use is_batch_aware=True on BaseTransform"
 
-    def test_run_result_captures_all_metrics(self, db: LandscapeDB) -> None:
+    def test_run_result_captures_all_metrics(self, db: LandscapeDB, payload_store) -> None:
         """RunResult captures metrics for all pipeline operations.
 
         This test verifies that RunResult includes all expected metrics
@@ -2394,7 +2395,7 @@ class TestComplexDAGIntegration:
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 3 == 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "divisible_by_3", "value": row["value"]})
-                return TransformResult.success({"value": row["value"], "processed": True})
+                return TransformResult.success({"value": row["value"], "processed": True}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects written rows."""
@@ -2471,7 +2472,7 @@ class TestComplexDAGIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # ================================================================
         # Verify all metrics are non-negative
@@ -2566,7 +2567,7 @@ class TestRetryIntegration:
     - Audit trail records all attempts
     """
 
-    def test_transient_failure_retries_and_succeeds(self, db: LandscapeDB) -> None:
+    def test_transient_failure_retries_and_succeeds(self, db: LandscapeDB, payload_store) -> None:
         """Transform that fails twice then succeeds should complete.
 
         Pipeline: source -> flaky_transform (fails 2x, succeeds 3rd) -> sink
@@ -2633,7 +2634,7 @@ class TestRetryIntegration:
                     # Raise ConnectionError - this is retryable
                     raise ConnectionError(f"Transient failure attempt {attempt_counts[row_value]}")
 
-                return TransformResult.success({"value": row_value, "processed": True})
+                return TransformResult.success({"value": row_value, "processed": True}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "output_sink"
@@ -2680,7 +2681,7 @@ class TestRetryIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings)
+        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings, payload_store=payload_store)
 
         # Verify run completed successfully
         assert result.status == RunStatus.COMPLETED
@@ -2725,7 +2726,7 @@ class TestRetryIntegration:
         final_states = [s for s in states if s.attempt == 2]
         assert all(s.status == "completed" for s in final_states), "All final attempts should be 'completed'"
 
-    def test_permanent_failure_quarantines_after_max_retries(self, db: LandscapeDB) -> None:
+    def test_permanent_failure_quarantines_after_max_retries(self, db: LandscapeDB, payload_store) -> None:
         """Transform that always fails should quarantine row after max retries.
 
         Pipeline: source -> always_fail_transform -> sink
@@ -2792,7 +2793,7 @@ class TestRetryIntegration:
                     # Always fail with ConnectionError (retryable)
                     raise ConnectionError(f"Permanent failure for value=1, attempt {attempt_counts[row_value]}")
 
-                return TransformResult.success({"value": row_value, "processed": True})
+                return TransformResult.success({"value": row_value, "processed": True}, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "output_sink"
@@ -2843,7 +2844,7 @@ class TestRetryIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings)
+        result = orchestrator.run(config, graph=_build_production_graph(config), settings=settings, payload_store=payload_store)
 
         # Run completes (partial success)
         assert result.status == RunStatus.COMPLETED
@@ -3377,7 +3378,7 @@ class TestErrorRecovery:
     causes the row to be quarantined.
     """
 
-    def test_partial_success_continues_processing(self, db: LandscapeDB) -> None:
+    def test_partial_success_continues_processing(self, db: LandscapeDB, payload_store) -> None:
         """Some rows fail via TransformResult.error(), others succeed.
 
         Pipeline should:
@@ -3435,7 +3436,7 @@ class TestErrorRecovery:
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows in memory."""
@@ -3476,7 +3477,7 @@ class TestErrorRecovery:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Pipeline completes despite failures
         assert result.status == RunStatus.COMPLETED, f"Expected COMPLETED, got {result.status}"
@@ -3491,7 +3492,7 @@ class TestErrorRecovery:
         expected_values = {1, 3, 5, 7, 9}
         assert result_values == expected_values, f"Expected odd values {expected_values}, got {result_values}"
 
-    def test_quarantined_rows_have_audit_trail(self, db: LandscapeDB) -> None:
+    def test_quarantined_rows_have_audit_trail(self, db: LandscapeDB, payload_store) -> None:
         """Quarantined rows must have complete audit trail.
 
         Even failed rows must be traceable - we need to know:
@@ -3553,7 +3554,7 @@ class TestErrorRecovery:
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "Even values fail", "value": row["value"]})
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows in memory."""
@@ -3594,7 +3595,7 @@ class TestErrorRecovery:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Basic verification
         assert result.status == RunStatus.COMPLETED

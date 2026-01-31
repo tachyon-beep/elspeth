@@ -67,17 +67,20 @@ def track_operation(
     - Context wiring (ctx.operation_id)
     - Duration calculation
     - Exception capture with proper status
-    - Guaranteed completion (even on DB failure)
+    - Audit integrity enforcement (fail run if audit write fails)
     - Context cleanup (clears operation_id after completion)
 
     The context manager pattern ensures operations are always completed,
     even when exceptions occur. This is critical for audit integrity -
     orphaned operations in 'open' status indicate framework bugs.
 
-    Exception Safety:
-        If complete_operation() fails (DB error), the original exception
-        is preserved and propagated. The DB failure is logged critically
-        but does not mask the original error.
+    Audit Integrity:
+        If complete_operation() fails (DB error), the run MUST fail.
+        A successful operation with a missing audit record violates
+        Tier-1 trust rules - audit data must be 100% pristine.
+
+        - If original operation failed: original exception propagates (DB error logged)
+        - If original operation succeeded but audit fails: DB error is raised
 
     Usage:
         with track_operation(
@@ -121,6 +124,7 @@ def track_operation(
     start_time = time.perf_counter()
     status: Literal["completed", "failed", "pending"] = "completed"
     error_msg: str | None = None
+    original_exception: BaseException | None = None
 
     try:
         yield handle
@@ -133,6 +137,7 @@ def track_operation(
     except Exception as e:
         status = "failed"
         error_msg = str(e)
+        original_exception = e
         raise
     finally:
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -145,8 +150,8 @@ def track_operation(
                 duration_ms=duration_ms,
             )
         except Exception as db_error:
-            # Log critically but don't mask original exception
-            # This is a serious issue - audit trail is now incomplete
+            # Audit integrity: if we can't record the operation, the run must fail.
+            # A successful operation with missing audit record violates Tier-1 trust.
             logger.critical(
                 "Failed to complete operation - audit trail incomplete",
                 extra={
@@ -157,7 +162,11 @@ def track_operation(
                     "original_error": error_msg,
                 },
             )
-            # Don't raise - let original exception propagate
+            # If there was an original exception, let it propagate (DB error is logged).
+            # If the operation succeeded but audit failed, we MUST raise the DB error.
+            if original_exception is None:
+                raise
+            # Otherwise let the original exception propagate (DB error is logged)
         finally:
             # Always restore previous operation_id to prevent accidental reuse
             ctx.operation_id = previous_operation_id

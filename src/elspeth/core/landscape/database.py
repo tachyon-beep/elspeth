@@ -31,6 +31,10 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("runs", "source_field_resolution_json"),
     # Fork/expand branch contract - enables recovery validation
     ("token_outcomes", "expected_branches_json"),
+    # Transform success reason audit trail - captures why transform succeeded
+    ("node_states", "success_reason_json"),
+    # Operation call linkage - enables source/sink call tracking
+    ("calls", "operation_id"),
 ]
 
 # Required foreign keys for audit integrity (Tier 1 trust).

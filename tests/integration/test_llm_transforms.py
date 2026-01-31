@@ -125,6 +125,8 @@ class TestLLMTransformIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
             provider="openai",
         )
@@ -186,6 +188,8 @@ class TestLLMTransformIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -227,6 +231,8 @@ class TestLLMTransformIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -268,6 +274,8 @@ class TestLLMTransformIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -312,6 +320,8 @@ class TestLLMTransformIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -401,21 +411,36 @@ class TestOpenRouterLLMTransformIntegration:
         recorder.create_token(row_id=row.row_id, token_id=token_id)
         return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
 
+    def _patch_httpx_for_chaosllm(self, chaosllm_server) -> Any:
+        """Route httpx.Client calls to the ChaosLLM ASGI app."""
+        from unittest.mock import patch
+
+        from starlette.testclient import TestClient
+
+        def _client_factory(*_args: Any, **kwargs: Any) -> httpx.Client:
+            kwargs.pop("timeout", None)
+            return TestClient(
+                chaosllm_server.server.app,
+                base_url=chaosllm_server.url,
+            )
+
+        return patch("httpx.Client", side_effect=_client_factory)
+
     def test_http_client_call_and_response_parsing(
         self,
         recorder: LandscapeRecorder,
         executor: TransformExecutor,
         run_id: str,
         node_id: str,
+        chaosllm_server,
     ) -> None:
         """Verify OpenRouter uses HTTP client and parses response."""
-        from unittest.mock import patch
-
         transform = OpenRouterLLMTransform(
             {
                 "model": "anthropic/claude-3-opus",
                 "template": "Analyze: {{ row.text }}",
                 "api_key": "test-api-key",
+                "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
@@ -430,28 +455,10 @@ class TestOpenRouterLLMTransformIntegration:
         )
         transform.on_start(ctx)
 
-        # Mock HTTP response
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Analysis complete"}}],
-            "usage": {"prompt_tokens": 15, "completion_tokens": 10},
-            "model": "anthropic/claude-3-opus",
-        }
-        mock_response.raise_for_status = MagicMock()
-        mock_response.content = b""
-        mock_response.text = ""
-
         row_data = {"text": "Hello world"}
         token = self._create_token(recorder, run_id, node_id, row_data)
 
-        with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.post.return_value = mock_response
-            mock_client_class.return_value.__enter__ = MagicMock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = MagicMock(return_value=None)
-
+        with self._patch_httpx_for_chaosllm(chaosllm_server):
             result, _, error_sink = executor.execute_transform(
                 transform=transform,
                 token=token,
@@ -462,30 +469,33 @@ class TestOpenRouterLLMTransformIntegration:
         # Verify result
         assert result.status == "success"
         assert result.row is not None
-        assert result.row["llm_response"] == "Analysis complete"
-        assert result.row["llm_response_usage"]["prompt_tokens"] == 15
+        assert isinstance(result.row["llm_response"], str)
+        assert result.row["llm_response"]
+        assert result.row["llm_response_usage"]["prompt_tokens"] > 0
+        assert result.row["llm_response_usage"]["completion_tokens"] > 0
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus"
         assert error_sink is None
 
         transform.close()
 
-    @pytest.mark.skip(reason="Mock setup for httpx.HTTPStatusError in worker threads needs investigation - test hangs")
+    @pytest.mark.chaosllm(internal_error_pct=100.0)
     def test_http_error_returns_transform_error(
         self,
         recorder: LandscapeRecorder,
         executor: TransformExecutor,
         run_id: str,
         node_id: str,
+        chaosllm_server,
     ) -> None:
         """Verify HTTP errors are handled gracefully."""
-        from unittest.mock import patch
-
         transform = OpenRouterLLMTransform(
             {
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "api_key": "test-api-key",
+                "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
+                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
@@ -502,17 +512,8 @@ class TestOpenRouterLLMTransformIntegration:
         row_data = {"text": "test"}
         token = self._create_token(recorder, run_id, node_id, row_data)
 
-        with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.post.side_effect = httpx.HTTPStatusError(
-                "Server Error",
-                request=MagicMock(),
-                response=MagicMock(status_code=500),
-            )
-            mock_client_class.return_value.__enter__ = MagicMock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = MagicMock(return_value=None)
-
-            result, _, _error_sink = executor.execute_transform(
+        with self._patch_httpx_for_chaosllm(chaosllm_server):
+            result, _, error_sink = executor.execute_transform(
                 transform=transform,
                 token=token,
                 ctx=ctx,
@@ -524,26 +525,28 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is False  # 500 is not rate limit
+        assert error_sink == "discard"
 
         transform.close()
 
-    @pytest.mark.skip(reason="Mock setup for httpx.HTTPStatusError in worker threads needs investigation - test hangs")
+    @pytest.mark.chaosllm(rate_limit_pct=100.0)
     def test_rate_limit_http_error_is_retryable(
         self,
         recorder: LandscapeRecorder,
         executor: TransformExecutor,
         run_id: str,
         node_id: str,
+        chaosllm_server,
     ) -> None:
         """Verify 429 HTTP errors are marked retryable."""
-        from unittest.mock import patch
-
         transform = OpenRouterLLMTransform(
             {
                 "model": "anthropic/claude-3-opus",
                 "template": "{{ row.text }}",
                 "api_key": "test-api-key",
+                "base_url": f"{chaosllm_server.url}/v1",
                 "schema": DYNAMIC_SCHEMA,
+                "on_error": "discard",
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
             }
@@ -560,17 +563,8 @@ class TestOpenRouterLLMTransformIntegration:
         row_data = {"text": "test"}
         token = self._create_token(recorder, run_id, node_id, row_data)
 
-        with patch("httpx.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.post.side_effect = httpx.HTTPStatusError(
-                "Rate Limit",
-                request=MagicMock(),
-                response=MagicMock(status_code=429),
-            )
-            mock_client_class.return_value.__enter__ = MagicMock(return_value=mock_client)
-            mock_client_class.return_value.__exit__ = MagicMock(return_value=None)
-
-            result, _, _error_sink = executor.execute_transform(
+        with self._patch_httpx_for_chaosllm(chaosllm_server):
+            result, _, error_sink = executor.execute_transform(
                 transform=transform,
                 token=token,
                 ctx=ctx,
@@ -580,6 +574,7 @@ class TestOpenRouterLLMTransformIntegration:
         # Verify retryable error
         assert result.status == "error"
         assert result.retryable is True
+        assert error_sink == "discard"
 
         transform.close()
 
@@ -867,8 +862,12 @@ class TestAuditedLLMClientIntegration:
         return LandscapeRecorder(db)
 
     @pytest.fixture
-    def state_id(self, recorder: LandscapeRecorder) -> str:
-        """Create a node state for testing."""
+    def audit_state(self, recorder: LandscapeRecorder) -> tuple[str, str]:
+        """Create a node state for testing.
+
+        Returns:
+            Tuple of (run_id, state_id)
+        """
         schema = SchemaConfig.from_dict({"fields": "dynamic"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
@@ -893,10 +892,12 @@ class TestAuditedLLMClientIntegration:
             step_index=0,
             input_data={},
         )
-        return state.state_id
+        return run.run_id, state.state_id
 
-    def test_successful_call_recorded_with_all_fields(self, recorder: LandscapeRecorder, state_id: str) -> None:
+    def test_successful_call_recorded_with_all_fields(self, recorder: LandscapeRecorder, audit_state: tuple[str, str]) -> None:
         """Verify successful call records request, response, and latency."""
+        run_id, state_id = audit_state
+
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -911,6 +912,8 @@ class TestAuditedLLMClientIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -937,8 +940,10 @@ class TestAuditedLLMClientIntegration:
         assert call.latency_ms > 0
         assert call.error_json is None
 
-    def test_multiple_calls_indexed_correctly(self, recorder: LandscapeRecorder, state_id: str) -> None:
+    def test_multiple_calls_indexed_correctly(self, recorder: LandscapeRecorder, audit_state: tuple[str, str]) -> None:
         """Verify multiple calls have sequential indices."""
+        run_id, state_id = audit_state
+
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
@@ -953,6 +958,8 @@ class TestAuditedLLMClientIntegration:
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 
@@ -968,14 +975,18 @@ class TestAuditedLLMClientIntegration:
         assert calls[1].call_index == 1
         assert calls[2].call_index == 2
 
-    def test_error_call_recorded_with_error_details(self, recorder: LandscapeRecorder, state_id: str) -> None:
+    def test_error_call_recorded_with_error_details(self, recorder: LandscapeRecorder, audit_state: tuple[str, str]) -> None:
         """Verify failed calls record error details."""
+        run_id, state_id = audit_state
+
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = Exception("API down")
 
         audited_client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=lambda event: None,
             underlying_client=mock_client,
         )
 

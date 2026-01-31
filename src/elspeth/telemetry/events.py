@@ -106,8 +106,15 @@ class RowCreated(TelemetryEvent):
 class ExternalCallCompleted(TelemetryEvent):
     """Emitted when an external call (LLM, HTTP, SQL) completes.
 
+    Calls can originate from two contexts:
+    - Transform context: Call made during transform processing (has state_id)
+    - Operation context: Call made during source load or sink write (has operation_id)
+
+    Exactly one of state_id or operation_id should be set.
+
     Attributes:
-        state_id: Node state that made the call
+        state_id: Node state that made the call (for transform context)
+        operation_id: Operation that made the call (for source/sink context)
         call_type: Type of external call (llm, http, sql, filesystem)
         provider: Service provider (e.g., "azure-openai", "anthropic")
         status: Call result (success, error)
@@ -117,11 +124,22 @@ class ExternalCallCompleted(TelemetryEvent):
         token_usage: LLM token counts if applicable (optional)
     """
 
-    state_id: str
     call_type: CallType
     provider: str
     status: CallStatus
     latency_ms: float
+    state_id: str | None = None
+    operation_id: str | None = None
     request_hash: str | None = None
     response_hash: str | None = None
     token_usage: dict[str, int] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate XOR constraint: exactly one of state_id or operation_id must be set."""
+        has_state = self.state_id is not None
+        has_operation = self.operation_id is not None
+        if has_state == has_operation:  # Both True or both False
+            raise ValueError(
+                f"ExternalCallCompleted requires exactly one of state_id or operation_id. "
+                f"Got state_id={self.state_id!r}, operation_id={self.operation_id!r}"
+            )

@@ -14,7 +14,7 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 class TestExplainGracefulDegradation:
     """Tests for explain_row() when payloads are unavailable."""
 
-    def test_explain_with_missing_row_payload(self, tmp_path: Path) -> None:
+    def test_explain_with_missing_row_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() succeeds even when row payload is purged."""
         import json
 
@@ -63,7 +63,7 @@ class TestExplainGracefulDegradation:
         assert lineage.source_data is None  # Payload unavailable
         assert lineage.payload_available is False
 
-    def test_explain_reports_payload_status(self, tmp_path: Path) -> None:
+    def test_explain_reports_payload_status(self, tmp_path: Path, payload_store) -> None:
         """explain_row() explicitly reports payload availability."""
         import json
 
@@ -110,7 +110,7 @@ class TestExplainGracefulDegradation:
         assert lineage is not None
         assert lineage.payload_available is False
 
-    def test_explain_with_available_payload(self, tmp_path: Path) -> None:
+    def test_explain_with_available_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns payload when available."""
         import json
 
@@ -250,7 +250,7 @@ class TestExplainGracefulDegradation:
         assert lineage.source_data is None  # No payload_ref
         assert lineage.payload_available is False
 
-    def test_explain_row_with_corrupted_payload(self, tmp_path: Path) -> None:
+    def test_explain_row_with_corrupted_payload(self, tmp_path: Path, payload_store) -> None:
         """explain_row() handles corrupted payload (invalid JSON) gracefully."""
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -294,7 +294,7 @@ class TestExplainGracefulDegradation:
         assert lineage.source_data is None  # Corrupted payload not returned
         assert lineage.payload_available is False  # Reports as unavailable
 
-    def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path) -> None:
+    def test_explain_row_rejects_run_id_mismatch(self, tmp_path: Path, payload_store) -> None:
         """explain_row() returns None when row belongs to different run."""
         import json
 

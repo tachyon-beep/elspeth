@@ -16,10 +16,9 @@ class TestRuntimeRateLimitAllFields:
         """RuntimeRateLimitConfig must have all RateLimitSettings fields."""
         from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 
-        # All 5 fields from RateLimitSettings
+        # All 4 fields from RateLimitSettings (simplified to per-minute only)
         expected_fields = {
             "enabled",
-            "default_requests_per_second",
             "default_requests_per_minute",
             "persistence_path",
             "services",
@@ -59,10 +58,9 @@ class TestRuntimeRateLimitFromSettings:
         from elspeth.core.config import RateLimitSettings, ServiceRateLimit
 
         # Create settings with non-default values
-        services = {"openai": ServiceRateLimit(requests_per_second=5)}
+        services = {"openai": ServiceRateLimit(requests_per_minute=100)}
         settings = RateLimitSettings(
             enabled=False,
-            default_requests_per_second=25,
             default_requests_per_minute=500,
             persistence_path="/tmp/rate_limits.db",
             services=services,
@@ -72,8 +70,7 @@ class TestRuntimeRateLimitFromSettings:
 
         # Verify all fields mapped correctly
         assert config.enabled is False, "enabled not mapped correctly"
-        assert config.default_requests_per_second == 25.0, "default_requests_per_second not mapped correctly"
-        assert config.default_requests_per_minute == 500.0, "default_requests_per_minute not mapped correctly"
+        assert config.default_requests_per_minute == 500, "default_requests_per_minute not mapped correctly"
         assert config.persistence_path == "/tmp/rate_limits.db", "persistence_path not mapped correctly"
         assert config.services == services, "services not mapped correctly"
 
@@ -86,27 +83,11 @@ class TestRuntimeRateLimitFromSettings:
         settings = RateLimitSettings()
         config = RuntimeRateLimitConfig.from_settings(settings)
 
-        # RateLimitSettings defaults: enabled=True, default_requests_per_second=10
+        # RateLimitSettings defaults: enabled=True, default_requests_per_minute=60
         assert config.enabled is True
-        assert config.default_requests_per_second == 10.0
-        assert config.default_requests_per_minute is None
+        assert config.default_requests_per_minute == 60
         assert config.persistence_path is None
         assert config.services == {}
-
-    def test_from_settings_converts_int_to_float(self) -> None:
-        """from_settings() should convert int rates to float for protocol compliance."""
-        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
-        from elspeth.core.config import RateLimitSettings
-
-        settings = RateLimitSettings(
-            default_requests_per_second=10,  # int in Settings
-            default_requests_per_minute=100,  # int in Settings
-        )
-        config = RuntimeRateLimitConfig.from_settings(settings)
-
-        # Protocol expects float
-        assert isinstance(config.default_requests_per_second, float)
-        assert isinstance(config.default_requests_per_minute, float)
 
 
 class TestRuntimeRateLimitConvenienceFactories:
@@ -120,7 +101,6 @@ class TestRuntimeRateLimitConvenienceFactories:
 
         # Default should be disabled (no rate limiting by default)
         assert config.enabled is False
-        assert config.default_requests_per_second is None
-        assert config.default_requests_per_minute is None
+        assert config.default_requests_per_minute == 60
         assert config.persistence_path is None
         assert config.services == {}

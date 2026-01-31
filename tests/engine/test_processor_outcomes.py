@@ -444,7 +444,7 @@ class TestEngineIntegrationOutcomes:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True})
+                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         processor = RowProcessor(
             recorder=recorder,
@@ -528,7 +528,7 @@ class TestEngineIntegrationOutcomes:
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if row["value"] < 0:
                     return TransformResult.error({"reason": "validation_failed", "error": "negative_value"})
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         processor = RowProcessor(
             recorder=recorder,

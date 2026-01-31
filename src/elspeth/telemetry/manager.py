@@ -102,6 +102,9 @@ class TelemetryManager:
         # Track whether we've already disabled telemetry
         self._disabled = False
 
+        # Store exception for fail_on_total=True to re-raise on flush()
+        self._stored_exception: TelemetryExporterError | None = None
+
         # Thread coordination
         self._shutdown_event = threading.Event()
         self._dropped_lock = threading.Lock()
@@ -141,6 +144,10 @@ class TelemetryManager:
                 break
             try:
                 self._dispatch_to_exporters(event)
+            except TelemetryExporterError as e:
+                # Store for re-raise on flush() when fail_on_total=True
+                logger.error("Export loop failed unexpectedly", error=str(e))
+                self._stored_exception = e
             except Exception as e:
                 # CRITICAL: Log but don't crash - telemetry must not kill pipeline
                 logger.error("Export loop failed unexpectedly", error=str(e))
@@ -327,9 +334,20 @@ class TelemetryManager:
 
         Exporter flush failures are logged but don't raise - telemetry
         should not crash the pipeline.
+
+        Raises:
+            TelemetryExporterError: If fail_on_total_exporter_failure=True
+                and all exporters failed repeatedly during processing.
         """
         if not self._shutdown_event.is_set():
             self._queue.join()  # Wait for all queued events to be processed
+
+        # Re-raise stored exception from background thread (fail_on_total=True)
+        if self._stored_exception is not None:
+            exc = self._stored_exception
+            self._stored_exception = None  # Clear to allow recovery
+            raise exc
+
         for exporter in self._exporters:
             try:
                 exporter.flush()

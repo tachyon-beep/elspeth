@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
@@ -40,6 +40,7 @@ from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS
 from tests.conftest import (
+    MockPayloadStore,
     as_sink,
     as_source,
     as_transform,
@@ -178,6 +179,7 @@ class TestWorkQueueConservation:
         This is work conservation - no silent drops allowed.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i, "value": f"row_{i}"} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -191,7 +193,7 @@ class TestWorkQueueConservation:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # All rows must appear in sink
         assert len(sink.results) == num_rows, f"Work lost! Input: {num_rows} rows, Output: {len(sink.results)} rows"
@@ -208,6 +210,7 @@ class TestWorkQueueConservation:
     def test_multi_transform_pipeline_conserves_rows(self, num_rows: int, num_transforms: int) -> None:
         """Property: Row count preserved through N transforms."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -221,7 +224,7 @@ class TestWorkQueueConservation:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == num_rows, f"Row count changed through {num_transforms} transforms: {num_rows} -> {len(sink.results)}"
 
@@ -238,6 +241,7 @@ class TestWorkQueueConservation:
         quarantine and recorded with the QUARANTINED outcome.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = ConditionalErrorTransform()
         sink = CollectSink()
@@ -249,7 +253,7 @@ class TestWorkQueueConservation:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Count expected outcomes
         expected_errors = sum(1 for r in rows if r["fail"])
@@ -279,6 +283,7 @@ class TestWorkQueueConservation:
         from elspeth.core.config import ElspethSettings
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"value": i} for i in range(num_rows)]
         source = ListSource(rows)
         sink_a = CollectSink("sink_a")
@@ -317,7 +322,7 @@ class TestWorkQueueConservation:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Each sink should receive all rows (fork duplicates)
         assert len(sink_a.results) == num_rows, f"sink_a: expected {num_rows}, got {len(sink_a.results)}"
@@ -349,6 +354,7 @@ class TestOrderCorrectnessProperties:
         starting at 1. Note: sink execution may add additional step at the end.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": 0}]  # Single row for clear ordering
 
         source = ListSource(rows)
@@ -362,7 +368,7 @@ class TestOrderCorrectnessProperties:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Get the token
         with db.connection() as conn:
@@ -405,6 +411,7 @@ class TestOrderCorrectnessProperties:
         While the work queue is FIFO, source order determines initial queue order.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i, "sequence": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -418,7 +425,7 @@ class TestOrderCorrectnessProperties:
         )
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=build_production_graph(config))
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Results should be in same order as source
         result_sequences = [r["sequence"] for r in sink.results]
@@ -431,6 +438,7 @@ class TestOrderCorrectnessProperties:
     def test_no_transform_pipeline_preserves_order(self, num_rows: int) -> None:
         """Property: Even with no transforms, source order is preserved."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i, "order": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -444,7 +452,7 @@ class TestOrderCorrectnessProperties:
         )
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=build_production_graph(config))
+        orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         result_orders = [r["order"] for r in sink.results]
         expected_orders = list(range(num_rows))
@@ -488,6 +496,7 @@ class TestIterationGuardProperties:
         stay well under MAX_WORK_QUEUE_ITERATIONS.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -503,7 +512,7 @@ class TestIterationGuardProperties:
 
         orchestrator = Orchestrator(db)
         # Should complete without RuntimeError from iteration guard
-        _run = orchestrator.run(config, graph=build_production_graph(config))
+        _run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == num_rows
 
@@ -517,6 +526,7 @@ class TestIterationGuardProperties:
         from elspeth.core.config import ElspethSettings
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"value": i} for i in range(num_rows)]
         source = ListSource(rows)
         sink_a = CollectSink("sink_a")
@@ -555,7 +565,7 @@ class TestIterationGuardProperties:
 
         orchestrator = Orchestrator(db)
         # Should complete without RuntimeError
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert len(sink_a.results) == num_rows
         assert len(sink_b.results) == num_rows
@@ -577,6 +587,7 @@ class TestTokenIdentityProperties:
         No two tokens in the same run should have the same token_id.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -590,7 +601,7 @@ class TestTokenIdentityProperties:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Count unique tokens
         unique_count = count_unique_tokens(db, run.run_id)
@@ -609,6 +620,7 @@ class TestTokenIdentityProperties:
         from elspeth.core.config import ElspethSettings
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"value": i} for i in range(num_rows)]
         source = ListSource(rows)
         sink_a = CollectSink("sink_a")
@@ -646,7 +658,7 @@ class TestTokenIdentityProperties:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Get all token IDs
         with db.connection() as conn:
@@ -678,6 +690,7 @@ class TestTokenIdentityProperties:
         A token's row_id identifies its source row and should never change.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": i} for i in range(num_rows)]
 
         source = ListSource(rows)
@@ -691,7 +704,7 @@ class TestTokenIdentityProperties:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify row_ids exist and are consistent
         with db.connection() as conn:
@@ -720,6 +733,7 @@ class TestWorkQueueEdgeCases:
     def test_empty_source_no_work_items(self) -> None:
         """Edge case: Empty source creates no work items."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource([])  # Empty
         transform = PassTransform()
         sink = CollectSink()
@@ -731,7 +745,7 @@ class TestWorkQueueEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # No results
         assert len(sink.results) == 0
@@ -747,6 +761,7 @@ class TestWorkQueueEdgeCases:
     def test_single_row_single_transform(self) -> None:
         """Edge case: Minimal pipeline (1 row, 1 transform)."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"id": 0}]
 
         source = ListSource(rows)
@@ -760,17 +775,18 @@ class TestWorkQueueEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == 1
         missing = count_tokens_missing_terminal(db, run.run_id)
         assert missing == 0
 
     @given(num_rows=st.integers(min_value=1, max_value=10))
-    @settings(max_examples=20, deadline=None)
+    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_all_rows_error_all_quarantined(self, num_rows: int) -> None:
         """Edge case: When all rows error, all reach QUARANTINED."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         # All rows will error
         rows = [{"id": i, "fail": True} for i in range(num_rows)]
 
@@ -785,7 +801,7 @@ class TestWorkQueueEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # No successful results
         assert len(sink.results) == 0
@@ -799,7 +815,7 @@ class TestWorkQueueEdgeCases:
         assert missing == 0
 
     @given(num_rows=st.integers(min_value=2, max_value=10))
-    @settings(max_examples=20, deadline=None)
+    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_fork_coalesce_balance(self, num_rows: int) -> None:
         """Property: Fork-coalesce maintains token conservation.
 
@@ -815,6 +831,7 @@ class TestWorkQueueEdgeCases:
         from elspeth.core.config import ElspethSettings
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         rows = [{"value": i} for i in range(num_rows)]
         source = ListSource(rows)
         transform = PassTransform()  # Transform before fork for proper routing
@@ -863,7 +880,7 @@ class TestWorkQueueEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Coalesced tokens should reach sink - one per input row
         assert len(sink.results) == num_rows, f"Expected {num_rows} results after coalesce, got {len(sink.results)}"

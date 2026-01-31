@@ -16,6 +16,7 @@ class ExecutionError(TypedDict):
     exception: str  # String representation of the exception
     type: str  # Exception class name (e.g., "ValueError")
     traceback: NotRequired[str]  # Optional full traceback
+    phase: NotRequired[str]  # Optional phase indicator (e.g., "flush" for sink flush errors)
 
 
 class CoalesceFailureReason(TypedDict, total=False):

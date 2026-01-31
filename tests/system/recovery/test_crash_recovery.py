@@ -76,7 +76,7 @@ class _FailOnceTransform(BaseTransform):
         if row_id in self._fail_row_ids and self._attempt_count[row_id] == 1:
             return TransformResult.error({"reason": "simulated_failure"})
 
-        return TransformResult.success({**row, "attempts": self._attempt_count[row_id]})
+        return TransformResult.success({**row, "attempts": self._attempt_count[row_id]}, success_reason={"action": "test"})
 
 
 def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -115,7 +115,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 class TestResumeIdempotence:
     """Tests for resume idempotence - same results whether interrupted or not."""
 
-    def test_resume_produces_same_result(self, tmp_path: Path) -> None:
+    def test_resume_produces_same_result(self, tmp_path: Path, payload_store) -> None:
         """Resume after interruption produces same final output.
 
         This test verifies the recovery idempotence property:
@@ -181,7 +181,7 @@ class TestResumeIdempotence:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "value": row["value"] * 2})
+                return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "doubler"})
 
         class CollectSink(_TestSinkBase):
             """Sink that collects rows."""
@@ -222,7 +222,11 @@ class TestResumeIdempotence:
         )
 
         orchestrator_a = Orchestrator(db_a)
-        result_a = orchestrator_a.run(config_a, graph=_build_linear_graph(config_a))
+        result_a = orchestrator_a.run(
+            config_a,
+            graph=_build_linear_graph(config_a),
+            payload_store=payload_store,
+        )
 
         assert result_a.status == "completed"
         assert result_a.rows_processed == 5
@@ -427,7 +431,7 @@ class TestResumeIdempotence:
 class TestRetryBehavior:
     """Tests for retry behavior during processing."""
 
-    def test_pipeline_with_failed_transform_records_failure(self, tmp_path: Path) -> None:
+    def test_pipeline_with_failed_transform_records_failure(self, tmp_path: Path, payload_store) -> None:
         """A pipeline that has a failing transform records the failure in the audit trail.
 
         When a transform returns TransformResult.error():
@@ -467,7 +471,7 @@ class TestRetryBehavior:
                             "error": f"Row {row['id']} failed validation",
                         }
                     )
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
 
@@ -515,7 +519,7 @@ class TestRetryBehavior:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_linear_graph(config))
+        result = orchestrator.run(config, graph=_build_linear_graph(config), payload_store=payload_store)
 
         # Pipeline completes (errors are handled via routing, not as failures)
         assert result.status == "completed"
@@ -542,7 +546,7 @@ class TestRetryBehavior:
 
         error_details = json.loads(error.error_details_json)
         assert error_details["reason"] == "validation_failed"
-        assert error_details["row_id"] == "row_2"
+        assert error_details["error"] == "Row row_2 failed validation"
 
         db.close()
 

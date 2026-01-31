@@ -52,7 +52,8 @@ class TestPluginSystemIntegration:
                     {
                         "value": row["value"],
                         "doubled": row["value"] * 2,
-                    }
+                    },
+                    success_reason={"action": "double"},
                 )
 
         class MemorySink(BaseSink):

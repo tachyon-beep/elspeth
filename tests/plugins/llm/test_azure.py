@@ -2,8 +2,6 @@
 """Tests for Azure OpenAI LLM transform with row-level pipelining."""
 
 from collections.abc import Generator
-from contextlib import contextmanager
-from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -17,58 +15,10 @@ from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
 
+from .conftest import chaosllm_azure_openai_client
+
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
-
-
-@contextmanager
-def mock_azure_openai_client(
-    content: str = "Response",
-    model: str = "my-gpt4o-deployment",
-    usage: dict[str, Any] | None = None,
-    side_effect: Exception | None = None,
-) -> Generator[Mock, None, None]:
-    """Context manager to mock openai.AzureOpenAI.
-
-    Creates a mock client that returns a properly structured response
-    from chat.completions.create().
-
-    Args:
-        content: Response content to return
-        model: Model name in response
-        usage: Token usage dict (defaults to prompt_tokens=10, completion_tokens=5)
-        side_effect: Exception to raise instead of returning response
-
-    Yields:
-        Mock client instance for assertions
-    """
-    if usage is None:
-        usage = {"prompt_tokens": 10, "completion_tokens": 5}
-
-    mock_usage = Mock()
-    mock_usage.prompt_tokens = usage.get("prompt_tokens", 0)
-    mock_usage.completion_tokens = usage.get("completion_tokens", 0)
-
-    mock_message = Mock()
-    mock_message.content = content
-
-    mock_choice = Mock()
-    mock_choice.message = mock_message
-
-    mock_response = Mock()
-    mock_response.choices = [mock_choice]
-    mock_response.model = model
-    mock_response.usage = mock_usage
-    mock_response.model_dump = Mock(return_value={"model": model})
-
-    with patch("openai.AzureOpenAI") as mock_azure_class:
-        mock_client = Mock()
-        if side_effect:
-            mock_client.chat.completions.create.side_effect = side_effect
-        else:
-            mock_client.chat.completions.create.return_value = mock_response
-        mock_azure_class.return_value = mock_client
-        yield mock_client
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -403,13 +353,18 @@ class TestAzureLLMTransformPipelining:
         t.close()
 
     def test_successful_llm_call_emits_enriched_row(
-        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: AzureLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Successful LLM call emits row with response to output port."""
-        with mock_azure_openai_client(
-            content="The analysis is positive.",
-            model="my-gpt4o-deployment",
-            usage={"prompt_tokens": 10, "completion_tokens": 25},
+        with chaosllm_azure_openai_client(
+            chaosllm_server,
+            mode="template",
+            template_override="The analysis is positive.",
+            usage_override={"prompt_tokens": 10, "completion_tokens": 25},
         ):
             transform.accept({"text": "hello world"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -432,10 +387,14 @@ class TestAzureLLMTransformPipelining:
         assert result.row["text"] == "hello world"
 
     def test_model_passed_to_azure_client_is_deployment_name(
-        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: AzureLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """deployment_name is used as model in Azure client calls."""
-        with mock_azure_openai_client() as mock_client:
+        with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -443,11 +402,15 @@ class TestAzureLLMTransformPipelining:
             assert call_args.kwargs["model"] == "my-gpt4o-deployment"
 
     def test_template_rendering_error_emits_error(
-        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: AzureLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Template rendering failure emits TransformResult.error()."""
         # Missing required 'text' field triggers template error
-        with mock_azure_openai_client():
+        with chaosllm_azure_openai_client(chaosllm_server):
             transform.accept({"other_field": "value"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -460,9 +423,15 @@ class TestAzureLLMTransformPipelining:
         assert result.reason["reason"] == "template_rendering_failed"
         assert "template_hash" in result.reason
 
-    def test_llm_client_error_emits_error(self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort) -> None:
+    def test_llm_client_error_emits_error(
+        self,
+        ctx: PluginContext,
+        transform: AzureLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """LLM client failure emits TransformResult.error()."""
-        with mock_azure_openai_client(side_effect=Exception("API Error")):
+        with chaosllm_azure_openai_client(chaosllm_server, side_effect=Exception("API Error")):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -477,7 +446,11 @@ class TestAzureLLMTransformPipelining:
         assert result.retryable is False
 
     def test_rate_limit_error_propagates_for_engine_retry(
-        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: AzureLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Rate limit errors propagate as exceptions for engine retry.
 
@@ -489,7 +462,7 @@ class TestAzureLLMTransformPipelining:
         propagation through the async pattern. In production, TransformExecutor
         would re-raise this exception so RetryManager can act on it.
         """
-        with mock_azure_openai_client(side_effect=Exception("Rate limit exceeded 429")):
+        with chaosllm_azure_openai_client(chaosllm_server, side_effect=Exception("Rate limit exceeded 429")):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -536,7 +509,12 @@ class TestAzureLLMTransformPipelining:
         assert isinstance(result.exception, RuntimeError)
         assert "state_id" in str(result.exception)
 
-    def test_system_prompt_included_in_messages(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_system_prompt_included_in_messages(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """System prompt is included when configured."""
         transform = AzureLLMTransform(
             {
@@ -563,7 +541,7 @@ class TestAzureLLMTransformPipelining:
         )
 
         try:
-            with mock_azure_openai_client() as mock_client:
+            with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -577,7 +555,12 @@ class TestAzureLLMTransformPipelining:
         finally:
             transform.close()
 
-    def test_temperature_and_max_tokens_passed_to_client(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_temperature_and_max_tokens_passed_to_client(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """Temperature and max_tokens are passed to Azure client."""
         transform = AzureLLMTransform(
             {
@@ -605,7 +588,7 @@ class TestAzureLLMTransformPipelining:
         )
 
         try:
-            with mock_azure_openai_client() as mock_client:
+            with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -616,7 +599,12 @@ class TestAzureLLMTransformPipelining:
         finally:
             transform.close()
 
-    def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_custom_response_field(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """Custom response_field name is used."""
         transform = AzureLLMTransform(
             {
@@ -643,7 +631,11 @@ class TestAzureLLMTransformPipelining:
         )
 
         try:
-            with mock_azure_openai_client(content="Result"):
+            with chaosllm_azure_openai_client(
+                chaosllm_server,
+                mode="template",
+                template_override="Result",
+            ):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -770,7 +762,12 @@ class TestAzureLLMTransformIntegration:
         config = transform.azure_config
         assert config["api_version"] == "2024-10-21"
 
-    def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_complex_template_with_multiple_variables(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """Complex template with multiple variables works correctly."""
         transform = AzureLLMTransform(
             {
@@ -803,7 +800,7 @@ class TestAzureLLMTransformIntegration:
         )
 
         try:
-            with mock_azure_openai_client(content="Summary text") as mock_client:
+            with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
                 transform.accept(
                     {"name": "Test Item", "score": 95, "category": "A"},
                     ctx,
@@ -825,7 +822,12 @@ class TestAzureLLMTransformIntegration:
         finally:
             transform.close()
 
-    def test_calls_are_recorded_to_landscape(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_calls_are_recorded_to_landscape(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """LLM calls are recorded via AuditedLLMClient."""
         transform = AzureLLMTransform(
             {
@@ -851,7 +853,7 @@ class TestAzureLLMTransformIntegration:
         )
 
         try:
-            with mock_azure_openai_client():
+            with chaosllm_azure_openai_client(chaosllm_server):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -876,7 +878,12 @@ class TestAzureLLMTransformConcurrency:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
-    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_multiple_rows_processed_in_fifo_order(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
         transform = AzureLLMTransform(
             {
@@ -899,7 +906,7 @@ class TestAzureLLMTransformConcurrency:
         ]
 
         try:
-            with mock_azure_openai_client(content="Response"):
+            with chaosllm_azure_openai_client(chaosllm_server):
                 for i, row in enumerate(rows):
                     token = make_token(f"row-{i}")
                     ctx = PluginContext(

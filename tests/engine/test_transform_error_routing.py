@@ -65,7 +65,7 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"value": 42}))
+        transform = MockTransform(TransformResult.success({"value": 42}, success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(

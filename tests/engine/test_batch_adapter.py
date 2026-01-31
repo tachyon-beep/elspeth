@@ -49,7 +49,7 @@ class TestSharedBatchAdapter:
             registration_complete.wait()  # Wait for test setup to complete
             emit_allowed.wait()  # Wait for explicit signal
             token = MockTokenInfo(token_id="token-1", row_id=1)
-            result = TransformResult.success({"output": "done"})
+            result = TransformResult.success({"output": "done"}, success_reason={"action": "test"})
             adapter.emit(token, result, "state-1")  # type: ignore[arg-type]
 
         thread = threading.Thread(target=emit_when_signaled)
@@ -93,21 +93,21 @@ class TestSharedBatchAdapter:
             emit_events["token-2"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-2", row_id=2),  # type: ignore[arg-type]
-                TransformResult.success({"value": 2}),
+                TransformResult.success({"value": 2}, success_reason={"action": "test"}),
                 "state-2",
             )
 
             emit_events["token-1"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-1", row_id=1),  # type: ignore[arg-type]
-                TransformResult.success({"value": 1}),
+                TransformResult.success({"value": 1}, success_reason={"action": "test"}),
                 "state-1",
             )
 
             emit_events["token-3"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-3", row_id=3),  # type: ignore[arg-type]
-                TransformResult.success({"value": 3}),
+                TransformResult.success({"value": 3}, success_reason={"action": "test"}),
                 "state-3",
             )
 
@@ -145,7 +145,7 @@ class TestSharedBatchAdapter:
 
         # Emit result IMMEDIATELY (before wait is called)
         token = MockTokenInfo(token_id="token-fast", row_id=1)
-        result = TransformResult.success({"fast": True})
+        result = TransformResult.success({"fast": True}, success_reason={"action": "test"})
         adapter.emit(token, result, "state-fast")  # type: ignore[arg-type]
 
         # Now wait - should return immediately since event is already set
@@ -207,7 +207,7 @@ class TestSharedBatchAdapter:
         # Late result arrives after timeout
         adapter.emit(
             MockTokenInfo(token_id="token-late", row_id=1),  # type: ignore[arg-type]
-            TransformResult.success({"late": "result"}),
+            TransformResult.success({"late": "result"}, success_reason={"action": "test"}),
             "state-late",
         )
 
@@ -259,7 +259,7 @@ class TestSharedBatchAdapter:
             for i in range(5):
                 adapter.emit(
                     MockTokenInfo(token_id=f"token-{i}", row_id=i),  # type: ignore[arg-type]
-                    TransformResult.success({"index": i}),
+                    TransformResult.success({"index": i}, success_reason={"action": "test"}),
                     f"state-{i}",
                 )
 
@@ -288,7 +288,7 @@ class TestSharedBatchAdapter:
         # Emit a result that won't be consumed (orphaned due to no matching waiter key)
         adapter.emit(
             MockTokenInfo(token_id="token-orphan", row_id=99),  # type: ignore[arg-type]
-            TransformResult.success({"orphan": True}),
+            TransformResult.success({"orphan": True}, success_reason={"action": "test"}),
             "state-orphan",
         )
 
@@ -323,14 +323,14 @@ class TestSharedBatchAdapter:
         # First worker finishes late (after timeout), emits with old state_id
         adapter.emit(
             MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
-            TransformResult.success({"result": "stale"}),
+            TransformResult.success({"result": "stale"}, success_reason={"action": "test"}),
             "attempt-1",
         )
 
         # Retry worker finishes, emits with retry state_id
         adapter.emit(
             MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
-            TransformResult.success({"result": "fresh"}),
+            TransformResult.success({"result": "fresh"}, success_reason={"action": "test"}),
             "attempt-2",
         )
 
@@ -379,7 +379,7 @@ class TestSharedBatchAdapter:
         # This is what happens when emit() executes between event.wait() timeout
         # and wait()'s lock acquisition
         with adapter._lock:
-            adapter._results[key] = TransformResult.success({"race": "leaked"})
+            adapter._results[key] = TransformResult.success({"race": "leaked"}, success_reason={"action": "test"})
             adapter._waiters[key].set()  # Signal (even though we're about to timeout)
             del adapter._waiters[key]  # emit() removes waiter entry
 

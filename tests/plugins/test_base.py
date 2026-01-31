@@ -21,7 +21,7 @@ class TestBaseTransform:
             output_schema = None  # type: ignore[assignment]
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = SimpleTransform({})
         assert transform.creates_tokens is False
@@ -74,7 +74,8 @@ class TestBaseTransform:
                     {
                         "x": row["x"],
                         "doubled": row["x"] * 2,
-                    }
+                    },
+                    success_reason={"action": "test"},
                 )
 
         transform = DoubleTransform({"some": "config"})
@@ -304,7 +305,7 @@ class TestNoValidationEnforcement:
                 # NOT calling self._validate_self_consistency()
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         # Should instantiate without RuntimeError
         plugin = NoValidationTransform({})

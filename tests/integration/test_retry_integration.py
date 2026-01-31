@@ -52,7 +52,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
             raise ConnectionError(f"Transient failure attempt {self.fail_count}")
-        return TransformResult.success({"processed": True, **row})
+        return TransformResult.success({"processed": True, **row}, success_reason={"action": "processed"})
 
 
 class AlwaysFailTransform(BaseTransform):

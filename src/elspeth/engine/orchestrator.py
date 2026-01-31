@@ -191,6 +191,14 @@ class Orchestrator:
         if self._telemetry is not None:
             self._telemetry.handle_event(event)
 
+    def _flush_telemetry(self) -> None:
+        """Flush telemetry events if manager is configured.
+
+        Ensures queued telemetry is exported before returning control to caller.
+        """
+        if self._telemetry is not None:
+            self._telemetry.flush()
+
     def _maybe_checkpoint(self, run_id: str, token_id: str, node_id: str) -> None:
         """Create checkpoint if configured.
 
@@ -520,7 +528,7 @@ class Orchestrator:
         settings: ElspethSettings | None = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: PayloadStore | None = None,
+        payload_store: PayloadStore,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -532,15 +540,17 @@ class Orchestrator:
                 previous BatchPendingError). Maps node_id -> checkpoint_data.
                 Used when retrying a run after a batch transform raised
                 BatchPendingError.
-            payload_store: Optional PayloadStore for persisting source row payloads.
+            payload_store: PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
 
         Raises:
-            ValueError: If graph is not provided
+            ValueError: If graph or payload_store is not provided
         """
         if graph is None:
             raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
+        if payload_store is None:
+            raise ValueError("PayloadStore is required for audit compliance.")
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
 
@@ -740,8 +750,35 @@ class Orchestrator:
                 )
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
         finally:
+            # CRITICAL: Telemetry flush must not mask run errors or skip cleanup.
+            # If _flush_telemetry() raises TelemetryExporterError (fail_on_total=True),
+            # we must still run cleanup and preserve any pending exception.
+            import sys
+
+            import structlog
+
+            from elspeth.telemetry.errors import TelemetryExporterError
+
+            logger = structlog.get_logger()
+            telemetry_error: TelemetryExporterError | None = None
+
+            try:
+                self._flush_telemetry()
+            except TelemetryExporterError as e:
+                telemetry_error = e
+                logger.warning(
+                    "Telemetry flush failed - will raise after cleanup if no other exception pending",
+                    exporter=e.exporter_name,
+                    error=e.message,
+                )
+
             # Always clean up transforms, even on failure
             self._cleanup_transforms(config)
+
+            # Only raise telemetry error if no other exception is pending.
+            # sys.exc_info()[0] is None when we're NOT handling an exception.
+            if telemetry_error is not None and sys.exc_info()[0] is None:
+                raise telemetry_error
 
     def _execute_run(
         self,
@@ -752,7 +789,7 @@ class Orchestrator:
         settings: ElspethSettings | None = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
-        payload_store: PayloadStore | None = None,
+        payload_store: PayloadStore,
     ) -> RunResult:
         """Execute the run using the execution graph.
 
@@ -950,6 +987,7 @@ class Orchestrator:
             rate_limit_registry=self._rate_limit_registry,
             concurrency_config=self._concurrency_config,
             _batch_checkpoints=batch_checkpoints or {},
+            telemetry_emit=self._emit_telemetry,
         )
 
         # Set node_id on context for source validation error attribution
@@ -1020,6 +1058,7 @@ class Orchestrator:
             coalesce_step_map=coalesce_step_map,
             payload_store=payload_store,
             clock=self._clock,
+            telemetry_manager=self._telemetry,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -1903,7 +1942,7 @@ class Orchestrator:
         config: PipelineConfig,
         graph: ExecutionGraph,
         *,
-        payload_store: PayloadStore | None = None,
+        payload_store: PayloadStore,
         settings: ElspethSettings | None = None,
     ) -> RunResult:
         """Resume a failed run from a checkpoint.
@@ -2010,7 +2049,7 @@ class Orchestrator:
         restored_aggregation_state: dict[str, dict[str, Any]],
         settings: ElspethSettings | None = None,
         *,
-        payload_store: PayloadStore | None = None,
+        payload_store: PayloadStore,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -2106,6 +2145,7 @@ class Orchestrator:
             landscape=recorder,
             rate_limit_registry=self._rate_limit_registry,
             concurrency_config=self._concurrency_config,
+            telemetry_emit=self._emit_telemetry,
         )
 
         # Call on_start for transforms and sinks.
@@ -2175,6 +2215,7 @@ class Orchestrator:
             restored_aggregation_state=typed_restored_state,
             payload_store=payload_store,
             clock=self._clock,
+            telemetry_manager=self._telemetry,
         )
 
         # Process rows - Buffer TOKENS

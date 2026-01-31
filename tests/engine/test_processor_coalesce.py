@@ -176,7 +176,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"})
+                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -188,7 +188,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]})
+                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -359,7 +359,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"})
+                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -371,7 +371,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]})
+                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -1356,8 +1356,8 @@ class TestAggregationCoalesceMetadataPropagation:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total}, success_reason={"action": "aggregate"})
+                return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
         agg_transform = as_transform(BatchAggForCoalesce())
 

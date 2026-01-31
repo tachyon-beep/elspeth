@@ -532,8 +532,7 @@ class ServiceRateLimit(BaseModel):
 
     model_config = {"frozen": True}
 
-    requests_per_second: int = Field(gt=0, description="Maximum requests per second")
-    requests_per_minute: int | None = Field(default=None, gt=0, description="Maximum requests per minute")
+    requests_per_minute: int = Field(default=60, gt=0, description="Maximum requests per minute")
 
 
 class RateLimitSettings(BaseModel):
@@ -542,21 +541,19 @@ class RateLimitSettings(BaseModel):
     Example YAML:
         rate_limit:
           enabled: true
-          default_requests_per_second: 10
+          default_requests_per_minute: 60
           persistence_path: ./rate_limits.db
           services:
             openai:
-              requests_per_second: 5
               requests_per_minute: 100
             weather_api:
-              requests_per_second: 20
+              requests_per_minute: 120
     """
 
     model_config = {"frozen": True}
 
     enabled: bool = Field(default=True, description="Enable rate limiting for external calls")
-    default_requests_per_second: int = Field(default=10, gt=0, description="Default rate limit for unconfigured services")
-    default_requests_per_minute: int | None = Field(default=None, gt=0, description="Optional per-minute rate limit")
+    default_requests_per_minute: int = Field(default=60, gt=0, description="Default per-minute rate limit for unconfigured services")
     persistence_path: str | None = Field(default=None, description="SQLite path for cross-process limits")
     services: dict[str, ServiceRateLimit] = Field(default_factory=dict, description="Per-service rate limit configurations")
 
@@ -565,7 +562,6 @@ class RateLimitSettings(BaseModel):
         if service_name in self.services:
             return self.services[service_name]
         return ServiceRateLimit(
-            requests_per_second=self.default_requests_per_second,
             requests_per_minute=self.default_requests_per_minute,
         )
 

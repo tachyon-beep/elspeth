@@ -229,7 +229,7 @@ class MockTransform(_TestTransformBase):
         on_error: str | None = None,
         raises: Exception | None = None,
     ) -> None:
-        self._result = result or TransformResult.success({"transformed": True})
+        self._result = result or TransformResult.success({"transformed": True}, success_reason={"action": "test"})
         self._on_error = on_error
         self._raises = raises
 
@@ -259,7 +259,7 @@ class TestTransformExecutor:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"output": 42}))
+        transform = MockTransform(TransformResult.success({"output": 42}, success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(
@@ -314,7 +314,7 @@ class TestTransformExecutor:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"value": 1}))
+        transform = MockTransform(TransformResult.success({"value": 1}, success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(

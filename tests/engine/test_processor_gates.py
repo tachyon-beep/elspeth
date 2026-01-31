@@ -74,7 +74,7 @@ class TestRowProcessorGates:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "final": True})
+                return TransformResult.success({**row, "final": True}, success_reason={"action": "test"})
 
         # Config-driven gate: always continues
         pass_gate = GateSettings(
@@ -423,7 +423,7 @@ class TestRowProcessorNestedForks:
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 # Note: .get() is allowed here - this is row data (their data, Tier 2)
-                return TransformResult.success({**row, "count": row.get("count", 0) + 1})
+                return TransformResult.success({**row, "count": row.get("count", 0) + 1}, success_reason={"action": "count"})
 
         # Config-driven fork gates
         gate1_config = GateSettings(

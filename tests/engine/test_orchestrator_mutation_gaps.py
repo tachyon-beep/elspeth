@@ -368,7 +368,7 @@ class TestNodeTypeMetadata:
     to verify determinism and plugin_version are recorded correctly.
     """
 
-    def test_config_gate_recorded_as_deterministic(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_recorded_as_deterministic(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gates should be recorded as DETERMINISTIC in audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -418,7 +418,7 @@ class TestNodeTypeMetadata:
         )
 
         orchestrator = Orchestrator(landscape_db)
-        result = orchestrator.run(config, graph)
+        result = orchestrator.run(config, graph, payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
         # P1 Fix: Query audit trail and verify config gate metadata

@@ -22,45 +22,26 @@ from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
 from .conftest import (
-    make_azure_multi_query_config as make_config,
-)
-from .conftest import (
+    chaosllm_azure_openai_sequence,
     make_plugin_context,
     make_token,
+)
+from .conftest import (
+    make_azure_multi_query_config as make_config,
 )
 
 
 def make_mock_llm_response(score: int, rationale: str, delay_ms: float = 0) -> Mock:
-    """Create a mock LLM response with optional artificial delay."""
-    if delay_ms > 0:
-        time.sleep(delay_ms / 1000.0)
-
-    content = json.dumps({"score": score, "rationale": rationale})
-
-    mock_usage = Mock()
-    mock_usage.prompt_tokens = 10
-    mock_usage.completion_tokens = 5
-
-    mock_message = Mock()
-    mock_message.content = content
-
-    mock_choice = Mock()
-    mock_choice.message = mock_message
-
-    mock_response = Mock()
-    mock_response.choices = [mock_choice]
-    mock_response.model = "gpt-4o"
-    mock_response.usage = mock_usage
-    mock_response.model_dump = Mock(return_value={"model": "gpt-4o"})
-
-    return mock_response
+    """Create a ChaosLLM payload with optional artificial delay."""
+    payload = {"score": score, "rationale": rationale}
+    return (payload, delay_ms) if delay_ms > 0 else payload
 
 
 class TestLoadScenarios:
     """Test plugin under various load scenarios."""
 
     @pytest.mark.slow
-    def test_many_rows_parallel_execution(self) -> None:
+    def test_many_rows_parallel_execution(self, chaosllm_server) -> None:
         """Process 100 rows with 4 parallel queries each (400 total queries).
 
         Uses row-level pipelining via BatchTransformMixin. Query-level pooling
@@ -69,23 +50,19 @@ class TestLoadScenarios:
         row_count = 100
         queries_per_row = 4  # 2 case studies x 2 criteria
 
-        call_count = [0]
-
-        def make_response(**kwargs: Any) -> Mock:
+        def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             """Simulate LLM response with 50ms latency."""
-            call_count[0] += 1
-            # Simulate realistic API latency
             return make_mock_llm_response(
-                score=85 + (call_count[0] % 10),
-                rationale=f"Response {call_count[0]}",
+                score=85 + (call_index % 10),
+                rationale=f"Response {call_index}",
                 delay_ms=50,
             )
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            call_count,
+            _mock_azure_class,
+        ):
             # Disable query-level pooling to avoid mock threading issues
             config = make_config()
             del config["pool_size"]
@@ -146,7 +123,7 @@ class TestLoadScenarios:
                 transform.close()
 
     @pytest.mark.slow
-    def test_sequential_vs_parallel_performance(self) -> None:
+    def test_sequential_vs_parallel_performance(self, chaosllm_server) -> None:
         """Compare sequential vs parallel execution performance.
 
         Note: This test measures row-level pipelining only.
@@ -157,21 +134,19 @@ class TestLoadScenarios:
 
         def run_test(pool_size: int | None) -> tuple[float, int]:
             """Run test with given pool_size, return (elapsed_time, total_calls)."""
-            call_count = [0]
 
-            def make_response(**kwargs: Any) -> Mock:
-                call_count[0] += 1
+            def response_factory(call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
                 return make_mock_llm_response(
                     score=85,
-                    rationale=f"Response {call_count[0]}",
+                    rationale=f"Response {call_index}",
                     delay_ms=50,
                 )
 
-            with patch("openai.AzureOpenAI") as mock_azure_class:
-                mock_client = Mock()
-                mock_client.chat.completions.create.side_effect = make_response
-                mock_azure_class.return_value = mock_client
-
+            with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+                _mock_client,
+                call_count,
+                _mock_azure_class,
+            ):
                 # Both modes use sequential query execution (no pool_size)
                 # to avoid mock threading issues
                 config = make_config()
@@ -226,7 +201,7 @@ class TestLoadScenarios:
         print("  Note: Query-level pooling disabled; both use row-level pipelining")
 
     @pytest.mark.slow
-    def test_memory_usage_with_large_batch(self) -> None:
+    def test_memory_usage_with_large_batch(self, chaosllm_server) -> None:
         """Verify plugin doesn't accumulate excessive memory with large batches."""
         import gc
 
@@ -238,10 +213,8 @@ class TestLoadScenarios:
         process = psutil.Process()
 
         row_count = 200
-        call_count = [0]
 
-        def make_response(**kwargs: Any) -> Mock:
-            call_count[0] += 1
+        def response_factory(_call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             # Return small responses (shouldn't accumulate much memory)
             return make_mock_llm_response(
                 score=85,
@@ -249,11 +222,11 @@ class TestLoadScenarios:
                 delay_ms=10,
             )
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            _call_count,
+            _mock_azure_class,
+        ):
             # Disable query-level pooling to avoid mock threading issues
             config = make_config()
             del config["pool_size"]
@@ -310,81 +283,75 @@ class TestLoadScenarios:
         """Verify plugin handles rate limit errors correctly."""
         from elspeth.plugins.clients.llm import RateLimitError
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_azure_class.return_value = mock_client
+        # Disable query-level pooling to avoid mock threading issues
+        config = make_config()
+        del config["pool_size"]
 
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = make_plugin_context()
+        transform.on_start(init_ctx)
 
-            transform = AzureMultiQueryLLMTransform(config)
-            init_ctx = make_plugin_context()
-            transform.on_start(init_ctx)
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=10)
 
-            collector = CollectorOutputPort()
-            transform.connect_output(collector, max_pending=10)
+        # Mock the LLM client to raise RateLimitError
+        with patch.object(transform, "_get_llm_client") as mock_get_client:
+            mock_llm_client = Mock()
 
-            # Mock the LLM client to raise RateLimitError
-            with patch.object(transform, "_get_llm_client") as mock_get_client:
-                mock_llm_client = Mock()
+            # Counter for tracking which call we're on
+            llm_call_count = [0]
 
-                # Counter for tracking which call we're on
-                llm_call_count = [0]
+            def mock_chat_completion(**kwargs: Any) -> Mock:
+                llm_call_count[0] += 1
+                if llm_call_count[0] % 3 == 0:
+                    raise RateLimitError("Rate limit exceeded")
+                return Mock(
+                    content=json.dumps({"score": 85, "rationale": "OK"}),
+                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    model="gpt-4o",
+                )
 
-                def mock_chat_completion(**kwargs: Any) -> Mock:
-                    llm_call_count[0] += 1
-                    if llm_call_count[0] % 3 == 0:
-                        raise RateLimitError("Rate limit exceeded")
-                    return Mock(
-                        content=json.dumps({"score": 85, "rationale": "OK"}),
-                        usage={"prompt_tokens": 10, "completion_tokens": 5},
-                        model="gpt-4o",
-                    )
+            mock_llm_client.chat_completion.side_effect = mock_chat_completion
+            mock_get_client.return_value = mock_llm_client
 
-                mock_llm_client.chat_completion.side_effect = mock_chat_completion
-                mock_get_client.return_value = mock_llm_client
+            try:
+                row = {
+                    "cs1_bg": "data",
+                    "cs1_sym": "data",
+                    "cs1_hist": "data",
+                    "cs2_bg": "data",
+                    "cs2_sym": "data",
+                    "cs2_hist": "data",
+                }
+                token = make_token("row-rate-limit")
+                ctx = make_plugin_context(state_id="rate-limit-test", token=token)
+                transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-                try:
-                    row = {
-                        "cs1_bg": "data",
-                        "cs1_sym": "data",
-                        "cs1_hist": "data",
-                        "cs2_bg": "data",
-                        "cs2_sym": "data",
-                        "cs2_hist": "data",
-                    }
-                    token = make_token("row-rate-limit")
-                    ctx = make_plugin_context(state_id="rate-limit-test", token=token)
-                    transform.accept(row, ctx)
-                    transform.flush_batch_processing(timeout=10.0)
+                # Process will fail because one of the 4 queries hits rate limit
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
 
-                    # Process will fail because one of the 4 queries hits rate limit
-                    assert len(collector.results) == 1
-                    _, result, _state_id = collector.results[0]
-                    assert isinstance(result, TransformResult)
+                # All-or-nothing: entire row should fail
+                assert result.status == "error"
+                assert result.reason is not None
+                assert "query_failed" in result.reason["reason"]
 
-                    # All-or-nothing: entire row should fail
-                    assert result.status == "error"
-                    assert result.reason is not None
-                    assert "query_failed" in result.reason["reason"]
+            finally:
+                transform.close()
 
-                finally:
-                    transform.close()
-
-    def test_client_caching_behavior(self) -> None:
+    def test_client_caching_behavior(self, chaosllm_server) -> None:
         """Verify LLM client caching works correctly."""
-        call_count = [0]
 
-        def make_response(**kwargs: Any) -> Mock:
-            call_count[0] += 1
-            return make_mock_llm_response(score=85, rationale=f"Response {call_count[0]}")
+        def response_factory(call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
+            return make_mock_llm_response(score=85, rationale=f"Response {call_index}")
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            call_count,
+            mock_azure_class,
+        ):
             # Disable query-level pooling to avoid mock threading issues
             config = make_config()
             del config["pool_size"]
@@ -449,184 +416,176 @@ class TestRowAtomicity:
         # Simulate 10% of queries hitting capacity errors
         FAILURE_RATE = 0.1  # 10% of queries fail
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_azure_class.return_value = mock_client
+        # Disable query-level pooling to avoid mock threading issues
+        config = make_config()
+        del config["pool_size"]
 
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = make_plugin_context()
+        transform.on_start(init_ctx)
 
-            transform = AzureMultiQueryLLMTransform(config)
-            init_ctx = make_plugin_context()
-            transform.on_start(init_ctx)
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=50)
 
-            collector = CollectorOutputPort()
-            transform.connect_output(collector, max_pending=50)
+        # Mock the LLM client to raise RateLimitError for failed queries
+        with patch.object(transform, "_get_llm_client") as mock_get_client:
+            llm_call_count = [0]
 
-            # Mock the LLM client to raise RateLimitError for failed queries
-            with patch.object(transform, "_get_llm_client") as mock_get_client:
-                llm_call_count = [0]
+            def mock_chat_completion(**kwargs: Any) -> Mock:
+                llm_call_count[0] += 1
+                if llm_call_count[0] % 10 == 0:
+                    raise RateLimitError("Rate limit exceeded")
+                return Mock(
+                    content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
+                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    model="gpt-4o",
+                )
 
-                def mock_chat_completion(**kwargs: Any) -> Mock:
-                    llm_call_count[0] += 1
-                    if llm_call_count[0] % 10 == 0:
-                        raise RateLimitError("Rate limit exceeded")
-                    return Mock(
-                        content=json.dumps({"score": 85 + llm_call_count[0], "rationale": f"R{llm_call_count[0]}"}),
-                        usage={"prompt_tokens": 10, "completion_tokens": 5},
-                        model="gpt-4o",
-                    )
+            mock_llm_client = Mock()
+            mock_llm_client.chat_completion.side_effect = mock_chat_completion
+            mock_get_client.return_value = mock_llm_client
 
-                mock_llm_client = Mock()
-                mock_llm_client.chat_completion.side_effect = mock_chat_completion
-                mock_get_client.return_value = mock_llm_client
+            try:
+                # Process 50 rows (200 total queries, ~20 will fail)
+                for i in range(50):
+                    row = {
+                        "row_id": i,  # Track which row this is
+                        "cs1_bg": f"data_{i}",
+                        "cs1_sym": f"data_{i}",
+                        "cs1_hist": f"data_{i}",
+                        "cs2_bg": f"data_{i}",
+                        "cs2_sym": f"data_{i}",
+                        "cs2_hist": f"data_{i}",
+                    }
+                    token = make_token(f"row-{i}")
+                    ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
+                    transform.accept(row, ctx)
 
-                try:
-                    # Process 50 rows (200 total queries, ~20 will fail)
-                    for i in range(50):
-                        row = {
-                            "row_id": i,  # Track which row this is
-                            "cs1_bg": f"data_{i}",
-                            "cs1_sym": f"data_{i}",
-                            "cs1_hist": f"data_{i}",
-                            "cs2_bg": f"data_{i}",
-                            "cs2_sym": f"data_{i}",
-                            "cs2_hist": f"data_{i}",
-                        }
-                        token = make_token(f"row-{i}")
-                        ctx = make_plugin_context(state_id=f"atomicity-{i}", token=token)
-                        transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=30.0)
 
-                    transform.flush_batch_processing(timeout=30.0)
+                assert len(collector.results) == 50  # All 50 rows returned (success or error)
 
-                    assert len(collector.results) == 50  # All 50 rows returned (success or error)
+                # Verify atomicity: Each row has EITHER all 4 output fields OR an error status
+                successful_rows = 0
+                failed_rows = 0
 
-                    # Verify atomicity: Each row has EITHER all 4 output fields OR an error status
-                    successful_rows = 0
-                    failed_rows = 0
+                for _, result, _state_id in collector.results:
+                    assert isinstance(result, TransformResult)
+                    if result.status == "error":
+                        failed_rows += 1
+                        # CRITICAL: Failed rows must NOT have partial output fields
+                        # Error result has no row data (or row data without output fields)
+                    else:
+                        successful_rows += 1
+                        # CRITICAL: Successful rows must have ALL 4 output fields
+                        assert result.row is not None
+                        assert "cs1_diagnosis_score" in result.row, "Missing cs1_diagnosis_score"
+                        assert "cs1_treatment_score" in result.row, "Missing cs1_treatment_score"
+                        assert "cs2_diagnosis_score" in result.row, "Missing cs2_diagnosis_score"
+                        assert "cs2_treatment_score" in result.row, "Missing cs2_treatment_score"
+                        # All 4 scores should be present and valid
+                        assert isinstance(result.row["cs1_diagnosis_score"], int)
+                        assert isinstance(result.row["cs1_treatment_score"], int)
+                        assert isinstance(result.row["cs2_diagnosis_score"], int)
+                        assert isinstance(result.row["cs2_treatment_score"], int)
 
-                    for _, result, _state_id in collector.results:
-                        assert isinstance(result, TransformResult)
-                        if result.status == "error":
-                            failed_rows += 1
-                            # CRITICAL: Failed rows must NOT have partial output fields
-                            # Error result has no row data (or row data without output fields)
-                        else:
-                            successful_rows += 1
-                            # CRITICAL: Successful rows must have ALL 4 output fields
-                            assert result.row is not None
-                            assert "cs1_diagnosis_score" in result.row, "Missing cs1_diagnosis_score"
-                            assert "cs1_treatment_score" in result.row, "Missing cs1_treatment_score"
-                            assert "cs2_diagnosis_score" in result.row, "Missing cs2_diagnosis_score"
-                            assert "cs2_treatment_score" in result.row, "Missing cs2_treatment_score"
-                            # All 4 scores should be present and valid
-                            assert isinstance(result.row["cs1_diagnosis_score"], int)
-                            assert isinstance(result.row["cs1_treatment_score"], int)
-                            assert isinstance(result.row["cs2_diagnosis_score"], int)
-                            assert isinstance(result.row["cs2_treatment_score"], int)
+                # Should have both successes and failures (due to 10% failure rate)
+                assert successful_rows > 0, "Expected some successful rows"
+                assert failed_rows > 0, "Expected some failed rows due to capacity errors"
 
-                    # Should have both successes and failures (due to 10% failure rate)
-                    assert successful_rows > 0, "Expected some successful rows"
-                    assert failed_rows > 0, "Expected some failed rows due to capacity errors"
+                print("\nRow atomicity verification:")
+                print("  Total rows: 50")
+                print(f"  Successful rows: {successful_rows}")
+                print(f"  Failed rows: {failed_rows}")
+                print(f"  Total queries attempted: {llm_call_count[0]}")
+                print(f"  Expected failures (~10%): {int(llm_call_count[0] * FAILURE_RATE)}")
+                print("  NO PARTIAL ROWS DETECTED")
 
-                    print("\nRow atomicity verification:")
-                    print("  Total rows: 50")
-                    print(f"  Successful rows: {successful_rows}")
-                    print(f"  Failed rows: {failed_rows}")
-                    print(f"  Total queries attempted: {llm_call_count[0]}")
-                    print(f"  Expected failures (~10%): {int(llm_call_count[0] * FAILURE_RATE)}")
-                    print("  NO PARTIAL ROWS DETECTED")
-
-                finally:
-                    transform.close()
+            finally:
+                transform.close()
 
     def test_row_atomicity_high_failure_rate(self) -> None:
         """Verify row atomicity with 80% failure rate (extreme stress test)."""
         from elspeth.plugins.clients.llm import RateLimitError
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_azure_class.return_value = mock_client
+        # Disable query-level pooling to avoid mock threading issues
+        config = make_config()
+        del config["pool_size"]
 
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = make_plugin_context()
+        transform.on_start(init_ctx)
 
-            transform = AzureMultiQueryLLMTransform(config)
-            init_ctx = make_plugin_context()
-            transform.on_start(init_ctx)
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=20)
 
-            collector = CollectorOutputPort()
-            transform.connect_output(collector, max_pending=20)
+        with patch.object(transform, "_get_llm_client") as mock_get_client:
+            llm_call_count = [0]
 
-            with patch.object(transform, "_get_llm_client") as mock_get_client:
-                llm_call_count = [0]
+            def mock_chat_completion(**kwargs: Any) -> Mock:
+                """Simulate 80% failure rate."""
+                llm_call_count[0] += 1
+                # Only calls ending in 0 or 5 succeed (20%)
+                if llm_call_count[0] % 5 not in [0, 5]:
+                    raise RateLimitError("Rate limit exceeded")
+                return Mock(
+                    content=json.dumps({"score": 85, "rationale": "OK"}),
+                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    model="gpt-4o",
+                )
 
-                def mock_chat_completion(**kwargs: Any) -> Mock:
-                    """Simulate 80% failure rate."""
-                    llm_call_count[0] += 1
-                    # Only calls ending in 0 or 5 succeed (20%)
-                    if llm_call_count[0] % 5 not in [0, 5]:
-                        raise RateLimitError("Rate limit exceeded")
-                    return Mock(
-                        content=json.dumps({"score": 85, "rationale": "OK"}),
-                        usage={"prompt_tokens": 10, "completion_tokens": 5},
-                        model="gpt-4o",
-                    )
+            mock_llm_client = Mock()
+            mock_llm_client.chat_completion.side_effect = mock_chat_completion
+            mock_get_client.return_value = mock_llm_client
 
-                mock_llm_client = Mock()
-                mock_llm_client.chat_completion.side_effect = mock_chat_completion
-                mock_get_client.return_value = mock_llm_client
+            try:
+                # Process 20 rows (80 queries, ~64 will fail)
+                for i in range(20):
+                    row = {
+                        "row_id": i,
+                        "cs1_bg": f"data_{i}",
+                        "cs1_sym": f"data_{i}",
+                        "cs1_hist": f"data_{i}",
+                        "cs2_bg": f"data_{i}",
+                        "cs2_sym": f"data_{i}",
+                        "cs2_hist": f"data_{i}",
+                    }
+                    token = make_token(f"row-{i}")
+                    ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
+                    transform.accept(row, ctx)
 
-                try:
-                    # Process 20 rows (80 queries, ~64 will fail)
-                    for i in range(20):
-                        row = {
-                            "row_id": i,
-                            "cs1_bg": f"data_{i}",
-                            "cs1_sym": f"data_{i}",
-                            "cs1_hist": f"data_{i}",
-                            "cs2_bg": f"data_{i}",
-                            "cs2_sym": f"data_{i}",
-                            "cs2_hist": f"data_{i}",
-                        }
-                        token = make_token(f"row-{i}")
-                        ctx = make_plugin_context(state_id=f"high-failure-{i}", token=token)
-                        transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=30.0)
 
-                    transform.flush_batch_processing(timeout=30.0)
+                assert len(collector.results) == 20
 
-                    assert len(collector.results) == 20
+                # With 80% failure rate, most rows should fail (each row needs 4 successful queries)
+                successful_rows = 0
+                failed_rows = 0
 
-                    # With 80% failure rate, most rows should fail (each row needs 4 successful queries)
-                    successful_rows = 0
-                    failed_rows = 0
+                for _, result, _state_id in collector.results:
+                    assert isinstance(result, TransformResult)
+                    if result.status == "error":
+                        failed_rows += 1
+                        # Verify NO partial output in error results
+                    else:
+                        successful_rows += 1
+                        # Verify ALL outputs present
+                        assert result.row is not None
+                        assert "cs1_diagnosis_score" in result.row
+                        assert "cs1_treatment_score" in result.row
+                        assert "cs2_diagnosis_score" in result.row
+                        assert "cs2_treatment_score" in result.row
 
-                    for _, result, _state_id in collector.results:
-                        assert isinstance(result, TransformResult)
-                        if result.status == "error":
-                            failed_rows += 1
-                            # Verify NO partial output in error results
-                        else:
-                            successful_rows += 1
-                            # Verify ALL outputs present
-                            assert result.row is not None
-                            assert "cs1_diagnosis_score" in result.row
-                            assert "cs1_treatment_score" in result.row
-                            assert "cs2_diagnosis_score" in result.row
-                            assert "cs2_treatment_score" in result.row
+                # With 80% failure rate, most rows should fail
+                assert failed_rows > successful_rows, "Expected more failures than successes with 80% failure rate"
 
-                    # With 80% failure rate, most rows should fail
-                    assert failed_rows > successful_rows, "Expected more failures than successes with 80% failure rate"
+                print("\nHigh failure rate atomicity test:")
+                print(f"  Successful rows: {successful_rows}")
+                print(f"  Failed rows: {failed_rows}")
+                print("  NO PARTIAL ROWS EVEN AT 80% FAILURE RATE")
 
-                    print("\nHigh failure rate atomicity test:")
-                    print(f"  Successful rows: {successful_rows}")
-                    print(f"  Failed rows: {failed_rows}")
-                    print("  NO PARTIAL ROWS EVEN AT 80% FAILURE RATE")
-
-                finally:
-                    transform.close()
+            finally:
+                transform.close()
 
     def test_concurrent_row_processing_atomicity(self) -> None:
         """Verify row atomicity when multiple rows processed concurrently with failures.
@@ -638,109 +597,102 @@ class TestRowAtomicity:
         """
         from elspeth.plugins.clients.llm import RateLimitError
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_azure_class.return_value = mock_client
+        # Disable query-level pooling to avoid mock threading issues
+        config = make_config()
+        del config["pool_size"]
 
-            # Disable query-level pooling to avoid mock threading issues
-            config = make_config()
-            del config["pool_size"]
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = make_plugin_context()
+        transform.on_start(init_ctx)
 
-            transform = AzureMultiQueryLLMTransform(config)
-            init_ctx = make_plugin_context()
-            transform.on_start(init_ctx)
+        collector = CollectorOutputPort()
+        transform.connect_output(collector, max_pending=30)
 
-            collector = CollectorOutputPort()
-            transform.connect_output(collector, max_pending=30)
+        with patch.object(transform, "_get_llm_client") as mock_get_client:
+            llm_call_count = [0]
 
-            with patch.object(transform, "_get_llm_client") as mock_get_client:
-                llm_call_count = [0]
+            def mock_chat_completion(**kwargs: Any) -> Mock:
+                """Simulate failures in a pattern that affects different rows."""
+                llm_call_count[0] += 1
+                # Fail every 7th query (staggered pattern across rows)
+                if llm_call_count[0] % 7 == 0:
+                    raise RateLimitError("Rate limit exceeded")
+                return Mock(
+                    content=json.dumps({"score": 85, "rationale": "OK"}),
+                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    model="gpt-4o",
+                )
 
-                def mock_chat_completion(**kwargs: Any) -> Mock:
-                    """Simulate failures in a pattern that affects different rows."""
-                    llm_call_count[0] += 1
-                    # Fail every 7th query (staggered pattern across rows)
-                    if llm_call_count[0] % 7 == 0:
-                        raise RateLimitError("Rate limit exceeded")
-                    return Mock(
-                        content=json.dumps({"score": 85, "rationale": "OK"}),
-                        usage={"prompt_tokens": 10, "completion_tokens": 5},
-                        model="gpt-4o",
-                    )
+            mock_llm_client = Mock()
+            mock_llm_client.chat_completion.side_effect = mock_chat_completion
+            mock_get_client.return_value = mock_llm_client
 
-                mock_llm_client = Mock()
-                mock_llm_client.chat_completion.side_effect = mock_chat_completion
-                mock_get_client.return_value = mock_llm_client
+            try:
+                # Process 30 rows
+                for i in range(30):
+                    row = {
+                        "row_id": i,
+                        "cs1_bg": f"data_{i}",
+                        "cs1_sym": f"data_{i}",
+                        "cs1_hist": f"data_{i}",
+                        "cs2_bg": f"data_{i}",
+                        "cs2_sym": f"data_{i}",
+                        "cs2_hist": f"data_{i}",
+                    }
+                    token = make_token(f"row-{i}")
+                    ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
+                    transform.accept(row, ctx)
 
-                try:
-                    # Process 30 rows
-                    for i in range(30):
-                        row = {
-                            "row_id": i,
-                            "cs1_bg": f"data_{i}",
-                            "cs1_sym": f"data_{i}",
-                            "cs1_hist": f"data_{i}",
-                            "cs2_bg": f"data_{i}",
-                            "cs2_sym": f"data_{i}",
-                            "cs2_hist": f"data_{i}",
-                        }
-                        token = make_token(f"row-{i}")
-                        ctx = make_plugin_context(state_id=f"concurrent-{i}", token=token)
-                        transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=30.0)
 
-                    transform.flush_batch_processing(timeout=30.0)
+                assert len(collector.results) == 30
 
-                    assert len(collector.results) == 30
+                # Verify atomicity for all rows
+                for _, result, _state_id in collector.results:
+                    assert isinstance(result, TransformResult)
+                    if result.status == "error":
+                        # Failed row: must have no output fields
+                        pass
+                    else:
+                        # Successful row: MUST have ALL 4 output fields
+                        assert result.row is not None
+                        has_cs1_diag = "cs1_diagnosis_score" in result.row
+                        has_cs1_treat = "cs1_treatment_score" in result.row
+                        has_cs2_diag = "cs2_diagnosis_score" in result.row
+                        has_cs2_treat = "cs2_treatment_score" in result.row
 
-                    # Verify atomicity for all rows
-                    for _, result, _state_id in collector.results:
-                        assert isinstance(result, TransformResult)
-                        if result.status == "error":
-                            # Failed row: must have no output fields
-                            pass
-                        else:
-                            # Successful row: MUST have ALL 4 output fields
-                            assert result.row is not None
-                            has_cs1_diag = "cs1_diagnosis_score" in result.row
-                            has_cs1_treat = "cs1_treatment_score" in result.row
-                            has_cs2_diag = "cs2_diagnosis_score" in result.row
-                            has_cs2_treat = "cs2_treatment_score" in result.row
+                        output_field_count = sum([has_cs1_diag, has_cs1_treat, has_cs2_diag, has_cs2_treat])
+                        assert output_field_count == 4, f"Row has {output_field_count} output fields (expected 4)"
 
-                            output_field_count = sum([has_cs1_diag, has_cs1_treat, has_cs2_diag, has_cs2_treat])
-                            assert output_field_count == 4, f"Row has {output_field_count} output fields (expected 4)"
+                print("\nConcurrent processing atomicity test:")
+                print(f"  Total queries: {llm_call_count[0]}")
+                print("  ALL ROWS ATOMIC (0 or 4 output fields, never 1-3)")
 
-                    print("\nConcurrent processing atomicity test:")
-                    print(f"  Total queries: {llm_call_count[0]}")
-                    print("  ALL ROWS ATOMIC (0 or 4 output fields, never 1-3)")
-
-                finally:
-                    transform.close()
+            finally:
+                transform.close()
 
 
 class TestProfilingInstrumentation:
     """Tests for profiling and performance monitoring."""
 
-    def test_query_timing_distribution(self) -> None:
+    def test_query_timing_distribution(self, chaosllm_server) -> None:
         """Measure timing distribution of individual queries."""
         import random
         import statistics
 
         query_times: list[float] = []
 
-        def make_response(**kwargs: Any) -> Mock:
+        def response_factory(_call_index: int, _request: dict[str, Any]) -> tuple[dict[str, Any], float]:
             """Simulate variable query latency."""
-            # Vary latency: 20-80ms
             delay = random.uniform(20, 80)
-            start = time.time()
-            response = make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)
-            query_times.append((time.time() - start) * 1000)
-            return response
+            query_times.append(delay)
+            return make_mock_llm_response(score=85, rationale="OK", delay_ms=delay)
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            call_count,
+            _mock_azure_class,
+        ):
             # Disable query-level pooling to avoid mock threading issues
             config = make_config()
             del config["pool_size"]
@@ -770,7 +722,8 @@ class TestProfilingInstrumentation:
                 transform.flush_batch_processing(timeout=30.0)
 
                 assert len(collector.results) == 20
-                assert len(query_times) == 80  # 20 rows x 4 queries
+                assert call_count[0] == 80  # 20 rows x 4 queries
+                assert len(query_times) == 80
 
                 # Analyze distribution
                 mean_ms = statistics.mean(query_times)
@@ -791,18 +744,18 @@ class TestProfilingInstrumentation:
             finally:
                 transform.close()
 
-    def test_batch_processing_overhead(self) -> None:
+    def test_batch_processing_overhead(self, chaosllm_server) -> None:
         """Measure overhead of batch processing logic."""
 
-        def make_response(**kwargs: Any) -> Mock:
+        def response_factory(_call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
             # Instant responses to isolate batch processing overhead
             return make_mock_llm_response(score=85, rationale="OK", delay_ms=0)
 
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            _call_count,
+            _mock_azure_class,
+        ):
             # Disable query-level pooling to avoid mock threading issues
             config = make_config()
             del config["pool_size"]

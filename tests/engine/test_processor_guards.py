@@ -193,7 +193,7 @@ class TestProcessorGuards:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> PluginTransformResult:
-                return PluginTransformResult.success(row)
+                return PluginTransformResult.success(row, success_reason={"action": "passthrough"})
 
         transform = PassthroughTransform(transform_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})

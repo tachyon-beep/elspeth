@@ -25,7 +25,7 @@ from tests.conftest import _TestSinkBase
 class TestFieldResolutionRecording:
     """Tests that field resolution is correctly recorded in audit trail."""
 
-    def test_field_resolution_recorded_with_normalize_fields(self, tmp_path: Path) -> None:
+    def test_field_resolution_recorded_with_normalize_fields(self, tmp_path: Path, payload_store) -> None:
         """Field resolution is recorded when normalize_fields=True.
 
         This is the key test for the P2 fix - field resolution must be captured
@@ -84,7 +84,7 @@ class TestFieldResolutionRecording:
 
         # Run pipeline
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config=config, graph=graph)
+        result = orchestrator.run(config=config, graph=graph, payload_store=payload_store)
 
         # Query the audit database for field resolution
         with db.engine.connect() as conn:
@@ -110,7 +110,7 @@ class TestFieldResolutionRecording:
         assert "user_id" in sink.results[0]
         assert sink.results[0]["user_id"] == "1"
 
-    def test_field_resolution_identity_without_normalization(self, tmp_path: Path) -> None:
+    def test_field_resolution_identity_without_normalization(self, tmp_path: Path, payload_store) -> None:
         """Field resolution records identity mapping when normalize_fields=False.
 
         Even without normalization, CSVSource records an identity mapping
@@ -166,7 +166,7 @@ class TestFieldResolutionRecording:
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config=config, graph=graph)
+        result = orchestrator.run(config=config, graph=graph, payload_store=payload_store)
 
         # Query the audit database for field resolution
         with db.engine.connect() as conn:

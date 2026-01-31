@@ -323,11 +323,12 @@ class AuditedHTTPClient(AuditedClientBase):
                     ExternalCallCompleted(
                         timestamp=datetime.now(UTC),
                         run_id=self._run_id,
-                        state_id=self._state_id,
                         call_type=CallType.HTTP,
                         provider=self._extract_provider(full_url),
                         status=call_status,
                         latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
                         token_usage=None,  # HTTP calls don't have token usage
@@ -369,11 +370,12 @@ class AuditedHTTPClient(AuditedClientBase):
                     ExternalCallCompleted(
                         timestamp=datetime.now(UTC),
                         run_id=self._run_id,
-                        state_id=self._state_id,
                         call_type=CallType.HTTP,
                         provider=self._extract_provider(full_url),
                         status=CallStatus.ERROR,
                         latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=None,  # No response on exception
                         token_usage=None,

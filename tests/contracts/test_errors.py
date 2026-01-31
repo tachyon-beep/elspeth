@@ -17,17 +17,17 @@ class TestExecutionErrorSchema:
         assert ExecutionError.__required_keys__ == frozenset({"exception", "type"})
 
     def test_execution_error_optional_keys(self) -> None:
-        """ExecutionError has traceback as optional key."""
+        """ExecutionError has traceback and phase as optional keys."""
         from elspeth.contracts import ExecutionError
 
-        assert ExecutionError.__optional_keys__ == frozenset({"traceback"})
+        assert ExecutionError.__optional_keys__ == frozenset({"traceback", "phase"})
 
     def test_execution_error_all_keys(self) -> None:
         """ExecutionError total keys match required + optional."""
         from elspeth.contracts import ExecutionError
 
         all_keys = ExecutionError.__required_keys__ | ExecutionError.__optional_keys__
-        assert all_keys == frozenset({"exception", "type", "traceback"})
+        assert all_keys == frozenset({"exception", "type", "traceback", "phase"})
 
 
 class TestRoutingReasonSchema:

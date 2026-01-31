@@ -95,7 +95,6 @@ class RateLimitRegistry:
                 service_config = self._config.get_service_config(service_name)
                 self._limiters[service_name] = RateLimiter(
                     name=service_name,
-                    requests_per_second=service_config.requests_per_second,
                     requests_per_minute=service_config.requests_per_minute,
                     persistence_path=self._config.persistence_path,
                 )

@@ -81,7 +81,7 @@ class TestQuarantineIntegration:
                             "value": row["value"],
                         }
                     )
-                return TransformResult.success({**row, "validated": True})
+                return TransformResult.success({**row, "validated": True}, success_reason={"action": "validate"})
 
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         processor = RowProcessor(
@@ -179,7 +179,7 @@ class TestQuarantineIntegration:
                             "error": "missing required_field",
                         }
                     )
-                return TransformResult.success({**row, "validated": True})
+                return TransformResult.success({**row, "validated": True}, success_reason={"action": "validate"})
 
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
         processor = RowProcessor(

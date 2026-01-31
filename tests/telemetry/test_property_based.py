@@ -371,6 +371,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
 
         with patch("elspeth.telemetry.manager.logger"):
             self.manager.handle_event(event)
+            self.manager.flush()
 
         self.total_events_sent += 1
         self.events_when_partial += 1
@@ -386,6 +387,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
         self.all_exporters_failing = False
 
         self.manager.handle_event(event)
+        self.manager.flush()
         self.total_events_sent += 1
         self.events_when_all_working += 1
 
@@ -401,6 +403,7 @@ class TelemetryManagerStateMachine(RuleBasedStateMachine):
 
         with patch("elspeth.telemetry.manager.logger"):
             self.manager.handle_event(event)
+            self.manager.flush()
 
         self.total_events_sent += 1
         self.events_when_all_failing += 1
@@ -479,6 +482,7 @@ class AllExportersFailStateMachine(RuleBasedStateMachine):
 
             event = make_run_started(run_id)
             self.manager.handle_event(event)
+            self.manager.flush()
 
             if was_disabled:
                 self.events_sent_after_disable += 1
@@ -732,6 +736,7 @@ class TestEventOrdering:
             manager.handle_event(event)
 
         # Verify order is preserved
+        manager.flush()
         assert len(exporter.exports) == num_events
         for i, (emitted, received) in enumerate(zip(events, exporter.exports, strict=True)):
             assert emitted is received, f"Order mismatch at index {i}"
@@ -757,6 +762,7 @@ class TestEventOrdering:
             manager.handle_event(event)
 
         # All exporters should have the same events in the same order
+        manager.flush()
         assert exporter1.exports == exporter2.exports == exporter3.exports
         assert exporter1.exports == events
 
@@ -829,6 +835,7 @@ class TestManagerInvariants:
             manager.handle_event(event)
 
         # Emitted count should match events that passed filter
+        manager.flush()
         assert manager.health_metrics["events_emitted"] == events_that_pass
         assert manager.health_metrics["events_dropped"] == 0
         assert len(exporter.exports) == events_that_pass

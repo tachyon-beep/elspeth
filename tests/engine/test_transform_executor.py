@@ -42,7 +42,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2})
+                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         transform = DoubleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -237,7 +237,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True})
+                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         transform = EnrichTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -296,7 +296,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         transform = IdentityTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -489,7 +489,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"result": "ok"})
+                return TransformResult.success({"result": "ok"}, success_reason={"action": "test"})
 
         transform = SuccessfulTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -547,7 +547,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = SimpleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})

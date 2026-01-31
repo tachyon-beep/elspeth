@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
@@ -29,6 +29,7 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import (
+    MockPayloadStore,
     _TestSchema,
     _TestSinkBase,
     _TestSourceBase,
@@ -179,7 +180,7 @@ class _EnrichTransform(BaseTransform):
         super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success({**row, "enriched": True})
+        return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
 
 class _CollectSink(_TestSinkBase):
@@ -242,6 +243,7 @@ class TestForkCoalesceFlow:
         Total terminal outcomes: N FORKED + 2*N COALESCED + N COMPLETED = 4*N
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
@@ -291,7 +293,7 @@ class TestForkCoalesceFlow:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings_obj)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # Get statistics
         stats = get_fork_coalesce_stats(db, run.run_id)
@@ -327,7 +329,7 @@ class TestForkCoalesceFlow:
         )
 
     @given(n_rows=st.integers(min_value=1, max_value=10))
-    @settings(max_examples=20, deadline=None)
+    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_coalesced_tokens_have_parent_links(self, n_rows: int) -> None:
         """Property: All COALESCED tokens have parent links recorded.
 
@@ -335,6 +337,7 @@ class TestForkCoalesceFlow:
         parent token(s) contributed to each coalesced result.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
@@ -382,7 +385,7 @@ class TestForkCoalesceFlow:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings_obj)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # Get statistics
         stats = get_fork_coalesce_stats(db, run.run_id)
@@ -394,7 +397,7 @@ class TestForkCoalesceFlow:
         )
 
     @given(n_rows=st.integers(min_value=1, max_value=10))
-    @settings(max_examples=20, deadline=None)
+    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_merged_data_contains_enrichments(self, n_rows: int) -> None:
         """Property: Merged token data contains fields added before fork.
 
@@ -402,6 +405,7 @@ class TestForkCoalesceFlow:
         to the merged result after coalesce.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         rows = [{"value": i} for i in range(n_rows)]
         source = _ListSource(rows)
@@ -449,7 +453,7 @@ class TestForkCoalesceFlow:
         )
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=graph, settings=settings_obj)
+        orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # Verify all results have the enriched field
         assert len(sink.results) == n_rows
@@ -467,6 +471,7 @@ class TestForkCoalesceEdgeCases:
     def test_empty_source_with_coalesce_config(self) -> None:
         """Empty source with coalesce config should not cause issues."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         source = _ListSource([])  # Empty
         transform = _EnrichTransform()
@@ -513,7 +518,7 @@ class TestForkCoalesceEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings_obj)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         # No rows means no tokens
         stats = get_fork_coalesce_stats(db, run.run_id)
@@ -525,6 +530,7 @@ class TestForkCoalesceEdgeCases:
     def test_single_row_fork_coalesce(self) -> None:
         """Single row through fork→coalesce should work correctly."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
 
         source = _ListSource([{"value": 42}])
         transform = _EnrichTransform()
@@ -571,7 +577,7 @@ class TestForkCoalesceEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings_obj)
+        run = orchestrator.run(config, graph=graph, settings=settings_obj, payload_store=payload_store)
 
         stats = get_fork_coalesce_stats(db, run.run_id)
 

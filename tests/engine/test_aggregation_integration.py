@@ -65,6 +65,7 @@ class TestAggregationTimeoutIntegration:
     def test_aggregation_timeout_flushes_during_processing(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Aggregation should flush on timeout during processing, not wait for end-of-source.
 
@@ -120,10 +121,12 @@ class TestAggregationTimeoutIntegration:
                     # Batch mode - aggregate the rows
                     rows = row
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"id": rows[0].get("id"), "value": total, "count": len(rows)})
+                    return TransformResult.success(
+                        {"id": rows[0].get("id"), "value": total, "count": len(rows)}, success_reason={"action": "test"}
+                    )
                 else:
                     # Single row mode - passthrough
-                    return TransformResult.success(dict(row))
+                    return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectingSink(_TestSinkBase):
             """Sink that collects rows for verification."""
@@ -210,7 +213,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -256,6 +259,7 @@ class TestAggregationTimeoutIntegration:
     def test_aggregation_timeout_loop_checks_all_nodes(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """The timeout check loop iterates over all aggregation nodes.
 
@@ -311,8 +315,8 @@ class TestAggregationTimeoutIntegration:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects all rows."""
@@ -382,7 +386,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -400,6 +404,7 @@ class TestAggregationTimeoutIntegration:
     def test_timeout_fires_before_row_processing(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout is checked BEFORE each row is processed, not after.
 
@@ -467,8 +472,8 @@ class TestAggregationTimeoutIntegration:
                     flush_count += 1
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -540,7 +545,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -577,6 +582,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_single_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with single output_mode creates one aggregated token.
 
@@ -627,8 +633,8 @@ class TestEndOfSourceFlush:
                 if isinstance(row, list):
                     batch_data.append({"rows": len(row), "total": sum(r.get("value", 0) for r in row)})
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -696,7 +702,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -715,6 +721,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_passthrough_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with passthrough output_mode preserves all tokens.
 
@@ -765,8 +772,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: return same number of rows, enriched
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
-                    return TransformResult.success_multi(enriched)
-                return TransformResult.success(dict(row))
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -834,7 +841,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -854,6 +861,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_transform_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with transform output_mode creates new tokens.
 
@@ -906,9 +914,10 @@ class TestEndOfSourceFlush:
                         [
                             {"type": "summary", "total": total},
                             {"type": "count", "count": len(row)},
-                        ]
+                        ],
+                        success_reason={"action": "test"},
                     )
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -976,7 +985,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -996,6 +1005,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_passthrough_with_downstream_transform(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with passthrough routes tokens through downstream transforms.
 
@@ -1041,8 +1051,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: enrich with batch_total
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total} for r in row]
-                    return TransformResult.success_multi(enriched)
-                return TransformResult.success(dict(row))
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1056,7 +1066,7 @@ class TestEndOfSourceFlush:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "processed": True})
+                return TransformResult.success({**row, "processed": True}, success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1126,7 +1136,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -1142,6 +1152,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_single_with_downstream_transform(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with single mode routes result through downstream transforms.
 
@@ -1185,8 +1196,8 @@ class TestEndOfSourceFlush:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1200,7 +1211,9 @@ class TestEndOfSourceFlush:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "processed": True, "doubled_total": row.get("total", 0) * 2})
+                return TransformResult.success(
+                    {**row, "processed": True, "doubled_total": row.get("total", 0) * 2}, success_reason={"action": "test"}
+                )
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1270,7 +1283,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -1297,6 +1310,7 @@ class TestTimeoutFlushErrorHandling:
     def test_timeout_flush_error_single_mode_no_duplicate_outcomes(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout flush errors in single mode must not record duplicate terminal outcomes.
 
@@ -1334,7 +1348,7 @@ class TestTimeoutFlushErrorHandling:
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure"})
                 # Single row passthrough (shouldn't happen in batch mode)
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1428,7 +1442,7 @@ class TestTimeoutFlushErrorHandling:
         # BUG: This should NOT crash with IntegrityError
         # The fix should handle the fact that tokens in single mode already
         # have CONSUMED_IN_BATCH recorded when the flush fails.
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify the flush was attempted and failed
         assert len(flush_calls) >= 1, "Batch flush should have been called"
@@ -1446,6 +1460,7 @@ class TestTimeoutFlushErrorHandling:
     def test_timeout_flush_downstream_routed_counts_tracked(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Downstream ROUTED outcomes from timeout flush must be tracked in stats.
 
@@ -1480,8 +1495,8 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch mode - combine rows
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1605,7 +1620,7 @@ class TestTimeoutFlushErrorHandling:
 
         # Inject MockClock for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -1626,6 +1641,7 @@ class TestTimeoutFlushErrorHandling:
     def test_passthrough_flush_failure_marks_all_buffered_tokens_failed(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Passthrough flush failure must mark ALL buffered tokens as FAILED.
 
@@ -1667,7 +1683,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_passthrough_failure"})
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -1762,7 +1778,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -1802,6 +1818,7 @@ class TestTimeoutFlushErrorHandling:
     def test_passthrough_end_of_source_flush_failure_marks_all_failed(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE passthrough flush failure must mark ALL buffered tokens FAILED.
 
@@ -1835,7 +1852,7 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "eos_failure"})
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class ShortSource(_TestSourceBase):
             """Source that emits 2 rows (won't trigger count=10)."""
@@ -1927,7 +1944,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify END_OF_SOURCE flush was triggered and failed
         assert len(flush_calls) == 1, f"Expected 1 END_OF_SOURCE flush, got {len(flush_calls)}"
@@ -1960,6 +1977,7 @@ class TestTimeoutFlushErrorHandling:
     def test_single_mode_count_flush_failure_triggering_token_has_outcome(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Count-triggered flush failure in single mode must record CONSUMED_IN_BATCH for triggering token.
 
@@ -2008,7 +2026,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_single_mode_failure"})
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2104,7 +2122,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -2136,6 +2154,7 @@ class TestTimeoutFlushErrorHandling:
     def test_transform_mode_count_flush_failure_triggering_token_has_outcome(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Count-triggered flush failure in transform mode must record CONSUMED_IN_BATCH for triggering token.
 
@@ -2167,7 +2186,7 @@ class TestTimeoutFlushErrorHandling:
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_transform_mode_failure"})
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2259,7 +2278,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -2300,6 +2319,7 @@ class TestTimeoutFlushStepIndexing:
     def test_timeout_flush_records_1_indexed_step(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout flush at first transform should record step_index=1, not 0.
 
@@ -2344,8 +2364,8 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2414,7 +2434,7 @@ class TestTimeoutFlushStepIndexing:
 
         # Inject MockClock for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -2441,6 +2461,7 @@ class TestTimeoutFlushStepIndexing:
     def test_end_of_source_flush_records_1_indexed_step(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """End-of-source flush at first transform should record step_index=1, not 0.
 
@@ -2489,8 +2510,8 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2558,7 +2579,7 @@ class TestTimeoutFlushStepIndexing:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 

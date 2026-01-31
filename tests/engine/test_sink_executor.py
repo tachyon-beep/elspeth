@@ -524,3 +524,177 @@ class TestSinkExecutor:
         assert operation.operation_type == "sink_write"
         assert operation.status == "completed"
         assert operation.node_id == sink_node.node_id
+
+    def test_flush_exception_records_failure_for_all_tokens(self) -> None:
+        """P1-FIX: Sink flush() raising exception still records audit state for all tokens.
+
+        This tests the fix for the audit integrity gap where sink.flush() failures
+        left node_states OPEN permanently. The fix wraps flush() in try/except
+        and completes all states as FAILED before re-raising.
+
+        Bug: If flush() fails after write() succeeds, node_states were left OPEN
+        because complete_node_state() was only called after flush() returned.
+        """
+        from elspeth.contracts import TokenInfo
+        from elspeth.contracts.audit import NodeStateFailed
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="flush_exploding_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Custom sink where write() succeeds but flush() fails
+        class FlushExplodingSink:
+            name = "flush_exploding_sink"
+            node_id: str | None = sink_node.node_id
+
+            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+                # Write succeeds - returns valid artifact
+                return ArtifactDescriptor.for_file(
+                    path="/tmp/partial_output.csv",
+                    size_bytes=len(rows) * 100,
+                    content_hash="partial_hash",
+                )
+
+            def flush(self) -> None:
+                # Flush fails - simulates disk full, network error, etc.
+                raise OSError("Flush failed: disk quota exceeded")
+
+        sink = FlushExplodingSink()
+        ctx = PluginContext(run_id=run.run_id, config={})
+        executor = SinkExecutor(recorder, SpanFactory(), run.run_id)
+
+        # Create tokens
+        tokens = []
+        for i in range(3):
+            token = TokenInfo(
+                row_id=f"row-{i}",
+                token_id=f"token-{i}",
+                row_data={"value": i * 10},
+            )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=sink_node.node_id,
+                row_index=i,
+                data=token.row_data,
+                row_id=token.row_id,
+            )
+            recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+            tokens.append(token)
+
+        # Write should raise (flush fails)
+        with pytest.raises(IOError, match="disk quota exceeded"):
+            executor.write(
+                sink=as_sink(sink),
+                tokens=tokens,
+                ctx=ctx,
+                step_in_pipeline=5,
+                sink_name="flush_failing_sink",
+            )
+
+        # CRITICAL VERIFICATION: All node_states must be FAILED, not OPEN
+        # This is the core invariant we're testing
+        for token in tokens:
+            states = recorder.get_node_states_for_token(token.token_id)
+            assert len(states) == 1, f"Expected 1 state for token {token.token_id}"
+            state = states[0]
+            assert state.status == "failed", (
+                f"Expected FAILED status for token {token.token_id}, got {state.status}. "
+                "This indicates node_state was left OPEN after flush() failure."
+            )
+            # Verify it's properly typed as NodeStateFailed
+            assert isinstance(state, NodeStateFailed)
+            assert state.duration_ms is not None
+            # Verify error contains flush phase indicator
+            assert state.error_json is not None, "Error JSON should be recorded"
+            import json
+
+            error_data = json.loads(state.error_json)
+            assert error_data.get("phase") == "flush", (
+                f"Expected error phase='flush', got {error_data}. This helps distinguish flush failures from write failures."
+            )
+
+        # Verify no artifact recorded (flush failed = not durable)
+        artifacts = recorder.get_artifacts(run.run_id)
+        assert len(artifacts) == 0, "No artifact should be registered when flush fails. Artifact registration happens after flush succeeds."
+
+    def test_flush_exception_preserves_crash_behavior(self) -> None:
+        """P1-FIX: Flush exceptions still propagate (crash) after audit cleanup.
+
+        The original design intent was "if flush fails, we want to crash" (per comment).
+        This test verifies that behavior is preserved - we don't silently swallow
+        the exception after completing audit states.
+        """
+        from elspeth.contracts import TokenInfo
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        sink_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="crash_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        class CrashingSink:
+            name = "crash_sink"
+            node_id: str | None = sink_node.node_id
+
+            def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
+                return ArtifactDescriptor.for_file(
+                    path="/tmp/crash.csv",
+                    size_bytes=100,
+                    content_hash="crash_hash",
+                )
+
+            def flush(self) -> None:
+                raise RuntimeError("CRITICAL: Flush catastrophic failure")
+
+        sink = CrashingSink()
+        ctx = PluginContext(run_id=run.run_id, config={})
+        executor = SinkExecutor(recorder, SpanFactory(), run.run_id)
+
+        token = TokenInfo(row_id="row-0", token_id="token-0", row_data={"x": 1})
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=sink_node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        # Exception MUST propagate (crash behavior preserved)
+        with pytest.raises(RuntimeError, match="CRITICAL: Flush catastrophic failure"):
+            executor.write(
+                sink=as_sink(sink),
+                tokens=[token],
+                ctx=ctx,
+                step_in_pipeline=5,
+                sink_name="crash_sink",
+            )
+
+        # Verify audit state was cleaned up BEFORE the crash
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        assert states[0].status == "failed"

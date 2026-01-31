@@ -109,7 +109,7 @@ class TestCompletedOutcomeTimingContract:
     These tests verify the CORRECT behavior. They currently FAIL because of the bug.
     """
 
-    def test_no_completed_outcomes_when_sink_write_fails(self, tmp_path: Path) -> None:
+    def test_no_completed_outcomes_when_sink_write_fails(self, tmp_path: Path, payload_store) -> None:
         """COMPLETED outcomes must NOT exist when sink.write() throws.
 
         CORRECT BEHAVIOR: COMPLETED should only be recorded AFTER successful
@@ -152,7 +152,7 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class FailingSink(_TestSinkBase):
             """Sink that always throws on write.
@@ -189,7 +189,7 @@ class TestCompletedOutcomeTimingContract:
 
         # Run the pipeline - expect it to fail due to sink exception
         with pytest.raises(RuntimeError, match="Simulated sink failure"):
-            orchestrator.run(config, graph=_build_graph(config))
+            orchestrator.run(config, graph=_build_graph(config), payload_store=payload_store)
 
         # Check the audit trail
         with db.engine.connect() as conn:
@@ -216,7 +216,7 @@ class TestCompletedOutcomeTimingContract:
             f"The audit trail falsely claims success for data that was never written."
         )
 
-    def test_invariant_3_completed_implies_sink_node_state(self, tmp_path: Path) -> None:
+    def test_invariant_3_completed_implies_sink_node_state(self, tmp_path: Path, payload_store) -> None:
         """Every COMPLETED outcome must have a corresponding completed sink node_state.
 
         Contract Invariant 3: "COMPLETED implies the token has a completed sink node_state"
@@ -253,7 +253,7 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"
@@ -274,7 +274,7 @@ class TestCompletedOutcomeTimingContract:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError):
-            orchestrator.run(config, graph=_build_graph(config))
+            orchestrator.run(config, graph=_build_graph(config), payload_store=payload_store)
 
         # Verify Invariant 3: For every COMPLETED outcome, a sink node_state must exist
         with db.engine.connect() as conn:
@@ -304,7 +304,7 @@ class TestCompletedOutcomeTimingContract:
             f"Contract: 'COMPLETED implies the token has a completed sink node_state'"
         )
 
-    def test_audit_trail_does_not_lie_about_success(self, tmp_path: Path) -> None:
+    def test_audit_trail_does_not_lie_about_success(self, tmp_path: Path, payload_store) -> None:
         """Audit trail must not claim success for data that didn't reach sink.
 
         This is the user-facing impact: an auditor querying token_outcomes
@@ -339,7 +339,7 @@ class TestCompletedOutcomeTimingContract:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class FailingSink(_TestSinkBase):
             name = "failing_sink"
@@ -360,7 +360,7 @@ class TestCompletedOutcomeTimingContract:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError):
-            orchestrator.run(config, graph=_build_graph(config))
+            orchestrator.run(config, graph=_build_graph(config), payload_store=payload_store)
 
         # Simulate what an auditor would see
         with db.engine.connect() as conn:

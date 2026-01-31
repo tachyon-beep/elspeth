@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class TestOrchestratorProgress:
     """Tests for progress callback functionality."""
 
-    def test_progress_callback_called_every_100_rows(self) -> None:
+    def test_progress_callback_called_every_100_rows(self, payload_store) -> None:
         """Verify progress callback is called at 100, 200, and 250 row marks."""
         from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
@@ -86,6 +86,7 @@ class TestOrchestratorProgress:
         orchestrator.run(
             config,
             graph=build_production_graph(config),
+            payload_store=payload_store,
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
@@ -115,7 +116,7 @@ class TestOrchestratorProgress:
         for i in range(1, len(progress_events)):
             assert progress_events[i].elapsed_seconds >= progress_events[i - 1].elapsed_seconds, "Elapsed time not monotonically increasing"
 
-    def test_progress_callback_not_called_when_none(self) -> None:
+    def test_progress_callback_not_called_when_none(self, payload_store) -> None:
         """Verify no crash when on_progress is None."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
@@ -156,11 +157,11 @@ class TestOrchestratorProgress:
 
         orchestrator = Orchestrator(db)
         # Run without progress callback - should not crash
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.rows_processed == 50
 
-    def test_progress_callback_fires_for_quarantined_rows(self) -> None:
+    def test_progress_callback_fires_for_quarantined_rows(self, payload_store) -> None:
         """Verify progress callback fires even when rows are quarantined.
 
         Regression test: progress emission was placed after the quarantine
@@ -229,6 +230,7 @@ class TestOrchestratorProgress:
         orchestrator.run(
             config,
             graph=build_production_graph(config),
+            payload_store=payload_store,
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
@@ -253,7 +255,7 @@ class TestOrchestratorProgress:
         assert row_100_event.rows_quarantined == 1  # Row 100 (0-indexed 99) was quarantined
         assert final_event.rows_quarantined == 1  # Still 1 quarantined at final
 
-    def test_progress_callback_includes_routed_rows_in_success(self) -> None:
+    def test_progress_callback_includes_routed_rows_in_success(self, payload_store) -> None:
         """Verify routed rows are counted as successes in progress events.
 
         Regression test: progress was showing ✓0 for pipelines with gates
@@ -327,6 +329,7 @@ class TestOrchestratorProgress:
         orchestrator.run(
             config,
             graph=build_production_graph(config),
+            payload_store=payload_store,
         )
 
         # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals

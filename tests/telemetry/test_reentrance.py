@@ -169,6 +169,9 @@ class TestTelemetryManagerReentrance:
         # in case the system doesn't have re-entrance protection
         manager.handle_event(event)
 
+        # Wait for background thread to process the event
+        manager.flush()
+
         # Verify processing occurred
         assert exporter._export_count > 0, "Expected at least one export call"
 
@@ -487,6 +490,9 @@ class TestTelemetryManagerWithEventBus:
             source_plugin="test",
         )
         bus.emit(initial_event)
+
+        # Wait for background thread to process
+        manager.flush()
 
         # Should complete without overflow
         assert export_count > 0

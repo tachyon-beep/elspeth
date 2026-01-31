@@ -87,7 +87,7 @@ class TestRateLimitRegistryEnabled:
         """Registry creates new RateLimiter for unknown service."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -101,7 +101,7 @@ class TestRateLimitRegistryEnabled:
         """Registry returns cached limiter for repeated requests."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -116,7 +116,7 @@ class TestRateLimitRegistryEnabled:
         """Registry creates separate limiters for different services."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -135,10 +135,9 @@ class TestRateLimitRegistryEnabled:
         """
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
             services={
                 "openai": ServiceRateLimit(
-                    requests_per_second=5,
                     requests_per_minute=100,
                 ),
             },
@@ -153,7 +152,6 @@ class TestRateLimitRegistryEnabled:
         assert limiter.name == "openai"
 
         # Verify the service-specific config is actually applied
-        assert limiter._requests_per_second == 5
         assert limiter._requests_per_minute == 100
 
         registry.close()
@@ -166,10 +164,9 @@ class TestRateLimitRegistryEnabled:
         """
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=15,
-            default_requests_per_minute=None,  # Explicitly no per-minute limit
+            default_requests_per_minute=15,
             services={
-                "openai": ServiceRateLimit(requests_per_second=5),
+                "openai": ServiceRateLimit(requests_per_minute=100),
             },
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
@@ -183,8 +180,7 @@ class TestRateLimitRegistryEnabled:
         assert limiter.name == "unknown_api"
 
         # Verify the default config is applied (not openai's config)
-        assert limiter._requests_per_second == 15
-        assert limiter._requests_per_minute is None
+        assert limiter._requests_per_minute == 15
 
         registry.close()
 
@@ -196,7 +192,7 @@ class TestRateLimitRegistryThreadSafety:
         """Concurrent get_limiter calls for same service return same instance."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -219,7 +215,7 @@ class TestRateLimitRegistryThreadSafety:
         """Concurrent get_limiter calls for different services work correctly."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -246,7 +242,7 @@ class TestRateLimitRegistryCleanup:
         """reset_all() closes all limiters and clears the registry."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -270,7 +266,7 @@ class TestRateLimitRegistryCleanup:
         """close() closes all limiters."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -289,7 +285,7 @@ class TestRateLimitRegistryCleanup:
         """close() can be called multiple times safely."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)
@@ -304,7 +300,7 @@ class TestRateLimitRegistryCleanup:
         """After reset_all(), new limiters can be created."""
         settings = RateLimitSettings(
             enabled=True,
-            default_requests_per_second=10,
+            default_requests_per_minute=10,
         )
         config = RuntimeRateLimitConfig.from_settings(settings)
         registry = RateLimitRegistry(config)

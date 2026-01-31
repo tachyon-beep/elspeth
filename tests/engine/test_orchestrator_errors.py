@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 class TestOrchestratorErrorHandling:
     """Test error handling in orchestration."""
 
-    def test_run_marks_failed_on_transform_exception(self) -> None:
+    def test_run_marks_failed_on_transform_exception(self, payload_store) -> None:
         """If a transform raises, run status should be failed in Landscape."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -101,7 +101,7 @@ class TestOrchestratorErrorHandling:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError, match="Transform exploded!"):
-            orchestrator.run(config, graph=build_production_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify run was marked as failed in Landscape audit trail
         # Query for all runs and find the one that was created
@@ -123,7 +123,7 @@ class TestOrchestratorSourceQuarantineValidation:
     just like gate routes and transform error sinks.
     """
 
-    def test_invalid_source_quarantine_destination_fails_at_init(self) -> None:
+    def test_invalid_source_quarantine_destination_fails_at_init(self, payload_store) -> None:
         """Source quarantine to non-existent sink should fail before processing rows.
 
         When a source has on_validation_failure set to a sink that doesn't exist,
@@ -206,7 +206,7 @@ class TestOrchestratorSourceQuarantineValidation:
 
         # Should fail at initialization with clear error message
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=build_production_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify error message contains helpful information
         error_msg = str(exc_info.value)
@@ -220,7 +220,7 @@ class TestOrchestratorSourceQuarantineValidation:
 class TestOrchestratorQuarantineMetrics:
     """Test that QUARANTINED rows are counted separately from FAILED."""
 
-    def test_orchestrator_counts_quarantined_rows(self) -> None:
+    def test_orchestrator_counts_quarantined_rows(self, payload_store) -> None:
         """Orchestrator should count QUARANTINED rows separately.
 
         A transform with _on_error="discard" intentionally quarantines rows
@@ -312,7 +312,7 @@ class TestOrchestratorQuarantineMetrics:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify counts
         assert run_result.status == "completed"
@@ -339,7 +339,7 @@ class TestSourceQuarantineTokenOutcome:
     reaches exactly one terminal state).
     """
 
-    def test_source_quarantine_records_quarantined_token_outcome(self) -> None:
+    def test_source_quarantine_records_quarantined_token_outcome(self, payload_store) -> None:
         """Source-quarantined rows MUST have QUARANTINED outcome in token_outcomes.
 
         When a source yields SourceRow.quarantined(), the orchestrator should:
@@ -405,7 +405,7 @@ class TestSourceQuarantineTokenOutcome:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify run completed successfully
         assert run_result.status == "completed"

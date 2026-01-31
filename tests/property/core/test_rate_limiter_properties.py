@@ -86,54 +86,36 @@ weights = st.integers(min_value=1, max_value=10)
 class TestRateLimiterValidationProperties:
     """Property tests for RateLimiter input validation."""
 
-    @given(name=valid_names_extended, rps=positive_rates)
+    @given(name=valid_names_extended, rpm=positive_rates)
     @settings(max_examples=100)
-    def test_valid_name_and_rate_accepted(self, name: str, rps: int) -> None:
+    def test_valid_name_and_rate_accepted(self, name: str, rpm: int) -> None:
         """Property: Valid names and positive rates create a limiter."""
-        with RateLimiter(name=name, requests_per_second=rps) as limiter:
+        with RateLimiter(name=name, requests_per_minute=rpm) as limiter:
             assert limiter.name == name
 
-    @given(name=invalid_names, rps=positive_rates)
+    @given(name=invalid_names, rpm=positive_rates)
     @settings(max_examples=50)
-    def test_invalid_name_rejected(self, name: str, rps: int) -> None:
+    def test_invalid_name_rejected(self, name: str, rpm: int) -> None:
         """Property: Invalid names raise ValueError."""
         with pytest.raises(ValueError, match="Invalid rate limiter name"):
-            RateLimiter(name=name, requests_per_second=rps)
+            RateLimiter(name=name, requests_per_minute=rpm)
 
-    @given(name=valid_names, rps=non_positive_rates)
+    @given(name=valid_names, rpm=non_positive_rates)
     @settings(max_examples=50)
-    def test_non_positive_rps_rejected(self, name: str, rps: int) -> None:
-        """Property: Non-positive requests_per_second raises ValueError."""
-        with pytest.raises(ValueError, match="requests_per_second must be positive"):
-            RateLimiter(name=name, requests_per_second=rps)
-
-    @given(name=valid_names, rps=positive_rates, rpm=non_positive_rates)
-    @settings(max_examples=50)
-    def test_non_positive_rpm_rejected(self, name: str, rps: int, rpm: int) -> None:
+    def test_non_positive_rpm_rejected(self, name: str, rpm: int) -> None:
         """Property: Non-positive requests_per_minute raises ValueError."""
         with pytest.raises(ValueError, match="requests_per_minute must be positive"):
-            RateLimiter(name=name, requests_per_second=rps, requests_per_minute=rpm)
-
-    @given(name=valid_names, rps=positive_rates, rpm=positive_rates)
-    @settings(max_examples=50)
-    def test_both_rates_valid_accepted(self, name: str, rps: int, rpm: int) -> None:
-        """Property: Valid RPS and RPM together are accepted."""
-        with RateLimiter(
-            name=name,
-            requests_per_second=rps,
-            requests_per_minute=rpm,
-        ) as limiter:
-            assert limiter.name == name
+            RateLimiter(name=name, requests_per_minute=rpm)
 
 
 class TestRateLimiterAcquireProperties:
     """Property tests for acquire/try_acquire behavior."""
 
-    @given(name=valid_names, rps=st.integers(min_value=5, max_value=100))
+    @given(name=valid_names, rpm=st.integers(min_value=5, max_value=100))
     @settings(max_examples=50)
-    def test_try_acquire_succeeds_under_limit(self, name: str, rps: int) -> None:
+    def test_try_acquire_succeeds_under_limit(self, name: str, rpm: int) -> None:
         """Property: try_acquire succeeds when under rate limit."""
-        with RateLimiter(name=name, requests_per_second=rps) as limiter:
+        with RateLimiter(name=name, requests_per_minute=rpm) as limiter:
             # First acquire should always succeed
             assert limiter.try_acquire() is True
 
@@ -142,8 +124,8 @@ class TestRateLimiterAcquireProperties:
     def test_weight_affects_capacity(self, name: str, weight: int) -> None:
         """Property: Larger weights consume more capacity."""
         # Use high rate to avoid immediate rate limiting
-        rps = weight + 1  # Ensure we have capacity for one weighted acquire
-        with RateLimiter(name=name, requests_per_second=rps) as limiter:
+        rpm = weight + 1  # Ensure we have capacity for one weighted acquire
+        with RateLimiter(name=name, requests_per_minute=rpm) as limiter:
             # Acquire with weight should succeed initially
             assert limiter.try_acquire(weight=weight) is True
 
@@ -152,17 +134,17 @@ class TestRateLimiterAcquireProperties:
     def test_over_limit_returns_false(self, name: str) -> None:
         """Property: try_acquire returns False when over limit."""
         # Very low rate limit
-        with RateLimiter(name=name, requests_per_second=1) as limiter:
+        with RateLimiter(name=name, requests_per_minute=1) as limiter:
             # First acquire succeeds
             assert limiter.try_acquire() is True
             # Second immediate acquire fails (over limit)
             assert limiter.try_acquire() is False
 
-    @given(name=valid_names, rps=st.integers(min_value=1, max_value=10))
+    @given(name=valid_names, rpm=st.integers(min_value=1, max_value=10))
     @settings(max_examples=30)
-    def test_acquire_deterministic_success(self, name: str, rps: int) -> None:
+    def test_acquire_deterministic_success(self, name: str, rpm: int) -> None:
         """Property: acquire() always succeeds (eventually)."""
-        with RateLimiter(name=name, requests_per_second=rps) as limiter:
+        with RateLimiter(name=name, requests_per_minute=rpm) as limiter:
             # acquire() should always succeed (blocking)
             # We don't wait long, just verify no exception
             limiter.acquire()  # Should not raise
@@ -175,7 +157,7 @@ class TestRateLimiterTimeoutProperties:
     @settings(max_examples=20)
     def test_timeout_raises_after_deadline(self, name: str) -> None:
         """Property: acquire() with timeout raises TimeoutError when exceeded."""
-        with RateLimiter(name=name, requests_per_second=1) as limiter:
+        with RateLimiter(name=name, requests_per_minute=1) as limiter:
             # Exhaust the limit
             assert limiter.try_acquire() is True
 
@@ -187,7 +169,7 @@ class TestRateLimiterTimeoutProperties:
     @settings(max_examples=10)
     def test_timeout_respects_duration(self, name: str) -> None:
         """Property: Timeout doesn't significantly exceed specified duration."""
-        with RateLimiter(name=name, requests_per_second=1) as limiter:
+        with RateLimiter(name=name, requests_per_minute=1) as limiter:
             # Exhaust the limit
             limiter.try_acquire()
 
@@ -207,16 +189,16 @@ class TestRateLimiterTimeoutProperties:
 class TestRateLimiterPersistenceProperties:
     """Property tests for SQLite persistence."""
 
-    @given(name=valid_names, rps=positive_rates)
+    @given(name=valid_names, rpm=positive_rates)
     @settings(max_examples=20)
-    def test_persistence_creates_tables(self, name: str, rps: int) -> None:
+    def test_persistence_creates_tables(self, name: str, rpm: int) -> None:
         """Property: Persistence path creates SQLite tables."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = str(Path(tmp_dir) / "rate_limits.db")
 
             with RateLimiter(
                 name=name,
-                requests_per_second=rps,
+                requests_per_minute=rpm,
                 persistence_path=db_path,
             ):
                 # Just verify it doesn't crash
@@ -280,8 +262,7 @@ class TestRateLimitRegistryProperties:
         settings.enabled = True
         settings.persistence_path = None
         service_config = MagicMock()
-        service_config.requests_per_second = 100
-        service_config.requests_per_minute = None
+        service_config.requests_per_minute = 100
         settings.get_service_config.return_value = service_config
 
         registry = RateLimitRegistry(settings)
@@ -301,8 +282,7 @@ class TestRateLimitRegistryProperties:
         settings.enabled = True
         settings.persistence_path = None
         service_config = MagicMock()
-        service_config.requests_per_second = 100
-        service_config.requests_per_minute = None
+        service_config.requests_per_minute = 100
         settings.get_service_config.return_value = service_config
 
         registry = RateLimitRegistry(settings)
@@ -332,8 +312,7 @@ class TestRateLimitRegistryProperties:
         settings.enabled = True
         settings.persistence_path = None
         service_config = MagicMock()
-        service_config.requests_per_second = 100
-        service_config.requests_per_minute = None
+        service_config.requests_per_minute = 100
         settings.get_service_config.return_value = service_config
 
         registry = RateLimitRegistry(settings)
@@ -365,7 +344,7 @@ class TestRateLimiterThreadSafetyProperties:
     def test_concurrent_try_acquire_is_safe(self, name: str) -> None:
         """Property: Concurrent try_acquire() calls don't corrupt state."""
         # High limit so we don't hit rate limiting during test
-        with RateLimiter(name=name, requests_per_second=1000) as limiter:
+        with RateLimiter(name=name, requests_per_minute=1000) as limiter:
             successes: list[bool] = []
             lock = threading.Lock()
 
@@ -393,8 +372,7 @@ class TestRateLimiterThreadSafetyProperties:
         settings.enabled = True
         settings.persistence_path = None
         service_config = MagicMock()
-        service_config.requests_per_second = 100
-        service_config.requests_per_minute = None
+        service_config.requests_per_minute = 100
         settings.get_service_config.return_value = service_config
 
         registry = RateLimitRegistry(settings)
@@ -439,16 +417,16 @@ class TestRateLimiterEdgeCaseProperties:
     @settings(max_examples=20)
     def test_close_is_idempotent(self, name: str) -> None:
         """Property: Calling close() multiple times is safe."""
-        limiter = RateLimiter(name=name, requests_per_second=10)
+        limiter = RateLimiter(name=name, requests_per_minute=10)
         limiter.close()
         limiter.close()  # Should not raise
         limiter.close()  # Should not raise
 
-    @given(name=valid_names, rps=positive_rates)
+    @given(name=valid_names, rpm=positive_rates)
     @settings(max_examples=20)
-    def test_context_manager_cleanup(self, name: str, rps: int) -> None:
+    def test_context_manager_cleanup(self, name: str, rpm: int) -> None:
         """Property: Context manager properly cleans up resources."""
-        with RateLimiter(name=name, requests_per_second=rps) as limiter:
+        with RateLimiter(name=name, requests_per_minute=rpm) as limiter:
             limiter.try_acquire()
         # Should be closed after exiting context
         # (No way to verify directly, but shouldn't raise on second close)
@@ -459,7 +437,7 @@ class TestRateLimiterEdgeCaseProperties:
     def test_exact_capacity_consumption(self, name: str, weight: int) -> None:
         """Property: Acquiring exactly the capacity works, +1 fails."""
         capacity = weight * 2
-        with RateLimiter(name=name, requests_per_second=capacity) as limiter:
+        with RateLimiter(name=name, requests_per_minute=capacity) as limiter:
             # First acquire of weight should succeed
             assert limiter.try_acquire(weight=weight) is True
             # Second acquire of same weight should succeed (exactly at capacity)

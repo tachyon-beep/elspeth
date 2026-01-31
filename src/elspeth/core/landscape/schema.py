@@ -258,6 +258,29 @@ calls_table = Table(
     ),
 )
 
+# Partial unique indexes for call_index uniqueness within each parent type.
+# Since calls can be parented by EITHER state_id OR operation_id (XOR),
+# we need separate uniqueness constraints for each parent type.
+# This preserves the original UNIQUE(state_id, call_index) semantics while
+# also enforcing UNIQUE(operation_id, call_index) for operation calls.
+Index(
+    "ix_calls_state_call_index_unique",
+    calls_table.c.state_id,
+    calls_table.c.call_index,
+    unique=True,
+    sqlite_where=(calls_table.c.state_id.isnot(None)),
+    postgresql_where=(calls_table.c.state_id.isnot(None)),
+)
+
+Index(
+    "ix_calls_operation_call_index_unique",
+    calls_table.c.operation_id,
+    calls_table.c.call_index,
+    unique=True,
+    sqlite_where=(calls_table.c.operation_id.isnot(None)),
+    postgresql_where=(calls_table.c.operation_id.isnot(None)),
+)
+
 # === Artifacts ===
 
 artifacts_table = Table(

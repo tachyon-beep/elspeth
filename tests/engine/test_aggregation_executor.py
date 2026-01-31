@@ -1039,7 +1039,7 @@ class TestAggregationExecutorCheckpoint:
 
             def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 total = sum(r["value"] for r in rows)
-                return TransformResult.success({"sum": total})
+                return TransformResult.success({"sum": total}, success_reason={"action": "sum_batch"})
 
         transform = MockBatchTransform()
         ctx = PluginContext(run_id=run.run_id, config={})

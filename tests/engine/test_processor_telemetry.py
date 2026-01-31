@@ -66,7 +66,7 @@ class PassthroughTransform(BaseTransform):
         super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class FailingTransform(BaseTransform):
@@ -240,7 +240,7 @@ def create_mock_sink() -> MagicMock:
 class TestTransformCompletedTelemetry:
     """Tests for TransformCompleted telemetry event emission."""
 
-    def test_transform_completed_emitted_for_successful_transform(self, landscape_db: LandscapeDB) -> None:
+    def test_transform_completed_emitted_for_successful_transform(self, landscape_db: LandscapeDB, payload_store) -> None:
         """TransformCompleted is emitted after successful transform execution."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -253,7 +253,7 @@ class TestTransformCompletedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify TransformCompleted was emitted
         transform_events = [e for e in exporter.events if isinstance(e, TransformCompleted)]
@@ -266,7 +266,7 @@ class TestTransformCompletedTelemetry:
         assert event.input_hash is not None
         assert event.output_hash is not None
 
-    def test_transform_completed_emitted_for_failed_transform(self, landscape_db: LandscapeDB) -> None:
+    def test_transform_completed_emitted_for_failed_transform(self, landscape_db: LandscapeDB, payload_store) -> None:
         """TransformCompleted is emitted with FAILED status for transform errors."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -279,7 +279,7 @@ class TestTransformCompletedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_failing_transform())
+        orchestrator.run(config, graph=create_graph_with_failing_transform(), payload_store=payload_store)
 
         # Verify TransformCompleted was emitted with FAILED status
         transform_events = [e for e in exporter.events if isinstance(e, TransformCompleted)]
@@ -289,7 +289,7 @@ class TestTransformCompletedTelemetry:
         assert event.plugin_name == "failing"
         assert event.status == NodeStateStatus.FAILED
 
-    def test_multiple_transforms_emit_multiple_events(self, landscape_db: LandscapeDB) -> None:
+    def test_multiple_transforms_emit_multiple_events(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Each transform execution emits its own TransformCompleted event."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -316,7 +316,7 @@ class TestTransformCompletedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Verify two TransformCompleted events were emitted
         transform_events = [e for e in exporter.events if isinstance(e, TransformCompleted)]
@@ -331,7 +331,7 @@ class TestTransformCompletedTelemetry:
 class TestGateEvaluatedTelemetry:
     """Tests for GateEvaluated telemetry event emission."""
 
-    def test_gate_evaluated_emitted_for_gate(self, landscape_db: LandscapeDB) -> None:
+    def test_gate_evaluated_emitted_for_gate(self, landscape_db: LandscapeDB, payload_store) -> None:
         """GateEvaluated is emitted after gate evaluation."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -344,7 +344,7 @@ class TestGateEvaluatedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_gate())
+        orchestrator.run(config, graph=create_graph_with_gate(), payload_store=payload_store)
 
         # Verify GateEvaluated was emitted
         gate_events = [e for e in exporter.events if isinstance(e, GateEvaluated)]
@@ -354,7 +354,7 @@ class TestGateEvaluatedTelemetry:
         assert event.plugin_name == "simple_gate"
         assert event.destinations == ("continue",)
 
-    def test_gate_evaluated_contains_routing_mode(self, landscape_db: LandscapeDB) -> None:
+    def test_gate_evaluated_contains_routing_mode(self, landscape_db: LandscapeDB, payload_store) -> None:
         """GateEvaluated event includes the routing mode."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -367,7 +367,7 @@ class TestGateEvaluatedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_gate())
+        orchestrator.run(config, graph=create_graph_with_gate(), payload_store=payload_store)
 
         gate_events = [e for e in exporter.events if isinstance(e, GateEvaluated)]
         assert len(gate_events) == 1
@@ -384,7 +384,7 @@ class TestGateEvaluatedTelemetry:
 class TestTokenCompletedTelemetry:
     """Tests for TokenCompleted telemetry event emission."""
 
-    def test_token_completed_emitted_for_quarantined_token(self, landscape_db: LandscapeDB) -> None:
+    def test_token_completed_emitted_for_quarantined_token(self, landscape_db: LandscapeDB, payload_store) -> None:
         """TokenCompleted is emitted when a token is quarantined."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -397,14 +397,14 @@ class TestTokenCompletedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_failing_transform())
+        orchestrator.run(config, graph=create_graph_with_failing_transform(), payload_store=payload_store)
 
         # Verify TokenCompleted was emitted with QUARANTINED outcome
         token_events = [e for e in exporter.events if isinstance(e, TokenCompleted)]
         quarantined_events = [e for e in token_events if e.outcome == RowOutcome.QUARANTINED]
         assert len(quarantined_events) == 1
 
-    def test_token_completed_contains_outcome(self, landscape_db: LandscapeDB) -> None:
+    def test_token_completed_contains_outcome(self, landscape_db: LandscapeDB, payload_store) -> None:
         """TokenCompleted event contains the correct outcome."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -417,7 +417,7 @@ class TestTokenCompletedTelemetry:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_failing_transform())
+        orchestrator.run(config, graph=create_graph_with_failing_transform(), payload_store=payload_store)
 
         # Find the TokenCompleted event
         token_events = [e for e in exporter.events if isinstance(e, TokenCompleted)]
@@ -438,7 +438,7 @@ class TestTokenCompletedTelemetry:
 class TestNoTelemetryWithoutManager:
     """Tests verifying no telemetry is emitted without a TelemetryManager."""
 
-    def test_no_events_without_telemetry_manager(self, landscape_db: LandscapeDB) -> None:
+    def test_no_events_without_telemetry_manager(self, landscape_db: LandscapeDB, payload_store) -> None:
         """No telemetry events emitted when TelemetryManager is not provided."""
         # No telemetry_manager provided
         orchestrator = Orchestrator(landscape_db)
@@ -450,7 +450,7 @@ class TestNoTelemetryWithoutManager:
         )
 
         # Should complete without error
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
 
@@ -462,7 +462,7 @@ class TestNoTelemetryWithoutManager:
 class TestTelemetryEventOrdering:
     """Tests verifying telemetry events are emitted in correct order."""
 
-    def test_transform_completed_before_token_completed(self, landscape_db: LandscapeDB) -> None:
+    def test_transform_completed_before_token_completed(self, landscape_db: LandscapeDB, payload_store) -> None:
         """TransformCompleted should be emitted before TokenCompleted for same row."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -475,7 +475,7 @@ class TestTelemetryEventOrdering:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_graph_with_failing_transform())
+        orchestrator.run(config, graph=create_graph_with_failing_transform(), payload_store=payload_store)
 
         # Get events in order
         transform_events = [i for i, e in enumerate(exporter.events) if isinstance(e, TransformCompleted)]
@@ -485,7 +485,7 @@ class TestTelemetryEventOrdering:
         if transform_events and token_events:
             assert transform_events[0] < token_events[0]
 
-    def test_all_row_events_share_same_run_id(self, landscape_db: LandscapeDB) -> None:
+    def test_all_row_events_share_same_run_id(self, landscape_db: LandscapeDB, payload_store) -> None:
         """All row-level telemetry events share the same run_id."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -498,7 +498,7 @@ class TestTelemetryEventOrdering:
             sinks={"output": create_mock_sink()},
         )
 
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # All events should have the same run_id
         run_ids = {e.run_id for e in exporter.events}

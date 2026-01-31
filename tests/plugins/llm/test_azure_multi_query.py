@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Generator
 from typing import Any
 from unittest.mock import Mock, patch
@@ -16,12 +15,13 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
 from .conftest import (
-    make_azure_multi_query_config as make_config,
-)
-from .conftest import (
+    chaosllm_azure_openai_client,
+    chaosllm_azure_openai_responses,
     make_plugin_context,
     make_token,
-    mock_azure_openai_responses,
+)
+from .conftest import (
+    make_azure_multi_query_config as make_config,
 )
 
 
@@ -70,11 +70,11 @@ class TestAzureMultiQueryLLMTransformInit:
 class TestSingleQueryProcessing:
     """Tests for _process_single_query method."""
 
-    def test_process_single_query_renders_template(self) -> None:
+    def test_process_single_query_renders_template(self, chaosllm_server) -> None:
         """Single query renders template with input fields and criterion."""
         responses = [{"score": 85, "rationale": "Good diagnosis"}]
 
-        with mock_azure_openai_responses(responses) as mock_client:
+        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = AzureMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             # Call on_start to set up the recorder
@@ -98,11 +98,11 @@ class TestSingleQueryProcessing:
             assert "45yo male" in user_message
             assert "diagnosis" in user_message.lower()
 
-    def test_process_single_query_parses_json_response(self) -> None:
+    def test_process_single_query_parses_json_response(self, chaosllm_server) -> None:
         """Single query parses JSON and returns mapped fields."""
         responses = [{"score": 85, "rationale": "Excellent assessment"}]
 
-        with mock_azure_openai_responses(responses):
+        with chaosllm_azure_openai_responses(chaosllm_server, responses):
             transform = AzureMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -119,18 +119,13 @@ class TestSingleQueryProcessing:
             assert result.row["cs1_diagnosis_score"] == 85
             assert result.row["cs1_diagnosis_rationale"] == "Excellent assessment"
 
-    def test_process_single_query_handles_invalid_json(self) -> None:
+    def test_process_single_query_handles_invalid_json(self, chaosllm_server) -> None:
         """Single query returns error on invalid JSON response."""
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_response = Mock()
-            mock_response.choices = [Mock(message=Mock(content="not json"))]
-            mock_response.model = "gpt-4o"
-            mock_response.usage = Mock(prompt_tokens=10, completion_tokens=5)
-            mock_response.model_dump = Mock(return_value={})
-            mock_client.chat.completions.create.return_value = mock_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_client(
+            chaosllm_server,
+            mode="template",
+            template_override="not json",
+        ):
             transform = AzureMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
             transform.on_start(ctx)
@@ -174,11 +169,11 @@ class TestSingleQueryProcessing:
 
                 assert exc_info.value.status_code == 429
 
-    def test_process_single_query_handles_template_error(self) -> None:
+    def test_process_single_query_handles_template_error(self, chaosllm_server) -> None:
         """Template rendering errors return error result with details."""
         from elspeth.plugins.llm.templates import TemplateError
 
-        with mock_azure_openai_responses([{"score": 85, "rationale": "ok"}]):
+        with chaosllm_azure_openai_responses(chaosllm_server, [{"score": 85, "rationale": "ok"}]):
             transform = AzureMultiQueryLLMTransform(make_config())
             ctx = make_plugin_context()
 
@@ -261,6 +256,7 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: AzureMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Successful row emits results with all query outputs merged."""
         # 4 queries (2 case studies x 2 criteria)
@@ -271,7 +267,7 @@ class TestRowProcessingWithPipelining:
             {"score": 80, "rationale": "CS2 treatment"},
         ]
 
-        with mock_azure_openai_responses(responses) as mock_client:
+        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             row = {
                 "cs1_bg": "case1 bg",
                 "cs1_sym": "case1 sym",
@@ -302,6 +298,7 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: AzureMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Output row preserves original input fields."""
         responses = [
@@ -311,7 +308,7 @@ class TestRowProcessingWithPipelining:
             {"score": 80, "rationale": "R4"},
         ]
 
-        with mock_azure_openai_responses(responses):
+        with chaosllm_azure_openai_responses(chaosllm_server, responses):
             row = {
                 "cs1_bg": "bg1",
                 "cs1_sym": "sym1",
@@ -339,30 +336,17 @@ class TestRowProcessingWithPipelining:
         ctx: PluginContext,
         transform: AzureMultiQueryLLMTransform,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """All-or-nothing: if any query fails, entire row fails."""
-        # First 3 succeed, 4th returns invalid JSON
-        call_count = [0]
+        responses = [
+            {"score": 85, "rationale": "ok"},
+            {"score": 85, "rationale": "ok"},
+            {"score": 85, "rationale": "ok"},
+            "not valid json",
+        ]
 
-        def make_response(**kwargs: Any) -> Mock:
-            call_count[0] += 1
-            if call_count[0] == 4:
-                content = "not valid json"
-            else:
-                content = json.dumps({"score": 85, "rationale": "ok"})
-
-            mock_response = Mock()
-            mock_response.choices = [Mock(message=Mock(content=content))]
-            mock_response.model = "gpt-4o"
-            mock_response.usage = Mock(prompt_tokens=10, completion_tokens=5)
-            mock_response.model_dump = Mock(return_value={})
-            return mock_response
-
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_responses(chaosllm_server, responses):
             row = {
                 "cs1_bg": "bg",
                 "cs1_sym": "sym",
@@ -435,6 +419,7 @@ class TestMultiRowPipelining:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Multiple rows are emitted in submission order (FIFO).
 
@@ -455,7 +440,7 @@ class TestMultiRowPipelining:
         response = {"score": 85, "rationale": "Good"}
 
         try:
-            with mock_azure_openai_responses([response]):
+            with chaosllm_azure_openai_responses(chaosllm_server, [response]):
                 for i in range(3):
                     row = {
                         "row_id": f"row-{i}",
@@ -492,6 +477,7 @@ class TestMultiRowPipelining:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Each row's queries share a state_id (FK constraint).
 
@@ -517,7 +503,7 @@ class TestMultiRowPipelining:
         transform._get_llm_client = tracking_get_client  # type: ignore[method-assign]
 
         try:
-            with mock_azure_openai_responses(responses):
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
                     row = {
                         "cs1_bg": f"r{i}",
@@ -553,6 +539,7 @@ class TestMultiRowPipelining:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Clients are cleaned up after each row is processed."""
         transform = AzureMultiQueryLLMTransform(make_config())
@@ -563,7 +550,7 @@ class TestMultiRowPipelining:
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
 
         try:
-            with mock_azure_openai_responses(responses):
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
                     row = {
                         "cs1_bg": f"r{i}",
@@ -645,6 +632,7 @@ class TestSequentialMode:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Sequential mode (no pool_size) processes rows correctly."""
         # Create config WITHOUT pool_size - forces sequential mode
@@ -662,7 +650,7 @@ class TestSequentialMode:
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
 
         try:
-            with mock_azure_openai_responses(responses):
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 row = {
                     "cs1_bg": "r1",
                     "cs1_sym": "r1",
@@ -693,6 +681,7 @@ class TestSequentialMode:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Sequential mode cleans up clients after processing."""
         config = make_config()
@@ -706,7 +695,7 @@ class TestSequentialMode:
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]  # 2 rows x 4 queries
 
         try:
-            with mock_azure_openai_responses(responses):
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
                 for i in range(2):
                     row = {
                         "cs1_bg": f"r{i}",

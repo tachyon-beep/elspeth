@@ -136,7 +136,7 @@ def _get_latest_run_id(db: LandscapeDB) -> str:
 class TestCheckpointDurability:
     """Tests that checkpoints represent durable sink output."""
 
-    def test_successful_run_creates_checkpoints_for_all_rows(self, tmp_path: Path) -> None:
+    def test_successful_run_creates_checkpoints_for_all_rows(self, tmp_path: Path, payload_store) -> None:
         """A successful run should create checkpoints for all rows written.
 
         Checkpoints are created AFTER the sink write completes. For a successful
@@ -207,7 +207,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -225,7 +225,7 @@ class TestCheckpointDurability:
             checkpoint_config=checkpoint_config,
         )
 
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
         assert result.rows_processed == 5
 
@@ -271,7 +271,7 @@ class TestCheckpointDurability:
             assert len(artifacts) >= 1, "Expected at least 1 artifact"
             assert all(a.content_hash for a in artifacts), "All artifacts should have content_hash"
 
-    def test_crash_before_sink_write_recovers_correctly(self, tmp_path: Path) -> None:
+    def test_crash_before_sink_write_recovers_correctly(self, tmp_path: Path, payload_store) -> None:
         """End-to-end test: crash before sink write, then recover correctly.
 
         This test verifies the complete recovery flow:
@@ -354,7 +354,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         # --- Phase 1: Simulate a partial run with crash ---
         # We manually create the database state that would exist if:
@@ -585,7 +585,7 @@ class TestCheckpointDurability:
             artifacts = conn.execute(select(artifacts_table).where(artifacts_table.c.run_id == run_id)).fetchall()
             assert all(a.content_hash for a in artifacts), "All artifacts should have content_hash"
 
-    def test_failed_batch_creates_no_checkpoints(self, tmp_path: Path) -> None:
+    def test_failed_batch_creates_no_checkpoints(self, tmp_path: Path, payload_store) -> None:
         """If sink.write() fails, NO checkpoints should be created.
 
         The orchestrator batches all rows, then writes them all at once.
@@ -644,7 +644,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -663,7 +663,7 @@ class TestCheckpointDurability:
         )
 
         with pytest.raises(RuntimeError, match="Simulated sink failure"):
-            orchestrator.run(config, graph=_build_production_graph(config))
+            orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
 
         # Verify: NO checkpoints created because batch failed
         run_id = _get_latest_run_id(db)
@@ -673,7 +673,7 @@ class TestCheckpointDurability:
             "Checkpoints should only be created after successful sink writes."
         )
 
-    def test_checkpoint_node_id_is_sink_node(self, tmp_path: Path) -> None:
+    def test_checkpoint_node_id_is_sink_node(self, tmp_path: Path, payload_store) -> None:
         """Checkpoints should reference sink node, not last transform.
 
         The checkpoint node_id must be the SINK node, not the transform node.
@@ -717,7 +717,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2})
+                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class CapturingSink(_TestSinkBase):
             name = "capturing_sink"
@@ -764,7 +764,7 @@ class TestCheckpointDurability:
             checkpoint_config=checkpoint_config,
         )
 
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
         # Verify: checkpoint node_id is the SINK node
@@ -779,7 +779,7 @@ class TestCheckpointDurability:
             "Checkpoint node_id should NOT be the transform node. Checkpoints represent durable output, not processing completion."
         )
 
-    def test_no_checkpoint_until_sink_write_completes(self, tmp_path: Path) -> None:
+    def test_no_checkpoint_until_sink_write_completes(self, tmp_path: Path, payload_store) -> None:
         """Tokens processed but not yet written to sink have no checkpoint.
 
         This verifies that the checkpoint is created AFTER the sink write,
@@ -854,7 +854,7 @@ class TestCheckpointDurability:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
@@ -872,7 +872,7 @@ class TestCheckpointDurability:
             checkpoint_config=checkpoint_config,
         )
 
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
         # Verify timing: 0 checkpoints before write, N after
@@ -889,7 +889,7 @@ class TestCheckpointDurability:
 class TestCheckpointTimingInvariants:
     """Additional tests for checkpoint timing guarantees."""
 
-    def test_every_n_checkpointing_respects_sink_writes(self, tmp_path: Path) -> None:
+    def test_every_n_checkpointing_respects_sink_writes(self, tmp_path: Path, payload_store) -> None:
         """Checkpoints with frequency='every_n' still happen after sink writes.
 
         Even when checkpointing every N rows, the checkpoint represents
@@ -956,7 +956,7 @@ class TestCheckpointTimingInvariants:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         # Process 5 rows
         source = ListSource([{"value": i} for i in range(5)])
@@ -975,7 +975,7 @@ class TestCheckpointTimingInvariants:
             checkpoint_config=checkpoint_config,
         )
 
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
         # With 5 rows and checkpoint_interval=2:
@@ -997,7 +997,7 @@ class TestCheckpointTimingInvariants:
         for cp in captured_checkpoints:
             assert cp.node_id.startswith("sink_"), f"Checkpoint node_id should be a sink, got '{cp.node_id}'"
 
-    def test_checkpointing_disabled_creates_no_checkpoints(self, tmp_path: Path) -> None:
+    def test_checkpointing_disabled_creates_no_checkpoints(self, tmp_path: Path, payload_store) -> None:
         """When checkpointing is disabled, no checkpoints should be created."""
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         checkpoint_manager = CheckpointManager(db)
@@ -1052,7 +1052,7 @@ class TestCheckpointTimingInvariants:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(5)])
         transform = PassthroughTransform()
@@ -1070,7 +1070,7 @@ class TestCheckpointTimingInvariants:
             checkpoint_config=checkpoint_config,
         )
 
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
 
         # No checkpoints when disabled
@@ -1078,7 +1078,7 @@ class TestCheckpointTimingInvariants:
         checkpoints = checkpoint_manager.get_checkpoints(run_id)
         assert len(checkpoints) == 0
 
-    def test_no_checkpoint_manager_skips_checkpointing(self, tmp_path: Path) -> None:
+    def test_no_checkpoint_manager_skips_checkpointing(self, tmp_path: Path, payload_store) -> None:
         """When no checkpoint manager is provided, checkpointing is skipped."""
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         # No checkpoint_manager provided
@@ -1133,7 +1133,7 @@ class TestCheckpointTimingInvariants:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = ListSource([{"value": i} for i in range(3)])
         transform = PassthroughTransform()
@@ -1153,6 +1153,6 @@ class TestCheckpointTimingInvariants:
         )
 
         # Should run successfully without checkpointing
-        result = orchestrator.run(config, graph=_build_production_graph(config))
+        result = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
         assert result.status == RunStatus.COMPLETED
         assert len(sink.results) == 3

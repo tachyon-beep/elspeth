@@ -189,23 +189,21 @@ class RuntimeRateLimitConfig:
 
     Field Origins (all from RateLimitSettings, direct mapping):
         - enabled: RateLimitSettings.enabled
-        - default_requests_per_second: RateLimitSettings.default_requests_per_second
         - default_requests_per_minute: RateLimitSettings.default_requests_per_minute
         - persistence_path: RateLimitSettings.persistence_path
         - services: RateLimitSettings.services
 
     Protocol Coverage:
-        RuntimeRateLimitProtocol requires: enabled, default_requests_per_second,
-        default_requests_per_minute. The additional fields (persistence_path, services)
-        are preserved for full Settings fidelity but not part of the protocol.
+        RuntimeRateLimitProtocol requires: enabled, default_requests_per_minute.
+        The additional fields (persistence_path, services) are preserved for
+        full Settings fidelity but not part of the protocol.
 
     Note: Unlike RetryConfig, there are no plugin-level rate limit overrides.
     Rate limiting is configured globally in Settings only.
     """
 
     enabled: bool
-    default_requests_per_second: float | None
-    default_requests_per_minute: float | None
+    default_requests_per_minute: int
     persistence_path: str | None
     services: dict[str, "ServiceRateLimit"]
 
@@ -228,27 +226,17 @@ class RuntimeRateLimitConfig:
         # Lazy import to avoid breaking contracts leaf boundary
         from elspeth.core.config import ServiceRateLimit
 
-        # Construct from defaults - convert float back to int for ServiceRateLimit
-        # ServiceRateLimit expects int for requests_per_second
-        rps = int(self.default_requests_per_second) if self.default_requests_per_second is not None else 10
-        rpm = int(self.default_requests_per_minute) if self.default_requests_per_minute is not None else None
-
-        return ServiceRateLimit(
-            requests_per_second=rps,
-            requests_per_minute=rpm,
-        )
+        return ServiceRateLimit(requests_per_minute=self.default_requests_per_minute)
 
     @classmethod
     def default(cls) -> "RuntimeRateLimitConfig":
         """Factory for default rate limit configuration.
 
-        Returns disabled rate limiting - no constraints by default.
-        This is safe because rate limiting is opt-in.
+        Returns disabled rate limiting with 60 requests/minute default.
         """
         return cls(
             enabled=False,
-            default_requests_per_second=None,
-            default_requests_per_minute=None,
+            default_requests_per_minute=60,
             persistence_path=None,
             services={},
         )
@@ -259,13 +247,9 @@ class RuntimeRateLimitConfig:
 
         Field Mapping (all direct, no renames):
             settings.enabled -> enabled
-            settings.default_requests_per_second -> default_requests_per_second (int -> float)
-            settings.default_requests_per_minute -> default_requests_per_minute (int -> float)
+            settings.default_requests_per_minute -> default_requests_per_minute
             settings.persistence_path -> persistence_path
             settings.services -> services
-
-        Note: Protocol expects float for rate fields, but Settings uses int.
-        We convert int to float for protocol compliance.
 
         Args:
             settings: Validated Pydantic settings model
@@ -275,10 +259,7 @@ class RuntimeRateLimitConfig:
         """
         return cls(
             enabled=settings.enabled,
-            default_requests_per_second=float(settings.default_requests_per_second),
-            default_requests_per_minute=(
-                float(settings.default_requests_per_minute) if settings.default_requests_per_minute is not None else None
-            ),
+            default_requests_per_minute=settings.default_requests_per_minute,
             persistence_path=settings.persistence_path,
             services=dict(settings.services),
         )

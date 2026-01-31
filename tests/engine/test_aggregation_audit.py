@@ -48,9 +48,9 @@ class MockBatchTransform(_TestTransformBase):
         if isinstance(row, list):
             # Batch mode: sum all 'x' values
             total = sum(r.get("x", 0) for r in row)
-            return TransformResult.success({"sum": total, "count": len(row)})
+            return TransformResult.success({"sum": total, "count": len(row)}, success_reason={"action": "sum_batch"})
         # Single row mode
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class FailingBatchTransform(_TestTransformBase):

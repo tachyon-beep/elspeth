@@ -177,6 +177,7 @@ class TestResumeComprehensive:
     def test_resume_normal_path_with_remaining_rows(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test normal resume path: checkpoint mid-run, resume processes remaining rows.
 
@@ -282,6 +283,7 @@ class TestResumeComprehensive:
     def test_resume_early_exit_path_no_remaining_rows(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test early-exit resume path: all rows already processed (Bug #8).
 
@@ -384,6 +386,7 @@ class TestResumeComprehensive:
     def test_resume_with_datetime_fields(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test resume preserves datetime types correctly (not degraded to str).
 
@@ -574,6 +577,7 @@ class TestResumeComprehensive:
     def test_resume_with_decimal_fields(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test resume preserves Decimal types for precision (not degraded to float).
 
@@ -759,6 +763,7 @@ class TestResumeComprehensive:
     def test_resume_with_array_fields(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test resume preserves list/array types correctly.
 
@@ -944,6 +949,7 @@ class TestResumeComprehensive:
     def test_resume_with_nested_object_fields(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test resume preserves dict/nested object types correctly.
 
@@ -1129,6 +1135,7 @@ class TestResumeComprehensive:
     def test_resume_with_unsupported_type_crashes(
         self,
         test_env: dict[str, Any],
+        payload_store,
     ) -> None:
         """Test resume crashes loudly on unsupported schema types (no silent degradation).
 

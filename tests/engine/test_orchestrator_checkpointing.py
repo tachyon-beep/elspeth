@@ -68,7 +68,7 @@ class TestOrchestratorCheckpointing:
         )
         assert orchestrator._checkpoint_config == config
 
-    def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB) -> None:
+    def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint creates checkpoint when frequency=every_row."""
 
         from elspeth.contracts import PluginSchema
@@ -158,7 +158,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -167,7 +167,7 @@ class TestOrchestratorCheckpointing:
         # With frequency=every_row and 3 rows, we expect 3 checkpoint calls
         assert len(checkpoint_calls) == 3, f"Expected 3 checkpoint calls (one per row), got {len(checkpoint_calls)}"
 
-    def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB) -> None:
+    def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint only creates checkpoint every N rows."""
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
@@ -258,7 +258,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 7
@@ -268,7 +268,7 @@ class TestOrchestratorCheckpointing:
         # (rows 1, 2 don't checkpoint; row 3 checkpoints; rows 4, 5 don't; row 6 checkpoints; row 7 doesn't)
         assert len(checkpoint_calls) == 2, f"Expected 2 checkpoint calls (at rows 3 and 6), got {len(checkpoint_calls)}"
 
-    def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are deleted when run completes successfully."""
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
@@ -347,7 +347,7 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
 
@@ -355,7 +355,7 @@ class TestOrchestratorCheckpointing:
         remaining_checkpoints = checkpoint_mgr.get_checkpoints(result.run_id)
         assert len(remaining_checkpoints) == 0
 
-    def test_checkpoint_preserved_on_failure(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_preserved_on_failure(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are preserved when run fails for recovery.
 
         IMPORTANT: Checkpoints are created AFTER sink writes, not during transform
@@ -511,7 +511,7 @@ class TestOrchestratorCheckpointing:
         # The bad sink will fail, but good sink should have already written
         # Note: Sink iteration order in dict may vary, so we check checkpoints exist
         with pytest.raises(RuntimeError, match="Bad sink failure"):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query for the failed run (most recent)
         from elspeth.core.landscape import LandscapeRecorder
@@ -539,7 +539,7 @@ class TestOrchestratorCheckpointing:
             )
         # If good sink didn't write (bad sink failed first), that's also valid behavior
 
-    def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
@@ -628,14 +628,14 @@ class TestOrchestratorCheckpointing:
             checkpoint_manager=checkpoint_mgr,
             checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
 
         # P2 Fix: Verify no checkpoint calls were made when disabled
         assert len(checkpoint_calls) == 0, f"Expected 0 checkpoint calls when disabled, got {len(checkpoint_calls)}"
 
-    def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB) -> None:
+    def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Orchestrator works fine without checkpoint manager."""
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
@@ -712,7 +712,7 @@ class TestOrchestratorCheckpointing:
             db=checkpoint_db,
             checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 1

@@ -620,8 +620,8 @@ class TestCSVSourceFieldNormalization:
         rows = list(source.load(ctx))
         assert len(rows) == 0
 
-    def test_columns_fewer_than_data_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """columns config with fewer columns than data raises clear error."""
+    def test_columns_fewer_than_data_quarantines(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Headerless CSV with extra columns quarantines row (Tier-3 trust model)."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "wide.csv"
@@ -636,11 +636,14 @@ class TestCSVSourceFieldNormalization:
             }
         )
 
-        with pytest.raises(ValueError, match=r"column.*count.*mismatch|expected.*3.*got.*4"):
-            list(source.load(ctx))
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_error is not None
+        assert "expected 3 fields, got 4" in rows[0].quarantine_error
 
-    def test_columns_more_than_data_raises(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """columns config with more columns than data raises clear error."""
+    def test_columns_more_than_data_quarantines(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Headerless CSV with fewer columns quarantines row (Tier-3 trust model)."""
         from elspeth.plugins.sources.csv_source import CSVSource
 
         csv_file = tmp_path / "narrow.csv"
@@ -655,8 +658,11 @@ class TestCSVSourceFieldNormalization:
             }
         )
 
-        with pytest.raises(ValueError, match=r"column.*count.*mismatch|expected.*3.*got.*2"):
-            list(source.load(ctx))
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_error is not None
+        assert "expected 3 fields, got 2" in rows[0].quarantine_error
 
     def test_default_behavior_no_normalization(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Without normalize_fields, headers pass through unchanged (backward compatibility)."""

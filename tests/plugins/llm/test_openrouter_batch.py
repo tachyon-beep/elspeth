@@ -12,8 +12,8 @@ Tests cover:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
-from contextlib import contextmanager
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -27,6 +27,8 @@ from elspeth.plugins.llm.openrouter_batch import (
     OpenRouterBatchConfig,
     OpenRouterBatchLLMTransform,
 )
+
+from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
@@ -47,23 +49,29 @@ def _make_valid_config(overrides: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def _create_mock_response(
+    chaosllm_server,
     content: str = "Analysis result",
     model: str = "openai/gpt-4o-mini",
     usage: dict[str, int] | None = None,
     status_code: int = 200,
+    raw_body: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> Mock:
-    """Create a mock HTTP response for testing."""
-    response = Mock(spec=httpx.Response)
-    response.status_code = status_code
-    response.headers = {"content-type": "application/json"}
-    response.json.return_value = {
-        "choices": [{"message": {"content": content}}],
+    """Create an httpx.Response using ChaosLLM response generation."""
+    request = {
         "model": model,
-        "usage": usage or {"prompt_tokens": 10, "completion_tokens": 20},
+        "messages": [{"role": "user", "content": "test prompt"}],
+        "temperature": 0.0,
     }
-    response.raise_for_status = Mock()
-    response.text = ""
-    return response
+    return chaosllm_openrouter_httpx_response(
+        chaosllm_server,
+        request,
+        status_code=status_code,
+        headers=headers or {"content-type": "application/json"},
+        template_override=content,
+        raw_body=raw_body,
+        usage_override=usage,
+    )
 
 
 def _create_mock_context(
@@ -79,32 +87,20 @@ def _create_mock_context(
     return ctx
 
 
-@contextmanager
 def mock_httpx_client(
-    responses: list[Mock] | Mock | None = None,
+    chaosllm_server,
+    responses: list[httpx.Response] | httpx.Response | None = None,
     side_effect: Exception | None = None,
 ) -> Generator[Mock, None, None]:
-    """Context manager to mock httpx.Client.
-
-    Args:
-        responses: Single response or list of responses for sequential calls
-        side_effect: Exception to raise on post()
-    """
-    with patch("elspeth.plugins.llm.openrouter_batch.httpx.Client") as mock_client_class:
-        mock_client = Mock()
-
-        if side_effect:
-            mock_client.post.side_effect = side_effect
-        elif isinstance(responses, list):
-            mock_client.post.side_effect = responses
-        elif responses:
-            mock_client.post.return_value = responses
-
-        # Make it work as context manager
-        mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-        mock_client_class.return_value.__exit__ = Mock(return_value=None)
-
-        yield mock_client
+    """Context manager to mock httpx.Client using ChaosLLM responses."""
+    if responses is None and side_effect is None:
+        responses = _create_mock_response(chaosllm_server)
+    normalized = responses if isinstance(responses, list) else [responses]
+    return chaosllm_openrouter_http_responses(
+        chaosllm_server,
+        normalized,
+        side_effect=side_effect,
+    )
 
 
 class TestOpenRouterBatchConfig:
@@ -249,13 +245,13 @@ class TestOpenRouterBatchEmptyBatch:
 class TestOpenRouterBatchSingleRow:
     """Tests for single row processing (fallback mode)."""
 
-    def test_single_row_success(self) -> None:
+    def test_single_row_success(self, chaosllm_server) -> None:
         """Single row processed successfully."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Hello world"}
 
-        with mock_httpx_client(_create_mock_response(content="Analyzed!")):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server, content="Analyzed!")):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -263,13 +259,13 @@ class TestOpenRouterBatchSingleRow:
         assert result.row["llm_response"] == "Analyzed!"
         assert result.row["text"] == "Hello world"
 
-    def test_single_row_template_error(self) -> None:
+    def test_single_row_template_error(self, chaosllm_server) -> None:
         """Single row with template error returns error result."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"template": "{{ row.missing_field }}"}))
         ctx = _create_mock_context()
         row = {"text": "Hello"}
 
-        with mock_httpx_client(_create_mock_response()):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
             result = transform.process(row, ctx)
 
         # Template error returns error in the row, not TransformResult.error()
@@ -283,7 +279,7 @@ class TestOpenRouterBatchSingleRow:
 class TestOpenRouterBatchProcessing:
     """Tests for batch processing with parallel execution."""
 
-    def test_batch_success(self) -> None:
+    def test_batch_success(self, chaosllm_server) -> None:
         """Batch of rows processed successfully."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 2}))
         ctx = _create_mock_context()
@@ -294,9 +290,9 @@ class TestOpenRouterBatchProcessing:
         ]
 
         # Create responses for each row
-        responses = [_create_mock_response(content=f"Result {i}") for i in range(3)]
+        responses = [_create_mock_response(chaosllm_server, content=f"Result {i}") for i in range(3)]
 
-        with mock_httpx_client(responses):
+        with mock_httpx_client(chaosllm_server, responses):
             result = transform.process(rows, ctx)
 
         assert result.status == "success"
@@ -308,15 +304,15 @@ class TestOpenRouterBatchProcessing:
             assert output_row["text"] == f"Row {i + 1}"
             assert "llm_response" in output_row
 
-    def test_batch_records_calls_to_audit_trail(self) -> None:
+    def test_batch_records_calls_to_audit_trail(self, chaosllm_server) -> None:
         """Batch processing records all calls to audit trail."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         rows = [{"text": "Row 1"}, {"text": "Row 2"}]
 
-        responses = [_create_mock_response() for _ in range(2)]
+        responses = [_create_mock_response(chaosllm_server) for _ in range(2)]
 
-        with mock_httpx_client(responses):
+        with mock_httpx_client(chaosllm_server, responses):
             transform.process(rows, ctx)
 
         # Should have recorded calls for each row
@@ -325,7 +321,7 @@ class TestOpenRouterBatchProcessing:
             assert call.kwargs["call_type"] == CallType.LLM
             assert call.kwargs["status"] == CallStatus.SUCCESS
 
-    def test_batch_partial_failure(self) -> None:
+    def test_batch_partial_failure(self, chaosllm_server) -> None:
         """Batch with some rows failing continues processing others."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 2}))
         ctx = _create_mock_context()
@@ -335,16 +331,10 @@ class TestOpenRouterBatchProcessing:
         ]
 
         # First succeeds, second fails
-        success_response = _create_mock_response(content="Success")
-        error_response = Mock(spec=httpx.Response)
-        error_response.status_code = 500
-        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Server Error",
-            request=Mock(),
-            response=error_response,
-        )
+        success_response = _create_mock_response(chaosllm_server, content="Success")
+        error_response = _create_mock_response(chaosllm_server, status_code=500)
 
-        with mock_httpx_client([success_response, error_response]):
+        with mock_httpx_client(chaosllm_server, [success_response, error_response]):
             result = transform.process(rows, ctx)
 
         assert result.status == "success"
@@ -361,7 +351,7 @@ class TestOpenRouterBatchProcessing:
 class TestOpenRouterBatchErrorHandling:
     """Tests for error handling in batch processing."""
 
-    def test_http_status_error_captured(self) -> None:
+    def test_http_status_error_captured(self, chaosllm_server) -> None:
         """HTTP status errors are captured per-row, not raised."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
@@ -375,7 +365,7 @@ class TestOpenRouterBatchErrorHandling:
             response=error_response,
         )
 
-        with mock_httpx_client(side_effect=error):
+        with mock_httpx_client(chaosllm_server, side_effect=error):
             result = transform.process(row, ctx)
 
         assert result.status == "success"  # Single row fallback
@@ -384,13 +374,13 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response_error"]["reason"] == "api_call_failed"
         assert result.row["llm_response_error"]["status_code"] == 429
 
-    def test_network_error_captured(self) -> None:
+    def test_network_error_captured(self, chaosllm_server) -> None:
         """Network errors are captured per-row, not raised."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        with mock_httpx_client(side_effect=httpx.ConnectError("Connection refused")):
+        with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -398,19 +388,19 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "api_call_failed"
 
-    def test_invalid_json_response(self) -> None:
+    def test_invalid_json_response(self, chaosllm_server) -> None:
         """Invalid JSON response is captured per-row."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.json.side_effect = ValueError("Invalid JSON")
-        response.raise_for_status = Mock()
-        response.text = "not json"
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body="not json",
+            headers={"content-type": "application/json"},
+        )
 
-        with mock_httpx_client(response):
+        with mock_httpx_client(chaosllm_server, response):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -418,18 +408,19 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "invalid_json_response"
 
-    def test_malformed_response_structure(self) -> None:
+    def test_malformed_response_structure(self, chaosllm_server) -> None:
         """Response missing expected fields is captured."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.json.return_value = {"unexpected": "structure"}  # Missing 'choices'
-        response.raise_for_status = Mock()
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps({"unexpected": "structure"}),
+            headers={"content-type": "application/json"},
+        )
 
-        with mock_httpx_client(response):
+        with mock_httpx_client(chaosllm_server, response):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -437,18 +428,19 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "malformed_response"
 
-    def test_empty_choices_captured(self) -> None:
+    def test_empty_choices_captured(self, chaosllm_server) -> None:
         """Empty choices array is captured per-row."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.json.return_value = {"choices": []}  # Empty choices
-        response.raise_for_status = Mock()
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps({"choices": []}),
+            headers={"content-type": "application/json"},
+        )
 
-        with mock_httpx_client(response):
+        with mock_httpx_client(chaosllm_server, response):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -456,14 +448,14 @@ class TestOpenRouterBatchErrorHandling:
         assert result.row["llm_response"] is None
         assert result.row["llm_response_error"]["reason"] == "empty_choices"
 
-    def test_missing_state_id_returns_error(self) -> None:
+    def test_missing_state_id_returns_error(self, chaosllm_server) -> None:
         """Missing state_id on context returns row-level error."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         ctx.state_id = None  # No state_id
         row = {"text": "Test"}
 
-        with mock_httpx_client(_create_mock_response()):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
             result = transform.process(row, ctx)
 
         assert result.status == "success"
@@ -475,13 +467,13 @@ class TestOpenRouterBatchErrorHandling:
 class TestOpenRouterBatchAuditFields:
     """Tests for audit trail field generation."""
 
-    def test_audit_fields_present(self) -> None:
+    def test_audit_fields_present(self, chaosllm_server) -> None:
         """Successful response includes all audit fields."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config())
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        with mock_httpx_client(_create_mock_response()):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
             result = transform.process(row, ctx)
 
         assert result.row is not None
@@ -498,13 +490,13 @@ class TestOpenRouterBatchAuditFields:
         assert "llm_response_lookup_source" in output
         assert "llm_response_system_prompt_source" in output
 
-    def test_custom_response_field(self) -> None:
+    def test_custom_response_field(self, chaosllm_server) -> None:
         """Custom response_field is used for all output fields."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"response_field": "analysis"}))
         ctx = _create_mock_context()
         row = {"text": "Test"}
 
-        with mock_httpx_client(_create_mock_response()):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
             result = transform.process(row, ctx)
 
         assert result.row is not None
@@ -522,7 +514,7 @@ class TestOpenRouterBatchAuditFields:
 class TestOpenRouterBatchSharedClient:
     """Tests verifying shared httpx.Client behavior."""
 
-    def test_client_created_once_per_batch(self) -> None:
+    def test_client_created_once_per_batch(self, chaosllm_server) -> None:
         """httpx.Client is created once for the entire batch, not per row."""
         transform = OpenRouterBatchLLMTransform(_make_valid_config({"pool_size": 3}))
         ctx = _create_mock_context()
@@ -530,7 +522,7 @@ class TestOpenRouterBatchSharedClient:
 
         with patch("elspeth.plugins.llm.openrouter_batch.httpx.Client") as mock_client_class:
             mock_client = Mock()
-            mock_client.post.return_value = _create_mock_response()
+            mock_client.post.return_value = _create_mock_response(chaosllm_server)
             mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
             mock_client_class.return_value.__exit__ = Mock(return_value=None)
 
@@ -546,7 +538,7 @@ class TestOpenRouterBatchSharedClient:
 class TestOpenRouterBatchAllRowsFail:
     """Tests for when all rows in a batch fail."""
 
-    def test_all_rows_fail_returns_success_with_error_markers(self) -> None:
+    def test_all_rows_fail_returns_success_with_error_markers(self, chaosllm_server) -> None:
         """When all rows fail, success_multi returns rows with error markers.
 
         Batch processing never returns TransformResult.error() - every row gets
@@ -566,7 +558,7 @@ class TestOpenRouterBatchAllRowsFail:
             response=error_response,
         )
 
-        with mock_httpx_client(side_effect=error):
+        with mock_httpx_client(chaosllm_server, side_effect=error):
             result = transform.process(rows, ctx)
 
         # All rows processed - success_multi with error markers on each row
@@ -583,7 +575,7 @@ class TestOpenRouterBatchTemplateErrorAuditTrail:
     ctx.record_call() so that explain() queries can show why rows failed.
     """
 
-    def test_template_error_records_to_audit_trail(self) -> None:
+    def test_template_error_records_to_audit_trail(self, chaosllm_server) -> None:
         """Template rendering error is recorded to audit trail.
 
         Per CLAUDE.md auditability: 'Every decision must be traceable.'
@@ -593,7 +585,7 @@ class TestOpenRouterBatchTemplateErrorAuditTrail:
         ctx = _create_mock_context()
         rows = [{"text": "Test row"}]  # Template references nonexistent_field
 
-        with mock_httpx_client(_create_mock_response()):
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
             transform.process(rows, ctx)
 
         # Template error should be recorded to audit trail

@@ -396,7 +396,10 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,azure]"
+
+# Azure Blob integration tests (Azurite emulator)
+npm install
 
 # Run tests
 .venv/bin/python -m pytest tests/ -v

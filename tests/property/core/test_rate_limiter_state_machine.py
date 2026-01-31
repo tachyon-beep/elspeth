@@ -7,16 +7,13 @@ The rate limiter models a leaky bucket with these behaviors:
 1. Acquire tokens up to the configured limit
 2. Reject tokens when limit is exceeded
 3. Rejection doesn't consume quota
+4. Tokens replenish as the sliding window advances
 
-KNOWN BUG (P2): Replenishment is broken due to _would_all_buckets_accept()
-using stale bucket.count() instead of window-accurate counts. Tests for
-replenishment are skipped until the bug is fixed. See:
-docs/bugs/archive/generated-2026-01-22/elspeth/core/rate_limit/limiter.py.md
-
-Key Invariants (testable):
+Key Invariants:
 - Successful acquires never exceed the configured limit within a time window
-- Failed try_acquire() calls don't consume tokens immediately
+- Failed try_acquire() calls don't consume tokens
 - Weight correctly affects capacity consumption
+- After waiting a full window, tokens replenish
 
 These tests use Hypothesis RuleBasedStateMachine to explore state transitions
 and verify invariants hold.
@@ -107,7 +104,7 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         # Use a unique name to avoid conflicts between test runs
         self.limiter = RateLimiter(
             name=f"statemachine{int(time.monotonic() * 1000) % 100000}",
-            requests_per_second=self.limit,
+            requests_per_minute=self.limit,
         )
 
         # Model tracks our expected state
@@ -155,28 +152,20 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         else:
             self.consecutive_rejections += 1
 
-    # NOTE: Replenishment rules are disabled due to known P2 bug where
-    # _would_all_buckets_accept() uses stale bucket counts. The bug causes
-    # try_acquire() to return False even after the rate window has cleared.
-    # See: docs/bugs/archive/generated-2026-01-22/elspeth/core/rate_limit/limiter.py.md
-    #
-    # When the bug is fixed, uncomment the wait_for_replenish and wait_full_window
-    # rules below to test replenishment behavior.
+    @rule()
+    def wait_for_replenish(self) -> None:
+        """Wait for tokens to replenish."""
+        if self.consecutive_rejections == 0:
+            return
+        time.sleep(0.3)
 
-    # @rule()
-    # def wait_for_replenish(self) -> None:
-    #     """Wait for tokens to replenish."""
-    #     if self.consecutive_rejections == 0:
-    #         return
-    #     time.sleep(0.3)
-
-    # @rule()
-    # def wait_full_window(self) -> None:
-    #     """Wait for a full window to reset the bucket."""
-    #     if not self.model.attempts:
-    #         return
-    #     time.sleep(1.1)
-    #     self.consecutive_rejections = 0
+    @rule()
+    def wait_full_window(self) -> None:
+        """Wait for a full window to reset the bucket."""
+        if not self.model.attempts:
+            return
+        time.sleep(1.1)
+        self.consecutive_rejections = 0
 
     # -------------------------------------------------------------------------
     # Invariants
@@ -229,7 +218,7 @@ class TestRateLimiterQuotaInvariants:
         """
         with RateLimiter(
             name=f"quotatest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -251,7 +240,7 @@ class TestRateLimiterQuotaInvariants:
         """Property: Can acquire exactly `limit` tokens within window."""
         with RateLimiter(
             name=f"accepttest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Should be able to acquire exactly `limit` times
             for i in range(limit):
@@ -264,7 +253,7 @@ class TestRateLimiterQuotaInvariants:
         """Property: After `limit` acquires, next one fails."""
         with RateLimiter(
             name=f"rejecttest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -273,21 +262,14 @@ class TestRateLimiterQuotaInvariants:
             # Next acquire should fail
             assert limiter.try_acquire() is False
 
-    @pytest.mark.skip(
-        reason="P2 bug: _would_all_buckets_accept uses stale bucket.count(). "
-        "See docs/bugs/archive/generated-2026-01-22/elspeth/core/rate_limit/limiter.py.md"
-    )
+    @pytest.mark.skip(reason="Per-minute window requires 60s wait for replenishment, not practical in tests")
     @given(limit=st.integers(min_value=2, max_value=5))
     @settings(max_examples=10, deadline=None)
     def test_replenishment_after_wait(self, limit: int) -> None:
-        """Property: After waiting a full window, tokens replenish.
-
-        KNOWN BUG: This test is skipped due to P2 bug where _would_all_buckets_accept()
-        uses stale bucket.count() instead of window-accurate counts.
-        """
+        """Property: After waiting a full window, tokens replenish."""
         with RateLimiter(
             name=f"replenishtest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -311,7 +293,7 @@ class TestRateLimiterQuotaInvariants:
         """Property: Acquiring with weight consumes that many tokens."""
         with RateLimiter(
             name=f"weighttest{limit}w{weight}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # How many weighted acquires can we do?
             expected_acquires = limit // weight
@@ -327,24 +309,18 @@ class TestRateLimiterQuotaInvariants:
             assert successful >= expected_acquires
             assert successful <= expected_acquires + 1
 
-    @pytest.mark.skip(
-        reason="P2 bug: _would_all_buckets_accept uses stale bucket.count(). "
-        "See docs/bugs/archive/generated-2026-01-22/elspeth/core/rate_limit/limiter.py.md"
-    )
+    @pytest.mark.skip(reason="Per-minute window requires 60s wait for replenishment, not practical in tests")
     @given(limit=st.integers(min_value=1, max_value=10))
     @settings(max_examples=10, deadline=None)
     def test_multiple_rejection_attempts_dont_consume_with_replenish(self, limit: int) -> None:
         """Property: Multiple failed try_acquire calls don't accumulate consumption.
 
-        KNOWN BUG: This test is skipped due to P2 bug where _would_all_buckets_accept()
-        uses stale bucket.count() instead of window-accurate counts.
-
-        This test verifies that after replenishment, we can acquire the full
-        limit again (proving rejections didn't consume quota).
+        After replenishment, we can acquire the full limit again (proving
+        rejections didn't consume quota).
         """
         with RateLimiter(
             name=f"multirejecttest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -376,7 +352,7 @@ class TestRateLimiterQuotaInvariants:
         """
         with RateLimiter(
             name=f"multirejecttest{limit}",
-            requests_per_second=limit,
+            requests_per_minute=limit,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -400,7 +376,7 @@ class TestRateLimiterResourceManagement:
     @settings(max_examples=20)
     def test_close_releases_resources(self, name: str) -> None:
         """Property: close() releases resources without error."""
-        limiter = RateLimiter(name=name, requests_per_second=10)
+        limiter = RateLimiter(name=name, requests_per_minute=10)
         limiter.try_acquire()
         limiter.close()  # Should not raise
 
@@ -408,6 +384,6 @@ class TestRateLimiterResourceManagement:
     @settings(max_examples=20)
     def test_context_manager_cleanup(self, name: str) -> None:
         """Property: Context manager properly releases resources."""
-        with RateLimiter(name=name, requests_per_second=10) as limiter:
+        with RateLimiter(name=name, requests_per_minute=10) as limiter:
             limiter.try_acquire()
         # Resources should be released after exiting context

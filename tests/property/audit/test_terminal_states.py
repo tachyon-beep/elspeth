@@ -37,6 +37,7 @@ from elspeth.contracts.enums import RowOutcome
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.conftest import (
+    MockPayloadStore,
     as_sink,
     as_source,
     as_transform,
@@ -168,6 +169,7 @@ class TestTerminalStateProperty:
         A token without a terminal outcome means we lost track of data.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
         sink = CollectSink()
@@ -179,7 +181,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # THE INVARIANT: No tokens should be missing terminal outcomes
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -205,6 +207,7 @@ class TestTerminalStateProperty:
         quarantine and recorded with the QUARANTINED outcome.
         """
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = ConditionalErrorTransform()
         sink = CollectSink()
@@ -216,7 +219,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Count expected outcomes
         expected_errors = sum(1 for r in rows if r.get("fail"))
@@ -239,6 +242,7 @@ class TestTerminalStateProperty:
     def test_terminal_outcomes_have_correct_type(self, rows: list[dict[str, Any]]) -> None:
         """Property: All terminal outcomes are valid RowOutcome enum values."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
         sink = CollectSink()
@@ -250,7 +254,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Get all outcomes and verify they're valid enum values
         outcomes = get_all_token_outcomes(db, run.run_id)
@@ -274,6 +278,7 @@ class TestTerminalStateEdgeCases:
     def test_empty_source_no_orphan_tokens(self) -> None:
         """Edge case: Empty source should not create any orphan tokens."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource([])  # Empty
         transform = PassTransform()
         sink = CollectSink()
@@ -285,7 +290,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # No rows means no tokens
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -301,6 +306,7 @@ class TestTerminalStateEdgeCases:
         rows = [{"id": i} for i in range(n)]
 
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         transform = PassTransform()
         sink = CollectSink()
@@ -312,7 +318,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == n
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -323,6 +329,7 @@ class TestTerminalStateEdgeCases:
     def test_no_transform_pipeline(self, rows: list[dict[str, Any]]) -> None:
         """Property: Pipeline with no transforms still records terminal states."""
         db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
         source = ListSource(rows)
         sink = CollectSink()
 
@@ -334,7 +341,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == len(rows)
         missing = count_tokens_missing_terminal(db, run.run_id)

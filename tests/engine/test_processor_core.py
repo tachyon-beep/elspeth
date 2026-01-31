@@ -72,7 +72,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2})
+                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         class AddOneTransform(BaseTransform):
             name = "add_one"
@@ -84,7 +84,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] + 1})
+                return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(
@@ -166,7 +166,7 @@ class TestRowProcessor:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True})
+                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(
@@ -252,7 +252,7 @@ class TestRowProcessor:
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if row.get("value", 0) < 0:
                     return TransformResult.error({"reason": "validation_failed", "message": "negative values not allowed"})
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "validate"})
 
         return ValidatorTransform(node_id, on_error)
 
@@ -453,7 +453,7 @@ class TestRowProcessorTokenIdentity:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         ctx = PluginContext(run_id=run.run_id, config={})
         processor = RowProcessor(

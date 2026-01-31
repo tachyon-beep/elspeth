@@ -1468,7 +1468,9 @@ def _execute_resume_with_instances(
         concurrency_config=concurrency_config,
     )
 
-    # Execute resume
+    # Execute resume (payload_store is required for resume)
+    if payload_store is None:
+        raise ValueError("payload_store is required for resume operations")
     result = orchestrator.resume(
         resume_point=resume_point,
         config=pipeline_config,

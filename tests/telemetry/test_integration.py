@@ -171,7 +171,7 @@ class PassthroughTransform:
     _on_error: str | None = None
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -232,7 +232,7 @@ def landscape_db() -> LandscapeDB:
 class TestTelemetryEmittedAlongsideLandscape:
     """Integration: Run pipeline, verify both Landscape and telemetry have data."""
 
-    def test_both_landscape_and_telemetry_have_data_after_run(self, landscape_db: LandscapeDB) -> None:
+    def test_both_landscape_and_telemetry_have_data_after_run(self, landscape_db: LandscapeDB, payload_store) -> None:
         """After a successful run, both Landscape and telemetry contain data."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -247,7 +247,7 @@ class TestTelemetryEmittedAlongsideLandscape:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Verify Landscape has data
         assert result.status == RunStatus.COMPLETED
@@ -261,7 +261,7 @@ class TestTelemetryEmittedAlongsideLandscape:
         assert len(telemetry_run_ids) == 1
         assert result.run_id in telemetry_run_ids
 
-    def test_telemetry_events_match_landscape_operations(self, landscape_db: LandscapeDB) -> None:
+    def test_telemetry_events_match_landscape_operations(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Telemetry events correspond to Landscape-recorded operations."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -276,7 +276,7 @@ class TestTelemetryEmittedAlongsideLandscape:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Should have lifecycle events
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -299,7 +299,7 @@ class TestTelemetryEmittedAlongsideLandscape:
 class TestTelemetryOnlyAfterLandscapeSuccess:
     """Regression: If Landscape fails, telemetry must NOT be emitted."""
 
-    def test_no_run_started_if_begin_run_fails(self, landscape_db: LandscapeDB) -> None:
+    def test_no_run_started_if_begin_run_fails(self, landscape_db: LandscapeDB, payload_store) -> None:
         """If Landscape begin_run fails, RunStarted telemetry is NOT emitted.
 
         This is a critical ordering guarantee: telemetry is emitted AFTER
@@ -327,13 +327,13 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
             patch.object(LandscapeRecorder, "begin_run", side_effect=RuntimeError("Landscape failure")),
             pytest.raises(RuntimeError, match="Landscape failure"),
         ):
-            orchestrator.run(config, graph=create_minimal_graph())
+            orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # NO RunStarted should have been emitted
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
         assert len(run_started) == 0
 
-    def test_telemetry_order_verified_by_successful_run(self, landscape_db: LandscapeDB) -> None:
+    def test_telemetry_order_verified_by_successful_run(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify code ordering: telemetry emission follows Landscape success.
 
         This test proves the ordering by showing that in normal operation:
@@ -356,7 +356,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Both should exist (proves the normal path works)
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -370,7 +370,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
         completed_idx = exporter.events.index(run_completed[0])
         assert started_idx < completed_idx, "RunStarted must precede RunFinished"
 
-    def test_failed_run_still_emits_run_finished_with_failed_status(self, landscape_db: LandscapeDB) -> None:
+    def test_failed_run_still_emits_run_finished_with_failed_status(self, landscape_db: LandscapeDB, payload_store) -> None:
         """When a run fails, RunFinished is emitted with FAILED status.
 
         The telemetry system records failures - the key is that it only
@@ -400,7 +400,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         with pytest.raises(RuntimeError, match="Simulated transform failure"):
-            orchestrator.run(config, graph=create_minimal_graph(transform_name="failing_transform"))
+            orchestrator.run(config, graph=create_minimal_graph(transform_name="failing_transform"), payload_store=payload_store)
 
         # RunStarted should be present (began before failure)
         run_started = [e for e in exporter.events if isinstance(e, RunStarted)]
@@ -420,7 +420,7 @@ class TestTelemetryOnlyAfterLandscapeSuccess:
 class TestGranularityFiltering:
     """Verify events are filtered correctly at each granularity level."""
 
-    def test_lifecycle_granularity_only_emits_lifecycle_events(self, landscape_db: LandscapeDB) -> None:
+    def test_lifecycle_granularity_only_emits_lifecycle_events(self, landscape_db: LandscapeDB, payload_store) -> None:
         """At LIFECYCLE granularity, only RunStarted/RunFinished/PhaseChanged emitted."""
         config_lifecycle = MockTelemetryConfig(granularity=TelemetryGranularity.LIFECYCLE)
         exporter = RecordingExporter()
@@ -436,7 +436,7 @@ class TestGranularityFiltering:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Should only have lifecycle events
         for event in exporter.events:
@@ -448,7 +448,7 @@ class TestGranularityFiltering:
         row_events = [e for e in exporter.events if isinstance(e, (RowCreated, TransformCompleted, TokenCompleted))]
         assert len(row_events) == 0, "Row events should be filtered at LIFECYCLE granularity"
 
-    def test_rows_granularity_includes_row_events(self, landscape_db: LandscapeDB) -> None:
+    def test_rows_granularity_includes_row_events(self, landscape_db: LandscapeDB, payload_store) -> None:
         """At ROWS granularity, row-level events are included."""
         config_rows = MockTelemetryConfig(granularity=TelemetryGranularity.ROWS)
         exporter = RecordingExporter()
@@ -464,7 +464,7 @@ class TestGranularityFiltering:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Should have both lifecycle and row events
         has_lifecycle = any(isinstance(e, (RunStarted, RunFinished)) for e in exporter.events)
@@ -473,7 +473,7 @@ class TestGranularityFiltering:
         # Row events may or may not be present depending on RowProcessor emission
         # The key is they are ALLOWED, not filtered
 
-    def test_full_granularity_includes_all_events(self, landscape_db: LandscapeDB) -> None:
+    def test_full_granularity_includes_all_events(self, landscape_db: LandscapeDB, payload_store) -> None:
         """At FULL granularity, all event types are allowed."""
         config_full = MockTelemetryConfig(granularity=TelemetryGranularity.FULL)
         exporter = RecordingExporter()
@@ -489,7 +489,7 @@ class TestGranularityFiltering:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Should have lifecycle events at minimum
         has_lifecycle = any(isinstance(e, (RunStarted, RunFinished)) for e in exporter.events)
@@ -507,7 +507,7 @@ class TestGranularityFiltering:
 class TestExporterFailureIsolation:
     """One exporter failing doesn't prevent others from receiving events."""
 
-    def test_one_failing_exporter_doesnt_block_others(self, landscape_db: LandscapeDB) -> None:
+    def test_one_failing_exporter_doesnt_block_others(self, landscape_db: LandscapeDB, payload_store) -> None:
         """When one exporter fails, other exporters still receive events."""
         working_exporter = RecordingExporter("working")
         failing_exporter = FailingExporter("failing")
@@ -527,7 +527,7 @@ class TestExporterFailureIsolation:
 
         # Suppress warning logs from the failing exporter
         with patch("elspeth.telemetry.manager.logger"):
-            result = orchestrator.run(config, graph=create_minimal_graph())
+            result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Pipeline should complete successfully
         assert result.status == RunStatus.COMPLETED
@@ -538,7 +538,7 @@ class TestExporterFailureIsolation:
         # Failing exporter should have attempted exports
         assert failing_exporter.export_attempts > 0
 
-    def test_all_exporters_receive_same_events(self, landscape_db: LandscapeDB) -> None:
+    def test_all_exporters_receive_same_events(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Multiple working exporters all receive the same events."""
         exporter1 = RecordingExporter("exporter1")
         exporter2 = RecordingExporter("exporter2")
@@ -556,7 +556,7 @@ class TestExporterFailureIsolation:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # All exporters should have the same number of events
         assert len(exporter1.events) == len(exporter2.events) == len(exporter3.events)
@@ -566,7 +566,7 @@ class TestExporterFailureIsolation:
             assert type(e1) is type(e2) is type(e3)
             assert e1.run_id == e2.run_id == e3.run_id
 
-    def test_partial_success_counts_as_emitted(self, landscape_db: LandscapeDB) -> None:
+    def test_partial_success_counts_as_emitted(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Partial success (some exporters work) is counted as emitted."""
         working_exporter = RecordingExporter("working")
         failing_exporter = FailingExporter("failing")
@@ -585,7 +585,7 @@ class TestExporterFailureIsolation:
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
 
         with patch("elspeth.telemetry.manager.logger"):
-            orchestrator.run(config, graph=create_minimal_graph())
+            orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Events should be counted as emitted, not dropped
         metrics = telemetry_manager.health_metrics
@@ -634,9 +634,12 @@ class TestTotalExporterFailure:
             for i in range(9):
                 telemetry_manager.handle_event(make_run_started(f"run-{i}"))
 
-            # 10th event should trigger the exception
+            # 10th event triggers the exception (stored for re-raise on flush)
+            telemetry_manager.handle_event(make_run_started("run-10"))
+
+            # flush() re-raises the stored exception from background thread
             with pytest.raises(TelemetryExporterError) as exc_info:
-                telemetry_manager.handle_event(make_run_started("run-10"))
+                telemetry_manager.flush()
 
         assert exc_info.value.exporter_name == "all"
         assert "10 consecutive times" in str(exc_info.value)
@@ -658,6 +661,9 @@ class TestTotalExporterFailure:
             for i in range(10):
                 telemetry_manager.handle_event(make_run_started(f"run-{i}"))
 
+            # Wait for background thread to process all events
+            telemetry_manager.flush()
+
         # Telemetry should be disabled
         assert telemetry_manager._disabled is True
 
@@ -666,7 +672,7 @@ class TestTotalExporterFailure:
         telemetry_manager.handle_event(make_run_started("run-11"))
         assert telemetry_manager.health_metrics["events_dropped"] == initial_dropped
 
-    def test_total_failure_in_pipeline_context(self, landscape_db: LandscapeDB) -> None:
+    def test_total_failure_in_pipeline_context(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Total exporter failure behavior during actual pipeline run.
 
         With LIFECYCLE granularity (~5 events per run), we won't hit the
@@ -697,7 +703,7 @@ class TestTotalExporterFailure:
 
         with patch("elspeth.telemetry.manager.logger"):
             # Pipeline runs emit ~5 events, which is below threshold
-            result = orchestrator.run(config, graph=create_minimal_graph())
+            result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Pipeline should complete (didn't hit threshold)
         assert result.status == RunStatus.COMPLETED
@@ -721,7 +727,7 @@ class TestTotalExporterFailure:
 class TestHighVolumeFlooding:
     """10k+ events processed without memory issues."""
 
-    def test_ten_thousand_events_processed(self, landscape_db: LandscapeDB) -> None:
+    def test_ten_thousand_events_processed(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Process 10,000+ rows and verify telemetry handles the volume."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -738,7 +744,7 @@ class TestHighVolumeFlooding:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Pipeline should complete successfully
         assert result.status == RunStatus.COMPLETED
@@ -756,7 +762,7 @@ class TestHighVolumeFlooding:
         # RunFinished should have correct row count
         assert run_completed[0].row_count == num_rows
 
-    def test_high_volume_with_granularity_filter_reduces_memory(self, landscape_db: LandscapeDB) -> None:
+    def test_high_volume_with_granularity_filter_reduces_memory(self, landscape_db: LandscapeDB, payload_store) -> None:
         """LIFECYCLE granularity drastically reduces event volume for high-throughput."""
         exporter_full = RecordingExporter("full")
         exporter_lifecycle = RecordingExporter("lifecycle")
@@ -778,7 +784,7 @@ class TestHighVolumeFlooding:
 
         # Run with FULL granularity
         orchestrator1 = Orchestrator(landscape_db, telemetry_manager=manager_full)
-        orchestrator1.run(config, graph=create_minimal_graph())
+        orchestrator1.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Run with LIFECYCLE granularity (new source/sink for clean state)
         source2 = ListSource([{"id": i} for i in range(num_rows)])
@@ -789,7 +795,7 @@ class TestHighVolumeFlooding:
             sinks={"output": as_sink(sink2)},
         )
         orchestrator2 = Orchestrator(landscape_db, telemetry_manager=manager_lifecycle)
-        orchestrator2.run(config2, graph=create_minimal_graph())
+        orchestrator2.run(config2, graph=create_minimal_graph(), payload_store=payload_store)
 
         # LIFECYCLE should have significantly fewer events than FULL
         # (FULL could have row events, LIFECYCLE only has RunStarted/RunFinished/PhaseChanged)
@@ -802,7 +808,7 @@ class TestHighVolumeFlooding:
         for event in exporter_lifecycle.events:
             assert isinstance(event, (RunStarted, RunFinished, PhaseChanged))
 
-    def test_high_volume_metrics_accurate(self, landscape_db: LandscapeDB) -> None:
+    def test_high_volume_metrics_accurate(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Health metrics are accurate after high-volume processing."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -818,7 +824,7 @@ class TestHighVolumeFlooding:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         metrics = telemetry_manager.health_metrics
 
@@ -836,7 +842,7 @@ class TestHighVolumeFlooding:
 class TestTelemetryManagerLifecycle:
     """Tests for TelemetryManager lifecycle (flush, close) in integration context."""
 
-    def test_flush_called_on_manager_close(self, landscape_db: LandscapeDB) -> None:
+    def test_flush_called_on_manager_close(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Exporters are flushed when manager is closed."""
         exporter = RecordingExporter()
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
@@ -851,7 +857,7 @@ class TestTelemetryManagerLifecycle:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        orchestrator.run(config, graph=create_minimal_graph())
+        orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Manually close the manager (Orchestrator may or may not do this)
         telemetry_manager.flush()
@@ -860,7 +866,7 @@ class TestTelemetryManagerLifecycle:
         assert exporter.flush_count >= 1
         assert exporter.close_count >= 1
 
-    def test_telemetry_manager_handles_empty_exporter_list(self, landscape_db: LandscapeDB) -> None:
+    def test_telemetry_manager_handles_empty_exporter_list(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Telemetry manager with no exporters is a no-op."""
         telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[])
 
@@ -874,7 +880,7 @@ class TestTelemetryManagerLifecycle:
         )
 
         orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
-        result = orchestrator.run(config, graph=create_minimal_graph())
+        result = orchestrator.run(config, graph=create_minimal_graph(), payload_store=payload_store)
 
         # Pipeline should complete normally
         assert result.status == RunStatus.COMPLETED

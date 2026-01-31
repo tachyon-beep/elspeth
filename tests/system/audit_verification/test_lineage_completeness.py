@@ -59,7 +59,7 @@ class _PassthroughTransform(BaseTransform):
     def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
 
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class _EnrichingTransform(BaseTransform):
@@ -77,7 +77,7 @@ class _EnrichingTransform(BaseTransform):
         from elspeth.plugins.results import TransformResult
 
         enriched = {**row, "enriched": True, "processed_by": self.name}
-        return TransformResult.success(enriched)
+        return TransformResult.success(enriched, success_reason={"action": "enrich"})
 
 
 def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -124,7 +124,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 class TestLineageCompleteness:
     """Tests for verifying lineage is complete for all processed rows."""
 
-    def test_simple_pipeline_runs(self, tmp_path: Path) -> None:
+    def test_simple_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Simple pipeline: source -> transform -> sink runs successfully."""
         from elspeth.engine.artifacts import ArtifactDescriptor
 
@@ -169,7 +169,7 @@ class TestLineageCompleteness:
 
         # Run pipeline
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_linear_graph(config))
+        result = orchestrator.run(config, graph=_build_linear_graph(config), payload_store=payload_store)
 
         # Verify all rows completed
         assert result.status == "completed"
@@ -178,7 +178,7 @@ class TestLineageCompleteness:
 
         db.close()
 
-    def test_multi_transform_pipeline_runs(self, tmp_path: Path) -> None:
+    def test_multi_transform_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Multi-transform pipeline runs successfully."""
         from elspeth.engine.artifacts import ArtifactDescriptor
 
@@ -225,7 +225,7 @@ class TestLineageCompleteness:
 
         # Run pipeline
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_linear_graph(config))
+        result = orchestrator.run(config, graph=_build_linear_graph(config), payload_store=payload_store)
 
         # Verify all rows completed
         assert result.status == "completed"
@@ -243,7 +243,7 @@ class TestLineageCompleteness:
 class TestLineageAfterRetention:
     """Tests for lineage availability after payload retention."""
 
-    def test_lineage_available_after_payload_purge(self, tmp_path: Path) -> None:
+    def test_lineage_available_after_payload_purge(self, tmp_path: Path, payload_store) -> None:
         """Lineage hashes remain after payload data is purged.
 
         ELSPETH design: Hashes survive payload deletion - integrity is
@@ -325,7 +325,7 @@ class TestLineageAfterRetention:
 class TestExplainQueryFunctionality:
     """Tests for explain query functionality."""
 
-    def test_explain_returns_source_data(self, tmp_path: Path) -> None:
+    def test_explain_returns_source_data(self, tmp_path: Path, payload_store) -> None:
         """Explain query returns original source data for a row.
 
         This verifies the fundamental audit requirement: for any processed row,
@@ -411,7 +411,7 @@ class TestExplainQueryFunctionality:
 
         db.close()
 
-    def test_explain_returns_transform_history(self, tmp_path: Path) -> None:
+    def test_explain_returns_transform_history(self, tmp_path: Path, payload_store) -> None:
         """Explain query returns transformation history for a row.
 
         This verifies that explain() returns node_states showing each transform
@@ -464,7 +464,7 @@ class TestExplainQueryFunctionality:
 
         # Run pipeline
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=_build_linear_graph(config))
+        result = orchestrator.run(config, graph=_build_linear_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 1
