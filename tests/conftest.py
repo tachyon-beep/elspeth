@@ -102,6 +102,88 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# TelemetryManager Cleanup Fixture (Thread Leak Prevention)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _auto_close_telemetry_managers():
+    """Automatically close all TelemetryManager instances created during tests.
+
+    TelemetryManager starts a non-daemon background thread for async export.
+    If tests create TelemetryManager instances without calling close(), the
+    thread keeps running and blocks pytest from exiting.
+
+    This fixture tracks all TelemetryManager instances created during each test
+    and closes them in teardown, preventing thread leaks.
+
+    Special handling for tests that replace manager._queue:
+        Some tests replace the internal queue to test backpressure. This can
+        cause the export thread to be blocked on the OLD queue while close()
+        sends the sentinel to the NEW queue. We handle this by also sending
+        sentinels to any old queues we detect.
+
+    Thread Safety:
+        Uses module-level list tracking. Each test gets isolated via fixture
+        setup/teardown. The list is cleared at fixture start, populated during
+        the test, and drained at fixture end.
+    """
+    import queue as queue_module
+
+    from elspeth.telemetry.manager import TelemetryManager
+
+    # Track managers AND their original queues
+    created_managers: list[tuple[TelemetryManager, queue_module.Queue]] = []
+    original_init = TelemetryManager.__init__
+
+    def tracking_init(self: TelemetryManager, *args, **kwargs) -> None:
+        original_init(self, *args, **kwargs)
+        # Store manager AND its original queue (in case tests replace _queue)
+        created_managers.append((self, self._queue))
+
+    # Monkey-patch for tracking
+    TelemetryManager.__init__ = tracking_init  # type: ignore[method-assign]
+
+    try:
+        yield
+    finally:
+        # Restore original __init__
+        TelemetryManager.__init__ = original_init  # type: ignore[method-assign]
+
+        # Close all managers created during this test
+        for manager, original_queue in created_managers:
+            try:
+                # First, unblock any SlowExporter-style waiters
+                # by setting shutdown event
+                manager._shutdown_event.set()
+
+                # If queue was replaced, send sentinel to BOTH queues
+                current_queue = manager._queue
+                if current_queue is not original_queue:
+                    # Test replaced the queue - thread may be blocked on old one
+                    try:
+                        original_queue.put_nowait(None)  # Sentinel to old queue
+                    except queue_module.Full:
+                        # Queue full - drain and retry
+                        try:
+                            original_queue.get_nowait()
+                            original_queue.put_nowait(None)
+                        except (queue_module.Full, queue_module.Empty):
+                            pass
+
+                # Only close if not already closed (check if thread is alive)
+                if manager._export_thread.is_alive():
+                    manager.close()
+
+                # Final safety: if thread still alive, give it time then force-join
+                if manager._export_thread.is_alive():
+                    manager._export_thread.join(timeout=1.0)
+            except Exception:
+                # Best effort - don't fail test teardown
+                pass
+
+
+# =============================================================================
 # Test Infrastructure
 # =============================================================================
 
