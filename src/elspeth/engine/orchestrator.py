@@ -1108,14 +1108,6 @@ class Orchestrator:
 
                 self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
 
-                # CRITICAL: Clear operation_id before PROCESS phase begins.
-                # The operation context is still open (for proper completion tracking),
-                # but we must clear operation_id so transforms can set their own state_id
-                # without triggering the XOR constraint violation.
-                # External calls during source.load() are already recorded with operation_id.
-                # External calls during transform.process() will use state_id instead.
-                ctx.operation_id = None
-
                 # Track whether field resolution has been recorded (must happen after first iteration)
                 field_resolution_recorded = False
 
@@ -1219,6 +1211,17 @@ class Orchestrator:
 
                         # Extract row data from SourceRow (all source items are SourceRow)
                         row_data: dict[str, Any] = source_item.row
+
+                        # ─────────────────────────────────────────────────────────────────
+                        # CRITICAL: Clear operation_id now that source item is fetched.
+                        # Generator-based sources (e.g., AzureBlobSource) execute during
+                        # iteration - their external calls (blob downloads) happen inside
+                        # the for loop at the enumerate() call. By this point, the source
+                        # item is fully fetched and any source-side calls are recorded
+                        # with operation_id. Now we must clear it so transforms can set
+                        # their own state_id without triggering the XOR constraint.
+                        # ─────────────────────────────────────────────────────────────────
+                        ctx.operation_id = None
 
                         # ─────────────────────────────────────────────────────────────────
                         # Check for timed-out aggregations BEFORE processing this row
@@ -1485,68 +1488,8 @@ class Orchestrator:
                                 # Count failed coalesces for observability.
                                 rows_coalesce_failed += 1
 
-                    # Source consumption complete - track_operation will close here
-                    # Sink writing happens outside source_load operation (has its own sink_write operations in Phase 7)
-
-                    # Write to sinks using SinkExecutor
-                    sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-                    # Step = transforms + config gates + 1 (for sink)
-                    step = len(config.transforms) + len(config.gates) + 1
-
-                    # Create checkpoint callback for post-sink checkpointing
-                    def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                        def callback(token: TokenInfo) -> None:
-                            self._maybe_checkpoint(
-                                run_id=run_id,
-                                token_id=token.token_id,
-                                node_id=sink_node_id,
-                            )
-
-                        return callback
-
-                    for sink_name, token_outcome_pairs in pending_tokens.items():
-                        if token_outcome_pairs and sink_name in config.sinks:
-                            sink = config.sinks[sink_name]
-                            sink_node_id = sink_id_map[SinkName(sink_name)]
-
-                            # Group tokens by outcome for separate write() calls
-                            # (sink_executor.write() takes a single outcome for all tokens in a batch)
-                            from itertools import groupby
-
-                            # Sort by outcome to enable groupby (None sorts first)
-                            sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
-                            for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
-                                group_tokens = [token for token, _ in group]
-                                sink_executor.write(
-                                    sink=sink,
-                                    tokens=group_tokens,
-                                    ctx=ctx,
-                                    step_in_pipeline=step,
-                                    sink_name=sink_name,
-                                    outcome=outcome,
-                                    on_token_written=checkpoint_after_sink(sink_node_id),
-                                )
-
-                    # Emit final progress if we haven't emitted recently or row count not on interval
-                    # (RunSummary will show final summary regardless, but progress shows intermediate state)
-                    current_time = time.perf_counter()
-                    time_since_last_progress = current_time - last_progress_time
-                    # Emit if: not on progress_interval boundary OR >1s since last emission
-                    if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
-                        elapsed = current_time - start_time
-                        self._events.emit(
-                            ProgressEvent(
-                                rows_processed=rows_processed,
-                                # Include routed rows in success count - they reached their destination
-                                rows_succeeded=rows_succeeded + rows_routed,
-                                rows_failed=rows_failed,
-                                rows_quarantined=rows_quarantined,
-                                elapsed_seconds=elapsed,
-                            )
-                        )
-
-                    # PROCESS phase completed successfully
-                    self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
+                    # Source iteration complete - for loop ends here
+                    pass  # Explicit pass before exception handlers
 
                 except BatchPendingError:
                     # BatchPendingError is a control-flow signal, not an error.
@@ -1556,6 +1499,75 @@ class Orchestrator:
                     # PROCESS phase error (iteration or processing failures)
                     self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
                     raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
+
+            # track_operation ended - source_load operation is now complete
+            # Source duration is now accurately measured (excludes sink I/O)
+
+            # ─────────────────────────────────────────────────────────────────────────
+            # SINK WRITES - Outside source_load track_operation context
+            # Each sink write has its own track_operation (sink_write) in SinkExecutor.
+            # This ensures sink failures are not misattributed to the source operation.
+            # ─────────────────────────────────────────────────────────────────────────
+
+            # Write to sinks using SinkExecutor
+            sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+            # Step = transforms + config gates + 1 (for sink)
+            step = len(config.transforms) + len(config.gates) + 1
+
+            # Create checkpoint callback for post-sink checkpointing
+            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
+                def callback(token: TokenInfo) -> None:
+                    self._maybe_checkpoint(
+                        run_id=run_id,
+                        token_id=token.token_id,
+                        node_id=sink_node_id,
+                    )
+
+                return callback
+
+            for sink_name, token_outcome_pairs in pending_tokens.items():
+                if token_outcome_pairs and sink_name in config.sinks:
+                    sink = config.sinks[sink_name]
+                    sink_node_id = sink_id_map[SinkName(sink_name)]
+
+                    # Group tokens by outcome for separate write() calls
+                    # (sink_executor.write() takes a single outcome for all tokens in a batch)
+                    from itertools import groupby
+
+                    # Sort by outcome to enable groupby (None sorts first)
+                    sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
+                    for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                        group_tokens = [token for token, _ in group]
+                        sink_executor.write(
+                            sink=sink,
+                            tokens=group_tokens,
+                            ctx=ctx,
+                            step_in_pipeline=step,
+                            sink_name=sink_name,
+                            outcome=outcome,
+                            on_token_written=checkpoint_after_sink(sink_node_id),
+                        )
+
+            # Emit final progress if we haven't emitted recently or row count not on interval
+            # (RunSummary will show final summary regardless, but progress shows intermediate state)
+            current_time = time.perf_counter()
+            time_since_last_progress = current_time - last_progress_time
+            # Emit if: not on progress_interval boundary OR >1s since last emission
+            if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+                elapsed = current_time - start_time
+                self._events.emit(
+                    ProgressEvent(
+                        rows_processed=rows_processed,
+                        # Include routed rows in success count - they reached their destination
+                        rows_succeeded=rows_succeeded + rows_routed,
+                        rows_failed=rows_failed,
+                        rows_quarantined=rows_quarantined,
+                        elapsed_seconds=elapsed,
+                    )
+                )
+
+            # PROCESS phase completed successfully
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
         finally:
             # Call on_complete for all plugins (even on error)
