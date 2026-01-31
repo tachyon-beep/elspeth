@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field
@@ -129,9 +129,8 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._response_field = cfg.response_field
         self._on_error = cfg.on_error
 
-        # Schema from config
-        # TransformDataConfig validates schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
+        # Schema from config (TransformDataConfig guarantees schema_config is not None)
+        schema_config = cfg.schema_config
         schema = create_schema_from_config(
             schema_config,
             f"{self.name}Schema",

@@ -10,10 +10,9 @@ output correct types. Wrong types = upstream bug = crash.
 import hashlib
 import json
 import os
-from typing import IO, TYPE_CHECKING, Any, Literal, cast
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
-from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
@@ -180,8 +179,7 @@ class JSONSink(BaseSink):
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        self._schema_config = cfg.schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)

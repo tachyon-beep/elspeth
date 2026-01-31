@@ -16,13 +16,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
@@ -148,10 +147,8 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         self._pool_size = cfg.pool_size
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
-        # Cast for mypy - validation ensures schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
         schema = create_schema_from_config(
-            schema_config,
+            cfg.schema_config,
             "AzurePromptShieldSchema",
             allow_coercion=False,
         )

@@ -154,8 +154,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Build output schema config with field categorization
         # Multi-query: collect fields from all query specs
-        # cfg.schema_config is validated by LLMConfig.validate_schema_config()
-        schema_config = cast(SchemaConfig, cfg.schema_config)
+        # TransformDataConfig guarantees schema_config is not None
+        schema_config = cfg.schema_config
         all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
 

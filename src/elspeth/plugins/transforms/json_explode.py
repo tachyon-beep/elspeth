@@ -19,7 +19,7 @@ Therefore, JSONExplode inherits from DataPluginConfig (NOT TransformDataConfig)
 and has no on_error configuration.
 """
 
-from typing import Any, cast
+from typing import Any
 
 from pydantic import Field
 
@@ -97,8 +97,7 @@ class JSONExplode(BaseTransform):
         self._include_index = cfg.include_index
 
         # Input schema from config for validation
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self.input_schema = create_schema_from_config(schema_config, "JSONExplodeInputSchema", allow_coercion=False)
+        self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
 
         # Output schema MUST be dynamic because JSONExplode changes row shape:
         # - Removes array_field

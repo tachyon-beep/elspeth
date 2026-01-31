@@ -7,7 +7,7 @@ IMPORTANT: This transform uses is_batch_aware=True, meaning the engine
 will buffer rows and call process() with a list when the trigger fires.
 """
 
-from typing import Any, cast
+from typing import Any
 
 from pydantic import Field
 
@@ -76,12 +76,11 @@ class BatchStats(BaseTransform):
         self._compute_mean = cfg.compute_mean
         self._on_error = cfg.on_error
 
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        self._schema_config = cfg.schema_config
 
         # Create input schema from config
         self.input_schema = create_schema_from_config(
-            schema_config,
+            cfg.schema_config,
             "BatchStatsInputSchema",
             allow_coercion=False,
         )

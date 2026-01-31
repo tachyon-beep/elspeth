@@ -162,7 +162,7 @@ class TestAzureBlobSinkConfigValidation:
 
     def test_missing_schema_raises_error(self) -> None:
         """Missing schema raises PluginConfigError."""
-        with pytest.raises(PluginConfigError, match=r"require.*schema"):
+        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
             AzureBlobSink(
                 {
                     "connection_string": TEST_CONNECTION_STRING,

@@ -9,12 +9,11 @@ This is the ONLY place in the pipeline where coercion is allowed.
 
 import csv
 from collections.abc import Iterator
-from typing import Any, cast
+from typing import Any
 
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import TabularSourceDataConfig
 from elspeth.plugins.context import PluginContext
@@ -78,10 +77,8 @@ class CSVSource(BaseSource):
         # Field resolution computed at load() time - includes version for audit
         self._field_resolution: FieldResolution | None = None
 
-        # Store schema config for audit trail
-        # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        # Store schema config for audit trail (required by DataPluginConfig)
+        self._schema_config = cfg.schema_config
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure

@@ -9,7 +9,7 @@ output correct types. Wrong types = upstream bug = crash.
 
 import os
 import time
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
 
@@ -19,7 +19,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.plugins.base import BaseSink
@@ -105,8 +104,7 @@ class DatabaseSink(BaseSink):
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        self._schema_config = cfg.schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)

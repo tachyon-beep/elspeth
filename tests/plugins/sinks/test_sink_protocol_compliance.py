@@ -51,24 +51,16 @@ class TestSinkProtocolCompliance:
     """Parametrized protocol compliance tests for all sink plugins."""
 
     @pytest.mark.parametrize("class_path,config,expected_name", SINK_CONFIGS)
-    def test_implements_protocol(
-        self, class_path: str, config: dict[str, Any], expected_name: str
-    ) -> None:
+    def test_implements_protocol(self, class_path: str, config: dict[str, Any], expected_name: str) -> None:
         """All sinks must implement SinkProtocol."""
         sink_class = _import_sink_class(class_path)
         sink = sink_class(config)
-        assert isinstance(sink, SinkProtocol), (
-            f"{sink_class.__name__} must implement SinkProtocol"
-        )
+        assert isinstance(sink, SinkProtocol), f"{sink_class.__name__} must implement SinkProtocol"
 
     @pytest.mark.parametrize("class_path,config,expected_name", SINK_CONFIGS)
-    def test_has_required_attributes(
-        self, class_path: str, config: dict[str, Any], expected_name: str
-    ) -> None:
+    def test_has_required_attributes(self, class_path: str, config: dict[str, Any], expected_name: str) -> None:
         """All sinks must have name and input_schema attributes."""
         sink_class = _import_sink_class(class_path)
         assert sink_class.name == expected_name
         sink = sink_class(config)
-        assert hasattr(sink, "input_schema"), (
-            f"{sink_class.__name__} must have input_schema attribute"
-        )
+        assert hasattr(sink, "input_schema"), f"{sink_class.__name__} must have input_schema attribute"

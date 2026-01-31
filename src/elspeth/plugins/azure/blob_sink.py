@@ -20,13 +20,12 @@ import io
 import json
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from jinja2 import Environment, StrictUndefined
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
@@ -271,14 +270,13 @@ class AzureBlobSink(BaseSink):
         self._csv_options = cfg.csv_options
 
         # Store schema config for audit trail
-        # DataPluginConfig ensures schema_config is not None - cast for type narrowing
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        # DataPluginConfig ensures schema_config is not None
+        self._schema_config = cfg.schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)
         self._schema_class: type[PluginSchema] = create_schema_from_config(
-            schema_config,
+            self._schema_config,
             "AzureBlobRowSchema",
             allow_coercion=False,  # Sinks reject wrong types (upstream bug)
         )

@@ -76,18 +76,23 @@ class DataPluginConfig(PluginConfig):
 
     Use 'schema: {fields: dynamic}' to accept any fields, or provide
     explicit field definitions with mode (strict/free).
+
+    Type Safety:
+        This class overrides schema_config from Optional to required.
+        Pydantic validates this at construction time, and mypy sees the
+        narrowed type - no cast() needed in plugin implementations.
     """
 
-    @model_validator(mode="after")
-    def _require_schema(self) -> Self:
-        """Validate that schema is provided."""
-        if self.schema_config is None:
-            raise ValueError(
-                "Data plugins require 'schema' configuration. "
-                "Use 'schema: {fields: dynamic}' to accept any fields, or "
-                "provide explicit field definitions with mode (strict/free)."
-            )
-        return self
+    # Override parent's Optional field with required field.
+    # This provides both runtime validation (Pydantic) and static typing (mypy).
+    schema_config: SchemaConfig = Field(
+        ...,
+        description=(
+            "Schema configuration for data validation. "
+            "Use 'schema: {fields: dynamic}' to accept any fields, or "
+            "provide explicit field definitions with mode (strict/free)."
+        ),
+    )
 
 
 class PathConfig(DataPluginConfig):

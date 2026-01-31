@@ -193,7 +193,8 @@ class TestCSVSourceConfigValidation:
         from elspeth.plugins.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
-        with pytest.raises(PluginConfigError, match=r"require.*schema"):
+        # DataPluginConfig requires schema_config - Pydantic enforces this natively
+        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
             CSVSource({"path": "/tmp/test.csv", "on_validation_failure": QUARANTINE_SINK})
 
     def test_missing_on_validation_failure_raises_error(self) -> None:

@@ -14,13 +14,12 @@ import json
 import logging
 import time
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Literal, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import DataPluginConfig
@@ -265,9 +264,8 @@ class AzureBlobSource(BaseSource):
         self._json_options = cfg.json_options
 
         # Store schema config for audit trail
-        # DataPluginConfig ensures schema_config is not None - cast for type narrowing
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        # DataPluginConfig ensures schema_config is not None
+        self._schema_config = cfg.schema_config
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure
@@ -275,7 +273,7 @@ class AzureBlobSource(BaseSource):
         # CRITICAL: allow_coercion=True for sources (external data boundary)
         # Sources are the ONLY place where type coercion is allowed
         self._schema_class: type[PluginSchema] = create_schema_from_config(
-            schema_config,
+            self._schema_config,
             "AzureBlobRowSchema",
             allow_coercion=True,
         )

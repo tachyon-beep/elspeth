@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field, field_validator
@@ -301,8 +301,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Build output schema config with field categorization
         # Multi-query: collect fields from all query specs
-        # cfg.schema_config is validated by OpenRouterConfig.validate_schema_config() (inherited from LLMConfig)
-        schema_config = cast(SchemaConfig, cfg.schema_config)
+        # TransformDataConfig guarantees schema_config is not None
+        schema_config = cfg.schema_config
         all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
 

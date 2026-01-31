@@ -7,11 +7,10 @@ If the source outputs wrong types, the transform crashes immediately.
 """
 
 import copy
-from typing import Any, cast
+from typing import Any
 
 from pydantic import Field
 
-from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -83,13 +82,12 @@ class Truncate(BaseTransform):
             if suffix_len >= max_len:
                 raise ValueError(f"Suffix length ({suffix_len}) must be less than max length for field '{field_name}' ({max_len})")
 
-        schema_config = cast(SchemaConfig, cfg.schema_config)
-        self._schema_config = schema_config
+        self._schema_config = cfg.schema_config
 
         # Create schema from config
         # CRITICAL: allow_coercion=False - wrong types are source bugs
         schema = create_schema_from_config(
-            schema_config,
+            cfg.schema_config,
             "TruncateSchema",
             allow_coercion=False,
         )

@@ -20,7 +20,7 @@ import json
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from pydantic import Field
 
@@ -152,9 +152,8 @@ class AzureBatchLLMTransform(BaseTransform):
         # Error routing - required for TransformResult.error() to work
         self._on_error = cfg.on_error
 
-        # Schema from config
-        # TransformDataConfig validates schema_config is not None
-        schema_config = cast(SchemaConfig, cfg.schema_config)
+        # Schema from config (TransformDataConfig guarantees schema_config is not None)
+        schema_config = cfg.schema_config
         schema = create_schema_from_config(
             schema_config,
             "AzureBatchSchema",
