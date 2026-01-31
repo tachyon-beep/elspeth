@@ -27,12 +27,13 @@ class LandscapeExporter:
     - run: Run metadata (one per export)
     - node: Registered plugins
     - edge: Graph edges
+    - operation: Source/sink I/O operations
     - row: Source rows
     - token: Row instances
     - token_parent: Token lineage for forks/joins
     - node_state: Processing records
     - routing_event: Routing decisions
-    - call: External calls
+    - call: External calls (may have state_id OR operation_id)
     - batch: Aggregation batches
     - batch_member: Batch membership
     - artifact: Sink outputs
@@ -196,6 +197,37 @@ class LandscapeExporter:
                 "default_mode": edge.default_mode,
             }
 
+        # Operations (source loads, sink writes)
+        for operation in self._recorder.get_operations_for_run(run_id):
+            yield {
+                "record_type": "operation",
+                "run_id": run_id,
+                "operation_id": operation.operation_id,
+                "node_id": operation.node_id,
+                "operation_type": operation.operation_type,
+                "status": operation.status,
+                "started_at": operation.started_at.isoformat() if operation.started_at else None,
+                "completed_at": operation.completed_at.isoformat() if operation.completed_at else None,
+                "duration_ms": operation.duration_ms,
+                "error_message": operation.error_message,
+            }
+
+            # External calls for this operation
+            for call in self._recorder.get_operation_calls(operation.operation_id):
+                yield {
+                    "record_type": "call",
+                    "run_id": run_id,
+                    "call_id": call.call_id,
+                    "state_id": None,  # Operation calls don't have state_id
+                    "operation_id": call.operation_id,
+                    "call_index": call.call_index,
+                    "call_type": call.call_type,
+                    "status": call.status,
+                    "request_hash": call.request_hash,
+                    "response_hash": call.response_hash,
+                    "latency_ms": call.latency_ms,
+                }
+
         # Rows and their tokens/states
         for row in self._recorder.get_rows(run_id):
             yield {
@@ -320,6 +352,7 @@ class LandscapeExporter:
                             "run_id": run_id,
                             "call_id": call.call_id,
                             "state_id": call.state_id,
+                            "operation_id": None,  # State calls don't have operation_id
                             "call_index": call.call_index,
                             "call_type": call.call_type,
                             "status": call.status,

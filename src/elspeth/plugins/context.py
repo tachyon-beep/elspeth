@@ -76,7 +76,7 @@ class PluginContext:
             threshold = ctx.get("threshold", default=0.5)
             with ctx.start_span("my_operation"):
                 result = do_work(row, threshold)
-            return TransformResult.success(result)
+            return TransformResult.success(result, success_reason={"action": "processed"})
     """
 
     run_id: str
@@ -104,7 +104,9 @@ class PluginContext:
 
     # === Phase 6: State & Call Recording ===
     # Set by executor to enable transforms to record external calls
-    state_id: str | None = field(default=None)
+    # Exactly one of state_id or operation_id should be set when recording calls
+    state_id: str | None = field(default=None)  # For transform calls (via node_states)
+    operation_id: str | None = field(default=None)  # For source/sink calls (via operations)
     _call_index: int = field(default=0)
     _call_index_lock: "Lock" = field(init=False)  # Initialized in __post_init__
 
@@ -233,8 +235,9 @@ class PluginContext:
     ) -> "Call | None":
         """Record an external API call to the audit trail and emit telemetry.
 
-        Provides a convenient way for transforms to record external calls
-        without managing call indices manually. Requires state_id to be set.
+        Provides a convenient way for plugins to record external calls
+        without managing call indices manually. Routes to the appropriate
+        recorder method based on whether state_id or operation_id is set.
 
         After recording to Landscape (the legal record), emits an
         ExternalCallCompleted telemetry event for operational visibility.
@@ -252,31 +255,65 @@ class PluginContext:
             The recorded Call, or None if landscape not configured
 
         Raises:
-            RuntimeError: If state_id is not set (transform not in execution context)
+            FrameworkBugError: If neither or both of state_id and operation_id are set
         """
+        from elspeth.contracts import FrameworkBugError
+
         if self.landscape is None:
             logger.warning("External call not recorded (no landscape)")
             return None
 
-        if self.state_id is None:
-            raise RuntimeError("Cannot record call: state_id not set. Ensure transform is being executed through the engine.")
+        # Enforce XOR: exactly one of state_id or operation_id must be set
+        has_state = self.state_id is not None
+        has_operation = self.operation_id is not None
 
-        # Thread-safe call_index increment (INFRA-01 fix)
-        # Prevents race conditions when parallel threads record calls
-        with self._call_index_lock:
-            call_index = self._call_index
-            self._call_index += 1
+        if has_state and has_operation:
+            raise FrameworkBugError(
+                f"record_call() called with BOTH state_id and operation_id set. "
+                f"state_id={self.state_id}, operation_id={self.operation_id}. "
+                f"This is a framework bug - context should have exactly one parent."
+            )
 
-        recorded_call = self.landscape.record_call(
-            state_id=self.state_id,
-            call_index=call_index,
-            call_type=call_type,
-            status=status,
-            request_data=request_data,
-            response_data=response_data,
-            error=error,
-            latency_ms=latency_ms,
-        )
+        if not has_state and not has_operation:
+            raise FrameworkBugError(
+                f"record_call() called without state_id or operation_id. "
+                f"Context state: run_id={self.run_id}, node_id={self.node_id}. "
+                f"This is a framework bug - context should have been set by orchestrator/executor."
+            )
+
+        # Route to appropriate recorder method
+        if has_state:
+            # Thread-safe call_index increment (INFRA-01 fix)
+            with self._call_index_lock:
+                call_index = self._call_index
+                self._call_index += 1
+
+            assert self.state_id is not None  # Guarded by has_state check above
+            recorded_call = self.landscape.record_call(
+                state_id=self.state_id,
+                call_index=call_index,
+                call_type=call_type,
+                status=status,
+                request_data=request_data,
+                response_data=response_data,
+                error=error,
+                latency_ms=latency_ms,
+            )
+            parent_id: str = self.state_id
+        else:
+            # Operation call - recorder handles call index allocation
+            assert self.operation_id is not None  # Guarded by has_operation check above
+            recorded_call = self.landscape.record_operation_call(
+                operation_id=self.operation_id,
+                call_type=call_type,
+                status=status,
+                request_data=request_data,
+                response_data=response_data,
+                error=error,
+                latency_ms=latency_ms,
+                provider=provider,
+            )
+            parent_id = self.operation_id
 
         # Emit telemetry AFTER successful Landscape recording
         # Wrapped in try/except to prevent telemetry failures from affecting callers
@@ -295,7 +332,7 @@ class PluginContext:
                 ExternalCallCompleted(
                     timestamp=datetime.now(UTC),
                     run_id=self.run_id,
-                    state_id=self.state_id,
+                    state_id=parent_id,  # Use parent_id for both state and operation
                     call_type=call_type,
                     provider=provider,
                     status=status,
@@ -313,7 +350,7 @@ class PluginContext:
                     "error": str(tel_err),
                     "error_type": type(tel_err).__name__,
                     "run_id": self.run_id,
-                    "state_id": self.state_id,
+                    "parent_id": parent_id,
                 },
             )
 

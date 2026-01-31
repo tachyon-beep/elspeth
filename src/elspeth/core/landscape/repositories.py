@@ -198,15 +198,20 @@ class CallRepository:
         self.session = session
 
     def load(self, row: Any) -> Call:
-        """Load Call from database row."""
+        """Load Call from database row.
+
+        Handles both state-parented calls (transform processing) and
+        operation-parented calls (source/sink I/O).
+        """
         return Call(
             call_id=row.call_id,
-            state_id=row.state_id,
             call_index=row.call_index,
             call_type=CallType(row.call_type),  # Convert HERE
             status=CallStatus(row.status),  # Convert HERE
             request_hash=row.request_hash,
             created_at=row.created_at,
+            state_id=row.state_id,  # NULL for operation calls
+            operation_id=row.operation_id,  # NULL for state calls
             request_ref=row.request_ref,
             response_hash=row.response_hash,
             response_ref=row.response_ref,
@@ -352,6 +357,7 @@ class NodeStateRepository:
                 duration_ms=row.duration_ms,
                 context_before_json=row.context_before_json,
                 context_after_json=row.context_after_json,
+                success_reason_json=row.success_reason_json,
             )
 
         elif status == NodeStateStatus.FAILED:

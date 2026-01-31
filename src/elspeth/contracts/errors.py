@@ -81,15 +81,77 @@ class PluginGateReason(TypedDict):
 RoutingReason = ConfigGateReason | PluginGateReason
 
 
-class TransformReason(TypedDict):
-    """Schema for transform reason payloads.
+# Literal type for common transform actions (extensible - str also accepted)
+TransformActionCategory = Literal[
+    # Processing actions
+    "processed",  # Generic successful processing
+    "mapped",  # Field mapping completed
+    "validated",  # Validation passed
+    "enriched",  # Data enrichment from external source
+    "transformed",  # Data transformation applied
+    "normalized",  # Data normalization applied
+    "filtered",  # Row passed filter criteria
+    "classified",  # Classification assigned
+    # Skip/passthrough actions
+    "passthrough",  # No changes made (intentional)
+    "skipped",  # Processing skipped (e.g., data already present)
+    "cached",  # Result retrieved from cache
+]
 
-    Used by transforms to explain processing decisions.
+
+class TransformSuccessReason(TypedDict):
+    """Metadata for successful transform operations.
+
+    Provides structured audit information about what a transform did,
+    beyond just the input/output data. This enables:
+    - Efficient audit queries (fields_modified without diffing)
+    - Data quality monitoring (validation_warnings for non-blocking warnings)
+    - Conditional path tracking (action distinguishes code paths)
+
+    Used when transforms return TransformResult.success() with optional
+    success_reason parameter.
+
+    Required field:
+        action: What the transform did. Use TransformActionCategory values
+                for common actions, or custom strings for plugin-specific actions.
+
+    Optional fields:
+        fields_modified: List of field names that were changed
+        fields_added: List of field names that were added
+        fields_removed: List of field names that were removed
+        validation_warnings: Non-blocking validation issues (data quality flags)
+        metadata: Additional plugin-specific context
+
+    Example usage:
+        # Simple action tracking
+        TransformResult.success(row, success_reason={"action": "enriched"})
+
+        # Field change tracking
+        TransformResult.success(row, success_reason={
+            "action": "mapped",
+            "fields_modified": ["customer_id", "amount"],
+            "fields_added": ["currency_code"],
+        })
+
+        # Data quality warning
+        TransformResult.success(row, success_reason={
+            "action": "validated",
+            "validation_warnings": ["amount near threshold (995 of 1000 limit)"],
+        })
     """
 
-    action: str  # What the transform did
-    fields_modified: NotRequired[list[str]]  # Fields that were changed
-    validation_errors: NotRequired[list[str]]  # Any validation issues
+    action: str  # Use TransformActionCategory or custom string
+
+    # Field tracking
+    fields_modified: NotRequired[list[str]]
+    fields_added: NotRequired[list[str]]
+    fields_removed: NotRequired[list[str]]
+
+    # Data quality
+    validation_warnings: NotRequired[list[str]]
+
+    # Extensibility
+    metadata: NotRequired[dict[str, Any]]
 
 
 # =============================================================================
@@ -447,6 +509,25 @@ class OrchestrationInvariantError(Exception):
 
     Recovery: These errors indicate bugs in orchestration code that must
     be fixed. They should never occur in correct operation.
+    """
+
+    pass
+
+
+class FrameworkBugError(Exception):
+    """Raised when the framework encounters an internal inconsistency.
+
+    This indicates a bug in ELSPETH itself, not user error or external failure.
+    Unlike OrchestrationInvariantError (specific to orchestration flow), this
+    is a general-purpose exception for any framework-level bug.
+
+    Examples of conditions that trigger this:
+    - Double-completing an operation (already completed, trying to complete again)
+    - Missing required context (record_call with neither state_id nor operation_id)
+    - Completing a non-existent operation
+
+    Recovery: These errors indicate bugs in framework code that must be fixed.
+    They should never occur in correct operation.
     """
 
     pass

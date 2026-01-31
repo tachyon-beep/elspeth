@@ -1194,3 +1194,143 @@ allow_hits:
   reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
+- key: core/operations.py:R4:track_operation:line=147
+  owner: architecture
+  reason: 'Exception safety contract: DB failure in finally MUST NOT mask original exception'
+  safety: Caught, logged with CRITICAL level (audit trail incomplete warning), original exception propagates
+  expires: null
+- key: plugins/context.py:R1:PluginContext:record_call:line=327
+  owner: architecture
+  reason: 'Trust boundary: LLM response data (Tier 3 external data) may or may not have usage field'
+  safety: None returned when missing; token_usage is optional metadata, not required for audit
+  expires: null
+- key: plugins/context.py:R4:PluginContext:record_call:line=345
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: telemetry_emit MUST NOT raise - audit recording must succeed'
+  safety: Caught, logged with warning; audit call is already recorded in Landscape, telemetry is secondary
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:line=764
+  owner: architecture
+  reason: 'Aggregate dict: counting failures by node, missing entry means 0 failures'
+  safety: Default of 0 is semantically correct - no failures recorded for this node
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1029
+  owner: architecture
+  reason: 'SQLAlchemy inspector API: nullable info may be missing in some database backends'
+  safety: Default True is safe - conservative assumption for schema display
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1035
+  owner: architecture
+  reason: 'SQLAlchemy inspector API: primary key info may be empty or None for some tables'
+  safety: Empty list default is correct - no PK columns if info not available
+  expires: null
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:line=1540
+  owner: architecture
+  reason: 'Aggregate dict: counting runs by status, missing entry means 0 runs'
+  safety: Default of 0 is semantically correct - no runs with this status
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1850
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1851
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1862
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1863
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1868
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1869
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1874
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1875
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1876
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1883
+  owner: architecture
+  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative to row_id'
+  safety: None is valid - row_id or token_id must be provided, validated by tool
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1884
+  owner: architecture
+  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative to token_id'
+  safety: None is valid - row_id or token_id must be provided, validated by tool
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1885
+  owner: architecture
+  reason: 'MCP protocol: optional sink filter for disambiguation in DAGs with multiple terminals'
+  safety: None is valid - selects first matching sink if not specified
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1890
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1891
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1896
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1897
+  owner: architecture
+  reason: 'MCP protocol: optional filter parameter, None means no filtering'
+  safety: None is valid - filter not applied, returns all results
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1898
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1905
+  owner: architecture
+  reason: 'MCP protocol: optional SQL query parameters, None means no parameters'
+  safety: None is valid - SQL query executed without parameters
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1926
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R1:create_server:call_tool:line=1930
+  owner: architecture
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  safety: MCP schema defines defaults; .get() matches schema default values
+  expires: null
+- key: mcp/server.py:R4:create_server:call_tool:line=1937
+  owner: architecture
+  reason: 'MCP protocol: tool errors must return error response, not raise'
+  safety: Caught, returns MCP error response with error message; required by MCP protocol
+  expires: null

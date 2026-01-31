@@ -33,6 +33,7 @@ from elspeth.contracts.audit import (
     NodeStateOpen,
     NodeStatePending,
     NonCanonicalMetadata,
+    Operation,
     RoutingEvent,
     Row,
     RowLineage,
@@ -104,14 +105,16 @@ from elspeth.contracts.errors import (
     ConfigGateReason,
     ErrorDetail,
     ExecutionError,
+    FrameworkBugError,
     PluginGateReason,
     QueryFailureDetail,
     RoutingReason,
     RowErrorEntry,
     TemplateErrorEntry,
+    TransformActionCategory,
     TransformErrorCategory,
     TransformErrorReason,
-    TransformReason,
+    TransformSuccessReason,
     UsageStats,
 )
 from elspeth.contracts.events import (
@@ -157,8 +160,10 @@ from elspeth.contracts.url import (
 __all__ = [  # Grouped by category for readability
     # audit
     "Artifact",
+    "Operation",
     # errors
     "BatchPendingError",
+    "FrameworkBugError",
     "CoalesceFailureReason",
     "ConfigGateReason",
     "ErrorDetail",
@@ -168,9 +173,10 @@ __all__ = [  # Grouped by category for readability
     "RoutingReason",
     "RowErrorEntry",
     "TemplateErrorEntry",
+    "TransformActionCategory",
     "TransformErrorCategory",
     "TransformErrorReason",
-    "TransformReason",
+    "TransformSuccessReason",
     "UsageStats",
     "Batch",
     "BatchMember",

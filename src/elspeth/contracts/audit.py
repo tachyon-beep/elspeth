@@ -9,7 +9,10 @@ garbage from it, something catastrophic happened - crash immediately.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
+
+if TYPE_CHECKING:
+    pass  # Placeholder for future type-only imports
 
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -218,6 +221,7 @@ class NodeStateCompleted:
     duration_ms: float
     context_before_json: str | None = None
     context_after_json: str | None = None
+    success_reason_json: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,18 +256,26 @@ NodeState = NodeStateOpen | NodeStatePending | NodeStateCompleted | NodeStateFai
 
 @dataclass
 class Call:
-    """An external call made during node processing.
+    """An external call made during node processing or operation.
 
     Strict contract - call_type and status must be enums.
+
+    Calls can be parented by either:
+    - node_state (transform processing): state_id is set, operation_id is None
+    - operation (source/sink I/O): operation_id is set, state_id is None
+
+    The XOR constraint is enforced at the database level.
     """
 
     call_id: str
-    state_id: str
     call_index: int
     call_type: CallType  # Strict: enum only
     status: CallStatus  # Strict: enum only
     request_hash: str
     created_at: datetime
+    # Parent context - exactly one must be set (XOR)
+    state_id: str | None = None  # For transform calls
+    operation_id: str | None = None  # For source/sink calls
     request_ref: str | None = None
     response_hash: str | None = None
     response_ref: str | None = None
@@ -564,3 +576,56 @@ class TokenOutcome:
     error_hash: str | None = None
     context_json: str | None = None
     expected_branches_json: str | None = None  # Branch contract for FORKED/EXPANDED
+
+
+@dataclass(frozen=True, slots=True)
+class Operation:
+    """Represents a source/sink I/O operation in the audit trail.
+
+    Operations are the equivalent of node_states for sources and sinks.
+    They provide a parent context for external calls made during
+    source.load() or sink.write().
+
+    Unlike node_states (which require a token_id because they process
+    existing data flow), operations exist at the run/node level because
+    sources CREATE tokens rather than processing them.
+
+    Lifecycle:
+        1. begin_operation() creates with status='open'
+        2. External calls recorded via record_operation_call()
+        3. complete_operation() sets status to 'completed' or 'failed'
+
+    The operation_id follows format "op_{uuid4().hex}" to stay within
+    the 64-char column limit while remaining globally unique.
+    """
+
+    operation_id: str
+    run_id: str
+    node_id: str
+    operation_type: Literal["source_load", "sink_write"]
+    started_at: datetime
+    status: Literal["open", "completed", "failed", "pending"]
+    completed_at: datetime | None = None
+    input_data_ref: str | None = None
+    output_data_ref: str | None = None
+    error_message: str | None = None
+    duration_ms: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for database insertion.
+
+        Returns dict with keys matching operations table columns.
+        """
+        return {
+            "operation_id": self.operation_id,
+            "run_id": self.run_id,
+            "node_id": self.node_id,
+            "operation_type": self.operation_type,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "status": self.status,
+            "input_data_ref": self.input_data_ref,
+            "output_data_ref": self.output_data_ref,
+            "error_message": self.error_message,
+            "duration_ms": self.duration_ms,
+        }

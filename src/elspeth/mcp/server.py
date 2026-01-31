@@ -125,6 +125,7 @@ class LandscapeAnalyzer:
         from elspeth.core.landscape.schema import (
             node_states_table,
             nodes_table,
+            operations_table,
             rows_table,
             token_outcomes_table,
             tokens_table,
@@ -157,6 +158,31 @@ class LandscapeAnalyzer:
             # Count node states
             state_count = (
                 conn.execute(select(func.count()).select_from(node_states_table).where(node_states_table.c.run_id == run_id)).scalar() or 0
+            )
+
+            # Count operations (source/sink I/O)
+            operation_count = (
+                conn.execute(select(func.count()).select_from(operations_table).where(operations_table.c.run_id == run_id)).scalar() or 0
+            )
+
+            # Count source_load operations
+            source_load_count = (
+                conn.execute(
+                    select(func.count())
+                    .select_from(operations_table)
+                    .where((operations_table.c.run_id == run_id) & (operations_table.c.operation_type == "source_load"))
+                ).scalar()
+                or 0
+            )
+
+            # Count sink_write operations
+            sink_write_count = (
+                conn.execute(
+                    select(func.count())
+                    .select_from(operations_table)
+                    .where((operations_table.c.run_id == run_id) & (operations_table.c.operation_type == "sink_write"))
+                ).scalar()
+                or 0
             )
 
             # Count validation errors
@@ -205,6 +231,9 @@ class LandscapeAnalyzer:
                 "tokens": token_count,
                 "nodes": node_count,
                 "node_states": state_count,
+                "operations": operation_count,
+                "source_loads": source_load_count,
+                "sink_writes": sink_write_count,
             },
             "errors": {
                 "validation": validation_error_count,
@@ -297,6 +326,119 @@ class LandscapeAnalyzer:
                 "step_in_pipeline": row.step_in_pipeline,
                 "expand_group_id": row.expand_group_id,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+    def list_operations(
+        self,
+        run_id: str,
+        operation_type: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List source/sink operations for a run.
+
+        Operations are the source/sink equivalent of node_states. They track
+        external I/O operations (blob downloads, file writes, database inserts)
+        and provide a parent context for external calls made during source.load()
+        or sink.write().
+
+        Args:
+            run_id: Run ID to query
+            operation_type: Filter by type ('source_load' or 'sink_write')
+            status: Filter by status ('open', 'completed', 'failed', 'pending')
+            limit: Maximum operations to return
+
+        Returns:
+            List of operation records with node info
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import nodes_table, operations_table
+
+        with self._db.connection() as conn:
+            query = (
+                select(
+                    operations_table.c.operation_id,
+                    operations_table.c.run_id,
+                    operations_table.c.node_id,
+                    operations_table.c.operation_type,
+                    operations_table.c.started_at,
+                    operations_table.c.completed_at,
+                    operations_table.c.status,
+                    operations_table.c.error_message,
+                    operations_table.c.duration_ms,
+                    nodes_table.c.plugin_name,
+                )
+                .join(
+                    nodes_table,
+                    (operations_table.c.node_id == nodes_table.c.node_id) & (operations_table.c.run_id == nodes_table.c.run_id),
+                )
+                .where(operations_table.c.run_id == run_id)
+                .order_by(operations_table.c.started_at.desc())
+                .limit(limit)
+            )
+
+            if operation_type is not None:
+                if operation_type not in ("source_load", "sink_write"):
+                    raise ValueError(f"Invalid operation_type '{operation_type}'. Valid: source_load, sink_write")
+                query = query.where(operations_table.c.operation_type == operation_type)
+
+            if status is not None:
+                valid_statuses = ("open", "completed", "failed", "pending")
+                if status not in valid_statuses:
+                    raise ValueError(f"Invalid status '{status}'. Valid: {valid_statuses}")
+                query = query.where(operations_table.c.status == status)
+
+            rows = conn.execute(query).fetchall()
+
+        return [
+            {
+                "operation_id": row.operation_id,
+                "run_id": row.run_id,
+                "node_id": row.node_id,
+                "plugin_name": row.plugin_name,
+                "operation_type": row.operation_type,
+                "status": row.status,
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "duration_ms": row.duration_ms,
+                "error_message": row.error_message,
+            }
+            for row in rows
+        ]
+
+    def get_operation_calls(self, operation_id: str) -> list[dict[str, Any]]:
+        """Get external calls for a source/sink operation.
+
+        Unlike get_calls() which takes a state_id for transform calls, this
+        method returns calls made during source.load() or sink.write().
+
+        Args:
+            operation_id: Operation ID to query
+
+        Returns:
+            List of call records (HTTP, SQL, etc.)
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import calls_table
+
+        with self._db.connection() as conn:
+            query = select(calls_table).where(calls_table.c.operation_id == operation_id).order_by(calls_table.c.call_index)
+            rows = conn.execute(query).fetchall()
+
+        return [
+            {
+                "call_id": row.call_id,
+                "operation_id": row.operation_id,
+                "call_index": row.call_index,
+                "call_type": row.call_type,
+                "status": row.status,
+                "latency_ms": row.latency_ms,
+                "provider": row.provider,
+                "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
             }
             for row in rows
         ]
@@ -738,12 +880,13 @@ class LandscapeAnalyzer:
         Returns:
             LLM usage report with call counts, latencies, and token estimates
         """
-        from sqlalchemy import func, select
+        from sqlalchemy import func, select, union_all
 
         from elspeth.core.landscape.schema import (
             calls_table,
             node_states_table,
             nodes_table,
+            operations_table,
         )
 
         run = self._recorder.get_run(run_id)
@@ -751,17 +894,13 @@ class LandscapeAnalyzer:
             return {"error": f"Run '{run_id}' not found"}
 
         with self._db.connection() as conn:
-            # Get LLM calls with node info
-            llm_query = (
+            # LLM calls via transform state_id path
+            llm_state_query = (
                 select(
                     nodes_table.c.plugin_name,
                     calls_table.c.call_type,
                     calls_table.c.status,
-                    func.count(calls_table.c.call_id).label("count"),
-                    func.avg(calls_table.c.latency_ms).label("avg_latency"),
-                    func.min(calls_table.c.latency_ms).label("min_latency"),
-                    func.max(calls_table.c.latency_ms).label("max_latency"),
-                    func.sum(calls_table.c.latency_ms).label("total_latency"),
+                    calls_table.c.latency_ms,
                 )
                 .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
                 .join(
@@ -770,20 +909,55 @@ class LandscapeAnalyzer:
                 )
                 .where(node_states_table.c.run_id == run_id)
                 .where(calls_table.c.call_type == "llm")
-                .group_by(nodes_table.c.plugin_name, calls_table.c.call_type, calls_table.c.status)
             )
+
+            # LLM calls via operation_id path (source/sink operations)
+            llm_op_query = (
+                select(
+                    nodes_table.c.plugin_name,
+                    calls_table.c.call_type,
+                    calls_table.c.status,
+                    calls_table.c.latency_ms,
+                )
+                .join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id)
+                .join(
+                    nodes_table,
+                    (operations_table.c.node_id == nodes_table.c.node_id) & (operations_table.c.run_id == nodes_table.c.run_id),
+                )
+                .where(operations_table.c.run_id == run_id)
+                .where(calls_table.c.call_type == "llm")
+            )
+
+            # Union both paths and aggregate
+            combined_llm = union_all(llm_state_query, llm_op_query).subquery()
+            llm_query = select(
+                combined_llm.c.plugin_name,
+                combined_llm.c.call_type,
+                combined_llm.c.status,
+                func.count().label("count"),
+                func.avg(combined_llm.c.latency_ms).label("avg_latency"),
+                func.min(combined_llm.c.latency_ms).label("min_latency"),
+                func.max(combined_llm.c.latency_ms).label("max_latency"),
+                func.sum(combined_llm.c.latency_ms).label("total_latency"),
+            ).group_by(combined_llm.c.plugin_name, combined_llm.c.call_type, combined_llm.c.status)
             llm_rows = conn.execute(llm_query).fetchall()
 
-            # Count all call types
-            call_types_query = (
-                select(
-                    calls_table.c.call_type,
-                    func.count(calls_table.c.call_id).label("count"),
-                )
+            # Count all call types (both state_id and operation_id paths)
+            call_types_state_query = (
+                select(calls_table.c.call_type)
                 .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
                 .where(node_states_table.c.run_id == run_id)
-                .group_by(calls_table.c.call_type)
             )
+            call_types_op_query = (
+                select(calls_table.c.call_type)
+                .join(operations_table, calls_table.c.operation_id == operations_table.c.operation_id)
+                .where(operations_table.c.run_id == run_id)
+            )
+            combined_types = union_all(call_types_state_query, call_types_op_query).subquery()
+            call_types_query = select(
+                combined_types.c.call_type,
+                func.count().label("count"),
+            ).group_by(combined_types.c.call_type)
             call_type_rows = conn.execute(call_types_query).fetchall()
 
         if not llm_rows and not call_type_rows:
@@ -987,6 +1161,7 @@ class LandscapeAnalyzer:
         from sqlalchemy import func, select
 
         from elspeth.core.landscape.schema import (
+            operations_table,
             runs_table,
             token_outcomes_table,
             validation_errors_table,
@@ -1036,6 +1211,45 @@ class LandscapeAnalyzer:
                     }
                 )
                 recommendations.append("Check if process is still running; may need manual intervention")
+
+            # Find stuck operations (open for > 1 hour)
+            # These indicate source/sink I/O that never completed
+            stuck_ops = conn.execute(
+                select(
+                    operations_table.c.operation_id,
+                    operations_table.c.run_id,
+                    operations_table.c.operation_type,
+                    operations_table.c.started_at,
+                )
+                .where(operations_table.c.status == "open")
+                .where(operations_table.c.started_at < (datetime.now(UTC) - __import__("datetime").timedelta(hours=1)))
+                .order_by(operations_table.c.started_at)
+                .limit(5)
+            ).fetchall()
+
+            if stuck_ops:
+                problems.append(
+                    {
+                        "severity": "WARNING",
+                        "type": "stuck_operations",
+                        "count": len(stuck_ops),
+                        "operations": [
+                            {
+                                "operation_id": op.operation_id[:12] + "...",
+                                "run_id": op.run_id[:12] + "...",
+                                "type": op.operation_type,
+                                "started": op.started_at.isoformat() if op.started_at else None,
+                            }
+                            for op in stuck_ops
+                        ],
+                        "message": f"{len(stuck_ops)} operation(s) stuck in 'open' status for > 1 hour",
+                    }
+                )
+                recommendations.append(
+                    "Stuck operations may indicate: (1) streaming source still active, "
+                    "(2) process crashed during I/O, (3) database connection issue"
+                )
+                recommendations.append("Use list_operations(run_id, status='open') to see all open operations")
 
             # Find runs with high error rates
             error_rates = conn.execute(
@@ -1424,6 +1638,39 @@ def create_server(database_url: str) -> Server:
                 },
             ),
             Tool(
+                name="list_operations",
+                description="List source/sink operations for a run (blob downloads, file writes, database inserts)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string", "description": "Run ID to query"},
+                        "operation_type": {
+                            "type": "string",
+                            "description": "Filter by type",
+                            "enum": ["source_load", "sink_write"],
+                        },
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by status",
+                            "enum": ["open", "completed", "failed", "pending"],
+                        },
+                        "limit": {"type": "integer", "description": "Max operations (default 100)", "default": 100},
+                    },
+                    "required": ["run_id"],
+                },
+            ),
+            Tool(
+                name="get_operation_calls",
+                description="Get external calls (HTTP, SQL, etc.) made during a source/sink operation",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "operation_id": {"type": "string", "description": "Operation ID to query"},
+                    },
+                    "required": ["operation_id"],
+                },
+            ),
+            Tool(
                 name="explain_token",
                 description="Get complete lineage for a token: source row, node states, calls, routing, errors, outcome",
                 inputSchema={
@@ -1621,6 +1868,15 @@ def create_server(database_url: str) -> Server:
                     row_id=arguments.get("row_id"),
                     limit=arguments.get("limit", 100),
                 )
+            elif name == "list_operations":
+                result = analyzer.list_operations(
+                    run_id=arguments["run_id"],
+                    operation_type=arguments.get("operation_type"),
+                    status=arguments.get("status"),
+                    limit=arguments.get("limit", 100),
+                )
+            elif name == "get_operation_calls":
+                result = analyzer.get_operation_calls(arguments["operation_id"])
             elif name == "explain_token":
                 result = analyzer.explain_token(
                     run_id=arguments["run_id"],
