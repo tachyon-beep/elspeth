@@ -5,6 +5,8 @@ allowed_external_types:
   - "tui/types:TokenDisplayInfo"
   # Plugin execution context - framework infrastructure, not a data contract
   - "plugins/context:PluginContext"
+  # Telemetry event types - internal telemetry infrastructure, not a data contract
+  - "telemetry/events:ExternalCallCompleted"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -175,7 +177,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/context.py:PluginContext.record_call:response_data"
   - "src/elspeth/plugins/context.py:PluginContext.record_call:error"
   - "src/elspeth/plugins/context.py:PluginContext.record_transform_error:row"
-  - "src/elspeth/plugins/context.py:PluginContext.record_transform_error:error_details"
   - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:row"
   - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:metadata"
 
@@ -189,17 +190,21 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:context_before"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:error"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:context_after"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_routing_event:reason"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_routing_events:reason"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:request_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:response_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:error"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:error_details"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
+
+  # Operations tracking - source/sink I/O audit trail
+  - "src/elspeth/core/operations.py:track_operation:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:request_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:response_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:error"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FORMATTERS - Record formatting for export
@@ -332,7 +337,6 @@ allowed_dict_patterns:
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"
   - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
   - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
-  - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.attributes:return"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter.configure:config"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
   - "src/elspeth/telemetry/exporters/datadog.py:DatadogExporter.configure:config"
@@ -363,6 +367,8 @@ allowed_dict_patterns:
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.diagnose:return"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_failure_context:return"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_recent_activity:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_operations:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_operation_calls:return (list)"
   - "src/elspeth/mcp/server.py:call_tool:arguments"
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -386,6 +392,9 @@ allowed_dict_patterns:
   - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_stats:return"
   - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_requests:return (list)"
   - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_timeseries:return (list)"
+  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.export_data:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.export_metrics:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_slow_response:body"
 
   # ChaosLLM MCP server (test tooling)
   - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.diagnose:return"
