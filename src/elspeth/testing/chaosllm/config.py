@@ -260,6 +260,30 @@ class ErrorInjectionConfig(BaseModel):
         default=(30, 60),
         description="How long to hang before responding [min, max] seconds",
     )
+    connection_failed_pct: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Percentage of requests that disconnect after a short lead time",
+    )
+    connection_failed_lead_sec: tuple[int, int] = Field(
+        default=(2, 5),
+        description="Lead time before disconnect [min, max] seconds",
+    )
+    connection_stall_pct: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Percentage of requests that stall the connection then disconnect",
+    )
+    connection_stall_start_sec: tuple[int, int] = Field(
+        default=(0, 2),
+        description="Initial delay before stalling [min, max] seconds",
+    )
+    connection_stall_sec: tuple[int, int] = Field(
+        default=(30, 60),
+        description="How long to stall before disconnect [min, max] seconds",
+    )
     connection_reset_pct: float = Field(
         default=0.0,
         ge=0.0,
@@ -324,7 +348,15 @@ class ErrorInjectionConfig(BaseModel):
         description="Error selection strategy: priority (first match) or weighted mix",
     )
 
-    @field_validator("retry_after_sec", "timeout_sec", "slow_response_sec", mode="before")
+    @field_validator(
+        "retry_after_sec",
+        "timeout_sec",
+        "connection_failed_lead_sec",
+        "connection_stall_start_sec",
+        "connection_stall_sec",
+        "slow_response_sec",
+        mode="before",
+    )
     @classmethod
     def parse_range(cls, v: Any) -> tuple[int, int]:
         """Parse [min, max] range from list or tuple."""
@@ -339,6 +371,18 @@ class ErrorInjectionConfig(BaseModel):
             raise ValueError(f"retry_after_sec min ({self.retry_after_sec[0]}) must be <= max ({self.retry_after_sec[1]})")
         if self.timeout_sec[0] > self.timeout_sec[1]:
             raise ValueError(f"timeout_sec min ({self.timeout_sec[0]}) must be <= max ({self.timeout_sec[1]})")
+        if self.connection_failed_lead_sec[0] > self.connection_failed_lead_sec[1]:
+            raise ValueError(
+                "connection_failed_lead_sec min "
+                f"({self.connection_failed_lead_sec[0]}) must be <= max ({self.connection_failed_lead_sec[1]})"
+            )
+        if self.connection_stall_start_sec[0] > self.connection_stall_start_sec[1]:
+            raise ValueError(
+                "connection_stall_start_sec min "
+                f"({self.connection_stall_start_sec[0]}) must be <= max ({self.connection_stall_start_sec[1]})"
+            )
+        if self.connection_stall_sec[0] > self.connection_stall_sec[1]:
+            raise ValueError(f"connection_stall_sec min ({self.connection_stall_sec[0]}) must be <= max ({self.connection_stall_sec[1]})")
         if self.slow_response_sec[0] > self.slow_response_sec[1]:
             raise ValueError(f"slow_response_sec min ({self.slow_response_sec[0]}) must be <= max ({self.slow_response_sec[1]})")
         return self

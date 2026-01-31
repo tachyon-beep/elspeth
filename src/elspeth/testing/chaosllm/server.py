@@ -391,8 +391,55 @@ class ChaosLLMServer:
         message_count: int,
         start_time: float,
     ) -> Response:
-        """Handle a connection-level error (timeout, reset, slow)."""
+        """Handle a connection-level error (timeout, reset, stall)."""
         error_type = decision.error_type
+
+        if error_type == "connection_failed":
+            lead_delay = decision.start_delay_sec if decision.start_delay_sec is not None else 0.0
+            if lead_delay > 0:
+                await asyncio.sleep(lead_delay)
+
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            self._record_request(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                endpoint=endpoint,
+                outcome="error_injected",
+                deployment=deployment,
+                model=model,
+                status_code=None,
+                error_type="connection_failed",
+                injection_type="connection_failed",
+                latency_ms=elapsed_ms,
+                injected_delay_ms=lead_delay * 1000 if lead_delay > 0 else None,
+                message_count=message_count,
+            )
+            raise ConnectionResetError("Connection failed after lead time")
+
+        if error_type == "connection_stall":
+            start_delay = decision.start_delay_sec if decision.start_delay_sec is not None else 0.0
+            stall_delay = decision.delay_sec if decision.delay_sec is not None else 60.0
+            if start_delay > 0:
+                await asyncio.sleep(start_delay)
+            await asyncio.sleep(stall_delay)
+
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            injected_delay_ms = (start_delay + stall_delay) * 1000
+            self._record_request(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                endpoint=endpoint,
+                outcome="error_injected",
+                deployment=deployment,
+                model=model,
+                status_code=None,
+                error_type="connection_stall",
+                injection_type="connection_stall",
+                latency_ms=elapsed_ms,
+                injected_delay_ms=injected_delay_ms if injected_delay_ms > 0 else None,
+                message_count=message_count,
+            )
+            raise ConnectionResetError("Connection stalled and was closed by server")
 
         if error_type == "timeout":
             # Hang forever (or until delay expires)
@@ -472,8 +519,8 @@ class ChaosLLMServer:
             headers["Retry-After"] = str(decision.retry_after_sec)
 
         # Build error body
-        openai_error_type = _ERROR_TYPE_MAPPING.get(error_type, "server_error")
-        error_message = _ERROR_MESSAGE_MAPPING.get(error_type, "An error occurred")
+        openai_error_type = _ERROR_TYPE_MAPPING[error_type]
+        error_message = _ERROR_MESSAGE_MAPPING[error_type]
 
         body = {
             "error": {

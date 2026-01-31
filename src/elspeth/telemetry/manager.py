@@ -139,10 +139,9 @@ class TelemetryManager:
 
         while True:
             event = self._queue.get()
-            if event is None:  # Shutdown sentinel
-                self._queue.task_done()
-                break
             try:
+                if event is None:  # Shutdown sentinel
+                    break
                 self._dispatch_to_exporters(event)
             except TelemetryExporterError as e:
                 # Store for re-raise on flush() when fail_on_total=True
@@ -153,6 +152,7 @@ class TelemetryManager:
                 logger.error("Export loop failed unexpectedly", error=str(e))
             finally:
                 # ALWAYS call task_done() to prevent join() hangs
+                # This runs for ALL cases including sentinel (break still executes finally)
                 self._queue.task_done()
 
     def _dispatch_to_exporters(self, event: TelemetryEvent) -> None:
@@ -380,11 +380,33 @@ class TelemetryManager:
         self._shutdown_event.set()
 
         # 2. Send sentinel FIRST - thread will process remaining events
-        #    then exit when it sees the sentinel
-        try:
-            self._queue.put(None, timeout=1.0)
-        except queue.Full:
-            logger.error("Failed to send shutdown sentinel - queue full")
+        #    then exit when it sees the sentinel.
+        #
+        #    CRITICAL: We MUST guarantee sentinel insertion. If queue is full,
+        #    drain items until we can insert. Since shutdown is signaled, no
+        #    new events will be queued, so draining is safe.
+        sentinel_sent = False
+        for _ in range(self._queue.maxsize + 10):  # +10 for safety margin
+            try:
+                self._queue.put(None, timeout=0.1)
+                sentinel_sent = True
+                break
+            except queue.Full:
+                # Queue full - drain one item and retry
+                try:
+                    discarded = self._queue.get_nowait()
+                    self._queue.task_done()
+                    if discarded is not None:
+                        logger.debug(
+                            "Discarded event during shutdown drain",
+                            event_type=type(discarded).__name__,
+                        )
+                except queue.Empty:
+                    # Queue became empty between put and get - try put again
+                    pass
+
+        if not sentinel_sent:
+            logger.error("Failed to send shutdown sentinel after drain attempts - export thread may hang")
 
         # 3. Wait for thread to exit (this implicitly waits for queue drain
         #    because thread processes all events before exiting on sentinel)

@@ -344,3 +344,95 @@ class TestHTTPClientTelemetry:
         event = emitted_events[0]
         assert event.call_type == CallType.HTTP
         assert event.status == CallStatus.ERROR
+
+    def test_provider_extraction_strips_credentials_from_url(self) -> None:
+        """Provider extraction MUST NOT include credentials from URL.
+
+        SECURITY: URLs may contain embedded credentials (e.g., https://user:pass@host/).
+        The telemetry provider field must contain only the hostname, not the userinfo
+        component. Leaking credentials into telemetry violates the secret-handling policy.
+
+        Regression test for credential leak vulnerability.
+        """
+        recorder = self._create_mock_recorder()
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        # URL with embedded credentials
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api_user:super_secret_password@api.example.com:8443",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            client.post("/endpoint", json={"input": "test"})
+
+        # Verify telemetry was emitted
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+
+        # CRITICAL: Provider must NOT contain credentials
+        assert "api_user" not in event.provider, f"Credentials leaked in provider: {event.provider}"
+        assert "super_secret_password" not in event.provider, f"Password leaked in provider: {event.provider}"
+        assert "@" not in event.provider, f"Userinfo separator leaked in provider: {event.provider}"
+
+        # Provider should contain only hostname (optionally with port)
+        assert "api.example.com" in event.provider
+
+    def test_provider_extraction_handles_url_without_credentials(self) -> None:
+        """Provider extraction works correctly for URLs without credentials."""
+        recorder = self._create_mock_recorder()
+
+        emitted_events: list[ExternalCallCompleted] = []
+
+        def telemetry_emit(event: ExternalCallCompleted) -> None:
+            emitted_events.append(event)
+
+        # URL without credentials
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+            base_url="https://api.example.com:443",
+            run_id="run_abc",
+            telemetry_emit=telemetry_emit,
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            mock_client_class.return_value = mock_client_instance
+
+            client.post("/endpoint", json={"input": "test"})
+
+        # Verify provider is correct
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        assert event.provider == "api.example.com"

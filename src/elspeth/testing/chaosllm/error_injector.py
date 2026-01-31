@@ -33,7 +33,8 @@ class ErrorDecision:
         error_type: The type of error to inject, or None for a successful response
         status_code: HTTP status code (only for HTTP errors)
         retry_after_sec: Value for Retry-After header (429/529 only)
-        delay_sec: Delay before responding (timeout/slow_response)
+        delay_sec: Delay before responding or disconnecting (timeout/slow_response/stall)
+        start_delay_sec: Lead time before a connection failure or stall
         category: The category of error (HTTP, CONNECTION, or MALFORMED)
         malformed_type: Specific malformation for MALFORMED category
     """
@@ -42,6 +43,7 @@ class ErrorDecision:
     status_code: int | None = None
     retry_after_sec: int | None = None
     delay_sec: float | None = None
+    start_delay_sec: float | None = None
     category: ErrorCategory | None = None
     malformed_type: str | None = None
 
@@ -70,12 +72,14 @@ class ErrorDecision:
         cls,
         error_type: str,
         delay_sec: float | None = None,
+        start_delay_sec: float | None = None,
     ) -> "ErrorDecision":
         """Create a decision for a connection-level failure."""
         return cls(
             error_type=error_type,
             category=ErrorCategory.CONNECTION,
             delay_sec=delay_sec,
+            start_delay_sec=start_delay_sec,
         )
 
     @classmethod
@@ -119,7 +123,13 @@ HTTP_ERRORS: dict[str, int] = {
 
 # Connection-level error types.
 # Exported for external consumers (e.g., response generators, test assertions).
-CONNECTION_ERRORS: set[str] = {"timeout", "connection_reset", "slow_response"}
+CONNECTION_ERRORS: set[str] = {
+    "timeout",
+    "connection_failed",
+    "connection_stall",
+    "connection_reset",
+    "slow_response",
+}
 
 # Malformed response types.
 # Exported for external consumers (e.g., response generators, test assertions).
@@ -219,6 +229,21 @@ class ErrorInjector:
         min_sec, max_sec = self._config.timeout_sec
         return self._rng.uniform(min_sec, max_sec)
 
+    def _pick_connection_failed_lead(self) -> float:
+        """Pick a lead time before a connection failure."""
+        min_sec, max_sec = self._config.connection_failed_lead_sec
+        return self._rng.uniform(min_sec, max_sec)
+
+    def _pick_connection_stall_start(self) -> float:
+        """Pick a start delay before stalling the connection."""
+        min_sec, max_sec = self._config.connection_stall_start_sec
+        return self._rng.uniform(min_sec, max_sec)
+
+    def _pick_connection_stall_delay(self) -> float:
+        """Pick a stall duration before disconnect."""
+        min_sec, max_sec = self._config.connection_stall_sec
+        return self._rng.uniform(min_sec, max_sec)
+
     def _pick_slow_response_delay(self) -> float:
         """Pick a random slow response delay from the configured range."""
         min_sec, max_sec = self._config.slow_response_sec
@@ -245,7 +270,7 @@ class ErrorInjector:
         - weighted: errors are chosen by configured weights
 
         Priority order (when selection_mode=priority):
-        1. Connection-level errors (timeout, connection_reset, slow_response)
+        1. Connection-level errors (connection_failed, connection_stall, timeout, connection_reset, slow_response)
         2. HTTP errors (rate_limit, capacity_529, service_unavailable, etc.)
         3. Malformed responses
 
@@ -261,6 +286,21 @@ class ErrorInjector:
         """Priority-based decision (first matching error wins)."""
 
         # === Connection-level errors (highest priority) ===
+
+        # Connection failed: accept then disconnect after a lead time
+        if self._should_trigger(self._config.connection_failed_pct):
+            return ErrorDecision.connection_error(
+                "connection_failed",
+                start_delay_sec=self._pick_connection_failed_lead(),
+            )
+
+        # Connection stall: accept, delay, stall, then disconnect
+        if self._should_trigger(self._config.connection_stall_pct):
+            return ErrorDecision.connection_error(
+                "connection_stall",
+                delay_sec=self._pick_connection_stall_delay(),
+                start_delay_sec=self._pick_connection_stall_start(),
+            )
 
         # Timeout: Accept connection but never respond
         if self._should_trigger(self._config.timeout_pct):
@@ -356,6 +396,21 @@ class ErrorInjector:
                 choices.append((weight, builder))
 
         # Connection-level
+        _add(
+            self._config.connection_failed_pct,
+            lambda: ErrorDecision.connection_error(
+                "connection_failed",
+                start_delay_sec=self._pick_connection_failed_lead(),
+            ),
+        )
+        _add(
+            self._config.connection_stall_pct,
+            lambda: ErrorDecision.connection_error(
+                "connection_stall",
+                delay_sec=self._pick_connection_stall_delay(),
+                start_delay_sec=self._pick_connection_stall_start(),
+            ),
+        )
         _add(
             self._config.timeout_pct,
             lambda: ErrorDecision.connection_error("timeout", delay_sec=self._pick_timeout_delay()),

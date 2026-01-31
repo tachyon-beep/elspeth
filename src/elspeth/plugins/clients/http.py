@@ -178,16 +178,22 @@ class AuditedHTTPClient(AuditedClientBase):
     def _extract_provider(self, url: str) -> str:
         """Extract provider (host) from URL for telemetry.
 
+        SECURITY: This method MUST NOT leak credentials. URLs may contain
+        embedded userinfo (e.g., https://user:pass@host/). We use hostname
+        only, which strips the userinfo component per RFC 3986.
+
         Args:
             url: Full URL
 
         Returns:
-            Host portion of URL (e.g., "api.example.com")
+            Host portion of URL (e.g., "api.example.com"), without credentials
         """
         from urllib.parse import urlparse
 
         parsed = urlparse(url)
-        return parsed.netloc or "unknown"
+        # SECURITY: Use hostname (not netloc) to avoid leaking credentials.
+        # netloc = [userinfo@]host[:port], hostname = just the host
+        return parsed.hostname or "unknown"
 
     def post(
         self,

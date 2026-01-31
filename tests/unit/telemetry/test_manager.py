@@ -880,8 +880,13 @@ class TestBackpressureMode:
             slow_exporter.can_continue.set()  # Unblock exporter
             manager.close()
 
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
     def test_block_mode_blocks_when_queue_full(self, base_timestamp: datetime) -> None:
-        """BLOCK mode blocks handle_event() when queue is full."""
+        """BLOCK mode blocks handle_event() when queue is full.
+
+        Note: This test replaces the internal queue mid-flight, which causes task_done()
+        count mismatches (expected warning). This is a test artifact, not a production issue.
+        """
         slow_exporter = SlowExporter("slow")
         config = MockConfig(backpressure_mode=BackpressureMode.BLOCK)
         manager = TelemetryManager(config, exporters=[slow_exporter])
@@ -1137,3 +1142,99 @@ class TestBackpressureMode:
 
         # Should get here without hanging
         assert manager.health_metrics["events_dropped"] == 3
+
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_close_completes_when_queue_is_full(self, base_timestamp: datetime) -> None:
+        """close() MUST complete even when queue is full at shutdown time.
+
+        Regression test for shutdown hang vulnerability.
+
+        When the queue is full at shutdown (e.g., slow exporters, DROP mode backlog),
+        close() must guarantee the sentinel gets inserted. If the sentinel cannot be
+        inserted, the export thread blocks on get() forever, and because it's non-daemon,
+        the process hangs indefinitely.
+
+        The fix drains items from the queue to make room for the sentinel when necessary.
+
+        Note: This test replaces the internal queue mid-flight, which causes task_done()
+        count mismatches (expected warning). This is a test artifact, not a production issue.
+        """
+        # Use SlowExporter to block the export thread - this allows us to fill the queue
+        # The thread will be blocked in export(), not in get()
+        slow_exporter = SlowExporter("slow")
+        config = MockConfig(backpressure_mode=BackpressureMode.DROP)
+        manager = TelemetryManager(config, exporters=[slow_exporter])
+
+        # Replace queue with tiny one BEFORE any events are sent
+        # The export thread is blocked on get() on the original queue initially,
+        # but when we send the first event, it will wake up and process it.
+        # Then it will be blocked in SlowExporter.export(), and we can replace the queue.
+
+        # Send first event to original queue
+        first_event = make_run_started("first", base_timestamp)
+        manager.handle_event(first_event)
+
+        # Wait for export thread to consume the event and block in SlowExporter
+        assert slow_exporter.export_started.wait(timeout=5.0), "Export thread never started"
+
+        # NOW replace the queue - thread is blocked in SlowExporter, not in get()
+        manager._queue = queue.Queue(maxsize=3)
+
+        # Fill the new queue completely with events in DROP mode
+        for i in range(10):
+            event = make_run_started(f"run-{i}", base_timestamp)
+            manager.handle_event(event)
+
+        # Queue should be full (or nearly full due to timing)
+        # Now call close() - this should drain queue and insert sentinel
+
+        # Now call close() - this MUST complete without hanging
+        close_completed = threading.Event()
+        close_exception: Exception | None = None
+
+        def close_with_tracking():
+            nonlocal close_exception
+            try:
+                manager.close()
+            except Exception as e:
+                close_exception = e
+            finally:
+                close_completed.set()
+
+        # Start close in a thread so we can timeout if it hangs
+        close_thread = threading.Thread(target=close_with_tracking)
+        close_thread.start()
+
+        # Give close() time to start its shutdown sequence (drain queue, insert sentinel)
+        import time
+
+        time.sleep(0.3)
+
+        # Now unblock the slow exporter - thread will finish export, then process queue
+        slow_exporter.can_continue.set()
+
+        # close() MUST complete within reasonable time
+        # If sentinel insertion fails when queue is full, the thread would hang
+        if not close_completed.wait(timeout=5.0):
+            # Force cleanup attempt
+            manager._shutdown_event.set()
+            try:
+                # Force-insert sentinel to try to unblock
+                while True:
+                    try:
+                        manager._queue.get_nowait()
+                    except queue.Empty:
+                        break
+                manager._queue.put(None)
+            except Exception:
+                pass
+            close_thread.join(timeout=1.0)
+            pytest.fail("close() hung when queue was full at shutdown - sentinel insertion must be guaranteed even when queue is full")
+
+        close_thread.join(timeout=1.0)
+
+        if close_exception is not None:
+            raise close_exception
+
+        # Verify export thread exited cleanly
+        assert not manager._export_thread.is_alive(), "Export thread still alive after close()"

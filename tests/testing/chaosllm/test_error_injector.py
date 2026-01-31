@@ -126,7 +126,7 @@ class TestErrorDecision:
             assert decision.is_malformed is False
 
         # Connection errors
-        for error_type in ["timeout", "connection_reset", "slow_response"]:
+        for error_type in ["timeout", "connection_failed", "connection_stall", "connection_reset", "slow_response"]:
             decision = ErrorDecision.connection_error(error_type)
             assert decision.is_connection_level is True
             assert decision.is_malformed is False
@@ -251,6 +251,38 @@ class TestConnectionErrors:
         assert decision.error_type == "timeout"
         assert decision.category == ErrorCategory.CONNECTION
         assert decision.delay_sec is not None
+        assert 10.0 <= decision.delay_sec <= 20.0
+
+    def test_connection_failed_error(self) -> None:
+        """Connection failed error has lead time and correct category."""
+        config = ErrorInjectionConfig(
+            connection_failed_pct=100.0,
+            connection_failed_lead_sec=(2, 5),
+        )
+        injector = ErrorInjector(config)
+
+        decision = injector.decide()
+        assert decision.error_type == "connection_failed"
+        assert decision.category == ErrorCategory.CONNECTION
+        assert decision.start_delay_sec is not None
+        assert 2.0 <= decision.start_delay_sec <= 5.0
+        assert decision.delay_sec is None
+
+    def test_connection_stall_error(self) -> None:
+        """Connection stall error has start and stall delays."""
+        config = ErrorInjectionConfig(
+            connection_stall_pct=100.0,
+            connection_stall_start_sec=(1, 2),
+            connection_stall_sec=(10, 20),
+        )
+        injector = ErrorInjector(config)
+
+        decision = injector.decide()
+        assert decision.error_type == "connection_stall"
+        assert decision.category == ErrorCategory.CONNECTION
+        assert decision.start_delay_sec is not None
+        assert decision.delay_sec is not None
+        assert 1.0 <= decision.start_delay_sec <= 2.0
         assert 10.0 <= decision.delay_sec <= 20.0
 
     def test_connection_reset_error(self) -> None:
@@ -750,7 +782,13 @@ class TestConstants:
 
     def test_connection_errors_set(self) -> None:
         """CONNECTION_ERRORS contains all expected types."""
-        expected = {"timeout", "connection_reset", "slow_response"}
+        expected = {
+            "timeout",
+            "connection_failed",
+            "connection_stall",
+            "connection_reset",
+            "slow_response",
+        }
         assert expected == CONNECTION_ERRORS
 
     def test_malformed_types_set(self) -> None:

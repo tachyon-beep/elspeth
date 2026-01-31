@@ -120,6 +120,18 @@ class TestClassifyOutcome:
         _, _, _, _, _, is_conn, _ = result
         assert is_conn is True
 
+    def test_connection_failed(self) -> None:
+        """Connection failed error type is classified as connection error."""
+        result = _classify_outcome("error_injected", None, "connection_failed")
+        _, _, _, _, _, is_conn, _ = result
+        assert is_conn is True
+
+    def test_connection_stall(self) -> None:
+        """Connection stall error type is classified as connection error."""
+        result = _classify_outcome("error_injected", None, "connection_stall")
+        _, _, _, _, _, is_conn, _ = result
+        assert is_conn is True
+
     def test_slow_response(self) -> None:
         """Slow response is not classified as a connection error."""
         result = _classify_outcome("success", 200, "slow_response")

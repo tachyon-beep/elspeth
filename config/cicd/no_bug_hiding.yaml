@@ -179,17 +179,17 @@ allow_hits:
   expires: null
 # REMOVED: plugins/clients/llm.py:R3:AuditedLLMClient:chat_completion:line=303
 # Reason: We require openai>=2.15 in pyproject.toml - model_dump() is guaranteed
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:line=251
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:line=257
   owner: architecture
   reason: 'Trust boundary: HTTP response headers from external server may lack content-type'
   safety: Graceful default to empty string - treats as non-JSON, still records body
   expires: null
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=337
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=343
   owner: architecture
   reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt successful call results'
   safety: Caught, logged with warning - call already recorded in Landscape, telemetry is secondary
   expires: null
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=384
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=390
   owner: architecture
   reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error recording'
   safety: Caught, logged with warning - error already recorded in Landscape, telemetry is secondary
@@ -1008,12 +1008,12 @@ allow_hits:
   reason: 'Intentional mapping with fallback: error_type from config maps to error message'
   safety: Default "An error occurred" is generic but valid error message
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=612
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=659
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=616
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=663
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
   safety: Empty list default produces 0 for message_count in metrics - safe for recording
@@ -1040,7 +1040,7 @@ allow_hits:
   reason: 'False positive: queue.Queue.get() is not dict.get() - no bug hiding'
   safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing keys
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:line=151
+- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:line=150
   owner: architecture
   reason: 'Export thread boundary: must catch all exceptions to prevent thread crash'
   safety: Caught, logged with error, task_done() still called; export thread continues
@@ -1060,7 +1060,7 @@ allow_hits:
   reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still flushed
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:close:line=400
+- key: telemetry/manager.py:R4:TelemetryManager:close:line=422
   owner: architecture
   reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
   safety: Caught, logged with warning; other exporters still closed
