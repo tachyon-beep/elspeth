@@ -266,7 +266,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, no-bug-hiding, contract-enforcement, test]
+    needs: [lint, enforce-tier-model, contract-enforcement, test]
     if: always()
     steps:
       - name: Check all jobs passed
