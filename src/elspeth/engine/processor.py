@@ -637,6 +637,16 @@ class RowProcessor:
                     )
                 output_rows = [result.row]
 
+            # Enforce expected_output_count if configured (plugin contract validation)
+            if settings.expected_output_count is not None:
+                actual_count = len(output_rows)
+                if actual_count != settings.expected_output_count:
+                    raise RuntimeError(
+                        f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
+                        f"but expected_output_count={settings.expected_output_count}. "
+                        f"This is a plugin contract violation."
+                    )
+
             # Create new tokens via expand_token using first buffered token as parent
             # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
@@ -911,6 +921,16 @@ class RowProcessor:
                             f"This is a plugin bug."
                         )
                     output_rows = [result.row]
+
+                # Enforce expected_output_count if configured (plugin contract validation)
+                if settings.expected_output_count is not None:
+                    actual_count = len(output_rows)
+                    if actual_count != settings.expected_output_count:
+                        raise RuntimeError(
+                            f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
+                            f"but expected_output_count={settings.expected_output_count}. "
+                            f"This is a plugin contract violation."
+                        )
 
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage
