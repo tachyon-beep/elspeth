@@ -370,14 +370,10 @@ class TransformExecutor:
                 duration_ms=duration_ms,
                 success_reason=result.success_reason,
             )
-            # Update token with new row data
+            # Update token with new row data, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
-            updated_token = TokenInfo(
-                row_id=token.row_id,
-                token_id=token.token_id,
-                row_data=result.row if result.row is not None else token.row_data,
-                branch_name=token.branch_name,
-            )
+            new_data = result.row if result.row is not None else token.row_data
+            updated_token = token.with_updated_data(new_data)
         else:
             # Transform returned error status (not exception)
             # This is a LEGITIMATE processing failure, not a bug
@@ -641,13 +637,8 @@ class GateExecutor:
             duration_ms=duration_ms,
         )
 
-        # Update token with new row data
-        updated_token = TokenInfo(
-            row_id=token.row_id,
-            token_id=token.token_id,
-            row_data=result.row,
-            branch_name=token.branch_name,
-        )
+        # Update token with new row data, preserving all lineage metadata
+        updated_token = token.with_updated_data(result.row)
 
         return GateOutcome(
             result=result,
@@ -840,12 +831,8 @@ class GateExecutor:
         )
 
         # Token row_data is unchanged (config gates don't modify data)
-        updated_token = TokenInfo(
-            row_id=token.row_id,
-            token_id=token.token_id,
-            row_data=token.row_data,
-            branch_name=token.branch_name,
-        )
+        # Use with_updated_data anyway to preserve all lineage metadata
+        updated_token = token.with_updated_data(token.row_data)
 
         return GateOutcome(
             result=result,
@@ -1310,6 +1297,9 @@ class AggregationExecutor:
                                 "token_id": str,
                                 "row_id": str,
                                 "branch_name": str | None,
+                                "fork_group_id": str | None,
+                                "join_group_id": str | None,
+                                "expand_group_id": str | None,
                                 "row_data": dict[str, Any]
                             },
                             ...
@@ -1345,12 +1335,16 @@ class AggregationExecutor:
             batch_id = self._batch_ids[node_id]
 
             # Store full TokenInfo as dicts (not just IDs)
+            # Include all lineage fields to preserve fork/join/expand metadata
             state[node_id] = {
                 "tokens": [
                     {
                         "token_id": t.token_id,
                         "row_id": t.row_id,
                         "branch_name": t.branch_name,
+                        "fork_group_id": t.fork_group_id,
+                        "join_group_id": t.join_group_id,
+                        "expand_group_id": t.expand_group_id,
                         "row_data": t.row_data,
                     }
                     for t in tokens
@@ -1445,14 +1439,17 @@ class AggregationExecutor:
                         f"Checkpoint token missing required fields: {missing}. Required: {required_fields}. Found: {set(t.keys())}"
                     )
 
-                # Reconstruct with explicit handling of optional field
-                # branch_name is OPTIONAL per TokenInfo contract (default=None)
+                # Reconstruct with explicit handling of optional fields
+                # All lineage fields are optional per TokenInfo contract (default=None)
                 reconstructed_tokens.append(
                     TokenInfo(
                         row_id=t["row_id"],
                         token_id=t["token_id"],
                         row_data=t["row_data"],
-                        branch_name=t.get("branch_name"),  # Optional field, None if missing
+                        branch_name=t.get("branch_name"),
+                        fork_group_id=t.get("fork_group_id"),
+                        join_group_id=t.get("join_group_id"),
+                        expand_group_id=t.get("expand_group_id"),
                     )
                 )
 

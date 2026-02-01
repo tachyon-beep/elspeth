@@ -1353,12 +1353,13 @@ class TestAggregationExecutorCheckpoint:
         executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint just under 1MB
-        # Target: ~900KB (safely under 1MB to account for JSON overhead)
-        # 900 rows x 1KB data each = ~900KB
+        # Target: ~750KB (safely under 1MB to account for JSON overhead)
+        # 750 rows x 1KB data each = ~750KB
+        # Note: checkpoint includes lineage fields (fork/join/expand_group_id)
         medium_row_data = {"data": "x" * 1000, "index": 0}
 
         tokens = []
-        for i in range(900):
+        for i in range(750):
             row_data = medium_row_data.copy()
             row_data["index"] = i
             tokens.append(

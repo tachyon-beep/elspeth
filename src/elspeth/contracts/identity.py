@@ -3,7 +3,7 @@
 These types answer: "How do we refer to things?"
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 
@@ -30,3 +30,21 @@ class TokenInfo:
     fork_group_id: str | None = None
     join_group_id: str | None = None
     expand_group_id: str | None = None
+
+    def with_updated_data(self, new_data: dict[str, Any]) -> "TokenInfo":
+        """Return a new TokenInfo with updated row_data, preserving all lineage fields.
+
+        This method ensures that when row_data is updated after a transform,
+        all identity and lineage metadata (branch_name, fork_group_id,
+        join_group_id, expand_group_id) are preserved.
+
+        Use this instead of constructing TokenInfo manually when updating
+        a token's data after processing.
+
+        Args:
+            new_data: The new row_data to use
+
+        Returns:
+            A new TokenInfo with the same identity/lineage but new row_data
+        """
+        return replace(self, row_data=new_data)

@@ -503,6 +503,161 @@ class TestTokenManagerEdgeCases:
 
         assert updated.branch_name == "my_branch"
 
+    def test_update_preserves_all_lineage_fields(self) -> None:
+        """update_row_data must preserve ALL lineage metadata fields.
+
+        Bug: P2-2026-01-31-update-row-data-drops-lineage
+        update_row_data() was only preserving branch_name, dropping:
+        - fork_group_id
+        - join_group_id
+        - expand_group_id
+        """
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+        initial = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"x": 1},
+        )
+
+        # Fork to get a token with fork_group_id
+        forked_children, fork_group_id = manager.fork_token(
+            parent_token=initial,
+            branches=["stats_branch"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+        forked_token = forked_children[0]
+
+        # Verify fork created the fork_group_id
+        assert forked_token.fork_group_id == fork_group_id
+        assert forked_token.branch_name == "stats_branch"
+
+        # Update the forked token's row data
+        updated = manager.update_row_data(
+            forked_token,
+            new_data={"x": 1, "y": 2},
+        )
+
+        # ALL lineage fields must be preserved
+        assert updated.row_data == {"x": 1, "y": 2}, "row_data should be updated"
+        assert updated.token_id == forked_token.token_id, "token_id must be preserved"
+        assert updated.row_id == forked_token.row_id, "row_id must be preserved"
+        assert updated.branch_name == "stats_branch", "branch_name must be preserved"
+        assert updated.fork_group_id == fork_group_id, "fork_group_id must be preserved"
+
+    def test_update_preserves_expand_group_id(self) -> None:
+        """update_row_data must preserve expand_group_id from expanded tokens."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+        parent = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"original": "data"},
+        )
+
+        # Expand to get tokens with expand_group_id
+        expanded_children, expand_group_id = manager.expand_token(
+            parent_token=parent,
+            expanded_rows=[{"id": 1}, {"id": 2}],
+            step_in_pipeline=2,
+            run_id=run.run_id,
+        )
+        expanded_token = expanded_children[0]
+
+        # Verify expand created the expand_group_id
+        assert expanded_token.expand_group_id == expand_group_id
+
+        # Update the expanded token's row data
+        updated = manager.update_row_data(
+            expanded_token,
+            new_data={"id": 1, "processed": True},
+        )
+
+        # expand_group_id must be preserved
+        assert updated.expand_group_id == expand_group_id, "expand_group_id must be preserved"
+
+    def test_update_preserves_join_group_id(self) -> None:
+        """update_row_data must preserve join_group_id from coalesced tokens."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.tokens import TokenManager
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        manager = TokenManager(recorder)
+        initial = manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            row_data={"value": 42},
+        )
+
+        # Fork and then coalesce to get a token with join_group_id
+        children, _fork_group_id = manager.fork_token(
+            parent_token=initial,
+            branches=["a", "b"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        merged = manager.coalesce_tokens(
+            parents=children,
+            merged_data={"value": 42, "merged": True},
+            step_in_pipeline=3,
+        )
+
+        # Verify coalesce created join_group_id
+        assert merged.join_group_id is not None
+
+        # Update the merged token's row data
+        updated = manager.update_row_data(
+            merged,
+            new_data={"value": 42, "merged": True, "enriched": "yes"},
+        )
+
+        # join_group_id must be preserved
+        assert updated.join_group_id == merged.join_group_id, "join_group_id must be preserved"
+
     def test_multiple_rows_different_tokens(self) -> None:
         """Each source row gets its own row_id and token_id."""
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder

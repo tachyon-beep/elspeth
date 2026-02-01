@@ -585,13 +585,8 @@ class RowProcessor:
                 )
 
             for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
-                # Update token with enriched data (same token_id, new row_data)
-                updated_token = TokenInfo(
-                    row_id=token.row_id,
-                    token_id=token.token_id,
-                    row_data=enriched_data,
-                    branch_name=token.branch_name,
-                )
+                # Update token with enriched data, preserving all lineage metadata
+                updated_token = token.with_updated_data(enriched_data)
 
                 # Check if token needs to go to a coalesce point
                 # This must happen EVEN if no more transforms - coalesce may be last step
@@ -863,12 +858,8 @@ class RowProcessor:
                     # If there's a coalesce point, skip directly there (matches fork behavior).
                     continuation_start = coalesce_at_step if coalesce_at_step is not None else step
                     for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
-                        updated_token = TokenInfo(
-                            row_id=token.row_id,
-                            token_id=token.token_id,
-                            row_data=enriched_data,
-                            branch_name=token.branch_name,
-                        )
+                        # Update token, preserving all lineage metadata
+                        updated_token = token.with_updated_data(enriched_data)
                         child_items.append(
                             _WorkItem(
                                 token=updated_token,
@@ -883,12 +874,8 @@ class RowProcessor:
                     # No more transforms and no coalesce - return COMPLETED for all tokens
                     passthrough_results: list[RowResult] = []
                     for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
-                        updated_token = TokenInfo(
-                            row_id=token.row_id,
-                            token_id=token.token_id,
-                            row_data=enriched_data,
-                            branch_name=token.branch_name,
-                        )
+                        # Update token, preserving all lineage metadata
+                        updated_token = token.with_updated_data(enriched_data)
                         # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                         passthrough_results.append(
                             RowResult(

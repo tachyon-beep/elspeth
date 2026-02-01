@@ -220,14 +220,9 @@ class TokenManager:
             new_data: New row data
 
         Returns:
-            Updated TokenInfo (same token_id, new row_data)
+            Updated TokenInfo (same token_id, new row_data, all lineage preserved)
         """
-        return TokenInfo(
-            row_id=token.row_id,
-            token_id=token.token_id,
-            row_data=new_data,
-            branch_name=token.branch_name,
-        )
+        return token.with_updated_data(new_data)
 
     def expand_token(
         self,

@@ -2689,3 +2689,18 @@ allow_hits:
   reason: Tier-3 boundary validation - user config fields list must be list type
   safety: Raises explicit ValueError for non-list fields value
   expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=6ca19ec767a89a81
+  owner: bugfix
+  reason: Deserializing optional TokenInfo field - fork_group_id is None by default in TokenInfo contract
+  safety: Returns None for missing keys which is the correct default for optional lineage field
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=643271cd701c8e93
+  owner: bugfix
+  reason: Deserializing optional TokenInfo field - join_group_id is None by default in TokenInfo contract
+  safety: Returns None for missing keys which is the correct default for optional lineage field
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=b3ac54805112ea99
+  owner: bugfix
+  reason: Deserializing optional TokenInfo field - expand_group_id is None by default in TokenInfo contract
+  safety: Returns None for missing keys which is the correct default for optional lineage field
+  expires: null
