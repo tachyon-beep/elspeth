@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import NodeType
+from elspeth.contracts import NodeType, PendingOutcome, RowOutcome
 from elspeth.contracts.schema import SchemaConfig
 from tests.conftest import as_sink
 
@@ -118,6 +118,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="mock_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # Verify artifact returned with correct info
@@ -184,6 +185,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="empty_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         assert artifact is None
@@ -247,6 +249,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="failing_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
 
         # Verify failure recorded for ALL tokens
@@ -333,6 +336,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="batch_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
             artifacts.append(artifact)
 
@@ -403,6 +407,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="linked_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # Get first token's state
@@ -486,6 +491,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="external_call_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # Verify sink succeeded
@@ -599,6 +605,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="flush_failing_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
 
         # CRITICAL VERIFICATION: All node_states must be FAILED, not OPEN
@@ -688,6 +695,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="crash_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
 
         # Verify audit state was cleaned up BEFORE the crash

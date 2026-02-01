@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryManager
 
 from elspeth import __version__ as ENGINE_VERSION
-from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import BatchPendingError, ExportStatus, NodeType, PendingOutcome, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.enums import TriggerType
@@ -1071,9 +1071,10 @@ class Orchestrator:
         rows_expanded = 0
         rows_buffered = 0
         routed_destinations: dict[str, int] = {}  # Track routing destinations
-        # Track (token, outcome) pairs for deferred outcome recording
+        # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
-        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
+        # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
         # Maps node_id_str -> (transform, step_in_pipeline)
@@ -1211,20 +1212,17 @@ class Orchestrator:
                                     )
                                 )
 
-                                # Record QUARANTINED outcome with error_hash for audit trail
+                                # Compute error_hash for QUARANTINED outcome audit trail
                                 # Per CLAUDE.md: every row must reach exactly one terminal state
+                                # Fix: P1-2026-01-31 - Do NOT record outcome here!
+                                # Record outcome AFTER sink durability in SinkExecutor.write()
                                 error_detail = source_item.quarantine_error or "unknown_validation_error"
                                 quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-                                recorder.record_token_outcome(
-                                    run_id=run_id,
-                                    token_id=quarantine_token.token_id,
-                                    outcome=RowOutcome.QUARANTINED,
-                                    error_hash=quarantine_error_hash,
-                                    sink_name=quarantine_sink,
-                                )
 
-                                # QUARANTINED outcome already recorded above - pass None to skip re-recording
-                                pending_tokens[quarantine_sink].append((quarantine_token, None))
+                                # Pass PendingOutcome with error_hash - outcome recorded after sink durability
+                                pending_tokens[quarantine_sink].append(
+                                    (quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash))
+                                )
                             # Emit progress before continue (ensures quarantined rows trigger updates)
                             # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                             current_time = time.perf_counter()
@@ -1330,14 +1328,14 @@ class Orchestrator:
                                 # sink durability is achieved. Do NOT record here - that would violate
                                 # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
-                                pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
+                                pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                             elif result.outcome == RowOutcome.ROUTED:
                                 rows_routed += 1
                                 # GateExecutor contract: ROUTED outcome always has sink_name set
                                 if result.sink_name is None:
                                     raise RuntimeError("ROUTED outcome requires sink_name")
                                 routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
-                                pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
+                                pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                             elif result.outcome == RowOutcome.FAILED:
                                 rows_failed += 1
                             elif result.outcome == RowOutcome.QUARANTINED:
@@ -1356,7 +1354,7 @@ class Orchestrator:
                                 # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
                                 # sink durability is achieved. Consumed tokens have COALESCED recorded
                                 # by CoalesceExecutor. The merged token's lineage is in join_group_id.
-                                pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                                pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                             elif result.outcome == RowOutcome.EXPANDED:
                                 # Deaggregation parent token - children counted separately
                                 rows_expanded += 1
@@ -1398,13 +1396,17 @@ class Orchestrator:
                                                         and cont_result.token.branch_name in config.sinks
                                                     ):
                                                         sink_name = cont_result.token.branch_name
-                                                    pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                                    pending_tokens[sink_name].append(
+                                                        (cont_result.token, PendingOutcome(RowOutcome.COMPLETED))
+                                                    )
                                                 elif cont_result.outcome == RowOutcome.ROUTED:
                                                     rows_routed += 1
                                                     # sink_name is guaranteed non-None for ROUTED outcome
                                                     routed_sink = cont_result.sink_name or default_sink_name
                                                     routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                                    pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                                    pending_tokens[routed_sink].append(
+                                                        (cont_result.token, PendingOutcome(RowOutcome.ROUTED))
+                                                    )
                                                 elif cont_result.outcome == RowOutcome.QUARANTINED:
                                                     rows_quarantined += 1
                                                 elif cont_result.outcome == RowOutcome.FAILED:
@@ -1414,7 +1416,9 @@ class Orchestrator:
                                             # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                                             # AFTER sink durability is achieved.
                                             rows_succeeded += 1
-                                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                            pending_tokens[default_sink_name].append(
+                                                (outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED))
+                                            )
                                     elif outcome.failure_reason:
                                         rows_coalesce_failed += 1
 
@@ -1516,13 +1520,13 @@ class Orchestrator:
                                             sink_name = default_sink_name
                                             if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
                                                 sink_name = cont_result.token.branch_name
-                                            pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                            pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
                                         elif cont_result.outcome == RowOutcome.ROUTED:
                                             rows_routed += 1
                                             # sink_name is guaranteed non-None for ROUTED outcome
                                             routed_sink = cont_result.sink_name or default_sink_name
                                             routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                            pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                            pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                         elif cont_result.outcome == RowOutcome.QUARANTINED:
                                             rows_quarantined += 1
                                         elif cont_result.outcome == RowOutcome.FAILED:
@@ -1532,7 +1536,7 @@ class Orchestrator:
                                     # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                                     # AFTER sink durability is achieved.
                                     rows_succeeded += 1
-                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
                             elif outcome.failure_reason:
                                 # Coalesce failed (quorum_not_met, incomplete_branches)
                                 # Audit trail recorded by executor: each consumed token has
@@ -1599,13 +1603,20 @@ class Orchestrator:
                     sink = config.sinks[sink_name]
                     sink_node_id = sink_id_map[SinkName(sink_name)]
 
-                    # Group tokens by outcome for separate write() calls
-                    # (sink_executor.write() takes a single outcome for all tokens in a batch)
+                    # Group tokens by pending_outcome for separate write() calls
+                    # (sink_executor.write() takes a single PendingOutcome for all tokens in a batch)
                     from itertools import groupby
 
-                    # Sort by outcome to enable groupby (None sorts first)
-                    sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
-                    for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                    # Sort by (outcome, error_hash) to enable groupby (None sorts first)
+                    # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
+                    def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
+                        pending = pair[1]
+                        if pending is None:
+                            return (True, "", "")  # None sorts first
+                        return (False, pending.outcome.value, pending.error_hash or "")
+
+                    sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
+                    for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                         group_tokens = [token for token, _ in group]
                         sink_executor.write(
                             sink=sink,
@@ -1613,7 +1624,7 @@ class Orchestrator:
                             ctx=ctx,
                             step_in_pipeline=step,
                             sink_name=sink_name,
-                            outcome=outcome,
+                            pending_outcome=pending_outcome,
                             on_token_written=checkpoint_after_sink(sink_node_id),
                         )
 
@@ -2281,9 +2292,10 @@ class Orchestrator:
         rows_expanded = 0
         rows_buffered = 0
         routed_destinations: dict[str, int] = {}  # Track routing destinations
-        # Track (token, outcome) pairs for deferred outcome recording
+        # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
-        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]] = {name: [] for name in config.sinks}
+        # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]] = {name: [] for name in config.sinks}
 
         # Pre-compute aggregation transform lookup for O(1) access per timeout check
         # NOTE: Steps are 0-indexed here; handle_timeout_flush converts to 1-indexed
@@ -2361,13 +2373,13 @@ class Orchestrator:
                         # sink durability is achieved. Do NOT record here - that would violate
                         # Invariant 3: "COMPLETED implies token has completed sink node_state"
 
-                        pending_tokens[sink_name].append((result.token, RowOutcome.COMPLETED))
+                        pending_tokens[sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
                         if result.sink_name is None:
                             raise RuntimeError("ROUTED outcome requires sink_name")
                         routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
-                        pending_tokens[result.sink_name].append((result.token, RowOutcome.ROUTED))
+                        pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     elif result.outcome == RowOutcome.FAILED:
                         rows_failed += 1
                     elif result.outcome == RowOutcome.QUARANTINED:
@@ -2381,7 +2393,7 @@ class Orchestrator:
                         rows_succeeded += 1
                         # NOTE: COMPLETED outcome is recorded by SinkExecutor.write() AFTER
                         # sink durability is achieved.
-                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                        pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     elif result.outcome == RowOutcome.EXPANDED:
                         rows_expanded += 1
                     elif result.outcome == RowOutcome.BUFFERED:
@@ -2417,13 +2429,13 @@ class Orchestrator:
                                             sink_name = default_sink_name
                                             if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
                                                 sink_name = cont_result.token.branch_name
-                                            pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                            pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
                                         elif cont_result.outcome == RowOutcome.ROUTED:
                                             rows_routed += 1
                                             # sink_name is guaranteed non-None for ROUTED outcome
                                             routed_sink = cont_result.sink_name or default_sink_name
                                             routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                            pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                            pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                         elif cont_result.outcome == RowOutcome.QUARANTINED:
                                             rows_quarantined += 1
                                         elif cont_result.outcome == RowOutcome.FAILED:
@@ -2432,7 +2444,7 @@ class Orchestrator:
                                     # No downstream nodes - send directly to sink
                                     # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                                     # AFTER sink durability is achieved.
-                                    pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                                    pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
                             elif outcome.failure_reason:
                                 rows_coalesce_failed += 1
 
@@ -2500,13 +2512,13 @@ class Orchestrator:
                                     sink_name = default_sink_name
                                     if cont_result.token.branch_name is not None and cont_result.token.branch_name in config.sinks:
                                         sink_name = cont_result.token.branch_name
-                                    pending_tokens[sink_name].append((cont_result.token, RowOutcome.COMPLETED))
+                                    pending_tokens[sink_name].append((cont_result.token, PendingOutcome(RowOutcome.COMPLETED)))
                                 elif cont_result.outcome == RowOutcome.ROUTED:
                                     rows_routed += 1
                                     # sink_name is guaranteed non-None for ROUTED outcome
                                     routed_sink = cont_result.sink_name or default_sink_name
                                     routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                                    pending_tokens[routed_sink].append((cont_result.token, RowOutcome.ROUTED))
+                                    pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                 elif cont_result.outcome == RowOutcome.QUARANTINED:
                                     rows_quarantined += 1
                                 elif cont_result.outcome == RowOutcome.FAILED:
@@ -2516,7 +2528,7 @@ class Orchestrator:
                             # NOTE: COMPLETED outcome is recorded by SinkExecutor.write()
                             # AFTER sink durability is achieved.
                             rows_succeeded += 1
-                            pending_tokens[default_sink_name].append((outcome.merged_token, RowOutcome.COMPLETED))
+                            pending_tokens[default_sink_name].append((outcome.merged_token, PendingOutcome(RowOutcome.COMPLETED)))
                     elif outcome.failure_reason:
                         # Coalesce failed - audit trail already recorded by executor
                         rows_coalesce_failed += 1
@@ -2529,11 +2541,18 @@ class Orchestrator:
                 if token_outcome_pairs and sink_name in config.sinks:
                     sink = config.sinks[sink_name]
 
-                    # Group tokens by outcome for separate write() calls
+                    # Group tokens by pending_outcome for separate write() calls
+                    # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED
                     from itertools import groupby
 
-                    sorted_pairs = sorted(token_outcome_pairs, key=lambda x: (x[1] is None, x[1].value if x[1] else ""))
-                    for outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
+                    def pending_sort_key(pair: tuple[TokenInfo, PendingOutcome | None]) -> tuple[bool, str, str]:
+                        pending = pair[1]
+                        if pending is None:
+                            return (True, "", "")
+                        return (False, pending.outcome.value, pending.error_hash or "")
+
+                    sorted_pairs = sorted(token_outcome_pairs, key=pending_sort_key)
+                    for pending_outcome, group in groupby(sorted_pairs, key=lambda x: x[1]):
                         group_tokens = [token for token, _ in group]
                         sink_executor.write(
                             sink=sink,
@@ -2541,7 +2560,7 @@ class Orchestrator:
                             ctx=ctx,
                             step_in_pipeline=step,
                             sink_name=sink_name,
-                            outcome=outcome,
+                            pending_outcome=pending_outcome,
                         )
 
         finally:
@@ -2688,7 +2707,7 @@ class Orchestrator:
         config: PipelineConfig,
         processor: RowProcessor,
         ctx: PluginContext,
-        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
         default_sink_name: str,
         agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
     ) -> tuple[int, int, int, int, int, int, int, int, dict[str, int]]:
@@ -2782,7 +2801,7 @@ class Orchestrator:
                     sink_name = result.token.branch_name or default_sink_name
                     if sink_name not in pending_tokens:
                         sink_name = default_sink_name
-                    pending_tokens[sink_name].append((result.token, result.outcome))
+                    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
                     rows_succeeded += 1
 
             # Process work items through remaining transforms
@@ -2811,7 +2830,7 @@ class Orchestrator:
                         sink_name = result.token.branch_name or default_sink_name
                         if sink_name not in pending_tokens:
                             sink_name = default_sink_name
-                        pending_tokens[sink_name].append((result.token, result.outcome))
+                        pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
                         rows_succeeded += 1
                     elif result.outcome == RowOutcome.ROUTED:
                         # Gate routed to named sink - MUST enqueue or row is lost
@@ -2819,7 +2838,7 @@ class Orchestrator:
                         rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
                         routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
+                        pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
                         rows_quarantined += 1
@@ -2828,7 +2847,7 @@ class Orchestrator:
                         # This handles the case where coalesce is the last step
                         rows_coalesced += 1
                         rows_succeeded += 1
-                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                        pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
                     elif result.outcome == RowOutcome.FORKED:
                         # Parent token split into multiple paths - children counted separately
                         rows_forked += 1
@@ -2857,7 +2876,7 @@ class Orchestrator:
         config: PipelineConfig,
         processor: RowProcessor,
         ctx: PluginContext,
-        pending_tokens: dict[str, list[tuple[TokenInfo, RowOutcome | None]]],
+        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
         default_sink_name: str,
         run_id: str,
         recorder: LandscapeRecorder,
@@ -2935,7 +2954,7 @@ class Orchestrator:
                     sink_name = result.token.branch_name or default_sink_name
                     if sink_name not in pending_tokens:
                         sink_name = default_sink_name
-                    pending_tokens[sink_name].append((result.token, result.outcome))
+                    pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
                     rows_succeeded += 1
 
                     # Checkpoint if enabled
@@ -2972,7 +2991,7 @@ class Orchestrator:
                         sink_name = result.token.branch_name or default_sink_name
                         if sink_name not in pending_tokens:
                             sink_name = default_sink_name
-                        pending_tokens[sink_name].append((result.token, result.outcome))
+                        pending_tokens[sink_name].append((result.token, PendingOutcome(result.outcome)))
                         rows_succeeded += 1
 
                         # Checkpoint if enabled
@@ -2988,7 +3007,7 @@ class Orchestrator:
                         rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
                         routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
-                        pending_tokens[routed_sink].append((result.token, RowOutcome.ROUTED))
+                        pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
@@ -3005,7 +3024,7 @@ class Orchestrator:
                         # This handles the case where coalesce is the last step
                         rows_coalesced += 1
                         rows_succeeded += 1
-                        pending_tokens[default_sink_name].append((result.token, RowOutcome.COMPLETED))
+                        pending_tokens[default_sink_name].append((result.token, PendingOutcome(RowOutcome.COMPLETED)))
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:

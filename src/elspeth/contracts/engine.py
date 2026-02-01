@@ -1,7 +1,33 @@
 # src/elspeth/contracts/engine.py
 """Engine-related type contracts."""
 
+from dataclasses import dataclass
 from typing import TypedDict
+
+from elspeth.contracts.enums import RowOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class PendingOutcome:
+    """Pending token outcome waiting for sink durability confirmation.
+
+    This dataclass carries outcome information through the pending_tokens queue
+    to be recorded AFTER sink durability is achieved.
+
+    The key insight: token outcomes must only be recorded after sink write + flush
+    complete successfully. Recording before durability creates audit trail entries
+    that claim data was written when it may not have been.
+
+    Attributes:
+        outcome: The terminal outcome (COMPLETED, ROUTED, QUARANTINED, etc.)
+        error_hash: Required for QUARANTINED/FAILED outcomes - hash of error details.
+                   For other outcomes, this is None.
+
+    Fix for: P1-2026-01-31-quarantine-outcome-before-durability
+    """
+
+    outcome: RowOutcome
+    error_hash: str | None = None
 
 
 class RetryPolicy(TypedDict, total=False):

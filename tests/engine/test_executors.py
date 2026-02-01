@@ -25,7 +25,9 @@ import pytest
 
 from elspeth.contracts import (
     ArtifactDescriptor,
+    PendingOutcome,
     RoutingAction,
+    RowOutcome,
     TokenInfo,
 )
 from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
@@ -1142,6 +1144,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="mock_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         assert artifact is not None
@@ -1199,6 +1202,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="mock_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
 
     def test_requires_sink_node_id_set(
@@ -1232,6 +1236,7 @@ class TestSinkExecutor:
                 ctx=ctx,
                 step_in_pipeline=5,
                 sink_name="mock_sink",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             )
 
     def test_on_token_written_callback_called(
@@ -1288,6 +1293,7 @@ class TestSinkExecutor:
             ctx=ctx,
             step_in_pipeline=5,
             sink_name="mock_sink",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             on_token_written=on_written,
         )
 

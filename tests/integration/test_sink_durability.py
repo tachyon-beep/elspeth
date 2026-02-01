@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, TokenInfo
+from elspeth.contracts import Determinism, NodeType, PendingOutcome, RowOutcome, TokenInfo
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -200,6 +200,7 @@ class TestSinkDurability:
                 ctx=ctx,
                 step_in_pipeline=1,
                 sink_name="output",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
                 on_token_written=checkpoint_callback,
             )
 
@@ -285,6 +286,7 @@ class TestSinkDurability:
                 ctx=ctx,
                 step_in_pipeline=1,
                 sink_name="output",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
                 on_token_written=failing_checkpoint_callback,
             )
 
@@ -383,6 +385,7 @@ class TestSinkDurability:
             ctx=ctx,
             step_in_pipeline=1,
             sink_name="output",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
             on_token_written=tracking_checkpoint_callback,
         )
 

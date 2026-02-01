@@ -81,7 +81,7 @@ from elspeth.contracts.data import (
     check_compatibility,
     validate_row,
 )
-from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.engine import PendingOutcome, RetryPolicy
 from elspeth.contracts.enums import (
     BackpressureMode,
     BatchStatus,
@@ -267,6 +267,7 @@ __all__ = [  # Grouped by category for readability
     "check_compatibility",
     "validate_row",
     # engine
+    "PendingOutcome",
     "RetryPolicy",
     # payload_store
     "IntegrityError",

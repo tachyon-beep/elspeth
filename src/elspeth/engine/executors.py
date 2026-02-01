@@ -20,9 +20,9 @@ from elspeth.contracts import (
     ConfigGateReason,
     ExecutionError,
     NodeStateOpen,
+    PendingOutcome,
     RoutingAction,
     RoutingSpec,
-    RowOutcome,
     TokenInfo,
 )
 from elspeth.contracts.enums import (
@@ -1637,7 +1637,7 @@ class SinkExecutor:
         step_in_pipeline: int,
         *,
         sink_name: str,
-        outcome: RowOutcome | None = RowOutcome.COMPLETED,
+        pending_outcome: PendingOutcome,
         on_token_written: Callable[[TokenInfo], None] | None = None,
     ) -> Artifact | None:
         """Write tokens to sink with artifact recording.
@@ -1652,15 +1652,18 @@ class SinkExecutor:
         - Invariant 3: "COMPLETED/ROUTED implies the token has a completed sink node_state"
         - Invariant 4: "Completed sink node_state implies a terminal token_outcome"
 
+        Fix: P1-2026-01-31-quarantine-outcome-before-durability
+        Uses PendingOutcome to carry error_hash for QUARANTINED outcomes through to
+        recording, ensuring outcomes are only recorded after sink durability.
+
         Args:
             sink: Sink plugin to write to
             tokens: Tokens to write (may be empty)
             ctx: Plugin context
             step_in_pipeline: Current position in DAG (Orchestrator is authority)
             sink_name: Name of the sink (for token_outcome recording)
-            outcome: RowOutcome to record (COMPLETED for default sink, ROUTED for gate-routed).
-                    Pass None to skip outcome recording (used when outcome was already recorded,
-                    e.g., QUARANTINED tokens).
+            pending_outcome: PendingOutcome containing outcome and optional error_hash.
+                    Required - all sink-bound tokens must have their outcome recorded.
             on_token_written: Optional callback called for each token after successful write.
                              Used for post-sink checkpointing.
 
@@ -1797,15 +1800,16 @@ class SinkExecutor:
         # 4. artifact is registered
         # Recording here ensures Invariant 3: "COMPLETED/ROUTED implies completed sink node_state"
         #
-        # outcome=None means outcome was already recorded (e.g., QUARANTINED tokens)
-        if outcome is not None:
-            for token, _ in states:
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=token.token_id,
-                    outcome=outcome,  # Use provided outcome (COMPLETED or ROUTED)
-                    sink_name=sink_name,
-                )
+        # Fix: P1-2026-01-31 - PendingOutcome carries error_hash for QUARANTINED outcomes
+        # pending_outcome is REQUIRED - all sink-bound tokens must have outcomes recorded
+        for token, _ in states:
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=token.token_id,
+                outcome=pending_outcome.outcome,
+                error_hash=pending_outcome.error_hash,
+                sink_name=sink_name,
+            )
 
         # Call checkpoint callback for each token after successful write + flush
         # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.

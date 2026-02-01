@@ -26,7 +26,9 @@ from elspeth.contracts import (
     NodeStateCompleted,
     NodeStateStatus,
     NodeType,
+    PendingOutcome,
     RoutingMode,
+    RowOutcome,
     RunStatus,
     SinkName,
     SourceRow,
@@ -1660,6 +1662,7 @@ class TestForkCoalescePipelineIntegration:
             ctx=ctx,
             step_in_pipeline=4,
             sink_name="output",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # CRITICAL VERIFICATION: Sink received 1 merged row, not 2 fork children
@@ -1905,6 +1908,7 @@ class TestForkCoalescePipelineIntegration:
             ctx=ctx,
             step_in_pipeline=3,
             sink_name="output",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # Verify sink received exactly 3 merged rows
@@ -2263,6 +2267,7 @@ class TestComplexDAGIntegration:
             ctx=ctx,
             step_in_pipeline=4,
             sink_name="output",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
         )
 
         # Verify sink received exactly 1 merged row (not 2 separate branch outputs)

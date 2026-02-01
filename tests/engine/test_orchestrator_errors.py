@@ -442,3 +442,109 @@ class TestSourceQuarantineTokenOutcome:
             "QUARANTINED outcome must have error_hash for audit trail. "
             "The error hash allows correlating with the original validation error."
         )
+
+    def test_quarantine_outcome_not_recorded_if_sink_fails(self, payload_store) -> None:
+        """QUARANTINED outcome must NOT be recorded if quarantine sink write fails.
+
+        Bug: P1-2026-01-31-quarantine-outcome-before-durability
+
+        The current implementation records QUARANTINED outcome BEFORE the sink
+        write completes. If the sink fails, the audit trail shows QUARANTINED
+        but no durable data exists - violating the durability invariant.
+
+        Expected behavior:
+        - If quarantine sink.write() fails, NO QUARANTINED outcome should exist
+        - The row should be in a FAILED state instead
+        - The pipeline should fail (sink errors are fatal)
+        """
+        from collections.abc import Iterator
+
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RowOutcome
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class QuarantiningSource(_TestSourceBase):
+            """Source that yields one quarantined row."""
+
+            name = "quarantining_source"
+            output_schema = RowSchema
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.quarantined(
+                    row={"id": 1, "name": "bad_row"},
+                    error="Validation failed",
+                    destination="quarantine",
+                )
+
+        class FailingSink(_TestSinkBase):
+            """Sink that always fails on write."""
+
+            name = "failing_sink"
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                raise RuntimeError("Sink write failed!")
+
+        class CollectSink(_TestSinkBase):
+            """Normal sink that collects rows."""
+
+            name = "collect_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = QuarantiningSource()
+        default_sink = CollectSink()
+        failing_quarantine_sink = FailingSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(failing_quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+
+        # Run should fail because quarantine sink fails
+        with pytest.raises(RuntimeError, match="Sink write failed!"):
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        # Get the run that was created (even though it failed)
+        from elspeth.core.landscape import LandscapeRecorder
+
+        recorder = LandscapeRecorder(db)
+        runs = recorder.list_runs()
+        assert len(runs) == 1, "Expected exactly one run in Landscape"
+        run_id = runs[0].run_id
+
+        # THE CRITICAL ASSERTION:
+        # There should be NO QUARANTINED outcome because sink write failed
+        # (durability was not achieved)
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import token_outcomes_table
+
+        with db.engine.connect() as conn:
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id)).fetchall()
+
+        quarantined_outcomes = [o for o in outcomes if o.outcome == RowOutcome.QUARANTINED.value]
+
+        # BUG: Currently this FAILS because QUARANTINED is recorded BEFORE sink durability
+        assert len(quarantined_outcomes) == 0, (
+            "QUARANTINED outcome should NOT exist when quarantine sink fails! "
+            f"Found {len(quarantined_outcomes)} QUARANTINED outcomes. "
+            "This violates the 'outcome = durable output' invariant. "
+            "See bug: P1-2026-01-31-quarantine-outcome-before-durability"
+        )
