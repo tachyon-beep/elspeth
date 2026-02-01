@@ -390,6 +390,7 @@ class TransformExecutor:
                 status=NodeStateStatus.FAILED,
                 duration_ms=duration_ms,
                 error=result.reason,
+                context_after=result.context_after,
             )
 
             # Handle error routing - _on_error is part of TransformProtocol
