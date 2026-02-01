@@ -213,6 +213,11 @@ class TestLandscapeSettingsAlignment:
     # Fields actively used at runtime
     WIRED_FIELDS: ClassVar[set[str]] = {
         "url",  # Used in LandscapeDB.from_url()
+        "dump_to_jsonl",  # Used in LandscapeDB.from_url() via cli.py
+        "dump_to_jsonl_path",  # Used in LandscapeDB.from_url() via cli.py
+        "dump_to_jsonl_fail_on_error",  # Used in LandscapeDB.from_url() via cli.py
+        "dump_to_jsonl_include_payloads",  # Used in LandscapeDB.from_url() via cli.py
+        "dump_to_jsonl_payload_base_path",  # Used in LandscapeDB.from_url() via cli.py
     }
 
     # Nested settings object - checked separately
