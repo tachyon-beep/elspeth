@@ -236,7 +236,8 @@ class TransformExecutor:
         # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
         ctx.state_id = state.state_id
         ctx.node_id = transform.node_id
-        ctx._call_index = 0  # Reset call index for this state
+        # Note: call_index allocation is handled by LandscapeRecorder.allocate_call_index()
+        # which automatically starts at 0 for each new state_id
 
         # Detect batch transforms (those using BatchTransformMixin)
         # They have accept() method and process() raises NotImplementedError
@@ -509,7 +510,7 @@ class GateExecutor:
         # Gates may need to make external calls (e.g., LLM API for routing decisions)
         ctx.state_id = state.state_id
         ctx.node_id = gate.node_id
-        ctx._call_index = 0  # Reset call index for this state
+        # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
         # Execute with timing and span
         with self._spans.gate_span(gate.name, input_hash=input_hash):
@@ -1113,7 +1114,7 @@ class AggregationExecutor:
         # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
         ctx.state_id = state.state_id
         ctx.node_id = node_id
-        ctx._call_index = 0  # Reset call index for this state
+        # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
         # Step 3: Execute with timing and span
         with self._spans.transform_span(transform.name, input_hash=input_hash):
@@ -1700,7 +1701,7 @@ class SinkExecutor:
         # these tokens. Sinks use operation_id for call attribution, and having both
         # state_id AND operation_id set would trigger the XOR constraint violation.
         ctx.state_id = None
-        ctx._call_index = 0  # Reset call index for operation calls
+        # Note: operation call_index is handled by LandscapeRecorder.allocate_operation_call_index()
 
         # Wrap sink I/O in operation for external call tracking
         # External calls during sink.write() are attributed to the operation (not token states)

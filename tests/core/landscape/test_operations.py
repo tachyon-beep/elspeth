@@ -1011,6 +1011,104 @@ class TestCallIndexUniquenessConstraints:
         assert len(calls1) == 1
         assert len(calls2) == 1
 
+    def test_plugin_context_record_call_uses_centralized_allocator(
+        self, recorder: LandscapeRecorder, run_id: str, source_node_id: str
+    ) -> None:
+        """PluginContext.record_call() must use recorder.allocate_call_index().
+
+        This verifies the fix for P1-2026-01-31-context-record-call-bypasses-allocator.
+
+        The bug: PluginContext maintained its own _call_index counter instead of
+        delegating to LandscapeRecorder.allocate_call_index(). This caused duplicate
+        (state_id, call_index) pairs when mixing ctx.record_call() with audited clients.
+
+        This test interleaves:
+        1. recorder.allocate_call_index() - simulates what audited clients do
+        2. ctx.record_call() - what transforms call directly
+
+        If ctx.record_call() uses its own counter, both will produce call_index=0.
+        If ctx.record_call() delegates to the centralized allocator, they coordinate.
+        """
+        # Create a row/token/state for testing
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            data={"test": "data"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            node_id=source_node_id,
+            run_id=run_id,
+            token_id=token.token_id,
+            step_index=0,
+            input_data={"test": "data"},
+        )
+
+        ctx = PluginContext(
+            run_id=run_id,
+            config={},
+            node_id=source_node_id,
+            landscape=recorder,
+            state_id=state.state_id,
+        )
+
+        # Step 1: Audited client allocates index (simulates AuditedLLMClient.query())
+        # This is what audited clients do internally via _next_call_index()
+        client_index_1 = recorder.allocate_call_index(state.state_id)
+        assert client_index_1 == 0
+
+        # Record the call (as if AuditedLLMClient recorded it)
+        recorder.record_call(
+            state_id=state.state_id,
+            call_index=client_index_1,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data={"prompt": "test"},
+            response_data={"response": "ok"},
+        )
+
+        # Step 2: Transform calls ctx.record_call() directly
+        # BUG: If ctx uses its own _call_index, this will be 0 (collision!)
+        # FIX: If ctx delegates to allocator, this will be 1 (no collision)
+        call_2 = ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example.com"},
+            response_data={"status": 200},
+            latency_ms=50.0,
+        )
+
+        # Verify ctx.record_call() got a DIFFERENT index than the audited client
+        assert call_2 is not None
+        assert call_2.call_index == 1, (
+            f"Expected call_index=1 but got {call_2.call_index}. PluginContext.record_call() is not using centralized allocator!"
+        )
+
+        # Step 3: Another audited client call (simulates second LLM call)
+        client_index_2 = recorder.allocate_call_index(state.state_id)
+        assert client_index_2 == 2
+
+        # Step 4: Another ctx.record_call()
+        call_4 = ctx.record_call(
+            call_type=CallType.HTTP,
+            status=CallStatus.SUCCESS,
+            request_data={"url": "http://example2.com"},
+            response_data={"status": 200},
+            latency_ms=50.0,
+        )
+        assert call_4 is not None
+        assert call_4.call_index == 3, (
+            f"Expected call_index=3 but got {call_4.call_index}. PluginContext.record_call() is not coordinating with allocator!"
+        )
+
+        # Verify all calls recorded with unique indices
+        calls = recorder.get_calls(state.state_id)
+        indices = [c.call_index for c in calls]
+        # We only recorded 3 calls (indices 0, 1, 3 - index 2 was allocated but not recorded)
+        assert len(calls) == 3
+        assert sorted(indices) == [0, 1, 3], f"Expected indices [0, 1, 3] but got {sorted(indices)}"
+
 
 class TestConcurrentCallIndexAllocation:
     """Tests for thread-safe call index allocation.

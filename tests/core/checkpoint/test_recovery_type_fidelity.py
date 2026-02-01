@@ -160,6 +160,7 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
                 sequence_number=0,
                 upstream_topology_hash="test-upstream-hash",  # Bug #12: required field
                 checkpoint_node_config_hash="test-node-config-hash",  # Bug #12: required field
+                format_version=2,  # Required for checkpoint compatibility validation
                 created_at=now,
             )
         )

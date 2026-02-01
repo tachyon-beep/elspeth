@@ -113,9 +113,9 @@ class TestCheckpointIdFormat:
         assert checkpoint.checkpoint_id.startswith("cp-"), f"checkpoint_id must start with 'cp-' prefix, got: {checkpoint.checkpoint_id}"
 
     def test_checkpoint_id_has_correct_format(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
-        """Line 54: checkpoint_id format is 'cp-' + 12 hex chars.
+        """Line 78: checkpoint_id format is 'cp-' + full 32 hex chars (UUID).
 
-        Format: cp-{uuid.uuid4().hex[:12]} = "cp-" + exactly 12 hex characters.
+        Format: cp-{uuid.uuid4().hex} = "cp-" + exactly 32 hex characters.
         """
         checkpoint = manager.create_checkpoint(
             run_id="run-001",
@@ -125,12 +125,12 @@ class TestCheckpointIdFormat:
             sequence_number=1,
         )
 
-        # Should be cp- + 12 hex chars = 15 chars total
-        assert len(checkpoint.checkpoint_id) == 15, f"checkpoint_id should be 15 chars (cp- + 12 hex), got {len(checkpoint.checkpoint_id)}"
+        # Should be cp- + 32 hex chars = 35 chars total
+        assert len(checkpoint.checkpoint_id) == 35, f"checkpoint_id should be 35 chars (cp- + 32 hex), got {len(checkpoint.checkpoint_id)}"
 
         # Extract hex portion (after "cp-")
         hex_portion = checkpoint.checkpoint_id[3:]
-        assert len(hex_portion) == 12, f"hex portion should be 12 chars, got {len(hex_portion)}"
+        assert len(hex_portion) == 32, f"hex portion should be 32 chars, got {len(hex_portion)}"
 
         # Verify it's valid hex
         try:

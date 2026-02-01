@@ -742,8 +742,14 @@ class TestExpressionParserFuzz:
         suffix=random_chars,
     )
     @settings(max_examples=200, deadline=None)
+    @pytest.mark.filterwarnings("ignore::SyntaxWarning")
     def test_valid_expression_with_garbage(self, prefix: str, valid_expr: str, suffix: str) -> None:
-        """Valid expressions surrounded by garbage should not crash."""
+        """Valid expressions surrounded by garbage should not crash.
+
+        Note: Random garbage can include patterns that look like invalid Python
+        literals (e.g., "0x" followed by non-hex chars), triggering SyntaxWarning
+        from Python's parser. This is expected and suppressed.
+        """
         expression = prefix + valid_expr + suffix
         self._assert_safe_parse(expression)
 

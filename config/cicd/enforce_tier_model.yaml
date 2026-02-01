@@ -3,7 +3,7 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
-- key: engine/executors.py:R4:SinkExecutor:write:fp=ac3de261304f63dc
+- key: engine/executors.py:R4:SinkExecutor:write:fp=d85d9f56ed29f9be
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
@@ -308,27 +308,27 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=8e94306803064d6e
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=c8bfaac89b15a835
   owner: architecture
   reason: hasattr for feature detection
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=4d32869239a35ac8
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=78fde178275e2085
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=167d6417adb2ec59
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=34e810ff782b8ff0
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=fadb937a905ccd67
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=9b9e895a6d8ba830
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=35063e10ca561406
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=0255bb470d73c02d
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -379,6 +379,11 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=ad0b19ecf0114f44
+  owner: architecture
+  reason: Optional field access at trust boundary
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=23807218c4629f91
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -828,32 +833,32 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:get:fp=84b544c54924a7e6
+- key: plugins/context.py:R5:PluginContext:get:fp=e94c9f7beef7caaf
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R1:PluginContext:record_call:fp=05b076aeedb60d2f
+- key: plugins/context.py:R1:PluginContext:record_call:fp=30fa8cc7ec5b8d6a
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_call:fp=4698705f028d4fef
+- key: plugins/context.py:R5:PluginContext:record_call:fp=a6473136b9f57075
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R4:PluginContext:record_call:fp=266f9a35c6866ff5
+- key: plugins/context.py:R4:PluginContext:record_call:fp=9d760d97743ce11f
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=9b41ec5656bf9160
+- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=ba40f0a3ab20d52a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=55a0622bc2c4ea37
+- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=a6eb568e2136d72d
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern

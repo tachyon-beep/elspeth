@@ -15,7 +15,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -106,8 +105,8 @@ class PluginContext:
     # Exactly one of state_id or operation_id should be set when recording calls
     state_id: str | None = field(default=None)  # For transform calls (via node_states)
     operation_id: str | None = field(default=None)  # For source/sink calls (via operations)
-    _call_index: int = field(default=0)
-    _call_index_lock: "Lock" = field(init=False)  # Initialized in __post_init__
+    # Note: call_index allocation is delegated to LandscapeRecorder.allocate_call_index()
+    # to ensure coordination with audited clients. See P1-2026-01-31-context-record-call-bypasses-allocator.
 
     # === Phase 6: Audited Clients ===
     # Set by executor when processing LLM transforms
@@ -132,16 +131,6 @@ class PluginContext:
     # Batch checkpoints restored from previous BatchPendingError
     # Maps node_id -> checkpoint_data for each batch transform
     _batch_checkpoints: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Initialize non-serializable fields after dataclass creation.
-
-        Thread-safety objects like Lock cannot be dataclass fields directly
-        (not serializable), so we initialize them here.
-        """
-        # Thread safety for call_index increment (INFRA-01 fix)
-        # Prevents race conditions when multiple threads call record_call()
-        object.__setattr__(self, "_call_index_lock", Lock())
 
     def get_checkpoint(self) -> dict[str, Any] | None:
         """Get checkpoint state for batch transforms.
@@ -282,12 +271,13 @@ class PluginContext:
 
         # Route to appropriate recorder method
         if has_state:
-            # Thread-safe call_index increment (INFRA-01 fix)
-            with self._call_index_lock:
-                call_index = self._call_index
-                self._call_index += 1
-
+            # Delegate call_index allocation to centralized LandscapeRecorder.
+            # This ensures UNIQUE(state_id, call_index) when mixing ctx.record_call()
+            # with audited clients (AuditedLLMClient, AuditedHTTPClient), which also
+            # use recorder.allocate_call_index(). See P1-2026-01-31-context-record-call-bypasses-allocator.
             assert self.state_id is not None  # Guarded by has_state check above
+            call_index = self.landscape.allocate_call_index(self.state_id)
+
             recorded_call = self.landscape.record_call(
                 state_id=self.state_id,
                 call_index=call_index,
