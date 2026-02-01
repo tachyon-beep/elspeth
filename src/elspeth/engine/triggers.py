@@ -62,6 +62,11 @@ class TriggerEvaluator:
         self._first_accept_time: float | None = None
         self._last_triggered: Literal["count", "timeout", "condition"] | None = None
 
+        # Track when each trigger first fired (for "first to fire wins" semantics)
+        # Per plugin-protocol.md:1211: "Multiple triggers can be combined (first one to fire wins)"
+        self._count_fire_time: float | None = None
+        self._condition_fire_time: float | None = None
+
         # Pre-parse condition expression if applicable
         self._condition_parser: ExpressionParser | None = None
         if config.condition is not None:
@@ -94,48 +99,86 @@ class TriggerEvaluator:
     def record_accept(self) -> None:
         """Record that a row was accepted into the batch.
 
-        Call this after each successful accept. Updates batch_count and
-        starts the timer on first accept.
+        Call this after each successful accept. Updates batch_count,
+        starts the timer on first accept, and tracks when triggers first fire.
+
+        Per plugin-protocol.md:1211: "Multiple triggers can be combined (first one to fire wins)"
+        We track when each trigger first becomes true so we can report the earliest.
         """
+        current_time = self._clock.monotonic()
         self._batch_count += 1
+
         if self._first_accept_time is None:
-            self._first_accept_time = self._clock.monotonic()
+            self._first_accept_time = current_time
+
+        # Track when count threshold was first reached
+        if self._count_fire_time is None and self._config.count is not None and self._batch_count >= self._config.count:
+            self._count_fire_time = current_time
+
+        # Track when condition first became true
+        if self._condition_fire_time is None and self._condition_parser is not None:
+            context = {
+                "batch_count": self._batch_count,
+                "batch_age_seconds": current_time - self._first_accept_time,
+            }
+            if bool(self._condition_parser.evaluate(context)):
+                self._condition_fire_time = current_time
 
     def should_trigger(self) -> bool:
         """Evaluate whether ANY trigger condition is met (OR logic).
+
+        Per plugin-protocol.md:1211: "Multiple triggers can be combined (first one to fire wins)"
+        When multiple triggers are satisfied, we report the one that fired EARLIEST,
+        not the one checked first in code order.
 
         Returns:
             True if any configured trigger should fire, False otherwise.
 
         Side effect:
-            Sets _last_triggered to the trigger type that fired.
+            Sets _last_triggered to the trigger type that fired first.
         """
         self._last_triggered = None
+        current_time = self._clock.monotonic()
 
-        # Check count trigger
-        if self._config.count is not None and self._batch_count >= self._config.count:
-            self._last_triggered = "count"
-            return True
+        # Collect all triggers that have fired with their fire times
+        # Format: (fire_time, trigger_name)
+        candidates: list[tuple[float, Literal["count", "timeout", "condition"]]] = []
 
-        # Check timeout trigger
-        if self._config.timeout_seconds is not None and self.batch_age_seconds >= self._config.timeout_seconds:
-            self._last_triggered = "timeout"
-            return True
+        # Timeout: fire time is deterministic (first_accept_time + timeout_seconds)
+        if self._config.timeout_seconds is not None and self._first_accept_time is not None:
+            timeout_fire_time = self._first_accept_time + self._config.timeout_seconds
+            if current_time >= timeout_fire_time:
+                candidates.append((timeout_fire_time, "timeout"))
 
-        # Check condition trigger
-        if self._condition_parser is not None:
-            # ExpressionParser.evaluate() accepts a dict that becomes "row" in expressions.
-            # So row['batch_count'] accesses this dict directly.
+        # Count: fire time tracked in record_accept()
+        if self._count_fire_time is not None:
+            candidates.append((self._count_fire_time, "count"))
+
+        # Condition: Re-evaluate since time-dependent conditions (batch_age_seconds)
+        # may have become true after time passed, not just when rows were accepted.
+        if self._condition_parser is not None and self._first_accept_time is not None:
+            batch_age = current_time - self._first_accept_time
             context = {
                 "batch_count": self._batch_count,
-                "batch_age_seconds": self.batch_age_seconds,
+                "batch_age_seconds": batch_age,
             }
-            result = self._condition_parser.evaluate(context)
-            if bool(result):
-                self._last_triggered = "condition"
-                return True
+            if bool(self._condition_parser.evaluate(context)):
+                # Condition is true now
+                if self._condition_fire_time is None:
+                    # First time detecting condition is true - set fire time now.
+                    # For conditions that became true due to time passing (not row accepts),
+                    # we use current_time as a conservative estimate. We can't know exactly
+                    # when it became true without parsing the expression.
+                    self._condition_fire_time = current_time
+                candidates.append((self._condition_fire_time, "condition"))
 
-        return False
+        if not candidates:
+            return False
+
+        # First to fire wins - sort by fire time and take earliest
+        candidates.sort(key=lambda x: x[0])
+        self._last_triggered = candidates[0][1]
+        return True
 
     def which_triggered(self) -> Literal["count", "timeout", "condition"] | None:
         """Return which trigger fired on the last should_trigger() call.
@@ -171,3 +214,5 @@ class TriggerEvaluator:
         self._batch_count = 0
         self._first_accept_time = None
         self._last_triggered = None
+        self._count_fire_time = None
+        self._condition_fire_time = None

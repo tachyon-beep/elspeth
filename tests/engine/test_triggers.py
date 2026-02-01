@@ -235,3 +235,160 @@ class TestTriggerEvaluator:
         clock.advance(0.5)  # Advance time by 500ms
 
         assert evaluator.batch_age_seconds == 0.5
+
+
+class TestTriggerFirstToFireWins:
+    """Tests for 'first to fire wins' semantics per plugin-protocol.md:1211.
+
+    When multiple triggers are satisfied simultaneously, the one that
+    FIRED FIRST (became true earliest) should be reported, not the one
+    checked first in code order.
+
+    Bug: P2-2026-01-22-trigger-type-priority-misreports-first-fire
+    """
+
+    def test_timeout_fires_before_count_reports_timeout(self) -> None:
+        """When timeout elapsed before count reached, report TIMEOUT.
+
+        Scenario:
+        - Count=100, Timeout=1.0s
+        - Accept 99 rows at t=0
+        - Time advances to t=1.1s (timeout fired at t=1.0s)
+        - Accept row 100 at t=1.1s (count fires now)
+        - Both conditions are now true, but timeout fired FIRST
+
+        Expected: which_triggered() == "timeout"
+        Bug behavior: which_triggered() == "count" (checked first in code)
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=100, timeout_seconds=1.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 99 rows quickly at t=0
+        for _ in range(99):
+            evaluator.record_accept()
+
+        # Timeout hasn't fired yet (only 99 rows, age ~0)
+        assert evaluator.should_trigger() is False
+
+        # Time advances past timeout threshold
+        clock.advance(1.1)  # Now at t=1.1s, timeout fired at t=1.0s
+
+        # Accept the 100th row - count threshold now reached at t=1.1s
+        evaluator.record_accept()
+
+        # Both triggers are satisfied, but timeout fired first (at t=1.0s)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "timeout", (
+            "Timeout fired at t=1.0s, count fired at t=1.1s. Per 'first to fire wins' contract, should report 'timeout', not 'count'."
+        )
+
+    def test_count_fires_before_timeout_reports_count(self) -> None:
+        """When count reached before timeout elapsed, report COUNT.
+
+        Scenario:
+        - Count=10, Timeout=5.0s
+        - Accept 10 rows quickly at t=0.1s
+        - Count fires at t=0.1s, timeout would fire at t=5.0s
+
+        Expected: which_triggered() == "count"
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=10, timeout_seconds=5.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 10 rows quickly
+        clock.advance(0.1)
+        for _ in range(10):
+            evaluator.record_accept()
+
+        # Count reached at t=0.1s, timeout would fire at t=5.0s
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count"
+
+    def test_condition_fires_before_timeout_reports_condition(self) -> None:
+        """When condition becomes true before timeout, report CONDITION.
+
+        Scenario:
+        - Condition: batch_count >= 5
+        - Timeout: 2.0s
+        - Accept 5 rows at t=0.5s (condition fires)
+        - Time advances to t=2.5s (timeout also fires)
+
+        Expected: which_triggered() == "condition"
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(
+            timeout_seconds=2.0,
+            condition="row['batch_count'] >= 5",
+        )
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 5 rows at t=0.5s
+        clock.advance(0.5)
+        for _ in range(5):
+            evaluator.record_accept()
+
+        # Condition fires at t=0.5s
+        # Time advances past timeout
+        clock.advance(2.0)  # Now at t=2.5s
+
+        # Both condition (t=0.5s) and timeout (t=2.0s) have fired
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "condition", (
+            "Condition fired at t=0.5s, timeout fired at t=2.0s. Per 'first to fire wins' contract, should report 'condition'."
+        )
+
+    def test_timeout_fires_before_condition_reports_timeout(self) -> None:
+        """When timeout elapses before condition becomes true, report TIMEOUT.
+
+        Scenario:
+        - Condition: batch_count >= 100
+        - Timeout: 1.0s
+        - Accept 50 rows at t=0 (condition not yet true)
+        - Time advances to t=1.5s (timeout fires at t=1.0s)
+        - Accept 50 more rows at t=1.5s (condition now fires)
+
+        Expected: which_triggered() == "timeout"
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(
+            timeout_seconds=1.0,
+            condition="row['batch_count'] >= 100",
+        )
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 50 rows at t=0 (condition not yet true)
+        for _ in range(50):
+            evaluator.record_accept()
+
+        assert evaluator.should_trigger() is False
+
+        # Time advances past timeout
+        clock.advance(1.5)  # Timeout fires at t=1.0s
+
+        # Accept 50 more rows - condition now true at t=1.5s
+        for _ in range(50):
+            evaluator.record_accept()
+
+        # Timeout (t=1.0s) fired before condition (t=1.5s)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "timeout", (
+            "Timeout fired at t=1.0s, condition fired at t=1.5s. Per 'first to fire wins' contract, should report 'timeout'."
+        )

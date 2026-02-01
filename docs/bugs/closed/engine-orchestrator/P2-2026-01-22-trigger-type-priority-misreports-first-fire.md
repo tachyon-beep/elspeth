@@ -164,3 +164,48 @@ This test does NOT currently exist in the test suite.
 **Status: STILL VALID**
 
 - `TriggerEvaluator.should_trigger()` still checks count then timeout then condition with fixed ordering, so it reports the first match instead of earliest trigger. (`src/elspeth/engine/triggers.py:115-136`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Implementation
+
+Modified `TriggerEvaluator` to track when each trigger first fires and select the earliest:
+
+1. **New state fields** (`triggers.py:67-68`):
+   - `_count_fire_time: float | None` - tracks when count threshold was first reached
+   - `_condition_fire_time: float | None` - tracks when condition first became true
+
+2. **Fire time tracking in `record_accept()`** (`triggers.py:114-129`):
+   - Records timestamp when count threshold is first reached
+   - Records timestamp when condition first becomes true
+   - Only sets fire time once (first occurrence)
+
+3. **Fire-time-based selection in `should_trigger()`** (`triggers.py:131-175`):
+   - Collects all triggered candidates with their fire times
+   - For timeout: fire time is deterministic (`first_accept_time + timeout_seconds`)
+   - For count: fire time tracked in `record_accept()`
+   - For condition: re-evaluates in `should_trigger()` to handle time-dependent conditions
+   - Sorts by fire time and selects earliest ("first to fire wins")
+
+4. **Reset clears fire times** (`triggers.py:210-211`)
+
+### Key Design Decision: Lazy Condition Evaluation
+
+Conditions involving `batch_age_seconds` can become true due to time passing, not just row accepts. The fix re-evaluates conditions in `should_trigger()` when they haven't fired yet, using current time as a conservative fire time estimate when first detected. This ensures time-dependent conditions work correctly.
+
+### Tests Added
+
+Added `TestTriggerFirstToFireWins` class with 4 tests (`tests/engine/test_triggers.py:240-398`):
+- `test_timeout_fires_before_count_reports_timeout` - timeout at t=1.0s, count at t=1.1s → TIMEOUT wins
+- `test_count_fires_before_timeout_reports_count` - count at t=0.1s, timeout at t=5.0s → COUNT wins
+- `test_condition_fires_before_timeout_reports_condition` - condition at t=0.5s, timeout at t=2.0s → CONDITION wins
+- `test_timeout_fires_before_condition_reports_timeout` - timeout at t=1.0s, condition at t=1.5s → TIMEOUT wins
+
+### Verification
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_triggers.py -v
+# 19 passed
+```
