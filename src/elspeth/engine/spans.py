@@ -141,6 +141,7 @@ class SpanFactory:
         self,
         transform_name: str,
         *,
+        node_id: str | None = None,
         input_hash: str | None = None,
         token_id: str | None = None,
         token_ids: Sequence[str] | None = None,
@@ -149,6 +150,7 @@ class SpanFactory:
 
         Args:
             transform_name: Name of the transform plugin
+            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
             input_hash: Optional input data hash
             token_id: Token identifier for single-row transforms (P2-2026-01-21 fix)
             token_ids: Token identifiers for batch transforms (aggregation flush)
@@ -157,6 +159,9 @@ class SpanFactory:
             Use token_id for single-row transforms (most common case).
             Use token_ids for batch/aggregation transforms that process multiple tokens.
             These are mutually exclusive - if both provided, token_ids takes precedence.
+
+            node_id enables correlation with Landscape node_states when multiple
+            instances of the same plugin type exist in a pipeline.
 
         Yields:
             Span or NoOpSpan
@@ -168,6 +173,8 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"transform:{transform_name}") as span:
             span.set_attribute("plugin.name", transform_name)
             span.set_attribute("plugin.type", "transform")
+            if node_id:
+                span.set_attribute("node.id", node_id)
             if input_hash:
                 span.set_attribute("input.hash", input_hash)
             # Token tracking for accurate child token attribution (P2-2026-01-21)
@@ -182,6 +189,7 @@ class SpanFactory:
         self,
         gate_name: str,
         *,
+        node_id: str | None = None,
         input_hash: str | None = None,
         token_id: str | None = None,
     ) -> Iterator["Span | NoOpSpan"]:
@@ -189,6 +197,7 @@ class SpanFactory:
 
         Args:
             gate_name: Name of the gate plugin
+            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
             input_hash: Optional input data hash
             token_id: Token identifier for the token being evaluated (P2-2026-01-21 fix)
 
@@ -202,6 +211,8 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"gate:{gate_name}") as span:
             span.set_attribute("plugin.name", gate_name)
             span.set_attribute("plugin.type", "gate")
+            if node_id:
+                span.set_attribute("node.id", node_id)
             if input_hash:
                 span.set_attribute("input.hash", input_hash)
             if token_id is not None:
@@ -213,6 +224,7 @@ class SpanFactory:
         self,
         aggregation_name: str,
         *,
+        node_id: str | None = None,
         batch_id: str | None = None,
         token_ids: Sequence[str] | None = None,
     ) -> Iterator["Span | NoOpSpan"]:
@@ -220,6 +232,7 @@ class SpanFactory:
 
         Args:
             aggregation_name: Name of the aggregation plugin
+            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
             batch_id: Optional batch identifier
             token_ids: Token identifiers in the batch (P2-2026-01-21 fix)
 
@@ -237,6 +250,8 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"aggregation:{aggregation_name}") as span:
             span.set_attribute("plugin.name", aggregation_name)
             span.set_attribute("plugin.type", "aggregation")
+            if node_id:
+                span.set_attribute("node.id", node_id)
             if batch_id:
                 span.set_attribute("batch.id", batch_id)
             if token_ids is not None:
@@ -248,12 +263,14 @@ class SpanFactory:
         self,
         sink_name: str,
         *,
+        node_id: str | None = None,
         token_ids: Sequence[str] | None = None,
     ) -> Iterator["Span | NoOpSpan"]:
         """Create a span for a sink write.
 
         Args:
             sink_name: Name of the sink plugin
+            node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
             token_ids: Token identifiers being written in this batch (P2-2026-01-21 fix)
 
         Note:
@@ -270,6 +287,8 @@ class SpanFactory:
         with self._tracer.start_as_current_span(f"sink:{sink_name}") as span:
             span.set_attribute("plugin.name", sink_name)
             span.set_attribute("plugin.type", "sink")
+            if node_id:
+                span.set_attribute("node.id", node_id)
             if token_ids is not None:
                 span.set_attribute("token.ids", tuple(token_ids))
             yield span

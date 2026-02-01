@@ -151,3 +151,37 @@ with self._spans.aggregation_span(transform.name, batch_id=batch_id):
 **Recommendation:**
 
 **Keep open** - bug is valid and should be fixed. The impact is observability degradation (P2 severity is appropriate) but does not affect data integrity. The fix is a simple one-line change with the `batch_id` variable already in scope.
+
+---
+
+## FIX APPLIED: 2026-02-02
+
+**Status:** FIXED
+
+**Fix Summary:**
+
+Changed `execute_flush()` in `src/elspeth/engine/executors.py` to use `aggregation_span()` instead of `transform_span()`.
+
+**Code Change (executors.py:1135-1144):**
+```python
+# BEFORE:
+with self._spans.transform_span(transform.name, input_hash=input_hash, token_ids=batch_token_ids):
+
+# AFTER:
+with self._spans.aggregation_span(
+    transform.name,
+    node_id=node_id,
+    batch_id=batch_id,
+    token_ids=batch_token_ids,
+):
+```
+
+**Result:**
+- Aggregation flushes now emit spans with name `aggregation:{plugin_name}` (distinguishable from regular transforms)
+- `batch.id` attribute is now included on aggregation spans
+- `node.id` attribute added for disambiguation when multiple aggregations exist
+- `token.ids` preserved for batch token tracking
+
+**Tests Added:** `tests/engine/test_spans.py::TestNodeIdOnSpans::test_aggregation_span_includes_node_id`
+
+**Verified By:** Claude Opus 4.5 systematic debugging

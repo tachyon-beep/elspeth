@@ -163,3 +163,42 @@ Keep open. This is a valid P2 bug that degrades observability for pipelines with
 4. Add test case with duplicate plugin types to verify span distinguishability
 
 This change is low-risk (observability only, no audit impact) and high-value (enables proper trace correlation).
+
+---
+
+## FIX APPLIED: 2026-02-02
+
+**Status:** FIXED
+
+**Fix Summary:**
+
+Added optional `node_id` parameter to all span methods in SpanFactory and updated all executor call sites to pass the appropriate node_id.
+
+**SpanFactory Changes (spans.py):**
+- `transform_span()`: Added `node_id: str | None = None` parameter
+- `gate_span()`: Added `node_id: str | None = None` parameter
+- `aggregation_span()`: Added `node_id: str | None = None` parameter
+- `sink_span()`: Added `node_id: str | None = None` parameter
+- All methods now set `span.set_attribute("node.id", node_id)` when provided
+
+**Executor Changes (executors.py):**
+- `TransformExecutor.execute_transform()`: Now passes `node_id=transform.node_id`
+- `GateExecutor.execute_gate()`: Now passes `node_id=gate.node_id`
+- `GateExecutor._execute_config_gate()`: Now passes `node_id=node_id`
+- `AggregationExecutor.execute_flush()`: Now passes `node_id=node_id`
+- `SinkExecutor.write()`: Now passes `node_id=sink_node_id`
+
+**Result:**
+- Multiple instances of the same plugin type now have distinguishable spans via `node.id` attribute
+- Spans can be correlated with Landscape `node_states` table using `node.id`
+- Backwards compatible: `node_id=None` omits the attribute (existing code unaffected)
+
+**Tests Added:**
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_transform_span_includes_node_id`
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_gate_span_includes_node_id`
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_sink_span_includes_node_id`
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_aggregation_span_includes_node_id`
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_duplicate_plugins_distinguishable_by_node_id`
+- `tests/engine/test_spans.py::TestNodeIdOnSpans::test_node_id_none_omits_attribute`
+
+**Verified By:** Claude Opus 4.5 systematic debugging

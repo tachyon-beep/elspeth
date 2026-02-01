@@ -245,7 +245,13 @@ class TransformExecutor:
 
         # Execute with timing and span
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-        with self._spans.transform_span(transform.name, input_hash=input_hash, token_id=token.token_id):
+        # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
+        with self._spans.transform_span(
+            transform.name,
+            node_id=transform.node_id,
+            input_hash=input_hash,
+            token_id=token.token_id,
+        ):
             start = time.perf_counter()
             try:
                 if has_accept:
@@ -521,7 +527,13 @@ class GateExecutor:
 
         # Execute with timing and span
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-        with self._spans.gate_span(gate.name, input_hash=input_hash, token_id=token.token_id):
+        # P2-2026-01-21: Pass node_id for disambiguation when multiple plugin instances exist
+        with self._spans.gate_span(
+            gate.name,
+            node_id=gate.node_id,
+            input_hash=input_hash,
+            token_id=token.token_id,
+        ):
             start = time.perf_counter()
             try:
                 result = gate.evaluate(token.row_data, ctx)
@@ -692,7 +704,13 @@ class GateExecutor:
 
         # Create parser and evaluate condition
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
-        with self._spans.gate_span(gate_config.name, input_hash=input_hash, token_id=token.token_id):
+        # P2-2026-01-21: Pass node_id for disambiguation when multiple config gates exist
+        with self._spans.gate_span(
+            gate_config.name,
+            node_id=node_id,
+            input_hash=input_hash,
+            token_id=token.token_id,
+        ):
             start = time.perf_counter()
             try:
                 parser = ExpressionParser(gate_config.condition)
@@ -1115,9 +1133,16 @@ class AggregationExecutor:
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
         # Step 3: Execute with timing and span
-        # P2-2026-01-21: Pass all token_ids in the batch for accurate attribution
+        # P2-2026-01-21: Use aggregation_span (not transform_span) for flush operations
+        # This ensures spans are distinguishable from regular transforms and carry batch_id
+        # P2-2026-01-21: Pass node_id for disambiguation when multiple aggregations exist
         batch_token_ids = [t.token_id for t in buffered_tokens]
-        with self._spans.transform_span(transform.name, input_hash=input_hash, token_ids=batch_token_ids):
+        with self._spans.aggregation_span(
+            transform.name,
+            node_id=node_id,
+            batch_id=batch_id,
+            token_ids=batch_token_ids,
+        ):
             start = time.perf_counter()
             try:
                 result = transform.process(buffered_rows, ctx)  # type: ignore[arg-type]
@@ -1745,8 +1770,13 @@ class SinkExecutor:
         ) as handle:
             # Execute sink write with timing and span
             # P2-2026-01-21: Pass all token_ids being written for accurate attribution
+            # P2-2026-01-21: Pass node_id for disambiguation when multiple sinks exist
             sink_token_ids = [t.token_id for t in tokens]
-            with self._spans.sink_span(sink.name, token_ids=sink_token_ids):
+            with self._spans.sink_span(
+                sink.name,
+                node_id=sink_node_id,
+                token_ids=sink_token_ids,
+            ):
                 start = time.perf_counter()
                 try:
                     artifact_info = sink.write(rows, ctx)

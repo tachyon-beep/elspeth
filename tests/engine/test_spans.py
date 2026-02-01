@@ -593,3 +593,199 @@ class TestTokenIdEdgeCases:
         attrs = dict(spans[0].attributes or {})
         assert attrs.get("batch.id") == "batch-123"
         assert attrs.get("token.ids") == tuple(batch_tokens)
+
+
+class TestNodeIdOnSpans:
+    """Test that spans include node.id for disambiguation.
+
+    BUG: P2-2026-01-21-span-ambiguous-plugin-instances
+    When multiple plugin instances of the same type exist (e.g., two FieldMapper
+    transforms), spans are indistinguishable because they only use plugin.name.
+    Adding node.id allows correlation with Landscape node_states.
+    """
+
+    def test_transform_span_includes_node_id(self) -> None:
+        """Transform span should include node.id when provided."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.transform_span(
+            "field_mapper",
+            node_id="transform_field_mapper_abc123_0",
+            token_id="token-001",
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        assert attrs.get("node.id") == "transform_field_mapper_abc123_0"
+
+    def test_gate_span_includes_node_id(self) -> None:
+        """Gate span should include node.id when provided."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.gate_span(
+            "safety_gate",
+            node_id="gate_safety_gate_def456",
+            token_id="token-002",
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        assert attrs.get("node.id") == "gate_safety_gate_def456"
+
+    def test_sink_span_includes_node_id(self) -> None:
+        """Sink span should include node.id when provided."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.sink_span(
+            "csv_sink",
+            node_id="sink_output_ghi789",
+            token_ids=["token-001", "token-002"],
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        assert attrs.get("node.id") == "sink_output_ghi789"
+
+    def test_aggregation_span_includes_node_id(self) -> None:
+        """Aggregation span should include node.id when provided."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.aggregation_span(
+            "batch_stats",
+            node_id="aggregation_batch_stats_jkl012",
+            batch_id="batch-001",
+            token_ids=["token-001", "token-002"],
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        assert attrs.get("node.id") == "aggregation_batch_stats_jkl012"
+        # Also verify batch.id is still present
+        assert attrs.get("batch.id") == "batch-001"
+
+    def test_duplicate_plugins_distinguishable_by_node_id(self) -> None:
+        """Two instances of same plugin type should have different node.id."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        # Simulate two FieldMapper transforms with different configs
+        with factory.transform_span(
+            "field_mapper",
+            node_id="transform_field_mapper_abc123_0",
+            token_id="token-001",
+        ):
+            pass
+
+        with factory.transform_span(
+            "field_mapper",
+            node_id="transform_field_mapper_def456_1",
+            token_id="token-002",
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 2
+
+        # Both have same plugin.name
+        assert spans[0].attributes.get("plugin.name") == "field_mapper"
+        assert spans[1].attributes.get("plugin.name") == "field_mapper"
+
+        # But different node.id - NOW DISTINGUISHABLE!
+        node_ids = {s.attributes.get("node.id") for s in spans}
+        assert node_ids == {
+            "transform_field_mapper_abc123_0",
+            "transform_field_mapper_def456_1",
+        }
+
+    def test_node_id_none_omits_attribute(self) -> None:
+        """node_id=None should omit the attribute (backwards compatible)."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        # No node_id provided
+        with factory.transform_span("field_mapper", token_id="token-001"):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        # node.id should NOT be present when not provided
+        assert "node.id" not in attrs
