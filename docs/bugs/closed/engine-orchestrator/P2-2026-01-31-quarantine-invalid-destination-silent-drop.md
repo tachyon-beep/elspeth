@@ -38,3 +38,27 @@
 **Status: STILL VALID**
 
 - Quarantine handling still short-circuits when `quarantine_sink` is unset or invalid with no failure/recording path. (`src/elspeth/engine/orchestrator.py:1198-1233`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Fix Applied
+
+Added runtime validation in `orchestrator.py:1197-1213` that raises `RouteValidationError` when:
+1. `quarantine_destination` is `None` or empty (missing destination)
+2. `quarantine_destination` not in `config.sinks` (invalid destination)
+
+The fix replaces the silent skip pattern with explicit crash-on-plugin-bug behavior, aligning with CLAUDE.md's "plugin bugs must crash" and "no silent drops" principles.
+
+### Tests Added
+
+- `tests/engine/test_orchestrator_errors.py::TestQuarantineDestinationRuntimeValidation::test_invalid_quarantine_destination_at_runtime_crashes`
+- `tests/engine/test_orchestrator_errors.py::TestQuarantineDestinationRuntimeValidation::test_none_quarantine_destination_at_runtime_crashes`
+
+### Verification
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_orchestrator_errors.py::TestQuarantineDestinationRuntimeValidation -v
+# 2 passed
+```

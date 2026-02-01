@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from deepdiff import DeepDiff
 
+from elspeth.contracts import CallStatus
 from elspeth.core.canonical import stable_hash
 
 if TYPE_CHECKING:
@@ -209,10 +210,10 @@ class CallVerifier:
         recorded_response = self._recorder.get_call_response_data(call.call_id)
 
         # Handle missing/purged payload explicitly.
-        # Distinguish between:
-        # - response_ref=None → call never had a response (NOT a missing payload)
-        # - response_ref set but response=None → payload was purged (IS missing payload)
-        if recorded_response is None and call.response_ref is not None:
+        # A response is expected if response_hash is set OR status is SUCCESS.
+        # This catches both purged payloads AND runs recorded without a payload store.
+        response_expected = call.response_hash is not None or call.status == CallStatus.SUCCESS
+        if recorded_response is None and response_expected:
             result = VerificationResult(
                 request_hash=request_hash,
                 live_response=live_response,

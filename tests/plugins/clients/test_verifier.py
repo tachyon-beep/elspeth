@@ -180,6 +180,7 @@ class TestCallVerifier:
         request_hash: str = "hash123",
         latency_ms: float = 150.0,
         response_ref: str | None = None,
+        response_hash: str | None = None,
     ) -> Call:
         """Create a mock Call object."""
         return Call(
@@ -192,6 +193,7 @@ class TestCallVerifier:
             created_at=datetime.now(UTC),
             latency_ms=latency_ms,
             response_ref=response_ref,
+            response_hash=response_hash,
         )
 
     def test_verify_matching_response(self) -> None:
@@ -544,6 +546,7 @@ class TestCallVerifier:
             request_hash=request_hash,
             status=CallStatus.ERROR,
             response_ref="payload_ref_456",  # Error call with response body
+            response_hash="hash_of_response",  # Hash proves response existed
         )
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = None  # But now purged

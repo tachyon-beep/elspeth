@@ -89,6 +89,7 @@ class TestCallReplayer:
         latency_ms: float = 150.0,
         error_json: str | None = None,
         response_ref: str | None = None,
+        response_hash: str | None = None,
     ) -> Call:
         """Create a mock Call object."""
         return Call(
@@ -102,6 +103,7 @@ class TestCallReplayer:
             latency_ms=latency_ms,
             error_json=error_json,
             response_ref=response_ref,
+            response_hash=response_hash,
         )
 
     def test_replay_returns_recorded_response(self) -> None:
@@ -258,13 +260,14 @@ class TestCallReplayer:
             latency_ms=50.0,
             error_json=json.dumps(error_details),
             response_ref="payload_ref_123",  # Response WAS recorded
+            response_hash="hash_of_response",  # Hash proves response existed
         )
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = None  # But payload is now missing
 
         replayer = CallReplayer(recorder, source_run_id="run_abc123")
 
-        # Should raise because response_ref exists but payload is missing
+        # Should raise because response_hash exists but payload is missing
         with pytest.raises(ReplayPayloadMissingError) as exc_info:
             replayer.replay(call_type="llm", request_data=request_data)
 

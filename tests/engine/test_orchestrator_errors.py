@@ -548,3 +548,247 @@ class TestSourceQuarantineTokenOutcome:
             "This violates the 'outcome = durable output' invariant. "
             "See bug: P1-2026-01-31-quarantine-outcome-before-durability"
         )
+
+
+class TestQuarantineDestinationRuntimeValidation:
+    """Test that invalid quarantine destinations at runtime crash (not silent skip).
+
+    Per P2-2026-01-31-quarantine-invalid-destination-silent-drop:
+    When a source yields a quarantined row with an invalid destination at runtime,
+    the orchestrator must crash with a clear error. Silent drops violate the
+    "every row reaches exactly one terminal state" contract.
+
+    Init-time validation checks `source._on_validation_failure`, but runtime
+    uses `source_item.quarantine_destination`. A plugin bug could make these differ.
+    """
+
+    def test_invalid_quarantine_destination_at_runtime_crashes(self, payload_store) -> None:
+        """Quarantined row with invalid destination at runtime must crash.
+
+        Scenario:
+        - Source has `_on_validation_failure = "quarantine"` (passes init validation)
+        - But source yields `SourceRow.quarantined(..., destination="nonexistent")`
+        - This is a plugin bug - should crash, not silently drop the row
+
+        Per CLAUDE.md:
+        - "Plugin bugs must crash"
+        - "Every row reaches exactly one terminal state - no silent drops"
+        """
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class MisbehavingSource(_TestSourceBase):
+            """Source that passes init validation but emits invalid destination at runtime.
+
+            This simulates a plugin bug: _on_validation_failure is validated at init,
+            but the source yields a different destination at runtime.
+            """
+
+            name = "misbehaving_source"
+            output_schema = RowSchema
+
+            def __init__(self) -> None:
+                # This passes init validation - "quarantine" sink exists
+                self._on_validation_failure = "quarantine"
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                # Valid row - no problem
+                yield SourceRow.valid({"id": 1, "name": "alice"})
+
+                # BUG: yields destination that differs from _on_validation_failure
+                # "typo_sink" doesn't exist - this is a plugin bug
+                yield SourceRow.quarantined(
+                    row={"id": 2, "name": "bob"},
+                    error="validation_failed",
+                    destination="typo_sink",  # <-- Plugin bug! Different from _on_validation_failure
+                )
+
+            def close(self) -> None:
+                pass
+
+        class CollectSink(_TestSinkBase):
+            name = "collect"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        class QuarantineSink(_TestSinkBase):
+            """Valid quarantine sink - exists for init validation to pass."""
+
+            name = "quarantine"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        source = MisbehavingSource()
+        default_sink = CollectSink()
+        quarantine_sink = QuarantineSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),  # Init validation passes
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+
+        # Should CRASH with clear error about invalid destination
+        # Currently BUGS: silently skips the row (no crash, no audit record)
+        with pytest.raises(Exception) as exc_info:
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        # Error message should identify the problem clearly
+        error_msg = str(exc_info.value)
+        assert "typo_sink" in error_msg, f"Error should mention the invalid destination 'typo_sink'. Got: {error_msg}"
+
+    def test_none_quarantine_destination_at_runtime_crashes(self, payload_store) -> None:
+        """Quarantined row with None destination at runtime must crash.
+
+        Scenario:
+        - Source yields SourceRow with is_quarantined=True but quarantine_destination=None
+        - This bypasses the factory method contract
+        - Should crash, not silently drop
+
+        This tests the case where SourceRow is constructed directly instead of
+        using the SourceRow.quarantined() factory method.
+        """
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class RowSchema(PluginSchema):
+            id: int
+            name: str
+
+        class BadSourceRow(_TestSourceBase):
+            """Source that yields SourceRow with None destination (bypassing factory)."""
+
+            name = "bad_source"
+            output_schema = RowSchema
+
+            def __init__(self) -> None:
+                self._on_validation_failure = "quarantine"
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                # Valid row - no problem
+                yield SourceRow.valid({"id": 1, "name": "alice"})
+
+                # BUG: Directly construct SourceRow with None destination
+                # This bypasses the factory method's required destination parameter
+                yield SourceRow(
+                    row={"id": 2, "name": "bob"},
+                    is_quarantined=True,
+                    quarantine_error="validation_failed",
+                    quarantine_destination=None,  # <-- Missing destination!
+                )
+
+            def close(self) -> None:
+                pass
+
+        class CollectSink(_TestSinkBase):
+            name = "collect"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        class QuarantineSink(_TestSinkBase):
+            name = "quarantine"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        source = BadSourceRow()
+        default_sink = CollectSink()
+        quarantine_sink = QuarantineSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={
+                "default": as_sink(default_sink),
+                "quarantine": as_sink(quarantine_sink),
+            },
+        )
+
+        orchestrator = Orchestrator(db)
+
+        # Should CRASH with clear error about missing destination
+        # Currently BUGS: silently skips the row
+        with pytest.raises(Exception) as exc_info:
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
+
+        # Error message should identify the problem
+        error_msg = str(exc_info.value)
+        assert "quarantine" in error_msg.lower() or "destination" in error_msg.lower(), (
+            f"Error should mention quarantine or destination. Got: {error_msg}"
+        )

@@ -1190,39 +1190,59 @@ class Orchestrator:
                         # Handle quarantined source rows - route directly to sink
                         if source_item.is_quarantined:
                             rows_quarantined += 1
-                            # Route quarantined row to configured sink if it exists
+                            # Route quarantined row to configured sink
+                            # Per CLAUDE.md: plugin bugs must crash, no silent drops
                             quarantine_sink = source_item.quarantine_destination
-                            if quarantine_sink and quarantine_sink in config.sinks:
-                                # Create a token for the quarantined row
-                                quarantine_token = processor.token_manager.create_initial_token(
+
+                            # Validate destination exists - crash on plugin bug
+                            if not quarantine_sink:
+                                raise RouteValidationError(
+                                    f"Source '{config.source.name}' yielded quarantined row "
+                                    f"(row_index={row_index}) with missing quarantine_destination. "
+                                    f"This is a plugin bug: quarantined rows MUST specify a destination. "
+                                    f"Use SourceRow.quarantined(row, error, destination) factory method."
+                                )
+                            if quarantine_sink not in config.sinks:
+                                raise RouteValidationError(
+                                    f"Source '{config.source.name}' yielded quarantined row "
+                                    f"(row_index={row_index}) with invalid quarantine_destination='{quarantine_sink}'. "
+                                    f"No sink named '{quarantine_sink}' exists. "
+                                    f"Available sinks: {sorted(config.sinks.keys())}. "
+                                    f"This is a plugin bug: quarantine_destination must match "
+                                    f"source._on_validation_failure='{config.source._on_validation_failure}'."
+                                )
+
+                            # Destination validated - proceed with routing
+                            # Create a token for the quarantined row
+                            quarantine_token = processor.token_manager.create_initial_token(
+                                run_id=run_id,
+                                source_node_id=source_id,
+                                row_index=row_index,
+                                row_data=source_item.row,
+                            )
+
+                            # Emit RowCreated telemetry AFTER Landscape recording succeeds
+                            self._emit_telemetry(
+                                RowCreated(
+                                    timestamp=datetime.now(UTC),
                                     run_id=run_id,
-                                    source_node_id=source_id,
-                                    row_index=row_index,
-                                    row_data=source_item.row,
+                                    row_id=quarantine_token.row_id,
+                                    token_id=quarantine_token.token_id,
+                                    content_hash=stable_hash(source_item.row),
                                 )
+                            )
 
-                                # Emit RowCreated telemetry AFTER Landscape recording succeeds
-                                self._emit_telemetry(
-                                    RowCreated(
-                                        timestamp=datetime.now(UTC),
-                                        run_id=run_id,
-                                        row_id=quarantine_token.row_id,
-                                        token_id=quarantine_token.token_id,
-                                        content_hash=stable_hash(source_item.row),
-                                    )
-                                )
+                            # Compute error_hash for QUARANTINED outcome audit trail
+                            # Per CLAUDE.md: every row must reach exactly one terminal state
+                            # Fix: P1-2026-01-31 - Do NOT record outcome here!
+                            # Record outcome AFTER sink durability in SinkExecutor.write()
+                            error_detail = source_item.quarantine_error or "unknown_validation_error"
+                            quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
 
-                                # Compute error_hash for QUARANTINED outcome audit trail
-                                # Per CLAUDE.md: every row must reach exactly one terminal state
-                                # Fix: P1-2026-01-31 - Do NOT record outcome here!
-                                # Record outcome AFTER sink durability in SinkExecutor.write()
-                                error_detail = source_item.quarantine_error or "unknown_validation_error"
-                                quarantine_error_hash = hashlib.sha256(error_detail.encode()).hexdigest()[:16]
-
-                                # Pass PendingOutcome with error_hash - outcome recorded after sink durability
-                                pending_tokens[quarantine_sink].append(
-                                    (quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash))
-                                )
+                            # Pass PendingOutcome with error_hash - outcome recorded after sink durability
+                            pending_tokens[quarantine_sink].append(
+                                (quarantine_token, PendingOutcome(RowOutcome.QUARANTINED, quarantine_error_hash))
+                            )
                             # Emit progress before continue (ensures quarantined rows trigger updates)
                             # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
                             current_time = time.perf_counter()

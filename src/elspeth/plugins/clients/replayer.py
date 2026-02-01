@@ -209,11 +209,11 @@ class CallReplayer:
         # Determine if this was an error call
         was_error = call.status == CallStatus.ERROR
 
-        # Fail if payload was recorded but is now missing (purged).
-        # Check response_ref to distinguish between:
-        # - response_ref=None → call never had a response (OK to use {} for errors)
-        # - response_ref set but response_data=None → response was purged (FAIL)
-        if response_data is None and call.response_ref is not None:
+        # Fail if a response was expected but payload is unavailable.
+        # A response is expected if response_hash is set OR status is SUCCESS.
+        # This catches both purged payloads AND runs recorded without a payload store.
+        response_expected = call.response_hash is not None or call.status == CallStatus.SUCCESS
+        if response_data is None and response_expected:
             raise ReplayPayloadMissingError(call.call_id, request_hash)
 
         # For calls that never had a response (response_ref is None), use empty dict
