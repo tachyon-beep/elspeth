@@ -1,5 +1,5 @@
 """
-Unit tests for the no_bug_hiding enforcement tool.
+Unit tests for the tier model enforcement tool.
 
 Tests cover:
 - Detection of each rule (R1-R4)
@@ -18,11 +18,11 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
-from scripts.cicd.no_bug_hiding import (
+from scripts.cicd.enforce_tier_model import (
     Allowlist,
     AllowlistEntry,
-    BugHidingVisitor,
     Finding,
+    TierModelVisitor,
     load_allowlist,
     scan_file,
 )
@@ -43,7 +43,7 @@ def parse_and_visit(source: str, filename: str = "test.py") -> list[Finding]:
     """Helper to parse source and run the visitor."""
     tree = ast.parse(source, filename=filename)
     source_lines = source.splitlines()
-    visitor = BugHidingVisitor(filename, source_lines)
+    visitor = TierModelVisitor(filename, source_lines)
     visitor.visit(tree)
     return visitor.findings
 

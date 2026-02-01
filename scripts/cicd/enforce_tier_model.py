@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-No Bug-Hiding Enforcement Tool
+Tier Model Enforcement Tool
 
-AST-based static analysis that detects "bug-hiding" defensive programming patterns
-and fails CI unless explicitly allowlisted. Enforces elspeth's philosophy:
-- Inside the tent: fail fast, no patterns that mask bugs
-- At boundaries: explicit validation allowed, but must be intentional and documented
+AST-based static analysis that detects defensive programming patterns that
+violate the three-tier trust model and fails CI unless explicitly allowlisted.
+
+Enforces ELSPETH's data manifesto (see CLAUDE.md):
+- Tier 1 (Audit Database): Full trust - crash on any anomaly
+- Tier 2 (Pipeline Data): Elevated trust - expect types, wrap operations on values
+- Tier 3 (External Data): Zero trust - validate at boundary, coerce where possible
 
 Usage:
-    python scripts/cicd/no_bug_hiding.py check --root src
-    python scripts/cicd/no_bug_hiding.py check --root src --allowlist scripts/cicd/no_bug_hiding_allowlist.yaml
+    python scripts/cicd/enforce_tier_model.py check --root src
+    python scripts/cicd/enforce_tier_model.py check --root src --allowlist config/cicd/enforce_tier_model.yaml
 """
 
 from __future__ import annotations
@@ -146,7 +149,7 @@ RULES = {
 # =============================================================================
 
 
-class BugHidingVisitor(ast.NodeVisitor):
+class TierModelVisitor(ast.NodeVisitor):
     """AST visitor that detects bug-hiding patterns."""
 
     def __init__(self, file_path: str, source_lines: list[str]) -> None:
@@ -315,7 +318,7 @@ def scan_file(file_path: Path, root: Path) -> list[Finding]:
     source_lines = source.splitlines()
     relative_path = str(file_path.relative_to(root))
 
-    visitor = BugHidingVisitor(relative_path, source_lines)
+    visitor = TierModelVisitor(relative_path, source_lines)
     visitor.visit(tree)
     return visitor.findings
 
@@ -514,8 +517,8 @@ def run_check(args: argparse.Namespace) -> int:
     # Load allowlist
     allowlist_path = args.allowlist
     if allowlist_path is None:
-        # Default: config/cicd/no_bug_hiding.yaml relative to repo root
-        allowlist_path = Path(__file__).parent.parent.parent / "config" / "cicd" / "no_bug_hiding.yaml"
+        # Default: config/cicd/enforce_tier_model.yaml relative to repo root
+        allowlist_path = Path(__file__).parent.parent.parent / "config" / "cicd" / "enforce_tier_model.yaml"
 
     allowlist = load_allowlist(allowlist_path)
 
