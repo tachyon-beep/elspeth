@@ -67,7 +67,7 @@ Use it to locate the source of any audit gap.
 - Recorder: RowProcessor
 - Primary location: `src/elspeth/engine/processor.py` `_process_batch_aggregation_node`
   - BUFFERED when passthrough mode and not flushed
-  - CONSUMED_IN_BATCH for single/transform modes when buffered
+  - CONSUMED_IN_BATCH for transform mode when buffered
   - On flush, result rows continue downstream or complete at sink
 
 ## Coalesce success (COALESCED)

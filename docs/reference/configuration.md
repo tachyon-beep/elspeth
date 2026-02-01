@@ -339,7 +339,8 @@ aggregations:
     trigger:
       count: 100              # Fire after 100 rows
       timeout_seconds: 3600   # Or after 1 hour
-    output_mode: single
+    output_mode: transform
+    expected_output_count: 1  # Optional: validate N→1 cardinality
     options:
       fields: ["value"]
       compute_mean: true
@@ -350,7 +351,8 @@ aggregations:
 | `name` | string | **Yes** | Unique aggregation identifier |
 | `plugin` | string | **Yes** | Aggregation plugin name |
 | `trigger` | object | **Yes** | When to flush the batch |
-| `output_mode` | string | No | `single`, `passthrough`, `transform` (default: `single`) |
+| `output_mode` | string | No | `passthrough` or `transform` (default: `transform`) |
+| `expected_output_count` | int | No | For `transform` mode: validate output row count |
 | `options` | object | No | Plugin-specific configuration |
 
 ### Trigger Configuration
@@ -378,9 +380,10 @@ trigger:
 
 | Mode | Behavior |
 |------|----------|
-| `single` | Batch produces one aggregated result row |
+| `transform` | Batch applies transform function to produce results (default) |
 | `passthrough` | Batch releases all accepted rows unchanged |
-| `transform` | Batch applies transform function to produce results |
+
+For N→1 aggregation (e.g., computing statistics), use `transform` mode with `expected_output_count: 1` to validate cardinality.
 
 ---
 

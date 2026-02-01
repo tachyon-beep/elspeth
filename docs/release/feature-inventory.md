@@ -144,7 +144,7 @@ Gates are configured in YAML, not as separate plugins. The engine provides:
 | End-of-source flush | ✅ | Implicit trigger at source completion |
 | Multiple triggers | ✅ | OR logic - first wins |
 | Batch state checkpoint | ✅ | Survives crash recovery |
-| Output modes | ✅ | single, passthrough, transform |
+| Output modes | ✅ | passthrough, transform (default: transform) |
 
 ### 2.4 Retry System
 
