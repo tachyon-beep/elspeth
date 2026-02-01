@@ -2,6 +2,7 @@
 """Tests for structured logging configuration."""
 
 import json
+import logging
 
 import pytest
 
@@ -101,3 +102,45 @@ class TestLoggingConfig:
             assert logger.getEffectiveLevel() >= logging.WARNING, (
                 f"Logger '{name}' should be WARNING or higher, got level {logger.getEffectiveLevel()}"
             )
+
+    def test_stdlib_loggers_emit_json_when_json_output_enabled(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """stdlib loggers emit JSON when json_output=True.
+
+        This is the critical test for P2-2026-01-31-json-logs-mixed-output.
+        Modules using logging.getLogger(__name__) must produce JSON output
+        when json_output=True, not plain text mixed with structlog JSON.
+        """
+        from elspeth.core.logging import configure_logging
+
+        configure_logging(json_output=True)
+
+        # Get a stdlib logger (simulates what plugins do)
+        stdlib_logger = logging.getLogger("test.stdlib.module")
+        stdlib_logger.info("message from stdlib logger")
+
+        captured = capsys.readouterr()
+        log_line = captured.out.strip().split("\n")[-1]
+
+        # MUST be valid JSON
+        data = json.loads(log_line)
+        assert data["event"] == "message from stdlib logger"
+        assert "level" in data  # Should have standard structlog fields
+        assert "timestamp" in data
+
+    def test_stdlib_loggers_emit_console_when_console_mode(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """stdlib loggers emit console format when json_output=False.
+
+        Ensures stdlib loggers go through ConsoleRenderer in console mode.
+        """
+        from elspeth.core.logging import configure_logging
+
+        configure_logging(json_output=False)
+
+        stdlib_logger = logging.getLogger("test.stdlib.console")
+        stdlib_logger.info("message from stdlib logger")
+
+        captured = capsys.readouterr()
+        # Should contain the message
+        assert "message from stdlib logger" in captured.out
+        # Should NOT be JSON
+        assert not captured.out.strip().split("\n")[-1].startswith("{")
