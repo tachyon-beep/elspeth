@@ -173,11 +173,22 @@ class KeyVaultSecretLoader:
 
         Raises:
             SecretNotFoundError: If the secret doesn't exist or has no value
+            azure.core.exceptions.ClientAuthenticationError: If authentication fails
+            azure.core.exceptions.HttpResponseError: For HTTP errors (rate limiting, server errors)
+            azure.core.exceptions.ServiceRequestError: For network/connectivity issues
         """
         # Check cache first
         if name in self._cache:
             ref = SecretRef(name=name, fingerprint="", source="keyvault")
             return self._cache[name], ref
+
+        # Import Azure exceptions for proper error handling
+        # These are only used when azure-keyvault-secrets is available
+        try:
+            from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
+        except ImportError:
+            # If azure.core isn't available, we'll raise ImportError from _get_client() anyway
+            AzureResourceNotFoundError = Exception  # type: ignore[misc, assignment]
 
         # Fetch from Key Vault
         try:
@@ -195,12 +206,17 @@ class KeyVaultSecretLoader:
             return value, ref
 
         except SecretNotFoundError:
+            # Re-raise our own SecretNotFoundError (from value is None check)
             raise
         except ImportError:
             # Re-raise ImportError as-is - missing package is different from missing secret
             raise
-        except Exception as e:
-            raise SecretNotFoundError(f"Failed to retrieve secret '{name}' from Key Vault ({self._vault_url}): {e}") from e
+        except AzureResourceNotFoundError as e:
+            # HTTP 404 - secret genuinely doesn't exist in Key Vault
+            # This is the ONLY Azure exception that should trigger fallback
+            raise SecretNotFoundError(f"Secret '{name}' not found in Key Vault ({self._vault_url})") from e
+        # All other Azure exceptions (auth errors, rate limits, network issues) propagate
+        # Do NOT catch Exception - operational failures must fail fast, not silently fall back
 
     def clear_cache(self) -> None:
         """Clear the secret cache, forcing refetch on next access."""

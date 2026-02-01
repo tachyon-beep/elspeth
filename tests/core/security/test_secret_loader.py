@@ -120,7 +120,11 @@ class TestKeyVaultSecretLoader:
         from elspeth.core.security.secret_loader import KeyVaultSecretLoader, SecretNotFoundError
 
         mock_client = MagicMock()
-        mock_client.get_secret.side_effect = Exception("SecretNotFound")
+
+        # Use the actual Azure exception type - generic Exception no longer triggers fallback
+        from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
+
+        mock_client.get_secret.side_effect = AzureResourceNotFoundError("SecretNotFound")
 
         with patch(
             "elspeth.core.security.secret_loader._get_keyvault_client",
@@ -149,6 +153,104 @@ class TestKeyVaultSecretLoader:
 
             with pytest.raises(SecretNotFoundError, match="has no value"):
                 loader.get_secret("secret-with-null-value")
+
+    def test_raises_when_resource_not_found(self) -> None:
+        """KeyVaultSecretLoader raises SecretNotFoundError for ResourceNotFoundError (HTTP 404)."""
+        from elspeth.core.security.secret_loader import KeyVaultSecretLoader, SecretNotFoundError
+
+        mock_client = MagicMock()
+
+        # Simulate Azure SDK ResourceNotFoundError
+        from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
+
+        mock_client.get_secret.side_effect = AzureResourceNotFoundError("Secret not found")
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            loader = KeyVaultSecretLoader(vault_url="https://test-vault.vault.azure.net")
+
+            with pytest.raises(SecretNotFoundError, match="nonexistent-secret"):
+                loader.get_secret("nonexistent-secret")
+
+    def test_propagates_auth_errors_not_converts_to_not_found(self) -> None:
+        """KeyVaultSecretLoader must propagate auth errors, NOT convert to SecretNotFoundError.
+
+        P2 Bug: Converting ClientAuthenticationError to SecretNotFoundError causes
+        CompositeSecretLoader to silently fall back to lower-priority backends
+        (e.g., env vars), potentially using the wrong credential in production.
+        """
+        from elspeth.core.security.secret_loader import KeyVaultSecretLoader
+
+        mock_client = MagicMock()
+
+        # Simulate Azure SDK auth failure
+        from azure.core.exceptions import ClientAuthenticationError
+
+        mock_client.get_secret.side_effect = ClientAuthenticationError("Authentication failed")
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            loader = KeyVaultSecretLoader(vault_url="https://test-vault.vault.azure.net")
+
+            # Should propagate ClientAuthenticationError, NOT convert to SecretNotFoundError
+            with pytest.raises(ClientAuthenticationError):
+                loader.get_secret("my-secret")
+
+    def test_propagates_http_errors_not_converts_to_not_found(self) -> None:
+        """KeyVaultSecretLoader must propagate HTTP errors (rate limiting, server errors).
+
+        P2 Bug: Converting HttpResponseError (429 rate limit, 5xx server errors) to
+        SecretNotFoundError causes silent fallback to wrong credentials.
+        """
+        from elspeth.core.security.secret_loader import KeyVaultSecretLoader
+
+        mock_client = MagicMock()
+
+        # Simulate Azure SDK rate limit (HTTP 429)
+        from azure.core.exceptions import HttpResponseError
+
+        rate_limit_error = HttpResponseError("Rate limit exceeded")
+        rate_limit_error.status_code = 429
+        mock_client.get_secret.side_effect = rate_limit_error
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            loader = KeyVaultSecretLoader(vault_url="https://test-vault.vault.azure.net")
+
+            # Should propagate HttpResponseError, NOT convert to SecretNotFoundError
+            with pytest.raises(HttpResponseError):
+                loader.get_secret("my-secret")
+
+    def test_propagates_network_errors_not_converts_to_not_found(self) -> None:
+        """KeyVaultSecretLoader must propagate network errors, NOT convert to SecretNotFoundError.
+
+        P2 Bug: Converting ServiceRequestError (network issues) to SecretNotFoundError
+        causes silent fallback when Key Vault is temporarily unreachable.
+        """
+        from elspeth.core.security.secret_loader import KeyVaultSecretLoader
+
+        mock_client = MagicMock()
+
+        # Simulate Azure SDK network failure
+        from azure.core.exceptions import ServiceRequestError
+
+        mock_client.get_secret.side_effect = ServiceRequestError("Network unreachable")
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            loader = KeyVaultSecretLoader(vault_url="https://test-vault.vault.azure.net")
+
+            # Should propagate ServiceRequestError, NOT convert to SecretNotFoundError
+            with pytest.raises(ServiceRequestError):
+                loader.get_secret("my-secret")
 
 
 class TestKeyVaultSecretLoaderCaching:
@@ -326,7 +428,11 @@ class TestCompositeSecretLoader:
         monkeypatch.delenv("NOWHERE_SECRET", raising=False)
 
         mock_client = MagicMock()
-        mock_client.get_secret.side_effect = Exception("Not found in Key Vault")
+
+        # Use the actual Azure exception for "not found"
+        from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
+
+        mock_client.get_secret.side_effect = AzureResourceNotFoundError("Not found in Key Vault")
 
         with patch(
             "elspeth.core.security.secret_loader._get_keyvault_client",
@@ -339,6 +445,45 @@ class TestCompositeSecretLoader:
 
             with pytest.raises(SecretNotFoundError, match=r"NOWHERE_SECRET.*not found in any backend"):
                 composite.get_secret("NOWHERE_SECRET")
+
+    def test_composite_does_not_fallback_on_auth_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CompositeSecretLoader must NOT fall back when Key Vault has auth errors.
+
+        P2 Bug Scenario: Key Vault is configured (env var pointing to it) but auth fails.
+        Current broken behavior: Auth error → SecretNotFoundError → falls back to env var.
+        Correct behavior: Auth error propagates, pipeline fails fast.
+
+        This is a security regression - using wrong credential silently is worse than failing.
+        """
+        from elspeth.core.security.secret_loader import (
+            CompositeSecretLoader,
+            EnvSecretLoader,
+            KeyVaultSecretLoader,
+        )
+
+        # Set up an env var that could be used as fallback (e.g., dev credential)
+        monkeypatch.setenv("API_KEY", "dev-key-from-env")
+
+        mock_client = MagicMock()
+
+        # Simulate auth failure in Key Vault
+        from azure.core.exceptions import ClientAuthenticationError
+
+        mock_client.get_secret.side_effect = ClientAuthenticationError("Token expired")
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            env_loader = EnvSecretLoader()
+            kv_loader = KeyVaultSecretLoader(vault_url="https://prod-vault.vault.azure.net")
+
+            # Key Vault first, env fallback (typical production config)
+            composite = CompositeSecretLoader(backends=[kv_loader, env_loader])
+
+            # Should propagate auth error, NOT silently use dev env var
+            with pytest.raises(ClientAuthenticationError):
+                composite.get_secret("API_KEY")
 
 
 class TestCachedSecretLoader:

@@ -2730,3 +2730,8 @@ allow_hits:
   reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
   safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
   expires: null
+- key: core/security/secret_loader.py:R6:KeyVaultSecretLoader:get_secret:fp=81a43ae834824aad
+  owner: bugfix
+  reason: Compile-time type fallback - provides Exception type when azure.core not installed
+  safety: Not a runtime error handler; _get_client() will raise ImportError before this path executes
+  expires: null
