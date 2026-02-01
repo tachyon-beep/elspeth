@@ -105,6 +105,7 @@ class RateLimiter:
         name: str,
         requests_per_minute: int,
         persistence_path: str | None = None,
+        window_ms: int | Duration | None = None,
     ) -> None:
         """Initialize rate limiter.
 
@@ -112,9 +113,11 @@ class RateLimiter:
             name: Identifier for this rate limiter (used as bucket key).
                 Must start with a letter and contain only alphanumeric
                 characters and underscores.
-            requests_per_minute: Maximum requests allowed per minute.
-                Must be greater than 0.
+            requests_per_minute: Maximum requests allowed per window.
+                Defaults to per-minute behavior. Must be greater than 0.
             persistence_path: Optional SQLite database path for persistence
+            window_ms: Optional window override in milliseconds.
+                Defaults to Duration.MINUTE.
 
         Raises:
             ValueError: If name is invalid or rate limit is not positive.
@@ -136,11 +139,16 @@ class RateLimiter:
         self.name = name
         self._requests_per_minute = requests_per_minute
         self._persistence_path = persistence_path
+        self._window_ms = int(Duration.MINUTE if window_ms is None else window_ms)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
-        # Single rate - per minute sliding window
-        rates: list[Rate] = [Rate(requests_per_minute, Duration.MINUTE)]
+        # Single rate - sliding window
+        if self._window_ms <= 0:
+            msg = f"window_ms must be positive, got {self._window_ms}"
+            raise ValueError(msg)
+
+        rates: list[Rate] = [Rate(requests_per_minute, self._window_ms)]
 
         # Create bucket (persistent or in-memory)
         if persistence_path:
@@ -157,7 +165,7 @@ class RateLimiter:
             self._bucket = InMemoryBucket(rates=rates)
 
         # Single limiter with per-minute rate
-        self._limiter = Limiter(self._bucket, max_delay=Duration.MINUTE, raise_when_fail=True)
+        self._limiter = Limiter(self._bucket, max_delay=self._window_ms, raise_when_fail=True)
 
     def acquire(self, weight: int = 1, timeout: float | None = None) -> None:
         """Acquire rate limit tokens, blocking if necessary.

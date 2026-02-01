@@ -41,6 +41,12 @@ state_machine_names = st.text(min_size=1, max_size=10, alphabet="abcdefghijklmno
 # Weight values for acquire operations
 weights = st.integers(min_value=1, max_value=3)
 
+# Use a short window so time-based tests complete quickly.
+TEST_WINDOW_SECONDS = 2.0
+TEST_WINDOW_MS = int(TEST_WINDOW_SECONDS * 1000)
+FULL_WINDOW_SLEEP = TEST_WINDOW_SECONDS + 0.1
+PARTIAL_WINDOW_SLEEP = TEST_WINDOW_SECONDS * 0.3
+
 
 # =============================================================================
 # Model Types for State Machine
@@ -64,7 +70,7 @@ class LimiterModel:
     """
 
     limit: int
-    window_seconds: float = 1.0  # Per-second rate limiting
+    window_seconds: float = TEST_WINDOW_SECONDS
     attempts: list[AcquireAttempt] = field(default_factory=list)
 
     def successful_tokens_in_window(self, now: float) -> int:
@@ -105,6 +111,7 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         self.limiter = RateLimiter(
             name=f"statemachine{int(time.monotonic() * 1000) % 100000}",
             requests_per_minute=self.limit,
+            window_ms=TEST_WINDOW_MS,
         )
 
         # Model tracks our expected state
@@ -157,14 +164,14 @@ class RateLimiterStateMachine(RuleBasedStateMachine):
         """Wait for tokens to replenish."""
         if self.consecutive_rejections == 0:
             return
-        time.sleep(0.3)
+        time.sleep(PARTIAL_WINDOW_SLEEP)
 
     @rule()
     def wait_full_window(self) -> None:
         """Wait for a full window to reset the bucket."""
         if not self.model.attempts:
             return
-        time.sleep(1.1)
+        time.sleep(FULL_WINDOW_SLEEP)
         self.consecutive_rejections = 0
 
     # -------------------------------------------------------------------------
@@ -219,6 +226,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"quotatest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -241,6 +249,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"accepttest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Should be able to acquire exactly `limit` times
             for i in range(limit):
@@ -254,6 +263,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"rejecttest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -270,6 +280,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"replenishtest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -278,8 +289,8 @@ class TestRateLimiterQuotaInvariants:
             # Verify exhausted
             assert limiter.try_acquire() is False
 
-            # Wait for full replenishment (slightly more than 1 second)
-            time.sleep(1.1)
+            # Wait for full replenishment (slightly more than one window)
+            time.sleep(FULL_WINDOW_SLEEP)
 
             # Should be able to acquire again
             assert limiter.try_acquire() is True
@@ -294,6 +305,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"weighttest{limit}w{weight}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # How many weighted acquires can we do?
             expected_acquires = limit // weight
@@ -321,6 +333,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"multirejecttest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -331,7 +344,7 @@ class TestRateLimiterQuotaInvariants:
                 assert limiter.try_acquire() is False
 
             # Wait for replenishment
-            time.sleep(1.1)
+            time.sleep(FULL_WINDOW_SLEEP)
 
             # Should be able to acquire full limit again
             # (if rejections consumed quota, we'd have fewer available)
@@ -353,6 +366,7 @@ class TestRateLimiterQuotaInvariants:
         with RateLimiter(
             name=f"multirejecttest{limit}",
             requests_per_minute=limit,
+            window_ms=TEST_WINDOW_MS,
         ) as limiter:
             # Exhaust the limit
             for _ in range(limit):
@@ -376,7 +390,7 @@ class TestRateLimiterResourceManagement:
     @settings(max_examples=20)
     def test_close_releases_resources(self, name: str) -> None:
         """Property: close() releases resources without error."""
-        limiter = RateLimiter(name=name, requests_per_minute=10)
+        limiter = RateLimiter(name=name, requests_per_minute=10, window_ms=TEST_WINDOW_MS)
         limiter.try_acquire()
         limiter.close()  # Should not raise
 
@@ -384,6 +398,6 @@ class TestRateLimiterResourceManagement:
     @settings(max_examples=20)
     def test_context_manager_cleanup(self, name: str) -> None:
         """Property: Context manager properly releases resources."""
-        with RateLimiter(name=name, requests_per_minute=10) as limiter:
+        with RateLimiter(name=name, requests_per_minute=10, window_ms=TEST_WINDOW_MS) as limiter:
             limiter.try_acquire()
         # Resources should be released after exiting context

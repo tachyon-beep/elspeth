@@ -420,6 +420,10 @@ class ChaosLLMConfig(BaseModel):
         default_factory=ErrorInjectionConfig,
         description="Error injection configuration",
     )
+    preset_name: str | None = Field(
+        default=None,
+        description="Preset name used to build this config (if any)",
+    )
 
 
 # === Preset Loading ===
@@ -529,6 +533,9 @@ def load_config(
     # Layer 3: CLI overrides (highest precedence)
     if cli_overrides is not None:
         config_dict = _deep_merge(config_dict, cli_overrides)
+
+    # Record preset name used for this config (if any)
+    config_dict["preset_name"] = preset
 
     # Validate and return
     return ChaosLLMConfig(**config_dict)

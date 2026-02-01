@@ -499,6 +499,26 @@ class LandscapeSettings(BaseModel):
         default_factory=LandscapeExportSettings,
         description="Post-run audit export configuration",
     )
+    dump_to_jsonl: bool = Field(
+        default=False,
+        description="Write an append-only JSONL change journal for emergency backup",
+    )
+    dump_to_jsonl_path: str | None = Field(
+        default=None,
+        description="Optional path for JSONL change journal (default: derived from landscape.url)",
+    )
+    dump_to_jsonl_fail_on_error: bool = Field(
+        default=False,
+        description="Fail the run if the JSONL journal cannot be written",
+    )
+    dump_to_jsonl_include_payloads: bool = Field(
+        default=False,
+        description="Inline payload store contents in the JSONL journal (request/response bodies)",
+    )
+    dump_to_jsonl_payload_base_path: str | None = Field(
+        default=None,
+        description="Optional payload store base path for inlining payloads (default: payload_store.base_path)",
+    )
 
     @field_validator("url")
     @classmethod

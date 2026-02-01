@@ -25,6 +25,8 @@ from elspeth.contracts.events import (
 )
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.testing.chaosllm.cli import app as chaosllm_app
+from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
@@ -64,6 +66,9 @@ app = typer.Typer(
     help="ELSPETH: Auditable Sense/Decide/Act pipelines.",
     no_args_is_help=True,
 )
+
+app.add_typer(chaosllm_app, name="chaosllm", help="ChaosLLM server commands.")
+app.add_typer(chaosllm_mcp_app, name="chaosllm-mcp", help="ChaosLLM MCP analysis tools.")
 
 
 def version_callback(value: bool) -> None:
@@ -509,7 +514,18 @@ def _execute_pipeline(
 
     # Get database URL from settings
     db_url = config.landscape.url
-    db = LandscapeDB.from_url(db_url)
+    db = LandscapeDB.from_url(
+        db_url,
+        dump_to_jsonl=config.landscape.dump_to_jsonl,
+        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
+        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
+        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
+        dump_to_jsonl_payload_base_path=(
+            str(config.payload_store.base_path)
+            if config.landscape.dump_to_jsonl_payload_base_path is None
+            else config.landscape.dump_to_jsonl_payload_base_path
+        ),
+    )
 
     # Create payload store for audit compliance
     # (CLAUDE.md: "Source entry - Raw data stored before any processing")
@@ -681,7 +697,7 @@ def _execute_pipeline(
                     "partial": "⚠",
                     "failed": "✗",
                 }
-                symbol = status_symbols.get(event.status.value, "?")
+                symbol = status_symbols[event.status.value]
                 # Build routed summary with destination breakdown
                 routed_summary = ""
                 if event.routed > 0:
@@ -813,7 +829,18 @@ def _execute_pipeline_with_instances(
 
     # Get database
     db_url = config.landscape.url
-    db = LandscapeDB.from_url(db_url)
+    db = LandscapeDB.from_url(
+        db_url,
+        dump_to_jsonl=config.landscape.dump_to_jsonl,
+        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
+        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
+        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
+        dump_to_jsonl_payload_base_path=(
+            str(config.payload_store.base_path)
+            if config.landscape.dump_to_jsonl_payload_base_path is None
+            else config.landscape.dump_to_jsonl_payload_base_path
+        ),
+    )
 
     # Create payload store for audit compliance
     # (CLAUDE.md: "Source entry - Raw data stored before any processing")
@@ -950,7 +977,7 @@ def _execute_pipeline_with_instances(
                     "partial": "⚠",
                     "failed": "✗",
                 }
-                symbol = status_symbols.get(event.status.value, "?")
+                symbol = status_symbols[event.status.value]
                 # Build routed summary with destination breakdown
                 routed_summary = ""
                 if event.routed > 0:
@@ -1293,6 +1320,7 @@ def purge(
     # else: use the fallback default of 90
 
     # Initialize database and payload store
+    # Note: purge is read-only for audit data, no JSONL journaling needed
     try:
         db = LandscapeDB.from_url(db_url)
     except Exception as e:
@@ -1427,7 +1455,7 @@ def _execute_resume_with_instances(
             "partial": "⚠",
             "failed": "✗",
         }
-        symbol = status_symbols.get(event.status.value, "?")
+        symbol = status_symbols[event.status.value]
         # Build routed summary with destination breakdown
         routed_summary = ""
         if event.routed > 0:

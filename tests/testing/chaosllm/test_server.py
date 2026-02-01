@@ -2,6 +2,7 @@
 """Tests for ChaosLLM HTTP server."""
 
 import json
+import sqlite3
 import time
 
 import pytest
@@ -501,6 +502,35 @@ class TestAdminResetEndpoint:
         # Verify stats are cleared
         response = client.get("/admin/stats")
         assert response.json()["total_requests"] == 0
+
+    def test_reset_records_run_info(self, tmp_metrics_db):
+        """POST /admin/reset persists run_info for new run."""
+        config = ChaosLLMConfig(
+            metrics=MetricsConfig(database=tmp_metrics_db),
+            preset_name="gentle",
+        )
+        app = create_app(config)
+        client = TestClient(app)
+
+        # Initial run info should be recorded on startup
+        stats = client.get("/admin/stats").json()
+        run_id = stats["run_id"]
+        with sqlite3.connect(tmp_metrics_db) as conn:
+            row = conn.execute("SELECT run_id, preset_name, config_json FROM run_info").fetchone()
+        assert row is not None
+        assert row[0] == run_id
+        assert row[1] == "gentle"
+        assert row[2]
+
+        # Reset should replace run_info with new run
+        reset = client.post("/admin/reset").json()
+        new_run_id = reset["new_run_id"]
+        assert new_run_id != run_id
+        with sqlite3.connect(tmp_metrics_db) as conn:
+            rows = conn.execute("SELECT run_id, preset_name FROM run_info").fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == new_run_id
+        assert rows[0][1] == "gentle"
 
 
 class TestMetricsRecording:

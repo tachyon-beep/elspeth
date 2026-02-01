@@ -154,15 +154,19 @@ class AzureAuthConfig(BaseModel):
         except ImportError as e:
             raise ImportError("azure-storage-blob is required for Azure plugins. Install with: uv pip install azure-storage-blob") from e
 
-        if self.connection_string:
-            return BlobServiceClient.from_connection_string(self.connection_string)
+        if self._is_set(self.connection_string):
+            # _is_set guarantees non-None non-whitespace
+            connection_string = cast(str, self.connection_string)
+            return BlobServiceClient.from_connection_string(connection_string)
 
-        elif self.sas_token:
+        elif self._is_set(self.sas_token):
             # SAS token auth: append token to account URL
             # model_validator guarantees account_url is non-None when sas_token is set
+            # _is_set guarantees sas_token is non-None non-whitespace
             account_url = cast(str, self.account_url)
+            sas_token = cast(str, self.sas_token)
             # Ensure SAS token starts with '?' for URL concatenation
-            sas = self.sas_token if self.sas_token.startswith("?") else f"?{self.sas_token}"
+            sas = sas_token if sas_token.startswith("?") else f"?{sas_token}"
             sas_url = f"{account_url.rstrip('/')}{sas}"
             return BlobServiceClient(sas_url)
 
@@ -200,6 +204,14 @@ class AzureAuthConfig(BaseModel):
             )
             return BlobServiceClient(account_url, credential=sp_credential)
 
+    def _is_set(self, value: str | None) -> bool:
+        """Check if a string field is non-empty after stripping whitespace.
+
+        Matches the validator's semantics: whitespace-only strings are treated as empty.
+        This ensures runtime behavior is consistent with validation.
+        """
+        return value is not None and bool(value.strip())
+
     @property
     def auth_method(self) -> str:
         """Return the active authentication method name.
@@ -207,9 +219,9 @@ class AzureAuthConfig(BaseModel):
         Returns:
             One of: 'connection_string', 'sas_token', 'managed_identity', 'service_principal'
         """
-        if self.connection_string:
+        if self._is_set(self.connection_string):
             return "connection_string"
-        elif self.sas_token:
+        elif self._is_set(self.sas_token):
             return "sas_token"
         elif self.use_managed_identity:
             return "managed_identity"

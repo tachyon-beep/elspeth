@@ -3,16 +3,6 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
-- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_pipeline_structure:line=185
-  owner: architecture
-  reason: 'Trust boundary: loading pipeline structure that may fail for corrupt/incomplete runs'
-  safety: Errors logged with exc_info; returns LoadingFailedState with error message
-  expires: null
-- key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_node_state:line=286
-  owner: architecture
-  reason: 'Trust boundary: loading node state that may fail for invalid node_id or db issues'
-  safety: Errors logged with exc_info; returns None (graceful degradation in TUI)
-  expires: null
 - key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=56
   owner: architecture
   reason: 'Optional field: state_id may be missing before execution'
@@ -55,18 +45,8 @@ allow_hits:
   expires: null
 - key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=86
   owner: architecture
-  reason: 'Optional field: error_json may be missing'
+  reason: 'Optional field: error_json only present for failed executions'
   safety: Graceful degradation - error section conditionally shown
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=98
-  owner: architecture
-  reason: 'Trust boundary: displaying error type from JSON that may be malformed'
-  safety: Graceful degradation to 'unknown' - user sees partial error info
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=99
-  owner: architecture
-  reason: 'Trust boundary: displaying error message from JSON that may be malformed'
-  safety: Graceful degradation to 'unknown' - user sees partial error info
   expires: null
 - key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=110
   owner: architecture
@@ -77,26 +57,6 @@ allow_hits:
   owner: architecture
   reason: 'Optional field: artifact may be missing for non-sink nodes'
   safety: Graceful degradation - artifact section conditionally shown
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=125
-  owner: architecture
-  reason: 'Trust boundary: displaying artifact_id that may be malformed'
-  safety: Graceful degradation to 'N/A' - user sees partial artifact info
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=126
-  owner: architecture
-  reason: 'Trust boundary: displaying path_or_uri that may be malformed'
-  safety: Graceful degradation to 'N/A' - user sees partial artifact info
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=127
-  owner: architecture
-  reason: 'Trust boundary: displaying content_hash that may be malformed'
-  safety: Graceful degradation to 'N/A' - user sees partial artifact info
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=131
-  owner: architecture
-  reason: 'Trust boundary: displaying size_bytes that may be malformed'
-  safety: Graceful degradation - conditionally displayed
   expires: null
 - key: plugins/manager.py:R3:_schema_hash:line=50
   owner: architecture
@@ -143,12 +103,12 @@ allow_hits:
   reason: 'Type introspection: not all types have __name__ attribute'
   safety: Graceful fallback to str() - error message still produced
   expires: null
-- key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=897
+- key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=917
   owner: architecture
   reason: 'Trust boundary: environment variables are external input that may not exist'
   safety: Explicit None check follows; falls back to default or keeps original for later error
   expires: null
-- key: core/config.py:R1:_fingerprint_config_for_audit:line=1162
+- key: core/config.py:R1:_fingerprint_config_for_audit:line=1182
   owner: architecture
   reason: 'Optional env var: ELSPETH_ALLOW_RAW_SECRETS is not required in production'
   safety: Missing env var = empty string = False = production mode (fail-closed)
@@ -413,11 +373,6 @@ allow_hits:
   reason: 'Background thread emit: emit failure should not crash release loop'
   safety: Logged with error, loop continues - waiter will timeout if emit fails
   expires: null
-- key: core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=145
-  owner: architecture
-  reason: 'Trust boundary: SQLAlchemy inspector FK dict structure from external library'
-  safety: Graceful handling of missing fields in FK metadata
-  expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:line=559
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
@@ -578,42 +533,27 @@ allow_hits:
   reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
   safety: Default empty string when unset is intentional; enables dev mode without fingerprint key (consistent with config.py and database_sink.py)
   expires: null
-- key: cli.py:R1:_execute_pipeline:_format_run_summary:line=684
-  owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
-  safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
-- key: cli.py:R1:_execute_pipeline_with_instances:_format_run_summary:line=953
-  owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
-  safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
-- key: cli.py:R1:_execute_resume_with_instances:_format_run_summary:line=1430
-  owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
-  safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
-- key: cli.py:R1:health:line=1862
+- key: cli.py:R1:health:line=1890
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1874
+- key: cli.py:R4:health:line=1902
   owner: architecture
   reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1890
+- key: cli.py:R1:health:line=1918
   owner: architecture
   reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1902
+- key: cli.py:R4:health:line=1930
   owner: architecture
   reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
   safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1966
+- key: cli.py:R4:health:line=1994
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
   safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
@@ -793,32 +733,32 @@ allow_hits:
   reason: 'MCP server boundary: must catch all exceptions and return error to client'
   safety: Error message returned to MCP client; server continues running for next request
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=260
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=278
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=261
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=279
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
   safety: Empty list default is safe - echo mode handles empty messages
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=264
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=282
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Response-Mode'
   safety: None default means use configured mode; HTTP Headers API returns None for missing headers
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=265
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=283
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Template'
   safety: None default means use configured template; HTTP Headers API returns None for missing headers
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=659
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=677
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=663
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=681
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
   safety: Empty list default produces 0 for message_count in metrics - safe for recording

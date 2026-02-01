@@ -17,6 +17,7 @@ Usage:
 """
 
 import asyncio
+import json
 import time
 import uuid
 from datetime import UTC, datetime
@@ -94,6 +95,7 @@ class ChaosLLMServer:
         self._response_generator = ResponseGenerator(config.response)
         self._latency_simulator = LatencySimulator(config.latency)
         self._metrics_recorder = MetricsRecorder(config.metrics)
+        self._record_run_info()
 
         # Build the Starlette app
         self._app = self._create_app()
@@ -141,6 +143,7 @@ class ChaosLLMServer:
         self._error_injector.reset()
         self._response_generator.reset()
         self._metrics_recorder.reset()
+        self._record_run_info()
         return self._metrics_recorder.run_id
 
     def export_metrics(self) -> dict[str, Any]:
@@ -185,6 +188,21 @@ class ChaosLLMServer:
             "response": self._response_generator._config.model_dump(),
             "latency": self._latency_simulator._config.model_dump(),
         }
+
+    def _record_run_info(self) -> None:
+        """Persist run info for the current metrics run."""
+        config_json = json.dumps(
+            {
+                "server": self._config.server.model_dump(),
+                "metrics": self._config.metrics.model_dump(),
+                **self._get_current_config(),
+            },
+            sort_keys=True,
+        )
+        self._metrics_recorder.save_run_info(
+            config_json=config_json,
+            preset_name=self._config.preset_name,
+        )
 
     # === Endpoint handlers ===
 

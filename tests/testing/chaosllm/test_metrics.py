@@ -577,6 +577,24 @@ class TestReset:
         recorder.reset()
         assert recorder.started_utc != old_started
 
+    def test_reset_preserves_run_info(self, recorder: MetricsRecorder) -> None:
+        """Reset preserves run_info metadata when available."""
+        config_json = json.dumps({"test": "config"})
+        recorder.save_run_info(config_json, preset_name="gentle")
+        old_run_id = recorder.run_id
+
+        recorder.reset()
+
+        with sqlite3.connect(recorder._config.database) as conn:
+            row = conn.execute("SELECT run_id, started_utc, config_json, preset_name FROM run_info").fetchone()
+
+        assert row is not None
+        assert row[0] == recorder.run_id
+        assert row[0] != old_run_id
+        assert row[1] == recorder.started_utc
+        assert row[2] == config_json
+        assert row[3] == "gentle"
+
 
 class TestGetStats:
     """Tests for get_stats method."""

@@ -605,11 +605,16 @@ class MetricsRecorder:
 
         conn.commit()
 
-    def reset(self) -> None:
+    def reset(
+        self,
+        *,
+        config_json: str | None = None,
+        preset_name: str | None = None,
+    ) -> None:
         """Reset all metrics tables and start a new run.
 
         Clears all data from requests and timeseries tables, generates a new
-        run_id, and records the new run in run_info.
+        run_id, and records the new run in run_info when metadata is available.
         """
         with self._lock:
             self._run_id = str(uuid.uuid4())
@@ -617,9 +622,27 @@ class MetricsRecorder:
 
         conn = self._get_connection()
 
+        if config_json is None:
+            cursor = conn.execute("SELECT config_json, preset_name FROM run_info LIMIT 1")
+            row = cursor.fetchone()
+            if row is not None:
+                config_json = row["config_json"]
+                if preset_name is None:
+                    preset_name = row["preset_name"]
+
         # Clear data tables
         conn.execute("DELETE FROM requests")
         conn.execute("DELETE FROM timeseries")
+
+        if config_json is not None:
+            conn.execute("DELETE FROM run_info")
+            conn.execute(
+                """
+                INSERT INTO run_info (run_id, started_utc, config_json, preset_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                (self._run_id, self._started_utc, config_json, preset_name),
+            )
         conn.commit()
 
     def get_stats(self) -> dict[str, Any]:

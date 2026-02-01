@@ -7,11 +7,14 @@ with appropriate settings for each.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Self
 
 from sqlalchemy import Connection, create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy.engine.url import make_url
 
+from elspeth.core.landscape.journal import LandscapeJournal
 from elspeth.core.landscape.schema import metadata
 
 
@@ -50,16 +53,39 @@ _REQUIRED_FOREIGN_KEYS: list[tuple[str, str, str]] = [
 class LandscapeDB:
     """Landscape database connection manager."""
 
-    def __init__(self, connection_string: str) -> None:
+    def __init__(
+        self,
+        connection_string: str,
+        *,
+        dump_to_jsonl: bool = False,
+        dump_to_jsonl_path: str | None = None,
+        dump_to_jsonl_fail_on_error: bool = False,
+        dump_to_jsonl_include_payloads: bool = False,
+        dump_to_jsonl_payload_base_path: str | None = None,
+    ) -> None:
         """Initialize database connection.
 
         Args:
             connection_string: SQLAlchemy connection string
                 e.g., "sqlite:///./state/audit.db"
                       "postgresql://user:pass@host/dbname"
+            dump_to_jsonl: Enable JSONL change journal for emergency backups
+            dump_to_jsonl_path: Optional override path for JSONL journal
+            dump_to_jsonl_fail_on_error: Fail if journal write fails
+            dump_to_jsonl_include_payloads: Inline payloads in journal records
+            dump_to_jsonl_payload_base_path: Payload store base path for inlining
         """
         self.connection_string = connection_string
         self._engine: Engine | None = None
+        self._journal: LandscapeJournal | None = None
+        if dump_to_jsonl:
+            journal_path = dump_to_jsonl_path or self._derive_journal_path(connection_string)
+            self._journal = LandscapeJournal(
+                journal_path,
+                fail_on_error=dump_to_jsonl_fail_on_error,
+                include_payloads=dump_to_jsonl_include_payloads,
+                payload_base_path=dump_to_jsonl_payload_base_path,
+            )
         self._setup_engine()
         self._validate_schema()  # Check BEFORE create_tables
         self._create_tables()
@@ -74,6 +100,8 @@ class LandscapeDB:
         # SQLite-specific configuration
         if self.connection_string.startswith("sqlite"):
             LandscapeDB._configure_sqlite(self._engine)
+        if self._journal is not None:
+            self._journal.attach(self._engine)
 
     @staticmethod
     def _configure_sqlite(engine: Engine) -> None:
@@ -140,10 +168,9 @@ class LandscapeDB:
                 continue
 
             # Check if FK exists AND targets the correct referenced table
+            # SQLAlchemy inspector API guarantees constrained_columns and referred_table keys
             fks = inspector.get_foreign_keys(table_name)
-            has_correct_fk = any(
-                column_name in fk.get("constrained_columns", []) and fk.get("referred_table") == referenced_table for fk in fks
-            )
+            has_correct_fk = any(column_name in fk["constrained_columns"] and fk["referred_table"] == referenced_table for fk in fks)
 
             if not has_correct_fk:
                 missing_fks.append((table_name, column_name, referenced_table))
@@ -207,16 +234,32 @@ class LandscapeDB:
         instance = cls.__new__(cls)
         instance.connection_string = "sqlite:///:memory:"
         instance._engine = engine
+        instance._journal = None
         return instance
 
     @classmethod
-    def from_url(cls, url: str, *, create_tables: bool = True) -> Self:
+    def from_url(
+        cls,
+        url: str,
+        *,
+        create_tables: bool = True,
+        dump_to_jsonl: bool = False,
+        dump_to_jsonl_path: str | None = None,
+        dump_to_jsonl_fail_on_error: bool = False,
+        dump_to_jsonl_include_payloads: bool = False,
+        dump_to_jsonl_payload_base_path: str | None = None,
+    ) -> Self:
         """Create database from connection URL.
 
         Args:
             url: SQLAlchemy connection URL
             create_tables: Whether to create tables if they don't exist.
                            Set to False when connecting to an existing database.
+            dump_to_jsonl: Enable JSONL change journal for emergency backups
+            dump_to_jsonl_path: Optional override path for JSONL journal
+            dump_to_jsonl_fail_on_error: Fail if journal write fails
+            dump_to_jsonl_include_payloads: Inline payloads in journal records
+            dump_to_jsonl_payload_base_path: Payload store base path for inlining
 
         Returns:
             LandscapeDB instance
@@ -230,6 +273,16 @@ class LandscapeDB:
         instance = cls.__new__(cls)
         instance.connection_string = url
         instance._engine = engine
+        instance._journal = None
+        if dump_to_jsonl:
+            journal_path = dump_to_jsonl_path or cls._derive_journal_path(url)
+            instance._journal = LandscapeJournal(
+                journal_path,
+                fail_on_error=dump_to_jsonl_fail_on_error,
+                include_payloads=dump_to_jsonl_include_payloads,
+                payload_base_path=dump_to_jsonl_payload_base_path,
+            )
+            instance._journal.attach(engine)
 
         # Validate BEFORE create_all - catches old schema with missing columns
         # before we try to use it. For fresh DBs, validation passes (no tables yet).
@@ -238,6 +291,17 @@ class LandscapeDB:
         if create_tables:
             metadata.create_all(engine)
         return instance
+
+    @staticmethod
+    def _derive_journal_path(connection_string: str) -> str:
+        """Derive a default JSONL journal path from the connection string."""
+        url = make_url(connection_string)
+        if not url.drivername.startswith("sqlite"):
+            raise ValueError("dump_to_jsonl requires dump_to_jsonl_path for non-SQLite databases")
+        database = url.database
+        if database is None or database == ":memory:":
+            raise ValueError("dump_to_jsonl requires a file-backed SQLite database")
+        return str(Path(database).with_suffix(".journal.jsonl"))
 
     @contextmanager
     def connection(self) -> Iterator[Connection]:
