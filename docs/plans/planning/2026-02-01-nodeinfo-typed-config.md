@@ -2,7 +2,7 @@
 
 **Status:** Planning
 **Created:** 2026-02-01
-**Updated:** 2026-02-01 (post-review)
+**Updated:** 2026-02-01 (post-review, post-verification)
 **Goal:** Replace `NodeInfo.config: dict[str, Any]` with typed dataclasses to catch integration bugs at compile time
 
 ## Problem Statement
@@ -175,11 +175,14 @@ def config_to_dict(config: NodeConfig) -> dict[str, Any]:
     return asdict(config)
 ```
 
-### Schema Access Helper
+### Schema Access Helpers
 
 ```python
 def get_node_schema(node: NodeInfo) -> dict[str, Any]:
-    """Extract schema from any node that has one."""
+    """Extract schema from any node that has one.
+
+    Raises ValueError for source/sink nodes which don't have schema.
+    """
     config = node.config
     if isinstance(config, (TransformNodeConfig, GateNodeConfig,
                            AggregationNodeConfig, CoalesceNodeConfig)):
@@ -187,6 +190,19 @@ def get_node_schema(node: NodeInfo) -> dict[str, Any]:
     if isinstance(config, (SourceNodeConfig, SinkNodeConfig)):
         raise ValueError(f"Node {node.node_id} ({node.node_type}) has no schema field")
     raise NodeConfigTypeMismatch(node.node_id, node.node_type, NodeConfig, type(config))
+
+
+def get_node_schema_optional(node: NodeInfo) -> dict[str, Any] | None:
+    """Extract schema if present, None for source/sink.
+
+    Use this for code paths that legitimately handle nodes without schema
+    (replaces the .get("schema") pattern at line 1114).
+    """
+    config = node.config
+    if isinstance(config, (TransformNodeConfig, GateNodeConfig,
+                           AggregationNodeConfig, CoalesceNodeConfig)):
+        return config.schema
+    return None  # Source/Sink don't have schema
 ```
 
 ### NodeInfo Update
@@ -309,6 +325,132 @@ class DAGTopology:
     branch_to_coalesce: dict[str, str]  # branch_name -> coalesce_id
 ```
 
+### The Coalesce Schema Challenge (Verified)
+
+The coalesce schema computation is non-trivial because:
+
+1. **Current code at line 789** reads schema from `graph.get_node_info(from_node).config["schema"]`
+2. This requires the **upstream nodes to already exist** with schema populated
+3. But coalesce nodes are created at line 631 **before edges are added**
+4. The loop at line 773 processes **each coalesce node** - multiple mutations if multiple coalesces
+
+**Solution approach:**
+
+```python
+def _compute_coalesce_schemas(
+    coalesce_settings: list[CoalesceSettings],
+    branch_schemas: dict[str, dict[str, Any]],  # branch_name -> schema (from gates)
+) -> dict[str, dict[str, Any]]:  # coalesce_name -> schema
+    """Pre-compute schema for each coalesce based on branch outputs.
+
+    Called BEFORE coalesce nodes are created. Uses branch_schemas which
+    is populated from gate outputs during topology computation.
+    """
+    result = {}
+    for coalesce_config in coalesce_settings:
+        first_branch = coalesce_config.branches[0]
+        first_schema = branch_schemas[first_branch]
+
+        # Validate all branches match (same as line 781-787)
+        for branch in coalesce_config.branches[1:]:
+            if branch_schemas[branch] != first_schema:
+                raise GraphValidationError(
+                    f"Coalesce {coalesce_config.name}: branch '{branch}' has "
+                    f"different schema than '{first_branch}'"
+                )
+
+        result[coalesce_config.name] = first_schema
+    return result
+```
+
+The key insight: **gate outputs define branch schemas**, and gates are processed before coalesces. So we can extract branch→schema mappings during gate processing, then use them for coalesce schema computation.
+
+## Verified Access Sites (13 Total)
+
+Verification found **13 distinct access sites** that must be updated:
+
+### In `core/dag.py` (8 sites)
+
+| Line | Context | Pattern | Read/Write |
+|------|---------|---------|------------|
+| 449 | Plugin gate creation | `config["schema"]` | Read |
+| 450 | Plugin gate creation | `"schema" in node_config` | Read |
+| 453 | Plugin gate creation | `node_config['schema']` | Read (error msg) |
+| 455 | Plugin gate creation | `node_config["schema"] =` | Write |
+| 549 | Config gate creation | `config["schema"]` | Read |
+| 779 | Coalesce validation | `config["schema"]` | Read |
+| 782 | Coalesce validation | `config["schema"]` | Read |
+| **789** | **Coalesce post-processing** | **`config["schema"] =`** | **Write (MUTATION)** |
+
+### In `core/dag.py` method `_get_schema_config_from_node` (1 site)
+
+| Line | Context | Pattern | Read/Write |
+|------|---------|---------|------------|
+| 1114 | Schema config retrieval | `config.get("schema")` | Read with `.get()` fallback |
+
+**Note:** Line 1114 uses `.get()` because source/sink nodes don't have schema. The typed approach handles this via `get_node_schema_optional()`:
+
+```python
+def get_node_schema_optional(node: NodeInfo) -> dict[str, Any] | None:
+    """Extract schema if present, None for source/sink."""
+    config = node.config
+    if isinstance(config, (TransformNodeConfig, GateNodeConfig,
+                           AggregationNodeConfig, CoalesceNodeConfig)):
+        return config.schema
+    return None  # Source/Sink don't have schema
+```
+
+### In `engine/orchestrator.py` (2 sites)
+
+| Line | Context | Pattern | Read/Write |
+|------|---------|---------|------------|
+| 900 | Landscape recording | `config["schema"]` | Read |
+| 909 | Landscape recording | `config` (entire dict) | Read |
+
+### In `plugins/base.py` (1 site)
+
+| Line | Context | Pattern | Read/Write |
+|------|---------|---------|------------|
+| 355 | CSV source read | `config["path"]` | Read |
+
+### In `core/canonical.py` (2 sites)
+
+| Line | Context | Pattern | Read/Write |
+|------|---------|---------|------------|
+| 199 | Topology hash | `config` (entire dict) | Read |
+| 259 | Upstream topology hash | `config` (entire dict) | Read |
+
+## Plugin Gates vs Config Gates (Two Code Paths)
+
+Verification revealed two distinct gate construction paths:
+
+| Gate Type | Lines | Schema Source | Plugin Config |
+|-----------|-------|---------------|---------------|
+| **Plugin gates** | 446-464 | `upstream_schema` (read from prev node) | From transform plugin |
+| **Config gates** | 545-590 | `graph.get_node_info(prev_node_id).config["schema"]` | None |
+
+Both must produce `GateNodeConfig`, but with different field values:
+
+```python
+# Plugin gate
+GateNodeConfig(
+    routes=dict(gate.routes),
+    schema=upstream_schema,
+    condition=None,  # Plugin gates don't have condition
+    fork_to=list(gate.fork_to) if gate.fork_to else None,
+    plugin_config=dict(transform.config),  # Has plugin config
+)
+
+# Config-driven gate
+GateNodeConfig(
+    routes=dict(gate_config.routes),
+    schema=prev_node_schema,
+    condition=gate_config.condition,  # Has condition
+    fork_to=list(gate_config.fork_to) if gate_config.fork_to else None,
+    plugin_config=None,  # No plugin config
+)
+```
+
 ## Access Patterns
 
 ### Direct Attribute Access After Narrowing
@@ -340,32 +482,76 @@ config = narrow_config(sink_node.config, SinkNodeConfig,
 path = config.plugin_config["path"]  # Plugin-specific field remains opaque
 ```
 
-## Implementation Order
+## Implementation Order (Detailed)
 
-1. **Add the new types** (`contracts/node_config.py`) - zero blast radius
-2. **Add topology helper types** (`core/dag.py` or `contracts/`) - zero blast radius
-3. **Refactor `from_plugin_instances()` to single-phase construction** - critical step
-   - Extract `_compute_dag_topology()`
-   - Extract `_compute_node_schemas()`
-   - Extract `_build_typed_config()`
-   - Remove post-construction schema mutation at line 789
-4. **Update NodeInfo type annotation** - tests will fail
-5. **Update construction sites** - now use typed config creation
-6. **Update access sites in dag.py** - schema/options/required_input_fields reads
-7. **Update orchestrator access sites** - Landscape recording, sink path, CSV export
-8. **Update plugin initialization** - pass `plugin_config`, not full config
-9. **Add tests** - unit tests, integration tests, round-trip tests
+### Phase A: Add Types (Zero Blast Radius)
 
-## Files to Modify
+1. **Create `contracts/node_config.py`**
+   - All 6 NodeConfig dataclasses
+   - `NodeConfig` TypeAlias union
+   - `NodeConfigTypeMismatch` exception
+   - `narrow_config()` with overloads
+   - `config_to_dict()` serialization
+   - `get_node_schema()` and `get_node_schema_optional()` helpers
 
-| File | Change Type | Scope |
-|------|-------------|-------|
-| `contracts/node_config.py` | **NEW** | ~150 lines (configs + helpers + overloads) |
-| `core/dag.py` | Modify | NodeInfo + refactor `from_plugin_instances()` (~200 lines touched) |
-| `engine/orchestrator.py` | Modify | ~3-5 access sites including CSV export at line 1740 |
-| `plugins/base.py` | Modify | Gate init (~2 sites) |
-| `tests/contracts/test_node_config.py` | **NEW** | ~80 lines |
-| `tests/core/test_dag_typed_config.py` | **NEW** | ~100 lines (single-phase construction tests) |
+2. **Add topology helper types** (in `core/dag.py` or separate file)
+   - `NodeDefinition`, `EdgeDefinition`, `DAGTopology` dataclasses
+
+### Phase B: Refactor Construction (Critical - Tests Will Break)
+
+3. **Refactor `from_plugin_instances()` to single-phase construction**
+   - 3a. Extract `_compute_dag_topology()` - builds node/edge definitions without creating nodes
+   - 3b. Track branch→schema mappings during gate processing (lines 455, 549)
+   - 3c. Extract `_compute_coalesce_schemas()` - uses branch mappings to compute all coalesce schemas
+   - 3d. Extract `_build_typed_config()` - creates frozen NodeConfig from definition + schema
+   - 3e. Remove post-construction schema mutation at line 789
+   - 3f. Update coalesce node creation (line 631) to include pre-computed schema
+
+4. **Update NodeInfo type annotation** - `config: NodeConfig`
+
+### Phase C: Update Access Sites (13 Sites)
+
+5. **Update dag.py internal access sites** (8 sites)
+   - Lines 449, 450, 453, 455: Plugin gate schema handling
+   - Line 549: Config gate schema handling
+   - Lines 779, 782: Coalesce branch validation
+   - Line 1114: Use `get_node_schema_optional()`
+
+6. **Update orchestrator.py** (3 sites)
+   - Line 900: Schema access → use `get_node_schema()`
+   - Line 909: Landscape recording → use `config_to_dict()`
+   - Line 1740: CSV export → use `narrow_config()` + `plugin_config["path"]`
+
+7. **Update canonical.py** (2 sites)
+   - Lines 199, 259: Topology hashing → use `config_to_dict()`
+
+8. **Update plugins/base.py** (1 site)
+   - Line 355: CSV source path → use `narrow_config()` + `plugin_config["path"]`
+
+### Phase D: Testing
+
+9. **Add unit tests** (`tests/contracts/test_node_config.py`)
+   - Construction, narrowing, serialization, frozen mutation prevention
+
+10. **Add integration tests** (`tests/core/test_dag_typed_config.py`)
+    - Single-phase construction produces correct types
+    - Multiple coalesce nodes get correct schemas
+    - Plugin gates vs config gates both produce `GateNodeConfig`
+    - Landscape round-trip test
+
+11. **Run full test suite** - verify no regressions
+
+## Files to Modify (Verified)
+
+| File | Change Type | Lines Affected | Scope |
+|------|-------------|----------------|-------|
+| `contracts/node_config.py` | **NEW** | ~180 | Configs + helpers + overloads + `get_node_schema_optional()` |
+| `core/dag.py` | Modify | 449, 450, 453, 455, 549, 779, 782, 789, 1114 | NodeInfo + refactor `from_plugin_instances()` (~250 lines touched) |
+| `core/canonical.py` | Modify | 199, 259 | Topology hash uses `config_to_dict()` |
+| `engine/orchestrator.py` | Modify | 900, 909, 1740 | Landscape recording + CSV export path |
+| `plugins/base.py` | Modify | 355 | CSV source path access |
+| `tests/contracts/test_node_config.py` | **NEW** | ~100 | Unit tests for types |
+| `tests/core/test_dag_typed_config.py` | **NEW** | ~150 | Single-phase construction + multiple coalesce tests |
 
 ## Testing Strategy
 
@@ -415,22 +601,32 @@ def test_typed_configs_survive_landscape_storage(landscape_db):
 - **Immutability guarantee:** Frozen configs can't be accidentally mutated
 - **Single-phase construction:** Objects complete at creation, no "fix up later"
 
-## Risks and Mitigations
+## Risks and Mitigations (Updated Post-Verification)
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Single-phase refactor more complex than expected | Medium | Topology helpers make phases explicit; can test each phase independently |
-| Missed access sites in orchestrator | Low | Layer 5 testing catches all dict accesses |
+| Coalesce schema ordering more complex than expected | Medium | Track branch→schema during gate construction; compute all coalesce schemas before creating any coalesce nodes |
+| Multiple coalesce nodes each need schema | Medium | Pre-compute ALL coalesce schemas in one pass before node creation |
+| Two gate code paths (plugin vs config) | Low | Both paths produce `GateNodeConfig`; condition/plugin_config fields differ |
+| canonical.py topology hashing | Low | Use `config_to_dict()` for serialization; verify hash stability |
+| Line 1114 `.get()` pattern for source/sink | Low | Add `get_node_schema_optional()` helper that returns None for source/sink |
+| Missed access sites | Low | Verification found all 13 sites; Layer 5 testing as backup |
 | Landscape serialization breaks | Low | Layer 4 round-trip test catches this |
 | CSV export path access breaks | Medium | Explicitly test CSV export; update to use `plugin_config["path"]` |
 
-## Estimated Effort
+## Estimated Effort (Revised Post-Verification)
 
-4-6 hours total:
-- Typed config dataclasses: 1 hour
-- Single-phase construction refactor: 2-3 hours
-- Access site updates: 1 hour
-- Testing: 1 hour
+**6-8 hours total:**
+- Typed config dataclasses + helpers: 1.5 hours
+- Single-phase construction refactor: 3-4 hours (more complex due to coalesce schema ordering)
+- Access site updates (13 sites across 5 files): 1.5 hours
+- Testing (including multiple coalesce scenarios): 1-2 hours
+
+**Why higher than original estimate:**
+- Coalesce schema computation requires branch→schema tracking during gate construction
+- Two distinct gate code paths (plugin vs config) both need updating
+- Additional access sites in canonical.py not in original plan
+- Multiple coalesce nodes require careful schema pre-computation
 
 ## Review Feedback Addressed
 
@@ -440,3 +636,20 @@ This design incorporates feedback from the 4-perspective review:
 2. **Python Engineering:** Added `@overload` for `narrow_config()`, `TypeAlias` for union, `slots=True` for `NodeInfo`
 3. **Quality Assurance:** Added Landscape round-trip test, addressed mutation conflict with single-phase construction
 4. **Systems Thinking:** Chose Option B (refactor) over Option A (remove frozen) for architectural correctness
+
+## Verification Summary
+
+This plan was verified against the actual codebase on 2026-02-01:
+
+**Confirmed:**
+- 13 access sites identified and documented with exact line numbers
+- Coalesce schema mutation at line 789 confirmed as the critical issue
+- Two gate construction paths (plugin vs config) require different handling
+- Multiple coalesce nodes each get mutated in the loop at line 773
+
+**Challenges identified:**
+- Coalesce schema requires edge information → must track branch→schema during gate construction
+- Line 1114 uses `.get()` fallback → need `get_node_schema_optional()` helper
+- canonical.py topology hashing reads entire config dict → needs `config_to_dict()`
+
+**Verification status:** ✅ Complete - plan aligned with codebase
