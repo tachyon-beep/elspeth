@@ -149,7 +149,7 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 - [x] Azure LLM transform calls API and records response **[VERIFIED 2026-02-01]**
 - [x] Template variables substituted correctly **[VERIFIED 2026-02-01]**
 - [x] Structured output mode returns parsed JSON **[VERIFIED 2026-02-01]**
-- [ ] Rate limiting prevents 429 errors **[KNOWN LIMITATION]**
+- [ ] Rate limiting prevents 429 errors **[GAP: service names like "azure-openai" include '-' and violate RateLimiter name validation]**
 
 ### 4.4 Sinks
 
@@ -228,10 +228,9 @@ These are documented limitations, not blockers:
 
 1. **Timeout triggers** - Fire only when next row arrives (documented limitation)
 2. **Explain TUI** - Works but may show "preview" quality
-3. **Rate limiting** - Engine infrastructure exists but not wired through CLI (documented, workaround: LLM plugins have their own)
-4. **Concurrent processing** - Config exists but not integrated (single-threaded acceptable for RC2)
-5. **Profile system** - Deferred (single settings file works)
-6. **Redaction profiles** - Deferred (manual redaction in plugins acceptable)
+3. **Concurrent processing** - Config exists but not integrated (single-threaded acceptable for RC2)
+4. **Profile system** - Deferred (single settings file works)
+5. **Redaction profiles** - Deferred (manual redaction in plugins acceptable)
 
 ---
 

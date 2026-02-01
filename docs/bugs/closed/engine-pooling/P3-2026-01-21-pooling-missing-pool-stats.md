@@ -88,9 +88,49 @@
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md`
 
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Fix Applied
+
+Added the missing `max_concurrent_reached` and `dispatch_delay_at_completion_ms` fields to `PooledExecutor.get_stats()`.
+
+### Changes Made
+
+1. **`src/elspeth/plugins/pooling/executor.py`**:
+   - Added thread-safe concurrency tracking:
+     - `_stats_lock`, `_active_workers`, `_max_concurrent`, `_dispatch_delay_at_completion_ms` instance variables
+     - `_increment_active_workers()` - increments counter and updates peak
+     - `_decrement_active_workers()` - decrements counter
+     - `_reset_batch_stats()` - resets per-batch stats at batch start
+     - `_capture_completion_stats()` - captures delay at batch end
+   - Updated `_execute_single()` to call increment/decrement around semaphore acquire/release
+   - Updated `_execute_batch_locked()` to call reset at start and capture at end
+   - Updated `get_stats()` to include new fields:
+     - `pool_stats.max_concurrent_reached`: Peak concurrent workers during batch
+     - `pool_config.dispatch_delay_at_completion_ms`: Throttle delay at batch completion
+
+2. **Tests added** (`tests/plugins/llm/test_pooled_executor.py`):
+   - `test_max_concurrent_reached_tracks_peak_workers`
+   - `test_dispatch_delay_at_completion_captures_final_delay`
+   - `test_stats_reset_between_batches`
+
+### Design Notes
+
+- `max_concurrent_reached` resets per batch (so each batch reports its own peak)
+- `dispatch_delay_at_completion_ms` captures the AIMD throttle delay at the exact moment the batch completes
+- Thread-safe via `_stats_lock` protecting all stat updates
+
+### Remaining Work
+
+The stats are now **available** via `get_stats()`. Integration with the Landscape recorder (to persist in `context_after_json`) is a separate enhancement that can be done when needed.
+
+---
+
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: STILL VALID** (at time of verification)
 
 - `get_stats()` still omits `max_concurrent_reached` and `dispatch_delay_at_completion_ms`. (`src/elspeth/plugins/pooling/executor.py:132-150`)
 

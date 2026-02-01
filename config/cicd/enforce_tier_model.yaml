@@ -2110,12 +2110,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=812b4378ab3d1b5a
+- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=923431e7c7c800eb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=40ef0414bae7c938
+- key: plugins/pooling/executor.py:R5:PooledExecutor:_execute_single:fp=bbe24a28f3c7d484
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

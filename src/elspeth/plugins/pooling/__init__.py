@@ -4,10 +4,12 @@
 from elspeth.plugins.pooling.config import PoolConfig
 from elspeth.plugins.pooling.errors import CapacityError, is_capacity_error
 from elspeth.plugins.pooling.executor import PooledExecutor, RowContext
+from elspeth.plugins.pooling.reorder_buffer import BufferEntry
 from elspeth.plugins.pooling.throttle import AIMDThrottle, ThrottleConfig
 
 __all__ = [
     "AIMDThrottle",
+    "BufferEntry",
     "CapacityError",
     "PoolConfig",
     "PooledExecutor",

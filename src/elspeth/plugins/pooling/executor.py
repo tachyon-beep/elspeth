@@ -22,7 +22,7 @@ from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.pooling.config import PoolConfig
 from elspeth.plugins.pooling.errors import CapacityError
-from elspeth.plugins.pooling.reorder_buffer import ReorderBuffer
+from elspeth.plugins.pooling.reorder_buffer import BufferEntry, ReorderBuffer
 from elspeth.plugins.pooling.throttle import AIMDThrottle
 
 
@@ -64,16 +64,24 @@ class PooledExecutor:
             for i, (row, state_id) in enumerate(zip(rows, state_ids))
         ]
 
-        # Process batch
-        results = executor.execute_batch(
+        # Process batch - returns BufferEntry with ordering metadata
+        entries = executor.execute_batch(
             contexts=contexts,
             process_fn=lambda row, state_id: transform.process_single(row, state_id),
         )
 
-        # Results are in submission order
-        assert len(results) == len(contexts)
+        # Entries are in submission order with full metadata
+        assert len(entries) == len(contexts)
 
-        # Get stats for audit
+        # Extract results when needed
+        results = [entry.result for entry in entries]
+
+        # Access ordering metadata for audit trail
+        for entry in entries:
+            print(f"Row {entry.submit_index} completed {entry.complete_index}th")
+            print(f"Buffer wait: {entry.buffer_wait_ms}ms")
+
+        # Get pool stats for audit
         stats = executor.get_stats()
     """
 
@@ -108,12 +116,41 @@ class PooledExecutor:
         self._last_dispatch_time: float = 0.0  # time.monotonic() of last dispatch
         self._dispatch_gate_lock = Lock()  # Serializes dispatch timing coordination
 
+        # Concurrency tracking for audit trail
+        self._stats_lock = Lock()
+        self._active_workers: int = 0
+        self._max_concurrent: int = 0
+        self._dispatch_delay_at_completion_ms: float = 0.0
+
         self._shutdown = False
 
     @property
     def pool_size(self) -> int:
         """Maximum concurrent requests."""
         return self._pool_size
+
+    def _increment_active_workers(self) -> None:
+        """Increment active worker count and update max_concurrent (thread-safe)."""
+        with self._stats_lock:
+            self._active_workers += 1
+            if self._active_workers > self._max_concurrent:
+                self._max_concurrent = self._active_workers
+
+    def _decrement_active_workers(self) -> None:
+        """Decrement active worker count (thread-safe)."""
+        with self._stats_lock:
+            self._active_workers -= 1
+
+    def _reset_batch_stats(self) -> None:
+        """Reset per-batch statistics at start of new batch."""
+        with self._stats_lock:
+            self._max_concurrent = 0
+            self._dispatch_delay_at_completion_ms = 0.0
+
+    def _capture_completion_stats(self) -> None:
+        """Capture statistics at batch completion."""
+        with self._stats_lock:
+            self._dispatch_delay_at_completion_ms = self._throttle.current_delay_ms
 
     @property
     def pending_count(self) -> int:
@@ -133,13 +170,20 @@ class PooledExecutor:
         """Get executor statistics for audit trail.
 
         Returns:
-            Dict with pool_size, throttle stats, etc.
+            Dict with pool_config and pool_stats including:
+            - pool_config: pool_size, max_capacity_retry_seconds, dispatch_delay_at_completion_ms
+            - pool_stats: capacity_retries, successes, peak_delay_ms, current_delay_ms,
+                          total_throttle_time_ms, max_concurrent_reached
         """
         throttle_stats = self._throttle.get_stats()
+        with self._stats_lock:
+            max_concurrent = self._max_concurrent
+            dispatch_delay_at_completion = self._dispatch_delay_at_completion_ms
         return {
             "pool_config": {
                 "pool_size": self._pool_size,
                 "max_capacity_retry_seconds": self._max_capacity_retry_seconds,
+                "dispatch_delay_at_completion_ms": dispatch_delay_at_completion,
             },
             "pool_stats": {
                 "capacity_retries": throttle_stats["capacity_retries"],
@@ -147,6 +191,7 @@ class PooledExecutor:
                 "peak_delay_ms": throttle_stats["peak_delay_ms"],
                 "current_delay_ms": throttle_stats["current_delay_ms"],
                 "total_throttle_time_ms": throttle_stats["total_throttle_time_ms"],
+                "max_concurrent_reached": max_concurrent,
             },
         }
 
@@ -154,12 +199,12 @@ class PooledExecutor:
         self,
         contexts: list[RowContext],
         process_fn: Callable[[dict[str, Any], str], TransformResult],
-    ) -> list[TransformResult]:
+    ) -> list[BufferEntry[TransformResult]]:
         """Execute batch of rows with parallel processing.
 
         Dispatches rows to the thread pool with semaphore control,
         applies AIMD throttle delays, and returns results in
-        submission order.
+        submission order with full ordering metadata.
 
         Each row is processed with its own state_id for audit trail.
 
@@ -171,7 +216,13 @@ class PooledExecutor:
             process_fn: Function that processes a single row with state_id
 
         Returns:
-            List of TransformResults in same order as input contexts
+            List of BufferEntry in submission order, each containing:
+            - result: The TransformResult from process_fn
+            - submit_index: Order in which row was submitted (0-indexed)
+            - complete_index: Order in which row completed (may differ)
+            - submit_timestamp: time.perf_counter() when submitted
+            - complete_timestamp: time.perf_counter() when completed
+            - buffer_wait_ms: Time spent waiting in buffer after completion
         """
         if not contexts:
             return []
@@ -186,7 +237,7 @@ class PooledExecutor:
         self,
         contexts: list[RowContext],
         process_fn: Callable[[dict[str, Any], str], TransformResult],
-    ) -> list[TransformResult]:
+    ) -> list[BufferEntry[TransformResult]]:
         """Internal batch execution (must be called while holding _batch_lock).
 
         Args:
@@ -194,8 +245,12 @@ class PooledExecutor:
             process_fn: Function that processes a single row with state_id
 
         Returns:
-            List of TransformResults in same order as input contexts
+            List of BufferEntry in same order as input contexts, preserving
+            full ordering metadata for audit trail.
         """
+        # Reset per-batch statistics
+        self._reset_batch_stats()
+
         # Track futures by their buffer index
         futures: dict[Future[tuple[int, TransformResult]], int] = {}
 
@@ -219,8 +274,8 @@ class PooledExecutor:
             )
             futures[future] = buffer_idx
 
-        # Wait for all futures and collect results
-        results: list[TransformResult] = []
+        # Wait for all futures and collect results with full metadata
+        entries: list[BufferEntry[TransformResult]] = []
 
         for future in as_completed(futures):
             buffer_idx, result = future.result()
@@ -228,24 +283,25 @@ class PooledExecutor:
             # Complete in buffer (may be out of order)
             self._buffer.complete(buffer_idx, result)
 
-            # Collect any ready results
+            # Collect any ready entries (preserving full BufferEntry, not just result)
             ready = self._buffer.get_ready_results()
-            for entry in ready:
-                results.append(entry.result)
+            entries.extend(ready)
 
-        # CRITICAL: Final drain - collect any remaining results not yet emitted
+        # CRITICAL: Final drain - collect any remaining entries not yet emitted
         # (the last completed future may not have been at the head of the queue)
         while self._buffer.pending_count > 0:
             ready = self._buffer.get_ready_results()
             if not ready:
                 break  # Safety: shouldn't happen if all futures completed
-            for entry in ready:
-                results.append(entry.result)
+            entries.extend(ready)
 
-        if len(results) != len(contexts):
-            raise RuntimeError(f"Pool returned {len(results)} results for {len(contexts)} contexts")
+        if len(entries) != len(contexts):
+            raise RuntimeError(f"Pool returned {len(entries)} entries for {len(contexts)} contexts")
 
-        return results
+        # Capture statistics at batch completion
+        self._capture_completion_stats()
+
+        return entries
 
     def _wait_for_dispatch_gate(self) -> None:
         """Wait until we're allowed to dispatch, ensuring global pacing.
@@ -336,6 +392,7 @@ class PooledExecutor:
         # This prevents deadlock when capacity errors cause release-then-reacquire
         self._semaphore.acquire()
         holding_semaphore = True
+        self._increment_active_workers()
 
         try:
             while True:
@@ -396,6 +453,7 @@ class PooledExecutor:
                     # CRITICAL: Release semaphore BEFORE sleeping
                     # This allows other workers to make progress while we wait
                     self._semaphore.release()
+                    self._decrement_active_workers()
                     holding_semaphore = False
 
                     # Wait throttle delay before retry
@@ -406,6 +464,7 @@ class PooledExecutor:
 
                     # Re-acquire semaphore for retry
                     self._semaphore.acquire()
+                    self._increment_active_workers()
                     holding_semaphore = True
 
                     # Continue to top of loop for retry
@@ -417,3 +476,4 @@ class PooledExecutor:
             # exception occurs between release and re-acquire
             if holding_semaphore:
                 self._semaphore.release()
+                self._decrement_active_workers()

@@ -89,9 +89,53 @@
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md`
 
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Fix Applied
+
+Changed `PooledExecutor.execute_batch()` to return `list[BufferEntry[TransformResult]]` instead of `list[TransformResult]`. This preserves the full ordering metadata that was previously discarded.
+
+### Changes Made
+
+1. **`src/elspeth/plugins/pooling/executor.py`**:
+   - Changed return type of `execute_batch()` from `list[TransformResult]` to `list[BufferEntry[TransformResult]]`
+   - Updated internal `_execute_batch_locked()` to collect full `BufferEntry` objects instead of just `.result`
+   - Updated docstrings to document the returned metadata fields
+
+2. **`src/elspeth/plugins/pooling/__init__.py`**:
+   - Exported `BufferEntry` from the module for callers to use
+
+3. **Callers updated**:
+   - `src/elspeth/plugins/llm/azure_multi_query.py`: Extract `.result` from entries
+   - `src/elspeth/plugins/llm/openrouter_multi_query.py`: Extract `.result` from entries
+
+4. **Tests added** (`tests/plugins/llm/test_pooled_executor.py`):
+   - `TestPooledExecutorOrderingMetadata` class with 5 new tests:
+     - `test_execute_batch_returns_buffer_entries_with_metadata`
+     - `test_submit_indices_are_sequential`
+     - `test_complete_indices_reflect_actual_completion_order`
+     - `test_timestamps_are_valid`
+     - `test_buffer_wait_ms_tracks_reorder_delay`
+
+### Design Decision
+
+Chose **Option A** (return `BufferEntry` directly) over alternatives because:
+- Makes metadata impossible to lose - it travels with the result
+- Follows "don't throw away data" principle
+- Type system enforces metadata availability
+- ELSPETH's "No Legacy Code" policy means breaking changes are acceptable
+
+### Remaining Work
+
+The metadata is now **available** to callers. Integration with the Landscape recorder (to actually persist the ordering metadata in `context_after_json`) is a separate enhancement that can be done when needed.
+
+---
+
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: STILL VALID** (at time of verification)
 
 - `PooledExecutor` still appends only `entry.result`, dropping ordering metadata. (`src/elspeth/plugins/pooling/executor.py:232-244`)
 - `BufferEntry` still defines submit/complete timing metadata that never reaches the audit trail. (`src/elspeth/plugins/pooling/reorder_buffer.py:16-34`)

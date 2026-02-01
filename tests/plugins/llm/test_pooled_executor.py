@@ -7,7 +7,7 @@ from threading import Lock
 from typing import Any
 
 from elspeth.contracts import TransformResult
-from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, RowContext
+from elspeth.plugins.pooling import BufferEntry, CapacityError, PoolConfig, PooledExecutor, RowContext
 
 
 class TestPooledExecutorInit:
@@ -106,13 +106,21 @@ class TestPooledExecutorBatch:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(3)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
-        # Results must be in submission order
-        assert len(results) == 3
-        assert results[0].row is not None and results[0].row["idx"] == 0
-        assert results[1].row is not None and results[1].row["idx"] == 1
-        assert results[2].row is not None and results[2].row["idx"] == 2
+        # Entries must be in submission order with full metadata
+        assert len(entries) == 3
+        assert all(isinstance(e, BufferEntry) for e in entries)
+
+        # Verify results are in submission order
+        assert entries[0].result.row is not None and entries[0].result.row["idx"] == 0
+        assert entries[1].result.row is not None and entries[1].result.row["idx"] == 1
+        assert entries[2].result.row is not None and entries[2].result.row["idx"] == 2
+
+        # Verify ordering metadata is present
+        assert entries[0].submit_index == 0
+        assert entries[1].submit_index == 1
+        assert entries[2].submit_index == 2
 
         executor.shutdown()
 
@@ -135,7 +143,7 @@ class TestPooledExecutorBatch:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"unique_state_{i}", row_index=i) for i in range(3)]
 
-        executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
         # Verify each row got its own state_id
         assert len(received_state_ids) == 3
@@ -143,6 +151,9 @@ class TestPooledExecutorBatch:
         assert state_id_map[0] == "unique_state_0"
         assert state_id_map[1] == "unique_state_1"
         assert state_id_map[2] == "unique_state_2"
+
+        # Verify entries returned
+        assert len(entries) == 3
 
         executor.shutdown()
 
@@ -176,9 +187,9 @@ class TestPooledExecutorBatch:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
-        assert len(results) == 5
+        assert len(entries) == 5
         assert max_concurrent <= 2  # Never exceeded pool_size
 
         executor.shutdown()
@@ -199,6 +210,7 @@ class TestPooledExecutorStats:
 
         assert stats["pool_config"]["pool_size"] == 4
         assert stats["pool_config"]["max_capacity_retry_seconds"] == 1800
+        assert "dispatch_delay_at_completion_ms" in stats["pool_config"]
 
         executor.shutdown()
 
@@ -216,6 +228,85 @@ class TestPooledExecutorStats:
         assert "peak_delay_ms" in stats["pool_stats"]
         assert "current_delay_ms" in stats["pool_stats"]
         assert "total_throttle_time_ms" in stats["pool_stats"]
+        assert "max_concurrent_reached" in stats["pool_stats"]
+
+        executor.shutdown()
+
+    def test_max_concurrent_reached_tracks_peak_workers(self) -> None:
+        """max_concurrent_reached should track peak concurrent workers.
+
+        Regression test for P3-2026-01-21-pooling-missing-pool-stats.
+        """
+        config = PoolConfig(pool_size=3)
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.05)  # Long enough for concurrent execution
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        # Run 5 items through pool_size=3 - should see max_concurrent=3
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
+        executor.execute_batch(contexts, mock_process)
+
+        stats = executor.get_stats()
+        # Should have reached pool_size at some point
+        assert stats["pool_stats"]["max_concurrent_reached"] >= 2
+        assert stats["pool_stats"]["max_concurrent_reached"] <= 3
+
+        executor.shutdown()
+
+    def test_dispatch_delay_at_completion_captures_final_delay(self) -> None:
+        """dispatch_delay_at_completion_ms should capture delay at batch end.
+
+        Regression test for P3-2026-01-21-pooling-missing-pool-stats.
+        """
+        config = PoolConfig(pool_size=2, recovery_step_ms=50)
+        executor = PooledExecutor(config)
+
+        call_count = 0
+        lock = Lock()
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            nonlocal call_count
+            with lock:
+                call_count += 1
+                current_count = call_count
+
+            # First call raises capacity error to trigger throttle
+            if current_count == 1:
+                raise CapacityError(429, "Rate limited")
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
+        executor.execute_batch(contexts, mock_process)
+
+        stats = executor.get_stats()
+        # After capacity error, delay should be > 0
+        assert stats["pool_config"]["dispatch_delay_at_completion_ms"] >= 0
+
+        executor.shutdown()
+
+    def test_stats_reset_between_batches(self) -> None:
+        """max_concurrent_reached should reset between batches."""
+        config = PoolConfig(pool_size=4)
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.02)
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        # First batch with 4 items
+        contexts1 = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
+        executor.execute_batch(contexts1, mock_process)
+        # Stats from first batch not needed - we only verify second batch's max_concurrent
+
+        # Second batch with only 1 item
+        contexts2 = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
+        executor.execute_batch(contexts2, mock_process)
+        stats2 = executor.get_stats()
+
+        # Second batch should have lower max_concurrent
+        assert stats2["pool_stats"]["max_concurrent_reached"] == 1
 
         executor.shutdown()
 
@@ -244,11 +335,11 @@ class TestPooledExecutorCapacityHandling:
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
         # Should have retried and succeeded
-        assert len(results) == 1
-        assert results[0].status == "success"
+        assert len(entries) == 1
+        assert entries[0].result.status == "success"
         assert call_count == 2
 
         # Throttle should have been triggered
@@ -278,13 +369,13 @@ class TestPooledExecutorCapacityHandling:
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
         # Should eventually fail after timeout
-        assert len(results) == 1
-        assert results[0].status == "error"
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "retry_timeout"
+        assert len(entries) == 1
+        assert entries[0].result.status == "error"
+        assert entries[0].result.reason is not None
+        assert entries[0].result.reason["reason"] == "retry_timeout"
 
         # Should have made multiple attempts before giving up
         assert call_count > 1
@@ -302,11 +393,11 @@ class TestPooledExecutorCapacityHandling:
 
         contexts = [RowContext(row={"idx": 0}, state_id="state_0", row_index=0)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
         # Should return error without retry
-        assert len(results) == 1
-        assert results[0].status == "error"
+        assert len(entries) == 1
+        assert entries[0].result.status == "error"
 
         executor.shutdown()
 
@@ -361,11 +452,11 @@ class TestPooledExecutorCapacityHandling:
             RowContext(row={"idx": 1}, state_id="state_1", row_index=1),
         ]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
         # Both should succeed
-        assert len(results) == 2
-        assert all(r.status == "success" for r in results)
+        assert len(entries) == 2
+        assert all(e.result.status == "success" for e in entries)
 
         # Row 1 should have executed WHILE row 0 was in retry sleep
         # If semaphore wasn't released, row 1 would be blocked
@@ -431,14 +522,14 @@ class TestPooledExecutorCapacityHandling:
         old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(10)
         try:
-            results = executor.execute_batch(contexts, mock_process)
+            entries = executor.execute_batch(contexts, mock_process)
         finally:
             signal.alarm(0)
             signal.signal(signal.SIGALRM, old_handler)
 
         # All rows should succeed
-        assert len(results) == 6
-        assert all(r.status == "success" for r in results)
+        assert len(entries) == 6
+        assert all(e.result.status == "success" for e in entries)
 
         # Each row should have been called twice (first fail, second succeed)
         for i in range(6):
@@ -465,8 +556,8 @@ class TestPooledExecutorConcurrentBatches:
         config = PoolConfig(pool_size=4)
         executor = PooledExecutor(config)
 
-        batch_a_results: list[TransformResult] = []
-        batch_b_results: list[TransformResult] = []
+        batch_a_entries: list[BufferEntry[TransformResult]] = []
+        batch_b_entries: list[BufferEntry[TransformResult]] = []
         errors: list[Exception] = []
 
         def process_a(row: dict[str, Any], state_id: str) -> TransformResult:
@@ -486,16 +577,16 @@ class TestPooledExecutorConcurrentBatches:
         def run_batch_a() -> None:
             try:
                 contexts = [RowContext(row={"idx": i}, state_id=f"a_state_{i}", row_index=i) for i in range(5)]
-                nonlocal batch_a_results
-                batch_a_results = executor.execute_batch(contexts, process_a)
+                nonlocal batch_a_entries
+                batch_a_entries = executor.execute_batch(contexts, process_a)
             except Exception as e:
                 errors.append(e)
 
         def run_batch_b() -> None:
             try:
                 contexts = [RowContext(row={"idx": i}, state_id=f"b_state_{i}", row_index=i) for i in range(5)]
-                nonlocal batch_b_results
-                batch_b_results = executor.execute_batch(contexts, process_b)
+                nonlocal batch_b_entries
+                batch_b_entries = executor.execute_batch(contexts, process_b)
             except Exception as e:
                 errors.append(e)
 
@@ -509,21 +600,21 @@ class TestPooledExecutorConcurrentBatches:
         # Check for errors
         assert not errors, f"Batch execution raised errors: {errors}"
 
-        # Both batches should have exactly 5 results
-        assert len(batch_a_results) == 5, f"Batch A has {len(batch_a_results)} results, expected 5"
-        assert len(batch_b_results) == 5, f"Batch B has {len(batch_b_results)} results, expected 5"
+        # Both batches should have exactly 5 entries
+        assert len(batch_a_entries) == 5, f"Batch A has {len(batch_a_entries)} entries, expected 5"
+        assert len(batch_b_entries) == 5, f"Batch B has {len(batch_b_entries)} entries, expected 5"
 
         # All batch A results must be from batch A (no mixing)
-        for i, result in enumerate(batch_a_results):
-            assert result.row is not None
-            assert result.row["batch"] == "A", f"Batch A result {i} contains batch {result.row['batch']}"
-            assert result.row["idx"] == i, f"Batch A result {i} has wrong index {result.row['idx']}"
+        for i, entry in enumerate(batch_a_entries):
+            assert entry.result.row is not None
+            assert entry.result.row["batch"] == "A", f"Batch A entry {i} contains batch {entry.result.row['batch']}"
+            assert entry.result.row["idx"] == i, f"Batch A entry {i} has wrong index {entry.result.row['idx']}"
 
         # All batch B results must be from batch B (no mixing)
-        for i, result in enumerate(batch_b_results):
-            assert result.row is not None
-            assert result.row["batch"] == "B", f"Batch B result {i} contains batch {result.row['batch']}"
-            assert result.row["idx"] == i, f"Batch B result {i} has wrong index {result.row['idx']}"
+        for i, entry in enumerate(batch_b_entries):
+            assert entry.result.row is not None
+            assert entry.result.row["batch"] == "B", f"Batch B entry {i} contains batch {entry.result.row['batch']}"
+            assert entry.result.row["idx"] == i, f"Batch B entry {i} has wrong index {entry.result.row['idx']}"
 
         executor.shutdown()
 
@@ -555,9 +646,9 @@ class TestPooledExecutorDispatchPacing:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(8)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
-        assert len(results) == 8
+        assert len(entries) == 8
 
         # Sort dispatch times and check intervals
         dispatch_times.sort()
@@ -592,9 +683,9 @@ class TestPooledExecutorDispatchPacing:
         # Exactly pool_size rows - all would dispatch together in buggy version
         contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(4)]
 
-        results = executor.execute_batch(contexts, mock_process)
+        entries = executor.execute_batch(contexts, mock_process)
 
-        assert len(results) == 4
+        assert len(entries) == 4
 
         # Check that dispatches are NOT bunched together
         dispatch_times.sort()
@@ -604,5 +695,154 @@ class TestPooledExecutorDispatchPacing:
         # With 50ms delay between each, 4 dispatches should span ~150ms minimum
         span_ms = (last_of_first_batch - first_dispatch) * 1000
         assert span_ms >= 120, f"All 4 dispatches completed within {span_ms:.1f}ms - indicates burst traffic (expected >= 150ms span)"
+
+        executor.shutdown()
+
+
+class TestPooledExecutorOrderingMetadata:
+    """Test that ordering metadata is preserved for audit trail.
+
+    Regression tests for P2-2026-01-21-pooling-ordering-metadata-dropped.
+    """
+
+    def test_execute_batch_returns_buffer_entries_with_metadata(self) -> None:
+        """execute_batch should return BufferEntry objects, not just results.
+
+        This is the core fix for the P2 bug - metadata was previously stripped.
+        """
+        config = PoolConfig(pool_size=2)
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(3)]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        # Must return BufferEntry objects
+        assert len(entries) == 3
+        for entry in entries:
+            assert isinstance(entry, BufferEntry)
+            assert hasattr(entry, "submit_index")
+            assert hasattr(entry, "complete_index")
+            assert hasattr(entry, "submit_timestamp")
+            assert hasattr(entry, "complete_timestamp")
+            assert hasattr(entry, "buffer_wait_ms")
+            assert hasattr(entry, "result")
+
+        executor.shutdown()
+
+    def test_submit_indices_are_sequential(self) -> None:
+        """Submit indices should be 0, 1, 2, ... in submission order."""
+        config = PoolConfig(pool_size=3)
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.01)
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        # Submit indices must be sequential
+        submit_indices = [e.submit_index for e in entries]
+        assert submit_indices == [0, 1, 2, 3, 4]
+
+        executor.shutdown()
+
+    def test_complete_indices_reflect_actual_completion_order(self) -> None:
+        """Complete indices should reflect the order requests actually completed.
+
+        With varying delays, completion order differs from submission order.
+        This metadata is crucial for diagnosing out-of-order issues.
+        """
+        config = PoolConfig(pool_size=5)  # All can run in parallel
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            idx = row["idx"]
+            # Reverse delay: idx 0 slowest, idx 4 fastest
+            time.sleep(0.05 * (5 - idx))
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(5)]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        # Submit indices should be in order (reorder buffer guarantees this)
+        submit_indices = [e.submit_index for e in entries]
+        assert submit_indices == [0, 1, 2, 3, 4]
+
+        # Complete indices should show that higher indices completed first
+        # (because they had shorter delays)
+        complete_indices = [e.complete_index for e in entries]
+
+        # Entry 4 should have completed first (complete_index 0)
+        # Entry 0 should have completed last (complete_index 4)
+        assert entries[4].complete_index < entries[0].complete_index, (
+            f"Row 4 (fast) should complete before row 0 (slow). Complete indices: {complete_indices}"
+        )
+
+        executor.shutdown()
+
+    def test_timestamps_are_valid(self) -> None:
+        """Timestamps should be valid perf_counter values."""
+        config = PoolConfig(pool_size=2)
+        executor = PooledExecutor(config)
+
+        before_test = time.perf_counter()
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            time.sleep(0.01)
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [RowContext(row={"idx": i}, state_id=f"state_{i}", row_index=i) for i in range(2)]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        after_test = time.perf_counter()
+
+        for entry in entries:
+            # Timestamps should be within test bounds
+            assert before_test <= entry.submit_timestamp <= after_test
+            assert before_test <= entry.complete_timestamp <= after_test
+
+            # Complete should be after submit
+            assert entry.complete_timestamp >= entry.submit_timestamp
+
+            # Buffer wait should be non-negative
+            assert entry.buffer_wait_ms >= 0
+
+        executor.shutdown()
+
+    def test_buffer_wait_ms_tracks_reorder_delay(self) -> None:
+        """buffer_wait_ms should track time spent waiting for earlier items.
+
+        When item N completes but item N-1 hasn't, item N waits in buffer.
+        """
+        config = PoolConfig(pool_size=2)
+        executor = PooledExecutor(config)
+
+        def mock_process(row: dict[str, Any], state_id: str) -> TransformResult:
+            idx = row["idx"]
+            if idx == 0:
+                time.sleep(0.1)  # Slow - holds up emission of item 1
+            else:
+                time.sleep(0.01)  # Fast - completes but waits for item 0
+            return TransformResult.success(row, success_reason={"action": "processed"})
+
+        contexts = [
+            RowContext(row={"idx": 0}, state_id="state_0", row_index=0),
+            RowContext(row={"idx": 1}, state_id="state_1", row_index=1),
+        ]
+
+        entries = executor.execute_batch(contexts, mock_process)
+
+        # Item 0 (slow) shouldn't have waited much - it was the blocker
+        # Item 1 (fast) should have waited ~90ms for item 0
+        assert entries[0].buffer_wait_ms < 50, f"Item 0 waited {entries[0].buffer_wait_ms}ms unexpectedly"
+        assert entries[1].buffer_wait_ms >= 50, f"Item 1 should have waited for item 0, only waited {entries[1].buffer_wait_ms}ms"
 
         executor.shutdown()

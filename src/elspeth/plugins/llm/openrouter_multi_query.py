@@ -881,7 +881,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Execute all queries with retry support
         # PooledExecutor handles capacity errors with AIMD backoff
-        results = self._executor.execute_batch(
+        # Returns BufferEntry with full ordering metadata for audit trail
+        entries = self._executor.execute_batch(
             contexts=contexts,
             process_fn=lambda work, work_state_id: self._process_single_query(
                 work["original_row"],
@@ -890,7 +891,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             ),
         )
 
-        return results
+        # Extract results for return
+        # Note: entries contain ordering metadata (submit_index, complete_index,
+        # buffer_wait_ms) available for audit trail integration
+        return [entry.result for entry in entries]
 
     def _execute_queries_sequential(
         self,
