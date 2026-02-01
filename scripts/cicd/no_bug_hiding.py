@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import sys
 from calendar import monthrange
@@ -52,6 +53,7 @@ class Finding:
     line: int
     col: int
     symbol_context: tuple[str, ...]  # e.g., ("ClassName", "method_name")
+    fingerprint: str
     code_snippet: str
     message: str
 
@@ -59,7 +61,7 @@ class Finding:
     def canonical_key(self) -> str:
         """Generate the canonical key for allowlist matching."""
         symbol_part = ":".join(self.symbol_context) if self.symbol_context else "_module_"
-        return f"{self.file_path}:{self.rule_id}:{symbol_part}:line={self.line}"
+        return f"{self.file_path}:{self.rule_id}:{symbol_part}:fp={self.fingerprint}"
 
     def suggested_allowlist_entry(self) -> dict[str, Any]:
         """Generate a suggested allowlist entry for this finding."""
@@ -152,12 +154,26 @@ class BugHidingVisitor(ast.NodeVisitor):
         self.source_lines = source_lines
         self.findings: list[Finding] = []
         self.symbol_stack: list[str] = []
+        self.path_stack: list[str] = []
 
     def _get_code_snippet(self, lineno: int) -> str:
         """Get the source line for a given line number."""
         if 1 <= lineno <= len(self.source_lines):
             return self.source_lines[lineno - 1].strip()
         return "<source unavailable>"
+
+    def _fingerprint_node(self, rule_id: str, node: ast.AST) -> str:
+        """Generate a stable fingerprint for a finding.
+
+        The fingerprint is based on:
+        - rule_id (ensures distinctness across rules)
+        - AST path (field/index path from root, stable across formatting)
+        - AST dump without line/column attributes
+        """
+        ast_path = "/".join(self.path_stack)
+        node_dump = ast.dump(node, include_attributes=False, annotate_fields=True)
+        payload = f"{rule_id}|{ast_path}|{node_dump}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
     def _add_finding(self, rule_id: str, node: ast.expr | ast.stmt | ast.ExceptHandler, message: str) -> None:
         """Record a finding."""
@@ -168,6 +184,7 @@ class BugHidingVisitor(ast.NodeVisitor):
                 line=node.lineno,
                 col=node.col_offset,
                 symbol_context=tuple(self.symbol_stack),
+                fingerprint=self._fingerprint_node(rule_id, node),
                 code_snippet=self._get_code_snippet(node.lineno),
                 message=message,
             )
@@ -260,6 +277,20 @@ class BugHidingVisitor(ast.NodeVisitor):
                 )
 
         self.generic_visit(node)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        """Visit a node, tracking AST path for stable fingerprints."""
+        for field_name, value in ast.iter_fields(node):
+            if isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, ast.AST):
+                        self.path_stack.append(f"{field_name}[{index}]")
+                        self.visit(item)
+                        self.path_stack.pop()
+            elif isinstance(value, ast.AST):
+                self.path_stack.append(field_name)
+                self.visit(value)
+                self.path_stack.pop()
 
 
 # =============================================================================
@@ -407,6 +438,7 @@ def report_json(
                     "line": f.line,
                     "col": f.col,
                     "context": list(f.symbol_context),
+                    "fingerprint": f.fingerprint,
                     "code": f.code_snippet,
                     "message": f.message,
                     "key": f.canonical_key,

@@ -3,1093 +3,1305 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=56
+# NodeStateInfo optional fields - TypedDict with total=False means fields may be absent
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=efa021de94ac3b1f
   owner: architecture
-  reason: 'Optional field: state_id may be missing before execution'
+  reason: 'Optional field: state_id may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to 'N/A' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=59
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=c487c413733875f2
   owner: architecture
-  reason: 'Optional field: token_id may be missing before execution'
+  reason: 'Optional field: token_id may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to 'N/A' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=64
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d83a6cacd8813583
   owner: architecture
-  reason: 'Optional field: status may be missing before execution'
+  reason: 'Optional field: status may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to 'N/A' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=67
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=561bead45d07791c
   owner: architecture
-  reason: 'Optional field: started_at may be missing before execution'
+  reason: 'Optional field: started_at may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to 'N/A' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=69
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=b9a8fe28fc3a2a35
   owner: architecture
-  reason: 'Optional field: completed_at may be missing before execution'
+  reason: 'Optional field: completed_at may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to 'N/A' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=71
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=db3f916fb4b5df04
   owner: architecture
-  reason: 'Optional field: duration_ms may be missing before execution'
+  reason: 'Optional field: duration_ms may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation - conditionally displayed
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=78
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f86a38f7c1fdf563
   owner: architecture
-  reason: 'Optional field: input_hash may be missing before execution'
+  reason: 'Optional field: input_hash may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to '(none)' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=79
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=e0e83f67901e3bc7
   owner: architecture
-  reason: 'Optional field: output_hash may be missing before execution'
+  reason: 'Optional field: output_hash may be missing before execution (TypedDict total=False)'
   safety: Graceful degradation to '(none)' - user sees partial data
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=86
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=2fe3f91f56f42b8c
   owner: architecture
-  reason: 'Optional field: error_json only present for failed executions'
+  reason: 'Optional field: error_json only present for failed executions (TypedDict total=False)'
   safety: Graceful degradation - error section conditionally shown
   expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=110
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=03b59094c0a9934c
   owner: architecture
-  reason: 'Trust boundary: state_id lookup for logging context'
-  safety: None is safe - just means unknown state_id in log message
-  expires: null
-- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:line=119
-  owner: architecture
-  reason: 'Optional field: artifact may be missing for non-sink nodes'
+  reason: 'Optional field: artifact may be missing for non-sink nodes (TypedDict total=False)'
   safety: Graceful degradation - artifact section conditionally shown
   expires: null
-- key: plugins/manager.py:R3:_schema_hash:line=50
+# Error message context - informational only, not control flow
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=d1f89dde14fd37d2
+  owner: architecture
+  reason: 'Error message context: state_id for debugging in error messages'
+  safety: None is safe - just means unknown state_id in error message
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=4689219565e309cc
+  owner: architecture
+  reason: 'Error message context: state_id for debugging in error messages'
+  safety: None is safe - just means unknown state_id in error message
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=675ba5371c46f70a
+  owner: architecture
+  reason: 'Error message context: state_id for debugging in error messages'
+  safety: None is safe - just means unknown state_id in error message
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a105e6d08eb1e3b9
+  owner: architecture
+  reason: 'Error message context: state_id for debugging in error messages'
+  safety: None is safe - just means unknown state_id in error message
+  expires: null
+# NotRequired fields on validated TypedDicts - may legitimately be absent per schema
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=6eefee9df94392dd
+  owner: architecture
+  reason: 'NotRequired field: ExecutionErrorDisplay.phase is optional per schema'
+  safety: Conditionally displays phase only when present
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=f40067b280807118
+  owner: architecture
+  reason: 'NotRequired field: TransformErrorDisplay.error is optional per schema'
+  safety: Falls back to message field or omits line if both absent
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=a4ecc4a0cc77230c
+  owner: architecture
+  reason: 'NotRequired field: TransformErrorDisplay.message is optional per schema'
+  safety: Falls back to error field or omits line if both absent
+  expires: null
+- key: tui/widgets/node_detail.py:R1:NodeDetailPanel:render_content:fp=872b14cd5cb8103d
+  owner: architecture
+  reason: 'NotRequired field: TransformErrorDisplay.field is optional per schema'
+  safety: Conditionally displays field only when present
+  expires: null
+- key: plugins/manager.py:R3:_schema_hash:fp=62e25fb56dc03325
   owner: architecture
   reason: 'Trust boundary: checking if plugin class has Pydantic model_fields'
   safety: Raises TypeError if not Pydantic - fails fast on protocol violation
   expires: null
-- key: plugins/manager.py:R2:PluginSpec:from_plugin:line=94
+- key: plugins/manager.py:R2:PluginSpec:from_plugin:fp=c22c4c4fb63c5092
   owner: architecture
   reason: 'Polymorphic: sources don''t have input_schema, sinks don''t have output_schema'
   safety: Legitimate Optional return - None means 'accepts any schema'
   expires: null
-- key: plugins/manager.py:R2:PluginSpec:from_plugin:line=95
+- key: plugins/manager.py:R2:PluginSpec:from_plugin:fp=04819a18a202df57
   owner: architecture
   reason: 'Polymorphic: sources don''t have input_schema, sinks don''t have output_schema'
   safety: Legitimate Optional return - None means 'accepts any schema'
   expires: null
-- key: contracts/data.py:R1:validate_row:line=101
+- key: contracts/data.py:R1:validate_row:fp=0f6fa60e1ef14cec
   owner: architecture
   reason: 'Trust boundary: Pydantic error dict may not have ''input'' key'
   safety: Graceful handling - validation error message still produced
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=284
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=980a3ced598bc995
   owner: architecture
   reason: 'Optional field: guaranteed_fields is not present in all schema configs'
   safety: _parse_field_names_list handles None correctly - returns None
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=285
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=5a37e990b69864e5
   owner: architecture
   reason: 'Optional field: required_fields is not present in all schema configs'
   safety: _parse_field_names_list handles None correctly - returns None
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=286
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=525630737c19bd17
   owner: architecture
   reason: 'Optional field: audit_fields is not present in all schema configs'
   safety: _parse_field_names_list handles None correctly - returns None
   expires: null
-- key: contracts/schema.py:R1:SchemaConfig:from_dict:line=289
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=fcf64cb10b4055d5
   owner: architecture
-  reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict() must accept it'
-  safety: Explicit check for serialized form before standard parsing - enables audit trail storage
+  reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict()
+    must accept it'
+  safety: Explicit check for serialized form before standard parsing - enables audit
+    trail storage
   expires: null
-- key: contracts/data.py:R3:_type_name:line=214
+- key: contracts/data.py:R3:_type_name:fp=e5ac6075b25c4cd5
   owner: architecture
   reason: 'Type introspection: not all types have __name__ attribute'
   safety: Graceful fallback to str() - error message still produced
   expires: null
-- key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=917
+- key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:fp=1126623845d43665
   owner: architecture
   reason: 'Trust boundary: environment variables are external input that may not exist'
-  safety: Explicit None check follows; falls back to default or keeps original for later error
+  safety: Explicit None check follows; falls back to default or keeps original for
+    later error
   expires: null
-- key: core/config.py:R1:_fingerprint_config_for_audit:line=1182
+- key: core/config.py:R1:_fingerprint_config_for_audit:fp=33f5a65878da4838
   owner: architecture
   reason: 'Optional env var: ELSPETH_ALLOW_RAW_SECRETS is not required in production'
   safety: Missing env var = empty string = False = production mode (fail-closed)
   expires: null
-- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:line=52
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=5bdbfe7db9e32163
   owner: architecture
   reason: 'Trust boundary: LLM API usage dict may not include all token counts'
   safety: Graceful default to 0 - total_tokens is convenience property, not critical
   expires: null
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:line=357
+- key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=695415b2ec4d8fee
   owner: architecture
-  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt successful call results'
-  safety: Caught, logged with warning - call already recorded in Landscape, telemetry is secondary
+  reason: 'Trust boundary: LLM API usage dict may not include all token counts'
+  safety: Graceful default to 0 - total_tokens is convenience property, not critical
   expires: null
-- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:line=417
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=13eb3bdd0e55d2e0
   owner: architecture
-  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error recording'
-  safety: Caught, logged with warning - error already recorded in Landscape, telemetry is secondary
+  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt successful
+    call results'
+  safety: Caught, logged with warning - call already recorded in Landscape, telemetry
+    is secondary
   expires: null
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:line=257
+- key: plugins/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=4832e12e65841168
+  owner: architecture
+  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error
+    recording'
+  safety: Caught, logged with warning - error already recorded in Landscape, telemetry
+    is secondary
+  expires: null
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:post:fp=4292aa1f376bd291
   owner: architecture
   reason: 'Trust boundary: HTTP response headers from external server may lack content-type'
   safety: Graceful default to empty string - treats as non-JSON, still records body
   expires: null
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=343
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=2cd5842f5abc4224
   owner: architecture
-  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt successful call results'
-  safety: Caught, logged with warning - call already recorded in Landscape, telemetry is secondary
+  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt successful
+    call results'
+  safety: Caught, logged with warning - call already recorded in Landscape, telemetry
+    is secondary
   expires: null
-- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=390
+- key: plugins/clients/http.py:R4:AuditedHTTPClient:post:fp=c513654ac7f08f4a
   owner: architecture
-  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error recording'
-  safety: Caught, logged with warning - error already recorded in Landscape, telemetry is secondary
+  reason: 'Telemetry non-crashing contract: telemetry failures MUST NOT corrupt error
+    recording'
+  safety: Caught, logged with warning - error already recorded in Landscape, telemetry
+    is secondary
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:line=314
-  owner: architecture
-  reason: 'Capability check: verify checkpoint API exists before using it'
-  safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
-  expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:line=331
-  owner: architecture
-  reason: 'Capability check: verify checkpoint API exists before using it'
-  safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
-  expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:line=347
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:fp=81c2f17b4e75b742
   owner: architecture
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:line=295
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:fp=2fbe061fb71628c7
+  owner: architecture
+  reason: 'Capability check: verify checkpoint API exists before using it'
+  safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
+  expires: null
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:fp=12fc15e2cdc4ea77
+  owner: architecture
+  reason: 'Capability check: verify checkpoint API exists before using it'
+  safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
+  expires: null
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:fp=39567fccd8167667
   owner: architecture
   reason: Checkpoint may be None or empty dict - checking for batch_id existence
   safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=453
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:fp=df56c52f8175dea8
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:line=494
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:fp=96ad46e2b10498a7
   owner: architecture
   reason: 'Trust boundary: Azure batches.create API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:line=572
+- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:fp=0869c967b8908c10
   owner: architecture
   reason: 'Trust boundary: Azure batch.output_file_id only exists on completed batches'
   safety: Recorded as None in audit trail - field is informational only
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:line=577
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:fp=a6c6303602e5bfab
   owner: architecture
   reason: 'Trust boundary: Azure batches.retrieve API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:line=610
+- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:fp=cc40aed919bc8a34
   owner: architecture
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:line=638
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:fp=e63f5554c249bc60
   owner: architecture
   reason: submitted_at may not exist in old checkpoint format
   safety: Missing submitted_at skips timeout check - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=683
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=bef8f67d6fb2a06d
   owner: architecture
   reason: row_mapping may not exist in corrupted checkpoint
   safety: Empty dict default allows graceful recovery - rows return with error
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=684
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=cdd5437abb7d0de9
   owner: architecture
   reason: template_errors may not exist in old checkpoint format
   safety: Empty list default means no template errors tracked - graceful degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:line=707
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:fp=a18f2c093fd983f7
   owner: architecture
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=744
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9b5f9a2db289d209
   owner: architecture
-  reason: 'Trust boundary: Azure JSONL result custom_id field validated as external data'
+  reason: 'Trust boundary: Azure JSONL result custom_id field validated as external
+    data'
   safety: None check follows on next line - returns error row if missing
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=809
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=0cd943822f05dfaf
   owner: architecture
   reason: 'Intentional Optional API: rows with template errors aren''t in mapping'
   safety: None is checked explicitly on next line with 'if custom_id is None'
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=825
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9b3bcfac5008d241
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''error'' field is optional'
   safety: Graceful handling - checks for error before extracting response
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=837
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=fd4ba75828650c17
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed responses
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=838
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=dad3d72e99157874
   owner: architecture
   reason: 'Trust boundary: Azure batch result ''response.body'' field structure varies'
   safety: Graceful default to {} - handles missing/malformed body
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=839
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=f11b50fcc31d71e0
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''choices'' field may be missing'
   safety: Graceful default to [] - explicit check for empty choices follows
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=842
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=fe355c1441419303
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=843
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=393ca12a4cefbdec
+  owner: architecture
+  reason: 'Trust boundary: Azure choice message.content structure may vary'
+  safety: Graceful default to empty string - empty content is valid for audit trail
+  expires: null
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=76aade499eec02cb
   owner: architecture
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:line=854
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=b7c0e3f93644f552
   owner: architecture
   reason: 'Trust boundary: Azure batch response may return different model'
   safety: Graceful fallback to deployment name - audit still captures actual value
   expires: null
-- key: plugins/discovery.py:R2:_discover_in_file:line=135
+- key: plugins/discovery.py:R2:_discover_in_file:fp=f42969a5d77096b3
   owner: architecture
-  reason: 'Trust boundary: scanning arbitrary classes that may or may not have ''name'' attribute'
+  reason: 'Trust boundary: scanning arbitrary classes that may or may not have ''name''
+    attribute'
   safety: Classes without valid name are skipped with warning log - discovery continues
   expires: null
-- key: plugins/discovery.py:R2:get_plugin_description:line=242
+- key: plugins/discovery.py:R2:get_plugin_description:fp=0806b3aad609f380
   owner: architecture
-  reason: 'UI display fallback: generating human-readable description for classes without ''name'' attr'
+  reason: 'UI display fallback: generating human-readable description for classes
+    without ''name'' attr'
   safety: Falls back to class __name__ for display - no control flow or audit impact
   expires: null
-- key: core/events.py:R1:EventBus:emit:line=83
+- key: core/events.py:R1:EventBus:emit:fp=9291c1b6dd51107b
   owner: architecture
-  reason: 'Intentional Optional API: checking subscription presence, not hiding missing keys'
-  safety: Empty list default means 'no subscribers' - documented behavior, events are decoupled
+  reason: 'Intentional Optional API: checking subscription presence, not hiding missing
+    keys'
+  safety: Empty list default means 'no subscribers' - documented behavior, events
+    are decoupled
   expires: null
-- key: core/security/fingerprint.py:R1:get_fingerprint_key:line=77
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=67e917b3bba8e03c
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_FINGERPRINT_KEY is optional external input (dev mode)'
-  safety: 'Explicit check: if not set, falls through to Key Vault check or raises ValueError'
+  reason: 'Trust boundary: ELSPETH_FINGERPRINT_KEY is optional external input (dev
+    mode)'
+  safety: 'Explicit check: if not set, falls through to Key Vault check or raises
+    ValueError'
   expires: null
-- key: core/security/fingerprint.py:R1:get_fingerprint_key:line=82
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=ed9dba52afb4ad69
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_KEYVAULT_URL is optional external input (production mode)'
+  reason: 'Trust boundary: ELSPETH_KEYVAULT_URL is optional external input (production
+    mode)'
   safety: 'Explicit check: if not set, raises ValueError with guidance on configuration'
   expires: null
-- key: core/security/fingerprint.py:R1:get_fingerprint_key:line=84
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=297883c4b9fefe0b
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible default'
+  reason: 'Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible
+    default'
   safety: Default 'elspeth-fingerprint-key' used when not set - documented behavior
   expires: null
-- key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=345
+- key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:fp=35eba6846f56fdbf
   owner: architecture
-  reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
-  safety: Graceful default to '<unknown>' - error message still produced with field and message
+  reason: 'Trust boundary: Pydantic error dict structure from external library - ''input''
+    field is optional'
+  safety: Graceful default to '<unknown>' - error message still produced with field
+    and message
   expires: null
-- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:line=432
+- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:fp=390d961f78a41f00
   owner: architecture
-  reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed data, etc.)'
+  reason: 'Trust boundary: CSV parsing can fail in many ways (encoding, malformed
+    data, etc.)'
   safety: Logged and row quarantined with full error details
   expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=462
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=2dbaef3d2189ec0e
   owner: architecture
   reason: 'Optional protocol extension: transforms may optionally define _output_schema_config'
   safety: None default when attribute missing - schema falls back to config dict parsing
   expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=524
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:fp=3329fe9a9ff2907c
   owner: architecture
-  reason: 'Optional protocol extension: aggregation transforms may optionally define _output_schema_config'
+  reason: 'Optional protocol extension: aggregation transforms may optionally define
+    _output_schema_config'
   safety: None default when attribute missing - schema falls back to config dict parsing
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:line=1114
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=c327ed6386a2eb98
   owner: architecture
-  reason: 'Trust boundary: not all node configs have schema field (depends on node type)'
+  reason: 'Trust boundary: not all node configs have schema field (depends on node
+    type)'
   safety: Returns None when schema not present - calling code handles None appropriately
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1175
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=f481c256d3a6c4a3
   owner: architecture
   reason: 'Optional field: required_input_fields is not present in all transform configs'
   safety: Returns None when not present, then checks options dict for aggregations
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1181
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=321a2cd68ee9cf0d
   owner: architecture
   reason: 'Aggregation config structure: options is nested dict for aggregation nodes'
-  safety: Default {} when options missing - then checks for required_input_fields inside
+  safety: Default {} when options missing - then checks for required_input_fields
+    inside
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:line=1183
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=183774ab59f5eafd
   owner: architecture
   reason: 'Optional field: required_input_fields may not be in aggregation options'
-  safety: Returns frozenset of fields if present, falls through to schema check if not
+  safety: Returns frozenset of fields if present, falls through to schema check if
+    not
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:line=162
+- key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=7a7503fa06420a75
   owner: architecture
-  reason: 'Optional protocol extension: checking if transform supports batch adapter pattern'
+  reason: 'Optional protocol extension: checking if transform supports batch adapter
+    pattern'
   safety: Fallback to non-batch processing if attribute missing
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:line=169
+- key: engine/executors.py:R2:TransformExecutor:_get_batch_adapter:fp=7835447a0b4d3edf
   owner: architecture
   reason: 'Optional protocol extension: pool_size is optional on batch-aware transforms'
   safety: Default value 30 is safe - used for concurrency limiting
   expires: null
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:line=243
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=8e94306803064d6e
   owner: architecture
   reason: 'Optional protocol extension: checking if transform has accept() method'
   safety: Non-batch transforms use process() instead - documented fallback
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=243
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=4d32869239a35ac8
   owner: architecture
   reason: 'Optional protocol extension: accept method check paired with hasattr'
   safety: Callable check ensures method is usable if present
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=284
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=167d6417adb2ec59
   owner: architecture
   reason: 'Optional protocol extension: batch_wait_timeout is optional on transforms'
   safety: Default 3600.0 seconds is generous timeout for batch results
   expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:line=314
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=7931c1d6ceafdbca
   owner: architecture
   reason: 'Optional protocol extension: evict_submission is optional on batch transforms'
   safety: None means transform doesn't support submission eviction - gracefully skipped
   expires: null
-- key: engine/executors.py:R4:TransformExecutor:execute_transform:line=318
+- key: engine/executors.py:R4:TransformExecutor:execute_transform:fp=f2135798ab651b57
   owner: architecture
-  reason: 'Best-effort cleanup: evict_submission failure should not block timeout handling'
+  reason: 'Best-effort cleanup: evict_submission failure should not block timeout
+    handling'
   safety: Logged with warning - original timeout error still raised
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=230
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=dc75c0a50ecb9961
   owner: architecture
-  reason: 'Trust boundary: batch processing can fail for many reasons (API errors, timeouts)'
+  reason: 'Trust boundary: batch processing can fail for many reasons (API errors,
+    timeouts)'
   safety: Caught, logged, and result emitted with error status for audit trail
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=287
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=e05a82665f12ff8a
   owner: architecture
   reason: 'Background thread cleanup: iteration failure should not crash release loop'
   safety: Logged with error, loop continues to process remaining results
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=300
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:fp=68ee805887eb3173
   owner: architecture
   reason: 'Background thread emit: emit failure should not crash release loop'
   safety: Logged with error, loop continues - waiter will timeout if emit fails
   expires: null
-- key: engine/executors.py:R1:GateExecutor:execute_gate:line=559
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=35063e10ca561406
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=862
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=2b237c85836e9050
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:GateExecutor:_record_routing:line=876
+- key: engine/executors.py:R1:GateExecutor:_record_routing:fp=f4fdabf1c74ef2a5
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
   safety: Raises immediately with node_id and label for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=967
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:fp=9485b76d310ca217
   owner: architecture
   reason: Checking if batch exists to decide whether to create one
   safety: None means create new batch - explicit conditional logic follows
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:line=992
+- key: engine/executors.py:R1:AggregationExecutor:buffer_row:fp=10f1fdfd567ef624
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:line=1005
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=ca339dc4c3e28cb0
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:line=1016
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=fb548bb8caf699fa
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered yet
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1031
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=1adbef057dd0c6a8
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:line=1032
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=ad0b19ecf0114f44
   owner: architecture
   reason: 'Intentional Optional API: returns empty list for unknown node_id'
   safety: Empty list is safe default - no tokens buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1066
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=bfa25063e4e9f79d
   owner: architecture
   reason: 'Explicit existence check: raises RuntimeError if batch_id is None'
   safety: Raises immediately with node_id for debugging
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1071
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=51b7273eb3864027
   owner: architecture
   reason: Existence check paired with explicit RuntimeError if empty
   safety: Raises immediately if buffer is empty
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1072
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=d6cb5b6bdb3e3108
   owner: architecture
   reason: Token buffer lookup matches row buffer lookup pattern
   safety: Empty list default paired with row buffer check
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1465
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=b4c52a40eff695df
   owner: architecture
   reason: 'Intentional Optional API: returns None if no batch exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1476
+- key: engine/executors.py:R1:AggregationExecutor:should_flush:fp=b27c084351efbf17
   owner: architecture
   reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
   safety: False return is safe default - no flush needed
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1490
+- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:fp=2a062158f9058b39
   owner: architecture
   reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:line=1510
+- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:fp=12f7c635a7a3a052
   owner: architecture
-  reason: 'Intentional Optional API: returns (False, None) if no evaluator exists for node_id'
+  reason: 'Intentional Optional API: returns (False, None) if no evaluator exists
+    for node_id'
   safety: False return is safe default - no flush needed when no trigger config
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1542
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=6e71afd1d2337fdf
   owner: architecture
   reason: 'Intentional Optional API: returns None if no state was restored for node_id'
   safety: None return is expected API behavior
   expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1804
+- key: engine/executors.py:R4:SinkExecutor:write:fp=ac3de261304f63dc
   owner: architecture
-  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'
-  safety: Logged with error - sink artifact exists but checkpoint failed, resume will replay
+  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink
+    write'
+  safety: Logged with error - sink artifact exists but checkpoint failed, resume will
+    replay
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=324
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=746f7769b0a1300f
   owner: architecture
   reason: 'Trust boundary (Tier 3): HTTP response headers may not include content-type'
   safety: Graceful default to 'unknown' - used for error reporting only
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=351
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=2d82352308d8d406
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:line=363
+- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=c4b32a5c4cdbf60f
   owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than
+    requested'
   safety: Graceful fallback to requested model - audit still captures actual value
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=1250
+- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=e0ac020c5c8ee19f
   owner: architecture
   reason: Optional trigger evaluator lookup - not all aggregations have trigger config
   safety: None means no trigger config - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:line=1262
+- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:fp=52b065ae51eb7490
   owner: architecture
   reason: 'Idempotent cleanup: batch_id may not exist if already reset'
   safety: None means already cleaned up or never existed - correctly skipped
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:line=1277
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=ed10cdaf9e8417a7
   owner: architecture
   reason: 'Intentional Optional API: returns 0 for unknown node_id'
   safety: 0 is safe default - no rows buffered
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1317
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:fp=266593a9d8f52785
   owner: architecture
-  reason: Optional trigger evaluator lookup for elapsed time - not all aggregations have trigger config
+  reason: Optional trigger evaluator lookup for elapsed time - not all aggregations
+    have trigger config
   safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:line=1331
+- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:fp=9d8ca60c63eaf2e2
   owner: architecture
   reason: 'Intentional Optional API: batch_id lookup for node_id'
   safety: None is safe - means no batch exists yet, recorded as null in checkpoint
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1379
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=44de9b3e54172856
   owner: architecture
   reason: 'Optional field: _version in checkpoint state for migration compatibility'
   safety: None check with explicit fallback to legacy format
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1428
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=ca632308ccd9455b
   owner: architecture
   reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
   safety: None default handled by dataclass
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1437
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=ab652420c6e681c3
   owner: architecture
   reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
   safety: None check with explicit handling
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1443
+- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=c45f5f4379db4b6a
   owner: architecture
   reason: Optional trigger evaluator lookup - node may not have trigger config
   safety: None check with conditional elapsed time restoration
   expires: null
-- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=96
+- key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=cb728c1a23ed45e2
   owner: architecture
-  reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
-  safety: Default empty string when unset is intentional; enables dev mode without fingerprint key
+  reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external
+    config'
+  safety: Default empty string when unset is intentional; enables dev mode without
+    fingerprint key
   expires: null
-- key: plugins/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:line=122
+- key: plugins/clients/http.py:R1:AuditedHTTPClient:_filter_request_headers:fp=2fe964de8b372284
   owner: architecture
-  reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external config'
-  safety: Default empty string when unset is intentional; enables dev mode without fingerprint key (consistent with config.py and database_sink.py)
+  reason: 'Trust boundary: environment variable ELSPETH_ALLOW_RAW_SECRETS is external
+    config'
+  safety: Default empty string when unset is intentional; enables dev mode without
+    fingerprint key (consistent with config.py and database_sink.py)
   expires: null
-- key: cli.py:R1:health:line=1890
+- key: cli.py:R1:health:fp=c0684e951f7b6fdc
   owner: architecture
-  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
+  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external
+    input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1902
+- key: cli.py:R4:health:fp=ef74a413a509a277
   owner: architecture
-  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
+  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed,
+    not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1918
+- key: cli.py:R1:health:fp=17701dc9a882ae1d
   owner: architecture
-  reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
+  reason: 'Trust boundary: environment variable DATABASE_URL is optional external
+    input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1930
+- key: cli.py:R4:health:fp=fe973479beae90e5
   owner: architecture
-  reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
-  safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
+  reason: 'Trust boundary: database connection may fail for many reasons (network,
+    auth, etc.)'
+  safety: Error recorded in checks dict with status='error' - health check reports
+    DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1994
+- key: cli.py:R4:health:fp=cd9f22034e2ccdcb
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
-  safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
+  safety: Error recorded in checks dict with status='error' - health check reports
+    plugins as unhealthy
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=279
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=b5e6013d4cab4656
   owner: architecture
-  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash would prevent other plugins from cleanup'
+  reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash
+    would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1310
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=63e96b00b57eb5e5
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1344
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=5824b486d9172c3f
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1411
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=09683df1f7bbac19
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1491
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=e6f60f803755cdd4
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=1529
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=bf9edb1b1543cc59
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2313
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=62925c5f8de5a0e3
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2339
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=b4c4c0174766d9be
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2395
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=6bcec8e0c6fc4d4a
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2442
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=ecdbd57ce29c5bbc
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during timeout flush'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:line=2478
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=e64ab390339fee40
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during execution'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during execution'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:line=2759
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:fp=50f4842a402e9610
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during timeout flush downstream processing'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during timeout flush downstream processing'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:line=2928
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:fp=b2e8d85365c677d8
   owner: architecture
-  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically discovered during end-of-source flush downstream processing'
-  safety: Default 0 for missing sink names is correct - first route to a sink initializes counter
+  reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
+    discovered during end-of-source flush downstream processing'
+  safety: Default 0 for missing sink names is correct - first route to a sink initializes
+    counter
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=560
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=fa85ebacc0f941c3
   owner: architecture
-  reason: 'Trust boundary (Tier 3): HTTP response headers from external server may lack content-type'
+  reason: 'Trust boundary (Tier 3): HTTP response headers from external server may
+    lack content-type'
   safety: Graceful default to 'unknown' - used for error reporting only
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=593
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=bfaef3172fded09e
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=598
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=404fb58af0b436aa
   owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API completion_tokens may be missing in usage dict'
-  safety: Default 0 skips truncation check - truncation detected later via JSON parse failure
+  reason: 'Trust boundary (Tier 3): OpenRouter API completion_tokens may be missing
+    in usage dict'
+  safety: Default 0 skips truncation check - truncation detected later via JSON parse
+    failure
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=610
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=4b62117d82a13c82
   owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API prompt_tokens is informational in error response'
+  reason: 'Trust boundary (Tier 3): OpenRouter API prompt_tokens is informational
+    in error response'
   safety: Default 0 in error metadata - does not affect control flow
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:line=686
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=5d6bfaaac55a9fa2
   owner: architecture
-  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
+  reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than
+    requested'
   safety: Graceful fallback to configured model - audit still captures actual value
   expires: null
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=401
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=6be4d58494ea62eb
   owner: architecture
-  reason: 'Trust boundary (Tier 3): LLM provider may omit usage data (streaming, certain configs)'
-  safety: Default 0 skips truncation check when usage unavailable; truncation detected via JSON parse failure
+  reason: 'Trust boundary (Tier 3): LLM provider may omit usage data (streaming, certain
+    configs)'
+  safety: Default 0 skips truncation check when usage unavailable; truncation detected
+    via JSON parse failure
   expires: null
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:line=413
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=7c4d5977c87ca0e5
   owner: architecture
-  reason: 'Trust boundary (Tier 3): LLM provider prompt_tokens is informational in truncation error'
+  reason: 'Trust boundary (Tier 3): LLM provider prompt_tokens is informational in
+    truncation error'
   safety: Default 0 in error metadata - does not affect control flow, just audit completeness
   expires: null
-- key: cli_helpers.py:R2:instantiate_plugins_from_config:line=54
+- key: cli_helpers.py:R2:instantiate_plugins_from_config:fp=fd01cc3b45761df9
   owner: architecture
-  reason: 'Plugin boundary: checking is_batch_aware on user-provided transform instance (Tier 2 data)'
-  safety: False default triggers ValueError with actionable message - fail-fast, not silent degradation
+  reason: 'Plugin boundary: checking is_batch_aware on user-provided transform instance
+    (Tier 2 data)'
+  safety: False default triggers ValueError with actionable message - fail-fast, not
+    silent degradation
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=482
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=1ba25161c45aaf41
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages
+    field is optional'
   safety: Empty list default is safe - template receives empty messages array
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:line=483
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_template_response:fp=a89767e7c531ac4a
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model
+    field is optional'
   safety: Default "unknown" is safe - used for template context only
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=488
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=13f703d73d706c75
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages
+    field is optional'
   safety: Empty list default triggers "(no messages provided)" response
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=493
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e726cefd13ee4fcb
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role
+    field is optional'
   safety: Empty string default means message is not matched as "user" role
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=495
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e59870599a1036db
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content
+    field is optional'
   safety: Empty string default produces "Echo:" response
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:line=498
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_generate_echo_response:fp=e18fc0bb62fd2eda
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content
+    field is optional'
   safety: Empty string default produces "Echo:" response
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=534
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=965b13109ef850c3
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages
+    field is optional'
   safety: Empty list default produces empty prompt text for token estimation
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=537
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=dc5b661e7357054b
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - role
+    field is optional'
   safety: Empty string default is safe for token estimation formatting
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:line=538
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:_extract_prompt_text:fp=f22f515f96150330
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP message dict from external client - content
+    field is optional'
   safety: Empty string default is safe for token estimation
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=571
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=e4ffa75f2ec50777
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - messages
+    field is optional'
   safety: Empty list default is safe for template rendering with override
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=572
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=2f8bb9dcd6d15dd2
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model
+    field is optional'
   safety: Default "unknown" is safe for template context
   expires: null
-- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:line=593
+- key: testing/chaosllm/response_generator.py:R1:ResponseGenerator:generate:fp=c353cb2f283b3f9e
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model field is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request dict from external client - model
+    field is optional'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:line=946
+- key: testing/chaosllm_mcp/server.py:R1:create_server:call_tool:fp=dbec59d6fc3896cb
   owner: chaosllm
   reason: 'Trust boundary (Tier 3): MCP arguments from Claude client - limit is optional'
   safety: Default 5 matches tool schema; MCP client may omit optional args
   expires: null
-- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:line=962
+- key: testing/chaosllm_mcp/server.py:R4:create_server:call_tool:fp=4af35464aca091f9
   owner: chaosllm
   reason: 'MCP server boundary: must catch all exceptions and return error to client'
-  safety: Error message returned to MCP client; server continues running for next request
+  safety: Error message returned to MCP client; server continues running for next
+    request
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=278
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=799383f3318c92d0
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model
+    is optional per OpenAI spec'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=279
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=805b2168b55f994d
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages
+    array is optional'
   safety: Empty list default is safe - echo mode handles empty messages
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=282
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=45d7f91fa3e95728
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Response-Mode'
-  safety: None default means use configured mode; HTTP Headers API returns None for missing headers
+  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether
+    to send X-Fake-Response-Mode'
+  safety: None default means use configured mode; HTTP Headers API returns None for
+    missing headers
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:line=283
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=da53fb5f17aab8ee
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether to send X-Fake-Template'
-  safety: None default means use configured template; HTTP Headers API returns None for missing headers
+  reason: 'Trust boundary (Tier 3): HTTP headers are optional - client chooses whether
+    to send X-Fake-Template'
+  safety: None default means use configured template; HTTP Headers API returns None
+    for missing headers
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=677
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=0d867cb3140ddc37
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model is optional per OpenAI spec'
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - model
+    is optional per OpenAI spec'
   safety: Default "gpt-4" is safe for response metadata
   expires: null
-- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:line=681
+- key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_success_response:fp=0725e49f88fcd8cc
   owner: chaosllm
-  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages array is optional'
+  reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages
+    array is optional'
   safety: Empty list default produces 0 for message_count in metrics - safe for recording
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:line=284
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:fp=2ae3d3d4fff62953
   owner: architecture
   reason: Internal dict lookup after parallel execution - results dict is fully populated
   safety: None check on next line handles unexpected missing entries with error row
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=524
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:fp=963e11d662938841
   owner: architecture
   reason: 'Trust boundary (Tier 3): OpenRouter API usage field is optional in response'
   safety: Graceful default to {} - usage is metadata, not critical for processing
   expires: null
-- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:line=141
+- key: telemetry/manager.py:R1:TelemetryManager:_export_loop:fp=a8166fc10299a912
   owner: architecture
   reason: 'False positive: queue.Queue.get() is not dict.get() - no bug hiding'
-  safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing keys
+  safety: This is stdlib queue.Queue.get() blocking call, not dict.get() for missing
+    keys
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:line=150
+- key: telemetry/manager.py:R4:TelemetryManager:_export_loop:fp=43b9fc24d17edf57
   owner: architecture
   reason: 'Export thread boundary: must catch all exceptions to prevent thread crash'
   safety: Caught, logged with error, task_done() still called; export thread continues
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:_dispatch_to_exporters:line=172
+- key: telemetry/manager.py:R4:TelemetryManager:_dispatch_to_exporters:fp=205648209571e6bf
   owner: architecture
-  reason: 'Exporter boundary: export() implementations are external code that can throw any exception'
+  reason: 'Exporter boundary: export() implementations are external code that can
+    throw any exception'
   safety: Caught, logged with warning, failure tracked; other exporters still attempted
   expires: null
-- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:line=174
+- key: telemetry/manager.py:R1:TelemetryManager:_dispatch_to_exporters:fp=7df5bc18c458067b
   owner: architecture
-  reason: 'Counter accumulation pattern: _exporter_failures counts failures per exporter name'
+  reason: 'Counter accumulation pattern: _exporter_failures counts failures per exporter
+    name'
   safety: Default 0 for first failure of an exporter is correct initialization
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:flush:line=354
+- key: telemetry/manager.py:R4:TelemetryManager:flush:fp=2bd83495c312d0cc
   owner: architecture
-  reason: 'Exporter boundary: flush() implementations are external code that can throw any exception'
+  reason: 'Exporter boundary: flush() implementations are external code that can throw
+    any exception'
   safety: Caught, logged with warning; other exporters still flushed
   expires: null
-- key: telemetry/manager.py:R4:TelemetryManager:close:line=422
+- key: telemetry/manager.py:R4:TelemetryManager:close:fp=0fc8092d4e145c14
   owner: architecture
-  reason: 'Exporter boundary: close() implementations are external code that can throw any exception'
+  reason: 'Exporter boundary: close() implementations are external code that can throw
+    any exception'
   safety: Caught, logged with warning; other exporters still closed
   expires: null
-- key: telemetry/exporters/otlp.py:R3:_derive_span_id:line=65
+- key: telemetry/exporters/otlp.py:R3:_derive_span_id:fp=8d6d0a8d0c8fa03a
   owner: architecture
-  reason: 'Polymorphic events: different TelemetryEvent types have different fields (token_id, state_id, row_id)'
-  safety: hasattr is correct here - gracefully includes available fields for span ID uniqueness
+  reason: 'Polymorphic events: different TelemetryEvent types have different fields
+    (token_id, state_id, row_id)'
+  safety: hasattr is correct here - gracefully includes available fields for span
+    ID uniqueness
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=140
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=76fabe90399c155e
   owner: architecture
   reason: 'Optional config field: headers is not required for OTLP export'
   safety: Empty dict default is safe - no headers sent to OTLP endpoint
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=141
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=ee40dec0d59a5c44
   owner: architecture
   reason: 'Optional config field: batch_size has sensible default of 100'
   safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:line=142
+- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=a30f047f0130725d
   owner: architecture
   reason: 'Optional config field: flush_interval_ms has sensible default of 5000ms'
-  safety: Default 5000ms is documented behavior - configured via pipeline.yaml if needed
+  safety: Default 5000ms is documented behavior - configured via pipeline.yaml if
+    needed
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:line=196
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:fp=f58cfd54c2536a9c
   owner: architecture
-  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - buffered events dropped, pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:line=226
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:fp=e3a316b85e1254aa
   owner: architecture
-  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline
+    continues on failure'
   safety: Caught, logged with warning, buffer cleared - pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:line=337
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:fp=46d7ad030be54d04
   owner: architecture
-  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:line=354
+- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:fp=12b9e81e35d5554d
   owner: architecture
-  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues
+    for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:line=103
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=1b1eafd5fe128144
   owner: architecture
   reason: 'Optional config field: batch_size has sensible default of 100'
   safety: Default 100 is documented behavior - configured via pipeline.yaml if needed
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:line=158
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:fp=e9e0e9f016c30c80
   owner: architecture
-  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - buffered events dropped, pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:line=188
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:fp=6eaab4af078bcd81
   owner: architecture
-  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: batch flush MUST NOT raise - pipeline
+    continues on failure'
   safety: Caught, logged with warning, buffer cleared - pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:line=299
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:fp=5b465c3b21e3c8f5
   owner: architecture
-  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:line=317
+- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:fp=5462f6815beb1d2c
   owner: architecture
-  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues
+    for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=91
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=183a944901202691
   owner: architecture
   reason: 'Optional config field: service_name has sensible default of "elspeth"'
-  safety: Default "elspeth" is documented behavior - configured via pipeline.yaml if needed
+  safety: Default "elspeth" is documented behavior - configured via pipeline.yaml
+    if needed
   expires: null
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=100
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=0bf03c31227a3cae
   owner: architecture
   reason: 'Optional config field: env has sensible default of "production"'
-  safety: Default "production" is documented behavior - configured via pipeline.yaml if needed
+  safety: Default "production" is documented behavior - configured via pipeline.yaml
+    if needed
   expires: null
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=109
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=835509f9d0db5ada
   owner: architecture
   reason: 'Optional config field: version is not required for Datadog tracing'
   safety: None default is safe - version tag not set if not provided
   expires: null
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=118
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=0163976f33d04180
   owner: architecture
   reason: 'Optional config field: agent_host has sensible default of "localhost"'
-  safety: Default "localhost" matches Datadog agent default - configured via pipeline.yaml if needed
+  safety: Default "localhost" matches Datadog agent default - configured via pipeline.yaml
+    if needed
   expires: null
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:line=126
+- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=4126ea580e01ba30
   owner: architecture
   reason: 'Optional config field: agent_port has sensible default of 8126'
-  safety: Default 8126 matches Datadog agent default port - configured via pipeline.yaml if needed
+  safety: Default 8126 matches Datadog agent default port - configured via pipeline.yaml
+    if needed
   expires: null
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:export:line=184
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:export:fp=c8c12088b2901c28
   owner: architecture
-  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:flush:line=298
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:flush:fp=123f56a94859bc04
   owner: architecture
-  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:close:line=317
+- key: telemetry/exporters/datadog.py:R4:DatadogExporter:close:fp=0d991472a33b8573
   owner: architecture
-  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues for other resources'
+  reason: 'Telemetry non-crashing contract: close() MUST NOT raise - cleanup continues
+    for other resources'
   safety: Caught, logged with warning - other cleanup continues
   expires: null
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=83
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:fp=15a53be18902ccc7
   owner: architecture
   reason: 'Optional config field: format has sensible default of "json"'
-  safety: Default "json" is documented behavior - configured via pipeline.yaml if needed
+  safety: Default "json" is documented behavior - configured via pipeline.yaml if
+    needed
   expires: null
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:line=98
+- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:fp=77633fafbb19e7f8
   owner: architecture
   reason: 'Optional config field: output has sensible default of "stdout"'
-  safety: Default "stdout" is documented behavior - configured via pipeline.yaml if needed
+  safety: Default "stdout" is documented behavior - configured via pipeline.yaml if
+    needed
   expires: null
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:line=135
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:fp=305515ababbd9709
   owner: architecture
-  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: export() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:line=228
+- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:fp=accadc998c5163fc
   owner: architecture
-  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues on failure'
+  reason: 'Telemetry non-crashing contract: flush() MUST NOT raise - pipeline continues
+    on failure'
   safety: Caught, logged with warning - pipeline continues
   expires: null
-- key: plugins/context.py:R1:PluginContext:record_call:line=328
+- key: plugins/context.py:R1:PluginContext:record_call:fp=05b076aeedb60d2f
   owner: architecture
-  reason: 'Trust boundary: LLM response data (Tier 3 external data) may or may not have usage field'
-  safety: None returned when missing; token_usage is optional metadata, not required for audit
+  reason: 'Trust boundary: LLM response data (Tier 3 external data) may or may not
+    have usage field'
+  safety: None returned when missing; token_usage is optional metadata, not required
+    for audit
   expires: null
-- key: plugins/context.py:R4:PluginContext:record_call:line=348
+- key: plugins/context.py:R4:PluginContext:record_call:fp=266f9a35c6866ff5
   owner: architecture
-  reason: 'Telemetry non-crashing contract: telemetry_emit MUST NOT raise - audit recording must succeed'
-  safety: Caught, logged with warning; audit call is already recorded in Landscape, telemetry is secondary
+  reason: 'Telemetry non-crashing contract: telemetry_emit MUST NOT raise - audit
+    recording must succeed'
+  safety: Caught, logged with warning; audit call is already recorded in Landscape,
+    telemetry is secondary
   expires: null
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:line=765
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:fp=3433dbbd63dc90f7
   owner: architecture
   reason: 'Aggregate dict: counting failures by node, missing entry means 0 failures'
   safety: Default of 0 is semantically correct - no failures recorded for this node
   expires: null
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1030
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=0fd8df29318fc728
   owner: architecture
-  reason: 'SQLAlchemy inspector API: nullable info may be missing in some database backends'
+  reason: 'SQLAlchemy inspector API: nullable info may be missing in some database
+    backends'
   safety: Default True is safe - conservative assumption for schema display
   expires: null
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:line=1036
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=ffd9ddfab6088b6f
   owner: architecture
-  reason: 'SQLAlchemy inspector API: primary key info may be empty or None for some tables'
+  reason: 'SQLAlchemy inspector API: primary key info may be empty or None for some
+    tables'
   safety: Empty list default is correct - no PK columns if info not available
   expires: null
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:line=1541
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:fp=07fc9b618d97e4f1
   owner: architecture
   reason: 'Aggregate dict: counting runs by status, missing entry means 0 runs'
   safety: Default of 0 is semantically correct - no runs with this status
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1851
+- key: mcp/server.py:R1:create_server:call_tool:fp=8509499193fbbd98
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1863
+- key: mcp/server.py:R1:create_server:call_tool:fp=218ce466e9ce8c5f
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1869
+- key: mcp/server.py:R1:create_server:call_tool:fp=1da67078cba834c5
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1870
+- key: mcp/server.py:R1:create_server:call_tool:fp=a21dfbe2c3269811
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1875
+- key: mcp/server.py:R1:create_server:call_tool:fp=e842b41955adb8de
   owner: architecture
   reason: 'MCP protocol: optional filter parameter, None means no filtering'
   safety: None is valid - filter not applied, returns all results
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1876
+- key: mcp/server.py:R1:create_server:call_tool:fp=d3fc0d42f8a000bc
   owner: architecture
   reason: 'MCP protocol: optional filter parameter, None means no filtering'
   safety: None is valid - filter not applied, returns all results
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1877
+- key: mcp/server.py:R1:create_server:call_tool:fp=19b600859462f09e
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1884
+- key: mcp/server.py:R1:create_server:call_tool:fp=26ff9492259b9726
   owner: architecture
-  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative to row_id'
+  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative
+    to row_id'
   safety: None is valid - row_id or token_id must be provided, validated by tool
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1885
+- key: mcp/server.py:R1:create_server:call_tool:fp=3c5fb6339dc7b952
   owner: architecture
-  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative to row_id'
+  reason: 'MCP protocol: optional identifier parameter for explain_token, alternative
+    to row_id'
   safety: None is valid - row_id or token_id must be provided, validated by tool
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1886
+- key: mcp/server.py:R1:create_server:call_tool:fp=a487f012486f6a0c
   owner: architecture
-  reason: 'MCP protocol: optional sink filter for disambiguation in DAGs with multiple terminals'
+  reason: 'MCP protocol: optional sink filter for disambiguation in DAGs with multiple
+    terminals'
   safety: None is valid - selects first matching sink if not specified
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1891
+- key: mcp/server.py:R1:create_server:call_tool:fp=73548f08428f5f2d
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1892
+- key: mcp/server.py:R1:create_server:call_tool:fp=df258a91ffac3553
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1897
+- key: mcp/server.py:R1:create_server:call_tool:fp=56cdf3a01851f606
   owner: architecture
   reason: 'MCP protocol: optional filter parameter, None means no filtering'
   safety: None is valid - filter not applied, returns all results
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1898
+- key: mcp/server.py:R1:create_server:call_tool:fp=b97a99ed369f3cb0
   owner: architecture
   reason: 'MCP protocol: optional filter parameter, None means no filtering'
   safety: None is valid - filter not applied, returns all results
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1899
+- key: mcp/server.py:R1:create_server:call_tool:fp=ca074575089daa3d
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1906
+- key: mcp/server.py:R1:create_server:call_tool:fp=b19bfa09d1795139
   owner: architecture
   reason: 'MCP protocol: optional SQL query parameters, None means no parameters'
   safety: None is valid - SQL query executed without parameters
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1927
+- key: mcp/server.py:R1:create_server:call_tool:fp=da9a91f6ac957e61
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1931
+- key: mcp/server.py:R1:create_server:call_tool:fp=ad72fe21e72fe6dd
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: mcp/server.py:R4:create_server:call_tool:line=1938
+- key: mcp/server.py:R4:create_server:call_tool:fp=dcd241fb6c1a869e
   owner: architecture
   reason: 'MCP protocol: tool errors must return error response, not raise'
   safety: Caught, returns MCP error response with error message; required by MCP protocol
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1852
+- key: mcp/server.py:R1:create_server:call_tool:fp=3eb2a2adb9ec4dce
   owner: architecture
   reason: 'MCP protocol: optional filter parameter, None means no filtering'
   safety: None is valid - filter not applied, returns all results
   expires: null
-- key: mcp/server.py:R1:create_server:call_tool:line=1864
+- key: mcp/server.py:R1:create_server:call_tool:fp=8a127369b3792c76
   owner: architecture
-  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides them'
+  reason: 'MCP protocol: tool arguments have documented defaults, .get() provides
+    them'
   safety: MCP schema defines defaults; .get() matches schema default values
   expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:line=525
+- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:fp=4d8878f640750a71
   owner: architecture
   reason: 'Trust boundary: OpenRouter API response usage field is optional'
   safety: Default {} - usage is metadata, not critical for correctness
   expires: null
-- key: plugins/base.py:R1:BaseGate:__init__:line=178
+- key: plugins/base.py:R1:BaseGate:__init__:fp=cecb5eb7253054e9
   owner: architecture
   reason: 'Optional config field: fork_to may not be specified in gate config'
   safety: None is valid - gate may not support forking
   expires: null
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_row_internal:line=615
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_row_internal:fp=52411f3ff4845c6a
   owner: architecture
   reason: 'Trust boundary: error reason may be dict or string from Azure API'
   safety: Safe extraction with fallback to str(reason)
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_row_internal:line=803
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_row_internal:fp=ae7e5855de205281
   owner: architecture
-  reason: 'Optional TypedDict field: TransformErrorReason.error is NotRequired - may not be present'
-  safety: Fallback to str(r.reason) provides full error context when error field is missing
+  reason: 'Optional TypedDict field: TransformErrorReason.error is NotRequired - may
+    not be present'
+  safety: Fallback to str(r.reason) provides full error context when error field is
+    missing
   expires: null
-- key: contracts/results.py:R3:ArtifactDescriptor:for_database:line=331
+- key: contracts/results.py:R3:ArtifactDescriptor:for_database:fp=22656d96c48cd60f
   owner: architecture
-  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials in audit trail'
+  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials
+    in audit trail'
   safety: Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()
   expires: null
-- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=362
+- key: contracts/results.py:R3:ArtifactDescriptor:for_database:fp=a7a0b0a53a6c5165
   owner: architecture
-  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit trail'
+  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials
+    in audit trail'
+  safety: Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()
+  expires: null
+- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:fp=5c19097474d76ced
+  owner: architecture
+  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit
+    trail'
+  safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
+  expires: null
+- key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:fp=5e5fdfdd79a39880
+  owner: architecture
+  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit
+    trail'
   safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
   expires: null

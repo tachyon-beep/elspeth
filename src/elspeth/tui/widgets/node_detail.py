@@ -1,12 +1,71 @@
 """Node detail panel widget for displaying node state information."""
 
 import json
+from typing import Any
 
 import structlog
 
-from elspeth.tui.types import NodeStateInfo
+from elspeth.tui.types import (
+    ArtifactDisplay,
+    ExecutionErrorDisplay,
+    NodeStateInfo,
+    TransformErrorDisplay,
+)
 
 logger = structlog.get_logger(__name__)
+
+
+def _validate_execution_error(data: dict[str, Any]) -> ExecutionErrorDisplay:
+    """Validate and cast a dict to ExecutionErrorDisplay.
+
+    ExecutionError has required fields: exception, type
+    Raises KeyError if required fields are missing (Tier 1 - crash on corruption).
+    """
+    result: ExecutionErrorDisplay = {
+        "exception": data["exception"],
+        "type": data["type"],
+    }
+    # Add optional fields only if present (NotRequired semantics)
+    if "traceback" in data:
+        result["traceback"] = data["traceback"]
+    if "phase" in data:
+        result["phase"] = data["phase"]
+    return result
+
+
+def _validate_transform_error(data: dict[str, Any]) -> TransformErrorDisplay:
+    """Validate and cast a dict to TransformErrorDisplay.
+
+    TransformErrorReason has required field: reason
+    Raises KeyError if required field is missing (Tier 1 - crash on corruption).
+    """
+    result: TransformErrorDisplay = {
+        "reason": data["reason"],
+    }
+    # Add optional fields only if present (NotRequired semantics)
+    if "error" in data:
+        result["error"] = data["error"]
+    if "message" in data:
+        result["message"] = data["message"]
+    if "error_type" in data:
+        result["error_type"] = data["error_type"]
+    if "field" in data:
+        result["field"] = data["field"]
+    return result
+
+
+def _validate_artifact(data: dict[str, Any]) -> ArtifactDisplay:
+    """Validate and cast a dict to ArtifactDisplay.
+
+    Artifact has required fields: artifact_id, path_or_uri, content_hash, size_bytes
+    Raises KeyError if required fields are missing (Tier 1 - crash on corruption).
+    """
+    return {
+        "artifact_id": data["artifact_id"],
+        "path_or_uri": data["path_or_uri"],
+        "content_hash": data["content_hash"],
+        "size_bytes": data["size_bytes"],
+    }
 
 
 class NodeDetailPanel:
@@ -82,58 +141,68 @@ class NodeDetailPanel:
         lines.append("")
 
         # Error (if present) - optional field
-        # Trust boundary: error_json may be malformed or wrong type from Landscape
+        # error_json is Tier 1 (our audit data) - if malformed, that's a bug
         error_json = self._state.get("error_json")
         if error_json:
             lines.append("Error:")
-            try:
-                # Runtime check: Landscape DB may contain corrupted/malformed data
-                if not isinstance(error_json, str):
-                    # Non-string error_json - display as-is
-                    lines.append(f"  {error_json}")  # type: ignore[unreachable]
-                else:
-                    error = json.loads(error_json)
-                    if isinstance(error, dict):
-                        # Error dict fields are external data - use .get() + fallback
-                        error_type = error.get("type")
-                        error_message = error.get("message")
-                        lines.append(f"  Type:    {error_type or 'unknown'}")
-                        lines.append(f"  Message: {error_message or 'unknown'}")
-                    else:
-                        # Parsed but not a dict (e.g., JSON string/number)
-                        lines.append(f"  {error}")
-            except json.JSONDecodeError as e:
-                # Trust boundary: error_json from Landscape DB may be malformed.
-                # Log for debugging but display raw - don't crash the TUI.
-                logger.warning(
-                    "Failed to parse error_json from Landscape",
-                    state_id=self._state.get("state_id"),
-                    error_json_preview=error_json[:200] if len(error_json) > 200 else error_json,
-                    decode_error=str(e),
+            # error_json MUST be a string (schema contract)
+            if not isinstance(error_json, str):
+                raise TypeError(
+                    f"error_json must be str, got {type(error_json).__name__} - "
+                    f"audit integrity violation in state {self._state.get('state_id')}"
                 )
-                lines.append(f"  {error_json}")
+            error = json.loads(error_json)  # Let JSONDecodeError crash - it's our data
+            if not isinstance(error, dict):
+                raise TypeError(
+                    f"error_json must parse to dict, got {type(error).__name__} - "
+                    f"audit integrity violation in state {self._state.get('state_id')}"
+                )
+
+            # Discriminated union: determine error variant by field presence
+            # ExecutionError has "type" + "exception", TransformErrorReason has "reason"
+            if "type" in error and "exception" in error:
+                # ExecutionError variant
+                validated = _validate_execution_error(error)
+                lines.append(f"  Type:    {validated['type']}")
+                lines.append(f"  Message: {validated['exception']}")
+                if validated.get("phase"):
+                    lines.append(f"  Phase:   {validated['phase']}")
+            elif "reason" in error:
+                # TransformErrorReason variant
+                validated_transform = _validate_transform_error(error)
+                lines.append(f"  Reason:  {validated_transform['reason']}")
+                # Display message from either 'error' or 'message' field
+                msg = validated_transform.get("error") or validated_transform.get("message")
+                if msg:
+                    lines.append(f"  Message: {msg}")
+                if validated_transform.get("field"):
+                    lines.append(f"  Field:   {validated_transform['field']}")
+            else:
+                # Unknown error format - this is a bug in our recording code
+                raise ValueError(
+                    f"error_json has unknown format (no 'type'+'exception' or 'reason') - "
+                    f"audit integrity violation in state {self._state.get('state_id')}: "
+                    f"keys={list(error.keys())}"
+                )
             lines.append("")
 
         # Artifact (if sink) - optional field
-        # Trust boundary: artifact may be malformed or wrong type from Landscape
+        # artifact is Tier 1 (our audit data) - if malformed, that's a bug
         artifact = self._state.get("artifact")
         if artifact:
             lines.append("Artifact:")
-            # Runtime check: Landscape DB may contain corrupted/malformed data
-            if isinstance(artifact, dict):
-                # Artifact dict fields are external data - use .get() + fallback
-                artifact_id = artifact.get("artifact_id")
-                path_or_uri = artifact.get("path_or_uri")
-                content_hash = artifact.get("content_hash")
-                lines.append(f"  ID:      {artifact_id or 'N/A'}")
-                lines.append(f"  Path:    {path_or_uri or 'N/A'}")
-                lines.append(f"  Hash:    {content_hash or 'N/A'}")
-                size_bytes = artifact.get("size_bytes")
-                if size_bytes is not None and isinstance(size_bytes, int | float):
-                    lines.append(f"  Size:    {self._format_size(int(size_bytes))}")
-            else:
-                # Non-dict artifact - display as-is
-                lines.append(f"  {artifact}")  # type: ignore[unreachable]
+            # artifact MUST be a dict (schema contract)
+            if not isinstance(artifact, dict):
+                raise TypeError(
+                    f"artifact must be dict, got {type(artifact).__name__} - "
+                    f"audit integrity violation in state {self._state.get('state_id')}"
+                )
+            # Validate and access fields directly (Tier 1 - crash on missing)
+            validated_artifact = _validate_artifact(artifact)
+            lines.append(f"  ID:      {validated_artifact['artifact_id']}")
+            lines.append(f"  Path:    {validated_artifact['path_or_uri']}")
+            lines.append(f"  Hash:    {validated_artifact['content_hash']}")
+            lines.append(f"  Size:    {self._format_size(validated_artifact['size_bytes'])}")
             lines.append("")
 
         return "\n".join(lines)

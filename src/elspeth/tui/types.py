@@ -4,9 +4,13 @@
 These TypedDicts define the exact shape of data passed between
 TUI components. Using direct field access (data["field"]) instead
 of .get() ensures missing fields fail loudly.
+
+Error and artifact display types follow the Tier 1 trust model:
+- After JSON parsing, data is validated and converted to typed structures
+- Display code accesses fields directly (crash on missing = bug)
 """
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class NodeInfo(TypedDict):
@@ -90,3 +94,50 @@ class NodeStateInfo(TypedDict, total=False):
     output_hash: str
     error_json: str
     artifact: dict[str, Any]
+
+
+# =============================================================================
+# Display Types for Parsed Landscape Data
+# =============================================================================
+# These types represent PARSED data from Landscape that has been validated.
+# After validation, fields are accessed directly (no .get()).
+
+
+class ExecutionErrorDisplay(TypedDict):
+    """Parsed ExecutionError for display.
+
+    From contracts.errors.ExecutionError - used by executors for exceptions.
+    Fields are REQUIRED after validation.
+    """
+
+    exception: str  # Exception message
+    type: str  # Exception class name (e.g., "ValueError")
+    traceback: NotRequired[str]  # Optional full traceback
+    phase: NotRequired[str]  # Optional phase (e.g., "flush")
+
+
+class TransformErrorDisplay(TypedDict):
+    """Parsed TransformErrorReason for display.
+
+    From contracts.errors.TransformErrorReason - used by transforms.
+    The 'reason' field is REQUIRED and identifies the error category.
+    """
+
+    reason: str  # Error category (e.g., "api_error", "missing_field")
+    error: NotRequired[str]  # Exception message or description
+    message: NotRequired[str]  # Human-readable error message
+    error_type: NotRequired[str]  # Sub-category
+    field: NotRequired[str]  # Field name for field-related errors
+
+
+class ArtifactDisplay(TypedDict):
+    """Parsed Artifact for display.
+
+    From contracts.audit.Artifact - produced by sinks.
+    Required fields match the dataclass contract.
+    """
+
+    artifact_id: str
+    path_or_uri: str
+    content_hash: str
+    size_bytes: int

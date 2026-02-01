@@ -311,11 +311,12 @@ class TestFinding:
             line=10,
             col=0,
             symbol_context=(),
+            fingerprint="deadbeefcafebabe",
             code_snippet="data.get('key')",
             message="test",
         )
 
-        assert finding.canonical_key == "src/module.py:R1:_module_:line=10"
+        assert finding.canonical_key == "src/module.py:R1:_module_:fp=deadbeefcafebabe"
 
     def test_canonical_key_function(self) -> None:
         """Function-level finding should include function name."""
@@ -325,11 +326,12 @@ class TestFinding:
             line=25,
             col=4,
             symbol_context=("process_data",),
+            fingerprint="0123456789abcdef",
             code_snippet="getattr(obj, 'x', None)",
             message="test",
         )
 
-        assert finding.canonical_key == "src/module.py:R2:process_data:line=25"
+        assert finding.canonical_key == "src/module.py:R2:process_data:fp=0123456789abcdef"
 
     def test_canonical_key_class_method(self) -> None:
         """Class method finding should include class and method."""
@@ -339,11 +341,12 @@ class TestFinding:
             line=42,
             col=8,
             symbol_context=("Handler", "process"),
+            fingerprint="feedfacecafed00d",
             code_snippet="hasattr(obj, 'attr')",
             message="test",
         )
 
-        assert finding.canonical_key == "src/handler.py:R3:Handler:process:line=42"
+        assert finding.canonical_key == "src/handler.py:R3:Handler:process:fp=feedfacecafed00d"
 
 
 # =============================================================================
@@ -357,7 +360,7 @@ class TestAllowlistMatching:
     def test_exact_match(self) -> None:
         """Allowlist entry should match finding with exact key."""
         entry = AllowlistEntry(
-            key="src/module.py:R1:process:line=10",
+            key="src/module.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -371,6 +374,7 @@ class TestAllowlistMatching:
             line=10,
             col=0,
             symbol_context=("process",),
+            fingerprint="deadbeefcafebabe",
             code_snippet="data.get('key')",
             message="test",
         )
@@ -383,7 +387,7 @@ class TestAllowlistMatching:
     def test_no_match(self) -> None:
         """Finding without matching allowlist entry should return None."""
         entry = AllowlistEntry(
-            key="src/other.py:R1:process:line=10",
+            key="src/other.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -397,6 +401,7 @@ class TestAllowlistMatching:
             line=10,
             col=0,
             symbol_context=("process",),
+            fingerprint="deadbeefcafebabe",
             code_snippet="data.get('key')",
             message="test",
         )
@@ -417,7 +422,7 @@ class TestStaleDetection:
     def test_unmatched_entry_is_stale(self) -> None:
         """Entry that doesn't match any finding should be stale."""
         entry = AllowlistEntry(
-            key="src/removed.py:R1:old_function:line=10",
+            key="src/removed.py:R1:old_function:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -433,7 +438,7 @@ class TestStaleDetection:
     def test_matched_entry_not_stale(self) -> None:
         """Entry that matched a finding should not be stale."""
         entry = AllowlistEntry(
-            key="src/module.py:R1:process:line=10",
+            key="src/module.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -460,7 +465,7 @@ class TestExpiryDetection:
         """Entry with past expiry date should be detected."""
         yesterday = datetime.now(UTC).date() - timedelta(days=1)
         entry = AllowlistEntry(
-            key="src/module.py:R1:process:line=10",
+            key="src/module.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -476,7 +481,7 @@ class TestExpiryDetection:
         """Entry with future expiry date should not be detected."""
         tomorrow = datetime.now(UTC).date() + timedelta(days=1)
         entry = AllowlistEntry(
-            key="src/module.py:R1:process:line=10",
+            key="src/module.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -490,7 +495,7 @@ class TestExpiryDetection:
     def test_no_expiry_not_expired(self) -> None:
         """Entry without expiry date should not be detected."""
         entry = AllowlistEntry(
-            key="src/module.py:R1:process:line=10",
+            key="src/module.py:R1:process:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
@@ -527,7 +532,7 @@ defaults:
   fail_on_stale: true
   fail_on_expired: false
 allow_hits:
-  - key: "src/module.py:R1:process:line=10"
+  - key: "src/module.py:R1:process:fp=deadbeefcafebabe"
     owner: "john"
     reason: "Legacy code"
     safety: "Will be refactored"
@@ -628,7 +633,7 @@ class TestIntegration:
             expires=None,
         )
         entry_stale = AllowlistEntry(
-            key="module.py:R1:old_function:line=999",
+            key="module.py:R1:old_function:fp=deadbeefcafebabe",
             owner="test",
             reason="test",
             safety="test",
