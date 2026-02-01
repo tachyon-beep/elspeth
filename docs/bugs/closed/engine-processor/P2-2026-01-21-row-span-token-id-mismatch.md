@@ -89,9 +89,44 @@
 - Related issues/PRs: N/A
 - Related design docs: docs/design/subsystems/00-overview.md
 
+---
+
+## RESOLUTION: 2026-02-02
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code (Opus 4.5)
+
+**Solution:**
+
+Added `token_id` and `token_ids` parameters to child span methods so they record the actual token being processed:
+
+1. **spans.py changes:**
+   - `transform_span()`: Added `token_id: str | None` for single-row transforms, `token_ids: Sequence[str] | None` for batch transforms
+   - `gate_span()`: Added `token_id: str | None`
+   - `sink_span()`: Added `token_ids: Sequence[str] | None` (sinks batch-write multiple tokens)
+   - `aggregation_span()`: Added `token_ids: Sequence[str] | None`
+
+2. **executors.py changes:**
+   - `TransformExecutor.execute()`: Passes `token_id=token.token_id`
+   - `GateExecutor.execute_gate()`: Passes `token_id=token.token_id`
+   - `GateExecutor.execute_config_gate()`: Passes `token_id=token.token_id`
+   - `AggregationExecutor.execute_flush()`: Passes `token_ids=[t.token_id for t in buffered_tokens]`
+   - `SinkExecutor.write()`: Passes `token_ids=[t.token_id for t in tokens]`
+
+3. **Tests added:**
+   - `TestTokenIdOnChildSpans`: 5 tests verifying token.id tracking on child spans
+   - `TestTokenIdEdgeCases`: 6 tests for edge cases (None, empty sequences, batch transforms)
+
+**Architectural Decision:**
+
+Kept `row_span` unchanged - it represents "all processing for tokens derived from this source row" which is semantically correct. Child spans (transform/gate/sink) now carry the precise `token.id` for the operation being performed.
+
+---
+
 ## VERIFICATION: 2026-02-01
 
-**Status:** STILL VALID
+**Status:** STILL VALID (superseded by fix)
 
 - RowProcessor still wraps the entire work queue in a single `row_span` created with the initial token. (`src/elspeth/engine/processor.py:383-405`)
 - `row_span()` still sets `token.id` at span creation and never updates it for child tokens. (`src/elspeth/engine/spans.py:116-137`)
