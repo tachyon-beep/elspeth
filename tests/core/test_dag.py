@@ -2389,6 +2389,159 @@ class TestSchemaValidation:
         error_msg = str(exc_info.value).lower()
         assert "schema" in error_msg or "incompatible" in error_msg
 
+    def test_coalesce_accepts_structurally_identical_schemas(self) -> None:
+        """Coalesce should accept branches with structurally identical schemas.
+
+        BUG FIX: P2-2026-01-30-coalesce-schema-identity-check
+        Previously, coalesce validation compared schema classes by identity (!=),
+        rejecting structurally identical schemas that were distinct class objects.
+        This happens when create_schema_from_config() is called multiple times
+        with the same field definitions (e.g., per-instance LLM transforms).
+
+        The fix uses check_compatibility() for structural comparison.
+        """
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create two STRUCTURALLY IDENTICAL schemas from same config
+        # These will be distinct class objects (SchemaA is not SchemaB)
+        fields = (
+            FieldDefinition(name="id", field_type="int"),
+            FieldDefinition(name="value", field_type="str"),
+        )
+        config = SchemaConfig(mode="strict", fields=fields, is_dynamic=False)
+
+        # Each call creates a NEW class object
+        SchemaA = create_schema_from_config(config, "BranchASchema")
+        SchemaB = create_schema_from_config(config, "BranchBSchema")
+
+        # Verify they are distinct class objects but structurally identical
+        assert SchemaA is not SchemaB, "Test requires distinct class objects"
+        assert list(SchemaA.model_fields.keys()) == list(SchemaB.model_fields.keys())
+
+        class SourceOutput(PluginSchema):
+            id: int
+
+        graph = ExecutionGraph()
+
+        # Build fork/join DAG with COMPATIBLE (structurally identical) schemas
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+
+        # Branch A uses SchemaA
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="enrich",
+            input_schema=SourceOutput,
+            output_schema=SchemaA,
+        )
+
+        # Branch B uses SchemaB (structurally identical to SchemaA!)
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="enrich",
+            input_schema=SourceOutput,
+            output_schema=SchemaB,
+        )
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        # Build edges
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should PASS: schemas are structurally identical
+        # (This was incorrectly failing before the fix)
+        graph.validate_edge_compatibility()
+
+    def test_coalesce_accepts_dynamic_schemas_from_different_instances(self) -> None:
+        """Coalesce should accept branches with dynamic schemas from different instances.
+
+        BUG FIX: P2-2026-01-30-coalesce-schema-identity-check
+        Dynamic schemas (is_dynamic=True) are compatible with anything.
+        Even if they're distinct class objects, they should pass validation.
+        """
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create two dynamic schemas (accept anything)
+        config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+
+        DynamicA = create_schema_from_config(config, "DynamicA")
+        DynamicB = create_schema_from_config(config, "DynamicB")
+
+        # Verify they are distinct class objects
+        assert DynamicA is not DynamicB, "Test requires distinct class objects"
+
+        class SourceOutput(PluginSchema):
+            id: int
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+
+        # Both branches use dynamic schemas (distinct objects)
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            input_schema=SourceOutput,
+            output_schema=DynamicA,
+        )
+
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            input_schema=SourceOutput,
+            output_schema=DynamicB,
+        )
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should PASS: dynamic schemas are compatible with anything
+        graph.validate_edge_compatibility()
+
     def test_aggregation_schema_transition_in_topology(self) -> None:
         """Aggregation with input_schema and output_schema in single topology.
 

@@ -91,6 +91,35 @@
 
 - Coalesce compatibility still uses class identity comparisons, and schema factory still generates per-call Pydantic classes. (`src/elspeth/core/dag.py:1039-1083`, `src/elspeth/plugins/schema_factory.py:41-91`)
 
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Changes Made
+
+1. **Added `_schemas_structurally_compatible()` helper method** (`src/elspeth/core/dag.py:1057-1106`):
+   - Handles dynamic schemas (None or no fields + extra="allow") as compatible with anything
+   - Uses bidirectional `check_compatibility()` for explicit schemas
+   - Returns `(is_compatible, error_message)` tuple for detailed error reporting
+
+2. **Updated `_get_effective_producer_schema()`** (`src/elspeth/core/dag.py:1039-1054`):
+   - Replaced `if first_schema != other_schema:` with structural compatibility check
+   - Now uses `_schemas_structurally_compatible()` for multi-input pass-through validation
+
+3. **Updated `_validate_coalesce_compatibility()`** (`src/elspeth/core/dag.py:1129-1141`):
+   - Replaced `if first_schema != other_schema:` with structural compatibility check
+   - Now uses `_schemas_structurally_compatible()` for coalesce validation
+
+### Tests Added
+
+- `test_coalesce_accepts_structurally_identical_schemas`: Verifies structurally identical schemas (different class objects) pass validation
+- `test_coalesce_accepts_dynamic_schemas_from_different_instances`: Verifies dynamic schemas from different `create_schema_from_config()` calls pass validation
+- Existing `test_coalesce_rejects_incompatible_branch_schemas` continues to pass (truly incompatible schemas still rejected)
+
+### Verification
+
+All 20 coalesce-related tests pass. All 7 schema validation tests pass.
+
 ## Tests
 
 - Suggested tests to run: `.venv/bin/python -m pytest tests/core/test_dag.py -k coalesce`

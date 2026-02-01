@@ -1036,23 +1036,77 @@ class ExecutionGraph:
             first_edge_source = incoming[0][0]
             first_schema = self._get_effective_producer_schema(first_edge_source)
 
-            # For multi-input nodes, verify all inputs have same schema
+            # For multi-input nodes, verify all inputs have structurally compatible schemas
+            # Note: Uses structural comparison, not class identity (P2-2026-01-30 fix)
             if len(incoming) > 1:
                 for from_id, _, _ in incoming[1:]:
                     other_schema = self._get_effective_producer_schema(from_id)
-                    if first_schema != other_schema:
+                    compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
+                    if not compatible:
                         # Multi-input pass-through nodes with incompatible schemas - CRASH
+                        first_name = first_schema.__name__ if first_schema else "dynamic"
+                        other_name = other_schema.__name__ if other_schema else "dynamic"
                         raise ValueError(
                             f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
                             f"multiple inputs - this is a graph construction bug. "
-                            f"First input schema: {first_schema}, "
-                            f"Other input schema: {other_schema}"
+                            f"First input: {first_name}, other input: {other_name}. {error_msg}"
                         )
 
             return first_schema
 
         # Not a pass-through node and no schema - return None (dynamic)
         return None
+
+    def _schemas_structurally_compatible(
+        self, schema_a: type[PluginSchema] | None, schema_b: type[PluginSchema] | None
+    ) -> tuple[bool, str]:
+        """Check if two schemas are structurally compatible (not by class identity).
+
+        Uses check_compatibility() for structural comparison. Handles dynamic schemas
+        which are compatible with anything.
+
+        Args:
+            schema_a: First schema (or None for dynamic)
+            schema_b: Second schema (or None for dynamic)
+
+        Returns:
+            Tuple of (is_compatible, error_message). If compatible, error_message is empty.
+        """
+        # Both None (dynamic) - compatible
+        if schema_a is None and schema_b is None:
+            return True, ""
+
+        # One None, one explicit - dynamic is compatible with anything
+        if schema_a is None or schema_b is None:
+            return True, ""
+
+        # Both explicit - check if either is dynamic (no fields + extra="allow")
+        # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+        # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+        a_is_dynamic = len(schema_a.model_fields) == 0 and schema_a.model_config["extra"] == "allow"
+        b_is_dynamic = len(schema_b.model_fields) == 0 and schema_b.model_config["extra"] == "allow"
+        if a_is_dynamic or b_is_dynamic:
+            return True, ""
+
+        # Same class - trivially compatible
+        if schema_a is schema_b:
+            return True, ""
+
+        # Both explicit schemas - use bidirectional structural comparison
+        # For coalesce/pass-through nodes, schemas must be mutually compatible
+        result_ab = check_compatibility(schema_a, schema_b)
+        result_ba = check_compatibility(schema_b, schema_a)
+
+        if result_ab.compatible and result_ba.compatible:
+            return True, ""
+
+        # Build error message showing what's incompatible
+        errors = []
+        if not result_ab.compatible:
+            errors.append(f"{schema_a.__name__} -> {schema_b.__name__}: {result_ab.error_message}")
+        if not result_ba.compatible:
+            errors.append(f"{schema_b.__name__} -> {schema_a.__name__}: {result_ba.error_message}")
+        return False, "; ".join(errors)
 
     def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:
         """Validate all inputs to coalesce node have compatible schemas.
@@ -1072,15 +1126,18 @@ class ExecutionGraph:
         first_edge_source = incoming[0][0]
         first_schema = self._get_effective_producer_schema(first_edge_source)
 
-        # Verify all other branches have same schema
+        # Verify all other branches have structurally compatible schemas
+        # Note: Uses structural comparison, not class identity (P2-2026-01-30 fix)
         for from_id, _, _ in incoming[1:]:
             other_schema = self._get_effective_producer_schema(from_id)
-            if first_schema != other_schema:
+            compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
+            if not compatible:
+                first_name = first_schema.__name__ if first_schema else "dynamic"
+                other_name = other_schema.__name__ if other_schema else "dynamic"
                 raise ValueError(
                     f"Coalesce '{coalesce_id}' receives incompatible schemas from "
-                    f"multiple branches: "
-                    f"first branch has {first_schema.__name__ if first_schema else 'dynamic'}, "
-                    f"branch from '{from_id}' has {other_schema.__name__ if other_schema else 'dynamic'}"
+                    f"multiple branches: first branch has {first_name}, "
+                    f"branch from '{from_id}' has {other_name}. {error_msg}"
                 )
 
     # ===== CONTRACT VALIDATION HELPERS =====
