@@ -33,9 +33,8 @@ class TestOrchestratorAuditTrail:
 
     def test_run_records_landscape_entries(self, payload_store) -> None:
         """Verify that run creates proper audit trail."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -169,7 +168,7 @@ class TestOrchestratorLandscapeExport:
 
     def test_orchestrator_exports_landscape_when_configured(self, plugin_manager, payload_store) -> None:
         """Orchestrator should export audit trail after run completes."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -179,7 +178,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -305,7 +303,7 @@ class TestOrchestratorLandscapeExport:
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -315,7 +313,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -437,7 +434,7 @@ class TestOrchestratorLandscapeExport:
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -447,7 +444,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -555,7 +551,7 @@ class TestOrchestratorLandscapeExport:
 
     def test_orchestrator_no_export_when_disabled(self, plugin_manager, payload_store) -> None:
         """Should not export when export.enabled is False."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeSettings,
@@ -564,7 +560,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -673,9 +668,8 @@ class TestOrchestratorConfigRecording:
         """Run should record the full resolved configuration in Landscape."""
         import json
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -767,9 +761,8 @@ class TestOrchestratorConfigRecording:
         """Run with no config passed should record empty dict (current behavior)."""
         import json
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -851,10 +844,9 @@ class TestNodeMetadataFromPlugin:
         Verifies that the node's plugin_version in Landscape matches
         the plugin class's plugin_version attribute.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -967,10 +959,9 @@ class TestNodeMetadataFromPlugin:
         Verifies that nondeterministic plugins are recorded correctly
         in the Landscape for reproducibility tracking.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -1078,11 +1069,10 @@ class TestNodeMetadataFromPlugin:
         This test verifies the fix: aggregation nodes now correctly inherit
         metadata from their transform plugin instance.
         """
-        from elspeth.contracts import AggregationName, PluginSchema
+        from elspeth.contracts import AggregationName, ArtifactDescriptor, PluginSchema
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -1222,11 +1212,10 @@ class TestNodeMetadataFromPlugin:
         they're engine components, not user plugins.
         """
         from elspeth import __version__ as ENGINE_VERSION
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()

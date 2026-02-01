@@ -14,9 +14,9 @@ from typing import Any
 
 from sqlalchemy import select
 
+from elspeth.contracts import ArtifactDescriptor
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import runs_table
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sources.csv_source import CSVSource
 from tests.conftest import _TestSinkBase

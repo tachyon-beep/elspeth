@@ -34,7 +34,7 @@ def make_mock_sink(
     Returns:
         Mock sink instance with write() and flush() methods
     """
-    from elspeth.engine.artifacts import ArtifactDescriptor
+    from elspeth.contracts import ArtifactDescriptor
     from elspeth.plugins.context import PluginContext
 
     class MockSink:
@@ -148,8 +148,8 @@ class TestSinkExecutor:
 
     def test_write_empty_tokens_returns_none(self) -> None:
         """Write with empty tokens returns None without side effects."""
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -267,9 +267,8 @@ class TestSinkExecutor:
 
     def test_write_multiple_batches_creates_multiple_artifacts(self) -> None:
         """Multiple sink writes create separate artifacts."""
-        from elspeth.contracts import TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, TokenInfo
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -417,9 +416,8 @@ class TestSinkExecutor:
 
     def test_sink_external_calls_attributed_to_operation(self) -> None:
         """BUG-RECORDER-01: Sink execution sets state_id on context for external call recording."""
-        from elspeth.contracts import CallStatus, CallType, TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, TokenInfo
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -535,10 +533,9 @@ class TestSinkExecutor:
         Bug: If flush() fails after write() succeeds, node_states were left OPEN
         because complete_node_state() was only called after flush() returned.
         """
-        from elspeth.contracts import TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, TokenInfo
         from elspeth.contracts.audit import NodeStateFailed
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext
@@ -637,9 +634,8 @@ class TestSinkExecutor:
         This test verifies that behavior is preserved - we don't silently swallow
         the exception after completing audit states.
         """
-        from elspeth.contracts import TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, TokenInfo
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
         from elspeth.plugins.context import PluginContext

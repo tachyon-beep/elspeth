@@ -20,10 +20,9 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 

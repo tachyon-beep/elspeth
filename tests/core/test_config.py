@@ -2027,6 +2027,54 @@ transforms:
         # Non-secret field preserved
         assert audit_config["transforms"][0]["options"]["model"] == "gpt-4"
 
+    def test_telemetry_exporter_options_are_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Telemetry exporter secrets should be fingerprinted in audit copy."""
+        from elspeth.core.config import load_settings, resolve_config
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv_source
+sinks:
+  output:
+    plugin: csv_sink
+default_sink: output
+telemetry:
+  enabled: true
+  exporters:
+    - name: otlp
+      options:
+        endpoint: http://localhost:4317
+        headers:
+          Authorization: "Bearer secret-token"
+    - name: azure_monitor
+      options:
+        connection_string: "InstrumentationKey=secret-value"
+    - name: datadog
+      options:
+        api_key: "dd-secret"
+""")
+
+        settings = load_settings(config_file)
+        audit_config = resolve_config(settings)
+
+        exporters = audit_config["telemetry"]["exporters"]
+        otlp_options = exporters[0]["options"]
+        azure_options = exporters[1]["options"]
+        dd_options = exporters[2]["options"]
+
+        assert otlp_options["endpoint"] == "http://localhost:4317"
+        assert "Authorization" not in otlp_options["headers"]
+        assert "Authorization_fingerprint" in otlp_options["headers"]
+
+        assert "connection_string" not in azure_options
+        assert "connection_string_fingerprint" in azure_options
+
+        assert "api_key" not in dd_options
+        assert "api_key_fingerprint" in dd_options
+
     # === Tests for recursive/nested fingerprinting ===
 
     def test_nested_secrets_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2054,6 +2102,30 @@ transforms:
         assert "api_key_fingerprint" in result["auth"]
         assert "token" not in result["auth"]["nested"]
         assert "token_fingerprint" in result["auth"]["nested"]
+
+    def test_connection_string_and_authorization_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Connection strings and Authorization headers should be fingerprinted."""
+        from elspeth.core.config import _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        options = {
+            "connection_string": "InstrumentationKey=secret-value",
+            "headers": {
+                "Authorization": "Bearer secret-token",
+                "User-Agent": "elspeth-tests",
+            },
+        }
+
+        result = _fingerprint_secrets(options)
+
+        assert "connection_string" not in result
+        assert "connection_string_fingerprint" in result
+
+        headers = result["headers"]
+        assert "Authorization" not in headers
+        assert "Authorization_fingerprint" in headers
+        assert headers["User-Agent"] == "elspeth-tests"
 
     def test_secrets_in_lists_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secrets inside list elements should be fingerprinted."""

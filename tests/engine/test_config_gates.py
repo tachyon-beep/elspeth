@@ -12,10 +12,9 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import GateName, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, GateName, PluginSchema, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,

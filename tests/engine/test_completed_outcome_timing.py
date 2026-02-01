@@ -26,6 +26,7 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
     PluginSchema,
@@ -40,7 +41,6 @@ from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.schema import node_states_table, token_outcomes_table
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult

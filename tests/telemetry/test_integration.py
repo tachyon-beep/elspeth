@@ -21,7 +21,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.enums import BackpressureMode, RunStatus, TelemetryGranularity
 from elspeth.contracts.events import (
     TelemetryEvent,
@@ -30,7 +30,6 @@ from elspeth.contracts.events import (
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.results import TransformResult
 from elspeth.telemetry import TelemetryManager

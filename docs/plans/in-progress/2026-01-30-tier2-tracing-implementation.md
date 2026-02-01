@@ -959,7 +959,8 @@ telemetry:
   granularity: full
   exporters:
     - name: datadog
-      service_name: "elspeth-pipeline"
+      options:
+        service_name: "elspeth-pipeline"
 
 # Tier 2: Plugin tracing → Langfuse for ML team
 transforms:

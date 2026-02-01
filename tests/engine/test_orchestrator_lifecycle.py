@@ -38,8 +38,8 @@ class TestLifecycleHooks:
         """on_start() called before any rows processed."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -121,9 +121,8 @@ class TestLifecycleHooks:
         """on_complete() called after all rows processed."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -292,8 +291,8 @@ class TestSourceLifecycleHooks:
         """Source on_start, on_complete should be called around loading."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         call_order: list[str] = []
@@ -366,8 +365,8 @@ class TestSinkLifecycleHooks:
         """Sink on_start and on_complete should be called."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         call_order: list[str] = []
@@ -436,9 +435,8 @@ class TestSinkLifecycleHooks:
         """Sink on_complete should be called even when run fails."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         completed: list[str] = []

@@ -126,7 +126,7 @@ class TestLineageCompleteness:
 
     def test_simple_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Simple pipeline: source -> transform -> sink runs successfully."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
 
         # Setup database (use SQLAlchemy connection string)
         db = LandscapeDB.in_memory()
@@ -180,7 +180,7 @@ class TestLineageCompleteness:
 
     def test_multi_transform_pipeline_runs(self, tmp_path: Path, payload_store) -> None:
         """Multi-transform pipeline runs successfully."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
 
         # Setup database
         db = LandscapeDB.in_memory()
@@ -251,11 +251,11 @@ class TestLineageAfterRetention:
         """
         from datetime import UTC, datetime, timedelta
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.landscape.row_data import RowDataState
         from elspeth.core.payload_store import FilesystemPayloadStore
         from elspeth.core.retention.purge import PurgeManager
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/lineage.db")
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -334,10 +334,10 @@ class TestExplainQueryFunctionality:
         Uses PayloadStore to persist source data, as required by CLAUDE.md:
         "Source entry - Raw data stored before any processing" (non-negotiable)
         """
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape.lineage import explain
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         # Setup database and payload store
         db = LandscapeDB.in_memory()
@@ -417,10 +417,9 @@ class TestExplainQueryFunctionality:
         This verifies that explain() returns node_states showing each transform
         the row passed through, enabling full audit trail reconstruction.
         """
-        from elspeth.contracts import NodeStateStatus
+        from elspeth.contracts import ArtifactDescriptor, NodeStateStatus
         from elspeth.core.landscape.lineage import explain
         from elspeth.core.landscape.recorder import LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         # Setup database
         db = LandscapeDB.in_memory()

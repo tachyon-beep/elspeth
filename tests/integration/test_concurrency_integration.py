@@ -175,9 +175,8 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         """
         from unittest.mock import MagicMock, patch
 
-        from elspeth.contracts import Determinism, NodeType, RoutingMode, SinkName, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, Determinism, NodeType, RoutingMode, SinkName, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         db = LandscapeDB.in_memory()
         concurrency_config = RuntimeConcurrencyConfig(max_workers=5)

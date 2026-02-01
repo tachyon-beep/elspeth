@@ -71,11 +71,10 @@ class TestOrchestratorCheckpointing:
     def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint creates checkpoint when frequency=every_row."""
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -169,11 +168,10 @@ class TestOrchestratorCheckpointing:
 
     def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint only creates checkpoint every N rows."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -270,11 +268,10 @@ class TestOrchestratorCheckpointing:
 
     def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are deleted when run completes successfully."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -369,12 +366,11 @@ class TestOrchestratorCheckpointing:
         - Checkpoints are created after each sink.write() returns successfully
         - If a later sink fails, checkpoints from earlier sinks are preserved
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings, GateSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -541,11 +537,10 @@ class TestOrchestratorCheckpointing:
 
     def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -637,10 +632,9 @@ class TestOrchestratorCheckpointing:
 
     def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Orchestrator works fine without checkpoint manager."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 

@@ -141,6 +141,31 @@ RULES = {
         "description": "Broad exception handling can suppress bugs",
         "remediation": "Catch specific exceptions, or re-raise after logging/quarantining",
     },
+    "R5": {
+        "name": "isinstance",
+        "description": "isinstance() checks can mask contract violations outside explicit trust boundaries",
+        "remediation": "Validate at Tier-3 boundaries or rely on contracts; do not use isinstance to hide bugs",
+    },
+    "R6": {
+        "name": "silent-except",
+        "description": "Exception handling that swallows errors without re-raise or explicit error result",
+        "remediation": "Raise the exception or return an explicit error/quarantine result",
+    },
+    "R7": {
+        "name": "contextlib.suppress",
+        "description": "contextlib.suppress() silently ignores exceptions",
+        "remediation": "Handle exceptions explicitly or allow them to raise",
+    },
+    "R8": {
+        "name": "dict.setdefault",
+        "description": "dict.setdefault() hides missing-key bugs by mutating defaults",
+        "remediation": "Access keys directly and fix the schema/contract if KeyError occurs",
+    },
+    "R9": {
+        "name": "dict.pop-default",
+        "description": "dict.pop(key, default) hides missing-key bugs with implicit defaults",
+        "remediation": "Access keys directly and fix the schema/contract if KeyError occurs",
+    },
 }
 
 
@@ -211,8 +236,34 @@ class TierModelVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.symbol_stack.pop()
 
+    def _is_default_return_value(self, value: ast.expr | None) -> bool:
+        """True if return value is a silent default (None, empty container, empty string, zero)."""
+        if value is None:
+            return True
+        if isinstance(value, ast.Constant):
+            return value.value in (None, "", 0, 0.0, False)
+        if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            return len(value.elts) == 0
+        if isinstance(value, ast.Dict):
+            return len(value.keys) == 0
+        return False
+
+    def _handler_is_silent(self, node: ast.ExceptHandler) -> bool:
+        """Return True if the except handler swallows errors without re-raise or explicit return."""
+        has_raise = any(isinstance(child, ast.Raise) for child in ast.walk(node))
+        if has_raise:
+            return False
+
+        returns: list[ast.Return] = [child for child in ast.walk(node) if isinstance(child, ast.Return)]
+        if returns:
+            # If all returns are silent defaults, treat as swallow.
+            return all(self._is_default_return_value(ret.value) for ret in returns)
+
+        # No raise, no return: likely swallow (even if logging).
+        return True
+
     def visit_Call(self, node: ast.Call) -> None:
-        """Detect R1 (dict.get), R2 (getattr), R3 (hasattr)."""
+        """Detect R1 (dict.get), R2 (getattr), R3 (hasattr), R5 (isinstance), R8/R9 defaults."""
         # R1: dict.get() - Call(func=Attribute(attr="get"))
         if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
             # This catches any .get() call - we can't know types statically
@@ -221,6 +272,22 @@ class TierModelVisitor(ast.NodeVisitor):
                 "R1",
                 node,
                 f"Potential dict.get() usage: {self._get_code_snippet(node.lineno)}",
+            )
+
+        # R8: dict.setdefault() - mutating default on missing key
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault":
+            self._add_finding(
+                "R8",
+                node,
+                f"dict.setdefault() hides missing keys: {self._get_code_snippet(node.lineno)}",
+            )
+
+        # R9: dict.pop(key, default) - implicit default on missing key
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "pop" and (len(node.args) >= 2 or node.keywords):
+            self._add_finding(
+                "R9",
+                node,
+                f"dict.pop() with default hides missing keys: {self._get_code_snippet(node.lineno)}",
             )
 
         # R2: getattr() - Call(func=Name("getattr"))
@@ -240,6 +307,42 @@ class TierModelVisitor(ast.NodeVisitor):
                 f"hasattr() branches around missing attributes: {self._get_code_snippet(node.lineno)}",
             )
 
+        # R5: isinstance() - runtime type checks can mask contract violations
+        if isinstance(node.func, ast.Name) and node.func.id == "isinstance":
+            self._add_finding(
+                "R5",
+                node,
+                f"isinstance() used: {self._get_code_snippet(node.lineno)}",
+            )
+
+        self.generic_visit(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        """Detect R7: contextlib.suppress usage."""
+        for item in node.items:
+            ctx_expr = item.context_expr
+            if isinstance(ctx_expr, ast.Call):
+                func = ctx_expr.func
+                if (isinstance(func, ast.Name) and func.id == "suppress") or (isinstance(func, ast.Attribute) and func.attr == "suppress"):
+                    self._add_finding(
+                        "R7",
+                        node,
+                        f"contextlib.suppress() used: {self._get_code_snippet(node.lineno)}",
+                    )
+        self.generic_visit(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        """Detect R7: contextlib.suppress usage in async context managers."""
+        for item in node.items:
+            ctx_expr = item.context_expr
+            if isinstance(ctx_expr, ast.Call):
+                func = ctx_expr.func
+                if (isinstance(func, ast.Name) and func.id == "suppress") or (isinstance(func, ast.Attribute) and func.attr == "suppress"):
+                    self._add_finding(
+                        "R7",
+                        node,
+                        f"contextlib.suppress() used: {self._get_code_snippet(node.lineno)}",
+                    )
         self.generic_visit(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
@@ -278,6 +381,14 @@ class TierModelVisitor(ast.NodeVisitor):
                     node,
                     f"Broad exception caught without re-raise: {self._get_code_snippet(node.lineno)}",
                 )
+
+        # R6: specific exception swallowed without re-raise or explicit return
+        if not is_broad and self._handler_is_silent(node):
+            self._add_finding(
+                "R6",
+                node,
+                f"Exception swallowed without re-raise or explicit error: {self._get_code_snippet(node.lineno)}",
+            )
 
         self.generic_visit(node)
 

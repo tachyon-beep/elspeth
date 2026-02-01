@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     BatchStatus,
     GateName,
     NodeID,
@@ -32,7 +33,6 @@ from elspeth.contracts import (
     TriggerType,
 )
 from elspeth.core.config import GateSettings
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -282,10 +282,9 @@ class TestEngineIntegration:
 
     def test_full_pipeline_with_audit(self, db: LandscapeDB, payload_store) -> None:
         """Full pipeline execution with audit trail verification."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class ValueSchema(PluginSchema):
@@ -426,10 +425,9 @@ class TestEngineIntegration:
         - All node_states are "completed"
         - Artifacts are recorded for sinks
         """
-        from elspeth.contracts import NodeType, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, NodeType, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class NumberSchema(PluginSchema):
@@ -558,10 +556,9 @@ class TestEngineIntegration:
         - Routed tokens reach correct sink
         - All tokens still have complete audit trail
         """
-        from elspeth.contracts import NodeType, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, NodeType, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         class NumberSchema(PluginSchema):
             value: int
@@ -691,9 +688,8 @@ class TestNoSilentAuditLoss:
         which is better than MissingEdgeError at runtime because it catches config
         errors before any rows are processed.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import RouteValidationError
 
         class RowSchema(PluginSchema):
@@ -789,10 +785,9 @@ class TestNoSilentAuditLoss:
 
     def test_transform_exception_propagates(self, db: LandscapeDB, payload_store) -> None:
         """Transform exceptions must propagate, not be silently caught."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         class ValueSchema(PluginSchema):
             value: int
@@ -959,10 +954,9 @@ class TestAuditTrailCompleteness:
 
     def test_empty_source_still_records_run(self, db: LandscapeDB, payload_store) -> None:
         """Even with no rows, run must be recorded in audit trail."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class ValueSchema(PluginSchema):
@@ -1038,10 +1032,9 @@ class TestAuditTrailCompleteness:
 
     def test_multiple_sinks_all_record_artifacts(self, db: LandscapeDB, payload_store) -> None:
         """When multiple sinks receive data, all must record artifacts."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
 
         class ValueSchema(PluginSchema):
             value: int
@@ -1361,11 +1354,10 @@ class TestForkCoalescePipelineIntegration:
         - Only 1 row written to sink per source row
         - Sink artifact has correct content hash
         """
-        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, NodeType, TokenInfo
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.executors import SinkExecutor
         from elspeth.engine.spans import SpanFactory
@@ -1713,11 +1705,10 @@ class TestForkCoalescePipelineIntegration:
         - No cross-contamination between rows
         - Sink receives correct number of merged rows
         """
-        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, NodeType, TokenInfo
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.executors import (
             GateExecutor,
@@ -1955,11 +1946,10 @@ class TestComplexDAGIntegration:
         - Sink receives single merged row per source row
         - Audit trail captures all node traversals
         """
-        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts import ArtifactDescriptor, NodeType, TokenInfo
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.config import CoalesceSettings
         from elspeth.core.landscape import LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.executors import (
             GateExecutor,
@@ -2344,10 +2334,9 @@ class TestComplexDAGIntegration:
         - All metrics >= 0
         - rows_succeeded + rows_quarantined <= rows_processed
         """
-        from elspeth.contracts import PluginSchema, RunStatus
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus
         from elspeth.core.config import GateSettings
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class ValueSchema(PluginSchema):
@@ -2582,12 +2571,11 @@ class TestRetryIntegration:
 
         from sqlalchemy import select
 
-        from elspeth.contracts import PluginSchema, RunStatus
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus
         from elspeth.core.config import ElspethSettings
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.schema import node_states_table
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class ValueSchema(PluginSchema):
@@ -2741,12 +2729,11 @@ class TestRetryIntegration:
 
         from sqlalchemy import select
 
-        from elspeth.contracts import PluginSchema, RunStatus
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus
         from elspeth.core.config import ElspethSettings
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.schema import node_states_table
         from elspeth.engine import Orchestrator, PipelineConfig
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         class ValueSchema(PluginSchema):
@@ -3388,8 +3375,7 @@ class TestErrorRecovery:
         - Sink only receives successful rows
         """
 
-        from elspeth.contracts import PluginSchema, RunStatus
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
@@ -3504,10 +3490,9 @@ class TestErrorRecovery:
 
         from sqlalchemy import select
 
-        from elspeth.contracts import PluginSchema, RunStatus
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.core.landscape.schema import node_states_table
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult

@@ -39,7 +39,7 @@ class TestTransformErrorSinkValidation:
 
     def test_invalid_on_error_sink_fails_at_startup(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Transform with on_error pointing to non-existent sink fails before processing."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -118,7 +118,7 @@ class TestTransformErrorSinkValidation:
 
     def test_error_message_includes_transform_name_and_sinks(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Error message includes transform name and available sinks."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -201,7 +201,7 @@ class TestTransformErrorSinkValidation:
 
     def test_on_error_discard_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: 'discard' passes validation (special value, not a sink)."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -269,7 +269,7 @@ class TestTransformErrorSinkValidation:
 
     def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: null (not set) passes validation."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -337,7 +337,7 @@ class TestTransformErrorSinkValidation:
 
     def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Valid on_error sink name passes validation."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -409,7 +409,7 @@ class TestTransformErrorSinkValidation:
 
     def test_validation_occurs_before_row_processing(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Error occurs BEFORE any rows are processed (source.load should not be called)."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,

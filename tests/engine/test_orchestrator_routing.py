@@ -40,10 +40,9 @@ class TestOrchestratorInvalidRouting:
 
     def test_gate_routing_to_unknown_sink_raises_error(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate routing to non-existent sink must fail loudly, not silently."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -124,13 +123,13 @@ class TestOrchestratorOutputSinkRouting:
         """Rows that complete the pipeline go to the output_sink from config."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.config import (
             ElspethSettings,
             SinkSettings,
             SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         # Config with default_sink="results" (NOT "default")
@@ -211,9 +210,8 @@ class TestOrchestratorGateRouting:
 
     def test_gate_routes_to_named_sink(self, routing_db: LandscapeDB, payload_store) -> None:
         """Gate can route rows to a named sink using route labels."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class RowSchema(PluginSchema):
@@ -296,9 +294,8 @@ class TestRouteValidation:
 
     def test_valid_routes_pass_validation(self, routing_db: LandscapeDB, payload_store) -> None:
         """Valid route configurations should pass validation without error."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class RowSchema(PluginSchema):
@@ -371,10 +368,9 @@ class TestRouteValidation:
 
     def test_invalid_route_destination_fails_at_init(self, routing_db: LandscapeDB, payload_store) -> None:
         """Route to non-existent sink should fail before processing any rows."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -456,10 +452,9 @@ class TestRouteValidation:
 
     def test_error_message_includes_route_label(self, routing_db: LandscapeDB, payload_store) -> None:
         """Error message should include the route label for debugging."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.dag import GraphValidationError
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -534,9 +529,8 @@ class TestRouteValidation:
 
     def test_continue_routes_are_not_validated_as_sinks(self, routing_db: LandscapeDB, payload_store) -> None:
         """Routes that resolve to 'continue' should not be validated as sinks."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.config import GateSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class RowSchema(PluginSchema):

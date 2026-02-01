@@ -77,14 +77,65 @@ default_sink: output
         assert url == "sqlite:///./state/audit.db"
         assert config is not None
 
-    def test_raises_when_no_database_and_no_settings(self, tmp_path: Path) -> None:
+    def test_uses_default_settings_yaml_when_no_explicit_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Falls back to default settings.yaml when no explicit --settings provided."""
+        from elspeth.cli_helpers import resolve_database_url
+
+        monkeypatch.chdir(tmp_path)
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+landscape:
+  url: sqlite:///./state/audit.db
+source:
+  plugin: csv
+  options:
+    path: input.csv
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+default_sink: output
+""")
+
+        url, _ = resolve_database_url(database=None, settings_path=None)
+
+        assert url == "sqlite:///./state/audit.db"
+
+    def test_raises_when_no_database_and_no_settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError when neither database nor settings provided."""
         from elspeth.cli_helpers import resolve_database_url
 
-        nonexistent = tmp_path / "nonexistent.yaml"
+        monkeypatch.chdir(tmp_path)
 
-        with pytest.raises(ValueError, match="database"):
-            resolve_database_url(database=None, settings_path=nonexistent)
+        with pytest.raises(ValueError, match="No database specified"):
+            resolve_database_url(database=None, settings_path=None)
+
+    def test_raises_when_explicit_settings_path_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raises ValueError when --settings path is provided but missing."""
+        from elspeth.cli_helpers import resolve_database_url
+
+        monkeypatch.chdir(tmp_path)
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+landscape:
+  url: sqlite:///./state/audit.db
+source:
+  plugin: csv
+  options:
+    path: input.csv
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+default_sink: output
+""")
+
+        missing_settings = tmp_path / "explicit.yaml"
+
+        with pytest.raises(ValueError, match="Settings file not found"):
+            resolve_database_url(database=None, settings_path=missing_settings)
 
     def test_raises_when_default_settings_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError with context when default settings.yaml fails to load."""

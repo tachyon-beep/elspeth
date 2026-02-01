@@ -11,6 +11,7 @@ Complete reference for ELSPETH environment variables and .env configuration.
 - [Optional Variables](#optional-variables)
 - [LLM Provider Variables](#llm-provider-variables)
 - [Azure Service Variables](#azure-service-variables)
+- [Telemetry Variables](#telemetry-variables)
 - [Secret Field Detection](#secret-field-detection)
 - [Example .env File](#example-env-file)
 - [Security Best Practices](#security-best-practices)
@@ -127,6 +128,29 @@ Used by `azure_blob` source and sink plugins.
 
 ---
 
+## Telemetry Variables
+
+### OpenTelemetry (OTLP)
+
+| Variable | Purpose |
+|----------|---------|
+| `OTEL_ENDPOINT` | OTLP endpoint URL (non-sensitive; can be set in YAML instead) |
+| `OTEL_TOKEN` | Auth token for OTLP exporter (sensitive) |
+
+### Azure Application Insights
+
+| Variable | Purpose |
+|----------|---------|
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Application Insights connection string (sensitive) |
+
+### Datadog
+
+| Variable | Purpose |
+|----------|---------|
+| `DD_API_KEY` | Datadog API key (sensitive; optional if using local agent) |
+
+---
+
 ## Secret Field Detection
 
 ELSPETH automatically detects and fingerprints fields containing secrets based on naming patterns:
@@ -197,6 +221,19 @@ AZURE_PROMPT_SHIELD_ENDPOINT=https://your-resource.cognitiveservices.azure.com
 
 # Azure Blob Storage (for azure_blob source/sink)
 AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+
+# =====================================================================
+# Telemetry (secrets only)
+# =====================================================================
+
+# OTLP auth token (optional; required if your OTLP endpoint enforces auth)
+OTEL_TOKEN=your-otel-token
+
+# Azure Application Insights connection string
+APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=...
+
+# Datadog API key (optional if using local agent)
+DD_API_KEY=your-datadog-api-key
 
 # =====================================================================
 # Development Settings (DO NOT USE IN PRODUCTION)

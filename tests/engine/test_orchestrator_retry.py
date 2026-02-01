@@ -29,7 +29,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_creates_retry_manager_from_settings(self, payload_store) -> None:
         """Orchestrator creates RetryManager when settings.retry is configured."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,
@@ -37,7 +37,6 @@ class TestOrchestratorRetry:
             SourceSettings,
         )
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -145,7 +144,7 @@ class TestOrchestratorRetry:
 
     def test_orchestrator_retry_exhausted_marks_row_failed(self, payload_store) -> None:
         """When all retry attempts fail, row should be marked FAILED."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             RetrySettings,
@@ -153,7 +152,6 @@ class TestOrchestratorRetry:
             SourceSettings,
         )
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()

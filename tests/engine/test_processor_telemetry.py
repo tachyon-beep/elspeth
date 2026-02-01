@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 from pydantic import ConfigDict
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     Determinism,
     NodeID,
     NodeType,
@@ -36,7 +37,6 @@ from elspeth.contracts.events import (
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import GateResult, RoutingAction, TransformResult

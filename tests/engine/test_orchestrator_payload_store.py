@@ -15,9 +15,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult

@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
 from elspeth.contracts.events import PhaseError, PipelinePhase
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,

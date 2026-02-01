@@ -573,90 +573,160 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports
     plugins as unhealthy
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=b5e6013d4cab4656
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=f010c021f277c4d6
   owner: architecture
   reason: 'Cleanup path exception: best-effort plugin close() in finally block - crash
     would prevent other plugins from cleanup'
   safety: Errors logged with full details, then raised after all cleanups attempted
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=63e96b00b57eb5e5
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=e5779555de04f94c
+  owner: architecture
+  reason: 'Cleanup path exception: on_complete hooks must all be attempted even if one fails'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=1a5bb40e61ca48eb
+  owner: architecture
+  reason: 'Cleanup path exception: on_complete hooks must all be attempted even if one fails'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=62df751c80015e35
+  owner: architecture
+  reason: 'Cleanup path exception: source on_complete must not block other cleanups'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=74c440819197c2fc
+  owner: architecture
+  reason: 'Cleanup path exception: source close must not block sink closes'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=e6bdd448c93c17b3
+  owner: architecture
+  reason: 'Cleanup path exception: sink close must not block other closes'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=f432ffa6f115711b
+  owner: architecture
+  reason: 'Cleanup path exception: on_complete hooks must all be attempted even if one fails'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=03f60d2e62279460
+  owner: architecture
+  reason: 'Cleanup path exception: on_complete hooks must all be attempted even if one fails'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=699db20f5d8c307c
+  owner: architecture
+  reason: 'Cleanup path exception: transform close must not block other closes'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=958e0dca6cf1e34b
+  owner: architecture
+  reason: 'Cleanup path exception: sink close must not block other closes'
+  safety: Errors logged and aggregated; RuntimeError raised after cleanup (chained if prior exception)
+  expires: null
+- key: engine/orchestrator.py:R5:Orchestrator:_validate_route_destinations:fp=84ff406202fec3a9
+  owner: architecture
+  reason: 'Framework boundary: protocol check distinguishes gate plugins from transforms'
+  safety: No defaulting - branch only selects gate-specific validation logic
+  expires: null
+- key: engine/orchestrator.py:R5:Orchestrator:_validate_transform_error_sinks:fp=b90b7eea038a2cf2
+  owner: architecture
+  reason: 'Framework boundary: protocol check ensures transform plugins implement required interface'
+  safety: Raises on protocol mismatch; not a default or recovery path
+  expires: null
+- key: engine/orchestrator.py:R5:Orchestrator:_execute_run:fp=8dfe67580de446ec
+  owner: architecture
+  reason: 'Framework boundary: classify batch-aware transforms for aggregation scheduling'
+  safety: No defaulting - filters known transform types only
+  expires: null
+- key: engine/orchestrator.py:R5:Orchestrator:_process_resumed_rows:fp=3235a8a9b80eb9b0
+  owner: architecture
+  reason: 'Framework boundary: classify batch-aware transforms for aggregation scheduling'
+  safety: No defaulting - filters known transform types only
+  expires: null
+- key: engine/orchestrator.py:R5:Orchestrator:_find_aggregation_transform:fp=3dc502c076389804
+  owner: architecture
+  reason: 'Framework boundary: locate batch-aware transform by protocol and node_id'
+  safety: No defaulting - returns None only when not found
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=5a77e2c5ec0256d5
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=5824b486d9172c3f
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=0ebdf561c522fee9
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=09683df1f7bbac19
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=537ca92a1027510a
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=e6f60f803755cdd4
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=0792ed4801aac290
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=bf9edb1b1543cc59
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=9e31c588c20ef8aa
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=62925c5f8de5a0e3
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=9521525f319d0ef0
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=b4c4c0174766d9be
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=d46cfda5a9444a0a
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=6bcec8e0c6fc4d4a
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=9bc808540f8de750
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=ecdbd57ce29c5bbc
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=d191cc4fa2a1d122
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during timeout flush'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=e64ab390339fee40
+- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=fd7c62af9c985a18
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during execution'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:fp=50f4842a402e9610
+- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:fp=1a5b7b304afbdf4d
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during timeout flush downstream processing'
   safety: Default 0 for missing sink names is correct - first route to a sink initializes
     counter
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:fp=b2e8d85365c677d8
+- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:fp=49266fc9071668cc
   owner: architecture
   reason: 'Counter accumulation pattern: routed_destinations counts sinks dynamically
     discovered during end-of-source flush downstream processing'
@@ -833,11 +903,6 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): HTTP request body from external client - messages
     array is optional'
   safety: Empty list default produces 0 for message_count in metrics - safe for recording
-  expires: null
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_batch:fp=2ae3d3d4fff62953
-  owner: architecture
-  reason: Internal dict lookup after parallel execution - results dict is fully populated
-  safety: None check on next line handles unexpected missing entries with error row
   expires: null
 - key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:fp=963e11d662938841
   owner: architecture

@@ -68,8 +68,8 @@ class TestOrchestratorForkExecution:
         """
         import hashlib
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 

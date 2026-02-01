@@ -17,6 +17,7 @@ Complete reference for ELSPETH pipeline configuration.
 - [Landscape Settings (Audit Trail)](#landscape-settings-audit-trail)
 - [Concurrency Settings](#concurrency-settings)
 - [Rate Limit Settings](#rate-limit-settings)
+- [Telemetry Settings](#telemetry-settings)
 - [Checkpoint Settings](#checkpoint-settings)
 - [Retry Settings](#retry-settings)
 - [Payload Store Settings](#payload-store-settings)
@@ -66,6 +67,7 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 | `payload_store` | object | No | (defaults) | Large blob storage settings |
 | `checkpoint` | object | No | (defaults) | Crash recovery settings |
 | `rate_limit` | object | No | (defaults) | External call rate limiting |
+| `telemetry` | object | No | (defaults) | Telemetry export configuration |
 
 ### Run Modes
 
@@ -508,22 +510,19 @@ Limit external API calls to avoid throttling.
 ```yaml
 rate_limit:
   enabled: true
-  default_requests_per_second: 10
   default_requests_per_minute: 100
   persistence_path: ./rate_limits.db
   services:
     openai:
-      requests_per_second: 5
       requests_per_minute: 100
     weather_api:
-      requests_per_second: 20
+      requests_per_minute: 120
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Enable rate limiting |
-| `default_requests_per_second` | int | `10` | Default rate limit |
-| `default_requests_per_minute` | int | - | Optional per-minute limit |
+| `default_requests_per_minute` | int | `60` | Default per-minute limit |
 | `persistence_path` | string | - | SQLite path for cross-process limits |
 | `services` | object | `{}` | Per-service configurations |
 
@@ -531,8 +530,82 @@ rate_limit:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `requests_per_second` | int | **Yes** | Maximum requests per second |
-| `requests_per_minute` | int | No | Maximum requests per minute |
+| `requests_per_minute` | int | **Yes** | Maximum requests per minute |
+
+---
+
+## Telemetry Settings
+
+Configure operational telemetry exports (OTLP, Azure Monitor, Datadog, console).
+
+```yaml
+telemetry:
+  enabled: true
+  granularity: rows
+  backpressure_mode: block
+  fail_on_total_exporter_failure: false
+  exporters:
+    - name: otlp
+      options:
+        endpoint: http://localhost:4317
+        headers:
+          Authorization: "Bearer ${OTEL_TOKEN}"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable telemetry emission |
+| `granularity` | string | `lifecycle` | `lifecycle`, `rows`, or `full` |
+| `backpressure_mode` | string | `block` | `block` or `drop` |
+| `fail_on_total_exporter_failure` | bool | `true` | Crash run if all exporters fail repeatedly |
+| `exporters` | list | `[]` | Exporter configurations |
+
+### Exporter Configuration
+
+Each exporter config has a required name and an `options` block. Exporter-specific keys **must** be placed under `options`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | **Yes** | `console`, `otlp`, `azure_monitor`, `datadog` |
+| `options` | object | No | Exporter-specific settings (see telemetry guide) |
+
+**Secrets convention:** keep non-sensitive values in YAML and secrets in `.env`, referenced with `${VAR}`. For example, `options.endpoint` can be set in YAML while `options.headers.Authorization` comes from `.env`.
+
+### Built-in Exporter Options
+
+**Console**
+```yaml
+options:
+  format: json   # json | pretty
+  output: stdout # stdout | stderr
+```
+
+**OTLP**
+```yaml
+options:
+  endpoint: http://localhost:4317   # required
+  headers:
+    Authorization: "Bearer ${OTEL_TOKEN}"  # optional
+  batch_size: 100                   # optional
+```
+
+**Azure Monitor**
+```yaml
+options:
+  connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}  # required
+  batch_size: 100                                              # optional
+```
+
+**Datadog**
+```yaml
+options:
+  api_key: ${DD_API_KEY}          # optional if using local agent
+  service_name: "elspeth"         # optional
+  env: "production"               # optional
+  agent_host: "localhost"         # optional
+  agent_port: 8126                # optional
+  version: "1.0.0"                # optional
+```
 
 ---
 
@@ -614,6 +687,7 @@ See the [Environment Variables Reference](environment-variables.md) for the comp
 - **Security variables:** `ELSPETH_FINGERPRINT_KEY`, `ELSPETH_SIGNING_KEY`
 - **LLM provider keys:** `OPENROUTER_API_KEY`, `AZURE_OPENAI_API_KEY`
 - **Azure service credentials:** Content Safety, Prompt Shield, Blob Storage
+- **Telemetry credentials:** `OTEL_TOKEN`, `APPLICATIONINSIGHTS_CONNECTION_STRING`, `DD_API_KEY`
 - **Secret field detection patterns**
 
 Configuration is loaded with this precedence (highest first):
@@ -759,12 +833,25 @@ retry:
 
 rate_limit:
   enabled: true
-  default_requests_per_second: 10
+  default_requests_per_minute: 600
 
 payload_store:
   backend: filesystem
   base_path: .elspeth/payloads
   retention_days: 90
+
+telemetry:
+  enabled: true
+  granularity: rows
+  exporters:
+    - name: console
+      options:
+        format: pretty
+    - name: otlp
+      options:
+        endpoint: http://localhost:4317
+        headers:
+          Authorization: "Bearer ${OTEL_TOKEN}"
 ```
 
 ---

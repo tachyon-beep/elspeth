@@ -1158,7 +1158,11 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.record_call = capture_call
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
-            "row_mapping": {"row-0-abc": {"index": 0, "variables_hash": "hash0"}, "row-1-def": {"index": 1, "variables_hash": "hash1"}},
+            "row_mapping": {
+                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
+                "row-1-def": {"index": 1, "variables_hash": "hash1"},
+            },
+            "template_errors": [],
             "requests": {
                 "row-0-abc": {
                     "messages": [{"role": "user", "content": "Analyze: Hello"}],
@@ -1236,7 +1240,11 @@ class TestAzureBatchLLMTransformAuditRecording:
         ctx.record_call = capture_call
         ctx.get_checkpoint.return_value = {
             "batch_id": "azure-batch-789",
-            "row_mapping": {"row-0-abc": {"index": 0, "variables_hash": "hash0"}, "row-1-def": {"index": 1, "variables_hash": "hash1"}},
+            "row_mapping": {
+                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
+                "row-1-def": {"index": 1, "variables_hash": "hash1"},
+            },
+            "template_errors": [],
             "requests": {
                 "row-0-abc": {"messages": [{"role": "user", "content": "Good"}], "model": "gpt-4o-batch"},
                 "row-1-def": {"messages": [{"role": "user", "content": "Bad"}], "model": "gpt-4o-batch"},

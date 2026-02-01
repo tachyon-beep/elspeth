@@ -28,9 +28,8 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_called_every_100_rows(self, payload_store) -> None:
         """Verify progress callback is called at 100, 200, and 250 row marks."""
-        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -118,9 +117,8 @@ class TestOrchestratorProgress:
 
     def test_progress_callback_not_called_when_none(self, payload_store) -> None:
         """Verify no crash when on_progress is None."""
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -168,9 +166,8 @@ class TestOrchestratorProgress:
         continue, so quarantined rows at 100-row boundaries never triggered
         progress updates.
         """
-        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -261,10 +258,9 @@ class TestOrchestratorProgress:
         Regression test: progress was showing ✓0 for pipelines with gates
         because routed rows weren't included in rows_succeeded.
         """
-        from elspeth.contracts import PluginSchema, ProgressEvent, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, ProgressEvent, SourceRow
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()

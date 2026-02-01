@@ -101,7 +101,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store
             pass
 
         def write(self, rows: Any, ctx: Any) -> Any:
-            from elspeth.engine.artifacts import ArtifactDescriptor
+            from elspeth.contracts import ArtifactDescriptor
 
             self.received_rows.extend(rows)
             return ArtifactDescriptor.for_file(path="memory://test", size_bytes=len(rows), content_hash="test_hash")

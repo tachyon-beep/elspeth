@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     RunStatus,
     SourceRow,
 )
@@ -29,7 +30,6 @@ from elspeth.core.config import (
     TriggerConfig,
 )
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.clock import MockClock
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform

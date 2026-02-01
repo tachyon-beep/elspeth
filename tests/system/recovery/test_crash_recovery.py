@@ -133,14 +133,13 @@ class TestResumeIdempotence:
         import json
         from collections.abc import Iterator
 
-        from elspeth.contracts import Determinism, PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
         from elspeth.core.payload_store import FilesystemPayloadStore
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.base import BaseTransform
         from elspeth.plugins.results import TransformResult
@@ -445,8 +444,8 @@ class TestRetryBehavior:
 
         from sqlalchemy import select
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape.schema import transform_errors_table
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.plugins.results import TransformResult
 
         # Create a transform that fails for a specific row with on_error configured

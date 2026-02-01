@@ -17,12 +17,11 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ConfigDict
 
-from elspeth.contracts import Determinism, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
+from elspeth.contracts import ArtifactDescriptor, Determinism, NodeID, NodeType, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.contracts.enums import RunStatus, TelemetryGranularity
 from elspeth.contracts.events import TelemetryEvent
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
@@ -499,9 +498,8 @@ class TestRowCreatedTelemetry:
         """
         from collections.abc import Iterator
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.canonical import stable_hash
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.telemetry.events import RowCreated
         from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
         from tests.engine.orchestrator_test_helpers import build_production_graph
@@ -569,8 +567,7 @@ class TestRowCreatedTelemetry:
         """No RowCreated event when telemetry manager is not configured."""
         from collections.abc import Iterator
 
-        from elspeth.contracts import PluginSchema
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source
         from tests.engine.orchestrator_test_helpers import build_production_graph
 

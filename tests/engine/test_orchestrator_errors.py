@@ -31,9 +31,8 @@ class TestOrchestratorErrorHandling:
 
     def test_run_marks_failed_on_transform_exception(self, payload_store) -> None:
         """If a transform raises, run status should be failed in Landscape."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -130,9 +129,8 @@ class TestOrchestratorSourceQuarantineValidation:
         the orchestrator should fail at initialization with a clear error message,
         NOT silently drop quarantined rows at runtime.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -227,9 +225,8 @@ class TestOrchestratorQuarantineMetrics:
         when it returns TransformResult.error(). These should be counted
         as quarantined, not failed.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -352,9 +349,8 @@ class TestSourceQuarantineTokenOutcome:
         """
         from collections.abc import Iterator
 
-        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, RowOutcome
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()

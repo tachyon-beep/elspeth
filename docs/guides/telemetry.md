@@ -46,7 +46,8 @@ telemetry:
   granularity: rows
   exporters:
     - name: console
-      format: pretty
+      options:
+        format: pretty
 ```
 
 ### Granularity Levels
@@ -101,8 +102,9 @@ Writes events to stdout/stderr for testing and local debugging.
 telemetry:
   exporters:
     - name: console
-      format: json    # json (default) | pretty
-      output: stdout  # stdout (default) | stderr
+      options:
+        format: json    # json (default) | pretty
+        output: stdout  # stdout (default) | stderr
 ```
 
 **Example output (pretty format):**
@@ -124,10 +126,11 @@ Exports to any OpenTelemetry Protocol compatible backend (Jaeger, Tempo, Honeyco
 telemetry:
   exporters:
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}  # e.g., "http://localhost:4317"
-      headers:
-        Authorization: "Bearer ${OTEL_TOKEN}"
-      batch_size: 100  # Events per batch (default: 100)
+      options:
+        endpoint: ${OTEL_ENDPOINT}  # e.g., "http://localhost:4317"
+        headers:
+          Authorization: "Bearer ${OTEL_TOKEN}"
+        batch_size: 100  # Events per batch (default: 100)
 ```
 
 **Required dependency:**
@@ -149,8 +152,9 @@ Exports to Azure Application Insights for native Azure observability.
 telemetry:
   exporters:
     - name: azure_monitor
-      connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
-      batch_size: 100  # Events per batch (default: 100)
+      options:
+        connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+        batch_size: 100  # Events per batch (default: 100)
 ```
 
 **Required dependency:**
@@ -176,12 +180,13 @@ Exports to Datadog via the native ddtrace library for full APM integration.
 telemetry:
   exporters:
     - name: datadog
-      api_key: ${DD_API_KEY}       # Optional if using local agent
-      service_name: elspeth-pipeline  # Default: "elspeth"
-      env: production             # Default: "production"
-      agent_host: localhost       # Default: "localhost"
-      agent_port: 8126            # Default: 8126
-      version: "1.0.0"            # Optional service version tag
+      options:
+        api_key: ${DD_API_KEY}       # Optional if using local agent
+        service_name: elspeth-pipeline  # Default: "elspeth"
+        env: production             # Default: "production"
+        agent_host: localhost       # Default: "localhost"
+        agent_port: 8126            # Default: 8126
+        version: "1.0.0"            # Optional service version tag
 ```
 
 **Required dependency:**
@@ -211,21 +216,23 @@ The `api_key` configuration sends traces directly to Datadog API (higher latency
 
 **All secrets MUST come from environment variables, never hardcoded in config files.**
 
-ELSPETH uses Dynaconf's `${ENV_VAR}` substitution pattern:
+**Standard practice:** keep non-sensitive settings (endpoint, batch_size, service_name, env) in YAML; keep secrets (tokens, connection strings, API keys) in `.env` and reference them with `${VAR}`.
+
+ELSPETH uses `${ENV_VAR}` substitution in pipeline config values:
 
 ```yaml
-# settings.yaml - structure only, no secrets
+# settings.yaml - non-sensitive config only, secrets via env vars
 telemetry:
   exporters:
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}
-      headers:
-        Authorization: "Bearer ${OTEL_TOKEN}"
+      options:
+        endpoint: http://localhost:4317
+        headers:
+          Authorization: "Bearer ${OTEL_TOKEN}"
 ```
 
 ```bash
 # .env file (gitignored) - secrets for local development
-OTEL_ENDPOINT=http://localhost:4317
 OTEL_TOKEN=my-secret-token
 ```
 
@@ -330,9 +337,11 @@ telemetry:
 telemetry:
   exporters:
     - name: console
-      format: pretty
+      options:
+        format: pretty
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}
+      options:
+        endpoint: ${OTEL_ENDPOINT}
 ```
 
 ### Events Being Dropped

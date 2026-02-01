@@ -7,10 +7,9 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult

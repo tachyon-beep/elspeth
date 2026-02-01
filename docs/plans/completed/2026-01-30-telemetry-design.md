@@ -347,9 +347,9 @@ ELSPETH uses Dynaconf's `${ENV_VAR}` substitution pattern. Secrets are resolved 
 
 | Secret Type | Environment Variable | Example |
 |-------------|---------------------|---------|
-| OTLP auth token | `OTEL_TOKEN` | `Authorization: "Bearer ${OTEL_TOKEN}"` |
-| Azure Monitor | `APPLICATIONINSIGHTS_CONNECTION_STRING` | `connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}` |
-| Datadog API key | `DD_API_KEY` | `api_key: ${DD_API_KEY}` |
+| OTLP auth token | `OTEL_TOKEN` | `options.headers.Authorization: "Bearer ${OTEL_TOKEN}"` |
+| Azure Monitor | `APPLICATIONINSIGHTS_CONNECTION_STRING` | `options.connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}` |
+| Datadog API key | `DD_API_KEY` | `options.api_key: ${DD_API_KEY}` |
 
 **Security rules:**
 - Config files (`.yaml`) go in git — they contain structure, not secrets
@@ -381,19 +381,23 @@ telemetry:
 
   exporters:
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}  # e.g., "http://localhost:4317"
-      headers:
-        Authorization: "Bearer ${OTEL_TOKEN}"
+      options:
+        endpoint: ${OTEL_ENDPOINT}  # e.g., "http://localhost:4317"
+        headers:
+          Authorization: "Bearer ${OTEL_TOKEN}"
 
     - name: azure_monitor
-      connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+      options:
+        connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
 
     - name: datadog
-      api_key: ${DD_API_KEY}  # Optional if local agent
-      service_name: "elspeth-pipeline"
+      options:
+        api_key: ${DD_API_KEY}  # Optional if local agent
+        service_name: "elspeth-pipeline"
 
     - name: console
-      format: json  # json | pretty (for local debugging)
+      options:
+        format: json  # json | pretty (for local debugging)
 ```
 
 ### Protocol (contracts/config/protocols.py)

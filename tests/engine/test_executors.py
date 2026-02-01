@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     RoutingAction,
     TokenInfo,
 )
@@ -33,7 +34,6 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.executors import (
     AggregationExecutor,
     GateExecutor,

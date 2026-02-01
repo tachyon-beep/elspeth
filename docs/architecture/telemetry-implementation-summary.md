@@ -75,8 +75,9 @@ src/elspeth/telemetry/
 
 ```yaml
 - name: console
-  format: pretty  # json | pretty
-  output: stderr  # stdout | stderr
+  options:
+    format: pretty  # json | pretty
+    output: stderr  # stdout | stderr
 ```
 
 ### OTLP Exporter
@@ -91,10 +92,11 @@ src/elspeth/telemetry/
 
 ```yaml
 - name: otlp
-  endpoint: http://localhost:4317
-  headers:
-    Authorization: "Bearer ${OTEL_TOKEN}"
-  batch_size: 100
+  options:
+    endpoint: http://localhost:4317
+    headers:
+      Authorization: "Bearer ${OTEL_TOKEN}"
+    batch_size: 100
 ```
 
 ### Azure Monitor Exporter
@@ -108,8 +110,9 @@ src/elspeth/telemetry/
 
 ```yaml
 - name: azure_monitor
-  connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
-  batch_size: 100
+  options:
+    connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    batch_size: 100
 ```
 
 ### Datadog Exporter
@@ -124,11 +127,12 @@ src/elspeth/telemetry/
 
 ```yaml
 - name: datadog
-  api_key: ${DD_API_KEY}          # Optional with local agent
-  service_name: "elspeth"
-  env: "production"
-  agent_host: "localhost"
-  agent_port: 8126
+  options:
+    api_key: ${DD_API_KEY}          # Optional with local agent
+    service_name: "elspeth"
+    env: "production"
+    agent_host: "localhost"
+    agent_port: 8126
 ```
 
 ---
@@ -192,9 +196,11 @@ telemetry:
   fail_on_total_exporter_failure: false
   exporters:
     - name: console
-      format: pretty
+      options:
+        format: pretty
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}
+      options:
+        endpoint: ${OTEL_ENDPOINT}
 ```
 
 ### Runtime Layer (Frozen Dataclass)
@@ -371,7 +377,8 @@ telemetry:
   backpressure_mode: block
   exporters:
     - name: console
-      format: pretty
+      options:
+        format: pretty
 ```
 
 ### Production Configuration
@@ -384,11 +391,13 @@ telemetry:
   fail_on_total_exporter_failure: false
   exporters:
     - name: otlp
-      endpoint: ${OTEL_ENDPOINT}
-      batch_size: 100
+      options:
+        endpoint: ${OTEL_ENDPOINT}
+        batch_size: 100
     - name: datadog
-      service_name: "elspeth-pipeline"
-      env: "production"
+      options:
+        service_name: "elspeth-pipeline"
+        env: "production"
 ```
 
 ### Debugging Configuration
@@ -400,6 +409,7 @@ telemetry:
   backpressure_mode: block  # Don't drop events
   exporters:
     - name: console
-      format: pretty
-      output: stderr
+      options:
+        format: pretty
+        output: stderr
 ```

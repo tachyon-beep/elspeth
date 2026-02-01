@@ -19,11 +19,10 @@ from typing import Any
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import RowOutcome, SourceRow
+from elspeth.contracts import ArtifactDescriptor, RowOutcome, SourceRow
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
 
