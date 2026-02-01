@@ -47,10 +47,10 @@
 
 ## Evidence
 
-- `src/elspeth/engine/coalesce_executor.py:465-575` — `check_timeouts()` only handles `best_effort` and `quorum`; there is no `require_all` timeout branch.
-- `src/elspeth/engine/coalesce_executor.py:684-732` — `require_all` failure handling exists only in `flush_pending()` (end-of-source).
-- `docs/reference/configuration.md:417` — `timeout_seconds` described as “Max wait time” without policy restriction.
-- `src/elspeth/core/config.py:359-364` — `timeout_seconds` is allowed for `require_all` (no validator rejecting it).
+- `src/elspeth/engine/coalesce_executor.py:469-582` — `check_timeouts()` handles `best_effort` and `quorum` only; there is no `require_all` branch.
+- `src/elspeth/engine/coalesce_executor.py:584-719` — `require_all` failure handling exists only in `flush_pending()` (end-of-source).
+- `docs/reference/configuration.md:420` — `timeout_seconds` described as “Max wait time” without policy restriction.
+- `src/elspeth/core/config.py:375-400` — `timeout_seconds` is allowed for `require_all` (no validator rejecting it).
 
 ## Impact
 
@@ -85,6 +85,12 @@
 - A `require_all` coalesce with `timeout_seconds` reliably resolves to failure after timeout without waiting for end-of-source.
 - Audit trail shows failed node states and token outcomes for arrived branches.
 - No pending coalesce remains after timeout expiration.
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `check_timeouts()` still lacks `require_all` handling; only `flush_pending()` produces the `require_all` failure path. (`src/elspeth/engine/coalesce_executor.py:469-719`)
 
 ## Tests
 

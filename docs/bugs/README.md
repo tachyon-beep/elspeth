@@ -49,6 +49,8 @@ Bugs are organized into subsystem-specific directories under `open/`. This enabl
 
 ### Bug Counts by Subsystem
 
+**Triage note (2026-02-01):** Current open-bug counts are maintained in `docs/bugs/open/README.md`. The table below reflects the historical 2026-01-25 verification snapshot.
+
 | Subsystem | P1 | P2 | P3 | Total | Notes |
 |-----------|----|----|----|----|-------|
 | **llm-azure** | 3 | 8 | 1 | 12 | Azure integration, error handling ⚠️ |
@@ -115,6 +117,8 @@ closed/
    - Kept for historical reference
 
 ## Verification Status
+
+**Triage note (2026-02-01):** The verification stats below are historical. See `docs/bugs/open/README.md` for the latest open-bug totals after duplicate cleanup.
 
 All bugs have been systematically verified against the current codebase:
 

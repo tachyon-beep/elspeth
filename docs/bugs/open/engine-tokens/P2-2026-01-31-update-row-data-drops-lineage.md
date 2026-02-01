@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - `update_row_data()` preserves fork_group_id, join_group_id, expand_group_id
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `update_row_data()` still returns a new `TokenInfo` without preserving lineage fields. (`src/elspeth/engine/tokens.py:211-229`)

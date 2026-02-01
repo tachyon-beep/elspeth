@@ -17,8 +17,8 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/context.py:215-265` - `record_call()` uses its own `_call_index` counter (lines 252-254)
-- `src/elspeth/core/landscape/recorder.py:1784-1821` - `allocate_call_index()` documented as "the single source of truth for call numbering"
+- `src/elspeth/plugins/context.py:284-295` - `record_call()` uses a local `_call_index` counter when `state_id` is set, bypassing the recorder allocator.
+- `src/elspeth/core/landscape/recorder.py:1800-1821` - `allocate_call_index()` is documented as the single source of truth for `(state_id, call_index)` uniqueness.
 - Recorder docstring: "All AuditedClient instances MUST delegate to this method rather than maintaining their own counters"
 
 ## Impact
@@ -43,3 +43,9 @@
 
 - All call_index values come from centralized allocator
 - No duplicate `(state_id, call_index)` pairs possible
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `PluginContext.record_call()` still increments its own `_call_index` instead of calling `allocate_call_index()`. (`src/elspeth/plugins/context.py:284-295`, `src/elspeth/core/landscape/recorder.py:1800-1821`)

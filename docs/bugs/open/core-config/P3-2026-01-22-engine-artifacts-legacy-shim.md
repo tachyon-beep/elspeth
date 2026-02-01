@@ -97,6 +97,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `src/elspeth/engine/artifacts.py` still exists as a re-export shim with no engine-specific logic.
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

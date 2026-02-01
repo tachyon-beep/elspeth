@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/core/checkpoint/recovery.py:93-99` - call to `get_latest_checkpoint()` not wrapped
-- `get_latest_checkpoint()` can raise `IncompatibleCheckpointError`
+- `src/elspeth/core/checkpoint/recovery.py:93-99` - call to `get_latest_checkpoint()` not wrapped.
+- `src/elspeth/core/checkpoint/manager.py:122-160` - `get_latest_checkpoint()` can raise `IncompatibleCheckpointError`.
 - `can_resume()` contract is to return `ResumeCheck`, not raise
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Incompatible checkpoints result in ResumeCheck with explanation, not exception
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `can_resume()` still calls `get_latest_checkpoint()` without catching `IncompatibleCheckpointError`. (`src/elspeth/core/checkpoint/recovery.py:93-99`, `src/elspeth/core/checkpoint/manager.py:122-160`)

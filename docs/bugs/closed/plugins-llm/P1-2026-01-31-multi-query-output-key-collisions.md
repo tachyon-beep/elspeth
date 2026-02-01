@@ -17,10 +17,10 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/llm/multi_query.py:291-303` - `expand_queries()` builds `output_prefix = f"{case_study.name}_{criterion.name}"` without checking uniqueness
-- Line 225 - `output_mapping` validation only checks non-empty
-- Metadata suffixes (`_usage`, `_model`) could collide with user-defined suffixes
-- Output is built via `output.update()` which silently overwrites duplicate keys
+- `src/elspeth/plugins/llm/multi_query.py:284-303` - `expand_queries()` builds `output_prefix = f"{case_study.name}_{criterion.name}"` without any uniqueness validation.
+- `src/elspeth/plugins/llm/multi_query.py:234-242` - `output_mapping` validator only checks non-empty; no collision checks.
+- `src/elspeth/plugins/llm/azure_multi_query.py:624-631` and `src/elspeth/plugins/llm/openrouter_multi_query.py:812-819` - results are merged via `output.update()`, which silently overwrites duplicate keys.
+- Reserved suffixes exist for guaranteed/audit fields (`_usage`, `_model`, `_template_hash`, etc.) but are not protected from collision with user-defined suffixes. (`src/elspeth/plugins/llm/__init__.py:37-52`)
 
 ## Impact
 
@@ -47,3 +47,14 @@
 - Duplicate case_study/criterion name combinations are rejected at config time
 - Collisions with reserved suffixes are detected and rejected
 - No silent overwrites possible in output
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Added `@model_validator(mode="after")` to `MultiQueryConfig` that validates:
+  1. No duplicate case_study names
+  2. No duplicate criterion names
+  3. No output_mapping suffixes that collide with reserved LLM suffixes (_usage, _model, _template_hash, etc.)
+- Added 3 regression tests in `TestMultiQueryConfig`
+- All 36 multi_query tests pass, mypy clean

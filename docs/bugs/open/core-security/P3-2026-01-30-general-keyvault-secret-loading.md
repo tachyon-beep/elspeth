@@ -197,3 +197,9 @@ The fingerprint implementation was built for a specific use case and not general
   - `src/elspeth/plugins/llm/azure_multi_query.py` - LLM API key usage
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Key Vault integration remains limited to fingerprint key loading (`get_fingerprint_key`), with no general-purpose secret loader abstraction. (`src/elspeth/core/security/fingerprint.py:58-95`)

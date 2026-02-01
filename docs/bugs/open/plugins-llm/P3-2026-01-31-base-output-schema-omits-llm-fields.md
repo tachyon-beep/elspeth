@@ -27,3 +27,10 @@
 ## Acceptance Criteria
 
 - Output schema accurately reflects all emitted fields
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Base LLM transforms still set `output_schema = input_schema`. (`src/elspeth/plugins/llm/base.py:223-232`)
+- `process()` still adds LLM-specific fields (`_usage`, `_model`, `_template_hash`, etc.) beyond the declared schema. (`src/elspeth/plugins/llm/base.py:329-340`)

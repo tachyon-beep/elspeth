@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/landscape/schema.py:156-164` - partial unique index uses dialect-specific clauses
+- `src/elspeth/core/landscape/schema.py:157-165` - partial unique index uses dialect-specific clauses (`sqlite_where`, `postgresql_where`).
 - Only SQLite and PostgreSQL get the constraint
 - MySQL and other backends have no enforcement
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Terminal uniqueness enforced on all supported backends
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- The terminal-uniqueness constraint remains dialect-specific to SQLite/Postgres. (`src/elspeth/core/landscape/schema.py:157-165`)

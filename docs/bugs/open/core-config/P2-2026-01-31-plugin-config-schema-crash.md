@@ -16,9 +16,9 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/config_base.py:59-68` - calls `SchemaConfig.from_dict(schema_dict)` without type check
-- `SchemaConfig.from_dict()` at line 280 accesses `"fields" not in config` - TypeError if None
-- `except ValueError` at line 67-68 doesn't catch TypeError
+- `src/elspeth/plugins/config_base.py:59-64` - calls `SchemaConfig.from_dict(schema_dict)` without checking type.
+- `src/elspeth/contracts/schema.py:280-286` - `from_dict()` assumes `config` is a mapping; `None` triggers `TypeError` on `"fields" not in config`.
+- `src/elspeth/plugins/config_base.py:65-68` - only catches `ValidationError` / `ValueError`, not `TypeError`.
 
 ## Impact
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Clear error message for `schema: null` or non-dict schema values
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `PluginConfig.from_dict()` still passes `schema` directly to `SchemaConfig.from_dict()` without type checks; `TypeError` is not caught. (`src/elspeth/plugins/config_base.py:59-68`, `src/elspeth/contracts/schema.py:280-286`)

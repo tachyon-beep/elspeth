@@ -27,3 +27,9 @@
 ## Acceptance Criteria
 
 - Documentation matches actual plugin names
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Updated `src/elspeth/plugins/azure/__init__.py` docstring to use `azure_blob` for both source and sink

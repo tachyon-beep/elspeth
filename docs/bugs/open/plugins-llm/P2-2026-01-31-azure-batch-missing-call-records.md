@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/llm/azure_batch.py:795-806` - when `custom_id not in results_by_id`, row gets error but no call
-- Line 866 - call recording only iterates `results_by_id.items()`
+- `src/elspeth/plugins/llm/azure_batch.py:811-821` - when `custom_id not in results_by_id`, row gets error but no call
+- Line 880 - call recording only iterates `results_by_id.items()`
 - Violates "External calls - Full request AND response recorded"
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - All rows have Call records, even those missing from batch output
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Missing-result rows still get error output but no `Call` record because recording only iterates `results_by_id`. (`src/elspeth/plugins/llm/azure_batch.py:811-821`, `src/elspeth/plugins/llm/azure_batch.py:880-907`)

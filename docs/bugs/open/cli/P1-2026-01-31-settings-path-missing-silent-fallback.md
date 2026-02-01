@@ -17,7 +17,9 @@
 
 ## Evidence
 
-- `src/elspeth/cli_helpers.py:108-126` - function only loads user-provided path if it exists; otherwise skips to default settings with no error
+- `src/elspeth/cli_helpers.py:108-114` - explicit `settings_path` is only used when `settings_path.exists()` is true.
+- `src/elspeth/cli_helpers.py:116-124` - when the explicit path is missing, the function falls through and loads `settings.yaml` if it exists, with no error mentioning the missing explicit path.
+- There is no branch that raises for a missing *explicit* `settings_path`, so a typo silently changes configuration precedence.
 
 ## Impact
 
@@ -40,3 +42,9 @@
 
 - Providing `--settings` with a non-existent file results in a clear `ValueError` and no fallback to default settings
 - Existing behavior when `--settings` is valid or omitted remains unchanged
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Verified `resolve_database_url()` still ignores a missing explicit `settings_path` and falls back to `settings.yaml` if present. (`src/elspeth/cli_helpers.py:108-124`)

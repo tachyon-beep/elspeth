@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/core/rate_limit/registry.py:22` - `NoOpLimiter.acquire(self, weight: int = 1)` lacks timeout
-- `src/elspeth/core/rate_limit/limiter.py:192` - `RateLimiter.acquire(self, weight: int = 1, timeout: float | None = None)`
+- `src/elspeth/core/rate_limit/registry.py:22-27` - `NoOpLimiter.acquire(self, weight: int = 1)` lacks timeout.
+- `src/elspeth/core/rate_limit/limiter.py:170-193` - `RateLimiter.acquire(self, weight: int = 1, timeout: float | None = None)` accepts timeout.
 
 ## Impact
 
@@ -31,3 +31,9 @@
 ## Acceptance Criteria
 
 - NoOpLimiter and RateLimiter have matching signatures
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `NoOpLimiter.acquire()` still omits `timeout`, while `RateLimiter.acquire()` accepts it. (`src/elspeth/core/rate_limit/registry.py:22-27`, `src/elspeth/core/rate_limit/limiter.py:170-193`)

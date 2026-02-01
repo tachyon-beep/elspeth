@@ -26,3 +26,10 @@
 ## Acceptance Criteria
 
 - Example code matches current protocol
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Example `emit()` still omits `state_id`. (`src/elspeth/plugins/batching/examples.py:41-46`)
+- OutputPort protocol still requires `state_id` in `emit()`. (`src/elspeth/plugins/batching/ports.py:40-49`)

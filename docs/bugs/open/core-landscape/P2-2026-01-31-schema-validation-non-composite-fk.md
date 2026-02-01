@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/landscape/database.py:39-43` - `_REQUIRED_FOREIGN_KEYS` only checks single-column FKs
+- `src/elspeth/core/landscape/database.py:43-50` - `_REQUIRED_FOREIGN_KEYS` only lists single-column FKs.
 - Nodes table has composite PK `(node_id, run_id)` per CLAUDE.md
 - Validation doesn't enforce composite FK requirement
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Schema validation detects missing composite FK to nodes table
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Schema validation still checks only single-column FKs and does not enforce composite `(node_id, run_id)` references. (`src/elspeth/core/landscape/database.py:43-50`)

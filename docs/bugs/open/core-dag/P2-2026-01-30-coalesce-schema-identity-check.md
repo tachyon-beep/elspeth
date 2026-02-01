@@ -47,9 +47,9 @@
 
 ## Evidence
 
-- `src/elspeth/core/dag.py:1039-1049` compares `first_schema != other_schema` inside `_get_effective_producer_schema` for multi-input pass-through nodes (coalesce), raising on class-identity mismatch.
-- `src/elspeth/core/dag.py:1071-1083` repeats the same identity comparison in `_validate_coalesce_compatibility`.
-- `src/elspeth/plugins/schema_factory.py:41-91` shows `create_schema_from_config()` creates a new Pydantic model class via `create_model()` per call, so identical configs yield distinct class objects.
+- `src/elspeth/core/dag.py:1039-1049` compares `first_schema != other_schema` inside `_get_effective_producer_schema` for multi-input pass-through nodes.
+- `src/elspeth/core/dag.py:1071-1083` repeats the identity comparison in `_validate_coalesce_compatibility`.
+- `src/elspeth/plugins/schema_factory.py:41-91` shows `create_schema_from_config()` uses `create_model()` per call, producing distinct class objects even for identical configs.
 
 ## Impact
 
@@ -84,6 +84,12 @@
 - Coalesce validation accepts structurally compatible schemas even when classes differ.
 - Coalesce validation continues to reject genuinely incompatible schemas.
 - Existing edge compatibility behavior is unchanged outside coalesce.
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Coalesce compatibility still uses class identity comparisons, and schema factory still generates per-call Pydantic classes. (`src/elspeth/core/dag.py:1039-1083`, `src/elspeth/plugins/schema_factory.py:41-91`)
 
 ## Tests
 

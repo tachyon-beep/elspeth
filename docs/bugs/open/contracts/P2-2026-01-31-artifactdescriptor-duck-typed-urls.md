@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/contracts/results.py:269-272` and `300-303` - uses `hasattr(url, "sanitized_url")`
+- `src/elspeth/contracts/results.py:331-332` and `362-363` - uses `hasattr(url, "sanitized_url")` / `hasattr(url, "fingerprint")` for duck-typed acceptance.
 - CLAUDE.md prohibits defensive patterns like `hasattr` for system-owned code
 - Creates security risk: unsanitized URLs could reach audit trail
 
@@ -33,3 +33,9 @@
 
 - Only verified Sanitized* types accepted
 - TypeError raised for duck-typed objects
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `ArtifactDescriptor.for_database()` and `.for_webhook()` still rely on `hasattr` checks instead of strict type enforcement. (`src/elspeth/contracts/results.py:331-333`, `src/elspeth/contracts/results.py:362-365`)

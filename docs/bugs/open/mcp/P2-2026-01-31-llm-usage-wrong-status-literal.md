@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/mcp/server.py:812` - `if row.status == "completed":`
+- `src/elspeth/mcp/server.py:987` - `if row.status == "completed":`
 - `src/elspeth/contracts/enums.py:203-204` - `CallStatus.SUCCESS = "success"`
 - 100% of successful calls misclassified
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Successful calls correctly counted as successful
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- LLM usage still compares `row.status` to `"completed"` while `CallStatus.SUCCESS` is `"success"`. (`src/elspeth/mcp/server.py:987`, `src/elspeth/contracts/enums.py:203-204`)

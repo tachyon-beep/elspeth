@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/landscape/formatters.py:215-217` - `json.dumps(value)` without `allow_nan=False`
+- `src/elspeth/core/landscape/formatters.py:215-217` - `json.dumps(value)` without `allow_nan=False`.
 
 ## Impact
 
@@ -30,3 +30,9 @@
 ## Acceptance Criteria
 
 - List values with NaN/Infinity are rejected or handled consistently
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `CSVFormatter` still serializes list values via `json.dumps()` without NaN/Infinity rejection. (`src/elspeth/core/landscape/formatters.py:215-217`)

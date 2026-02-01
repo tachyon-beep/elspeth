@@ -35,3 +35,17 @@
 ## Acceptance Criteria
 
 - Invalid enum values in Call/RoutingEvent/Batch/TokenOutcome raise immediately
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- `Call`, `RoutingEvent`, `Batch`, and `TokenOutcome` now implement `__post_init__` validation for enum fields. (`src/elspeth/contracts/audit.py:285-288`, `src/elspeth/contracts/audit.py:324-327`, `src/elspeth/contracts/audit.py:347-349`, `src/elspeth/contracts/audit.py:593-597`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Enum validation is now enforced at construction time for all referenced audit contracts.

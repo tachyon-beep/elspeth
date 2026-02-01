@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/config.py:1279-1308` - `_lowercase_schema_keys()` preserves `options` contents but lowercases outer dict keys
+- `src/elspeth/core/config.py:1311-1336` - `_lowercase_schema_keys()` lowercases all schema-level dict keys (including sink names) except inside `options`.
 - Sink names like `MySink` become `mysink`
 - `default_sink: MySink` would then fail validation
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Sink names preserve original casing, or validation fails early with clear message
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `_lowercase_schema_keys()` still lowercases sink names at the top level. (`src/elspeth/core/config.py:1311-1336`)

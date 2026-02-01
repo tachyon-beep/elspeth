@@ -25,3 +25,9 @@
 ## Acceptance Criteria
 
 - RateLimitRegistry.close() called on both success and failure
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `_execute_resume_with_instances()` still calls `rate_limit_registry.close()` only after `orchestrator.resume()` returns (no try/finally). (`src/elspeth/cli.py:1521-1534`)

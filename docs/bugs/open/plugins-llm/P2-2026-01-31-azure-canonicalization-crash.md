@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Rows with NaN/Infinity are routed to error, not crash the run
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Azure LLM `_process_row` still only catches `TemplateError` around `render_with_metadata()`, so `ValueError` from canonicalization will crash. (`src/elspeth/plugins/llm/azure.py:287-299`, `src/elspeth/plugins/llm/templates.py:173-176`, `src/elspeth/core/canonical.py:60-61`)

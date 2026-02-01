@@ -26,3 +26,9 @@
 ## Acceptance Criteria
 
 - No compatibility re-exports remain
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `payload_store.py` still exposes a backwards-compatibility re-export via `__all__`. (`src/elspeth/core/payload_store.py:15-18`)

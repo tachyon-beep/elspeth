@@ -39,9 +39,8 @@
 
 ## Evidence
 
-- `payload_store` is optional in `run()` and not validated: `src/elspeth/engine/orchestrator.py:518` (`payload_store: Any = None`).
-- Docstring at line 530-532 says "Required for audit compliance" but code doesn't enforce it.
-- Payload storage only occurs when `self._payload_store` is set: `src/elspeth/core/landscape/recorder.py:658-663`.
+- **Original issue (now fixed):** `payload_store` was optional and not validated in `run()`.
+- **Current code (fix in place):** `run()` requires `payload_store` and raises if missing. (`src/elspeth/engine/orchestrator.py:524-553`)
 
 ## Impact
 
@@ -69,6 +68,20 @@
 
 - `run()` raises a clear error if `payload_store` is not provided (unless explicitly disabled for testing).
 - Runs with a payload store always populate `source_data_ref` for source rows.
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- `Orchestrator.run()` now requires `payload_store` and raises `ValueError` when missing. (`src/elspeth/engine/orchestrator.py:524-553`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Payload store requirement is enforced in `Orchestrator.run()`, aligning with auditability requirements.
 
 ## Tests
 

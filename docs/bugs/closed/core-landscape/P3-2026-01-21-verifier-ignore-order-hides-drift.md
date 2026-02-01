@@ -196,3 +196,13 @@ Phase 1 adds the `ignore_order` parameter to `CallVerifier` with default `True` 
 ### Next Steps
 
 Phase 2 (P3-2026-01-29-verifier-field-level-order-config.md) will add field-level configuration to allow mixed semantics within a single verification session.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Closure Notes
+
+- Moved from `docs/bugs/open/` to `docs/bugs/closed/` because Phase 1 is implemented and test coverage is in place (see "Phase 1 Implementation" above).
+- **Priority validation:** P3 is appropriate. The fix improves verification fidelity for order-sensitive data but does not block core auditability when defaults remain unchanged.
+- Follow-up remains tracked in `docs/bugs/open/core-landscape/P3-2026-01-29-verifier-field-level-order-config.md`.

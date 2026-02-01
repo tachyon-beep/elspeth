@@ -198,6 +198,22 @@ Verified on commit `0e2f6da` (fix/rc1-bug-burndown-session-4):
 **Git History:**
 
 - Commit `26f8eb1` (2026-01-18): "feat(coalesce): record audit metadata for coalesce events"
+
+---
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Coalesce metadata is now recorded via `context_after` on the pending node state completion. (`src/elspeth/engine/coalesce_executor.py:374-405`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Coalesce metadata is persisted in node state `context_after`, satisfying the audit trail requirement for merge context.
   - This commit CREATED the metadata computation but did NOT persist it
   - Added `coalesce_metadata` dict to `CoalesceOutcome` object
   - Metadata is built and returned but never written to database

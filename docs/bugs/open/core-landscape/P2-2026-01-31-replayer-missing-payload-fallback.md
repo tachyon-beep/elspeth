@@ -16,9 +16,9 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/clients/replayer.py:200-220`:
-  - Lines 209-216: Missing payload check only fails if `not was_error`
-  - Lines 219-220: For error calls, `response_data = {}` used as fallback
+- `src/elspeth/plugins/clients/replayer.py:201-220`:
+  - Lines 212-216: Missing payload check only fails if `not was_error`.
+  - Lines 218-220: For error calls, `response_data = {}` used as fallback.
 - Silent data loss violates audit principles
 
 ## Impact
@@ -33,3 +33,9 @@
 ## Acceptance Criteria
 
 - Missing payloads always cause replay failure, not silent substitution
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Replayer still substitutes `{}` for missing error responses instead of failing. (`src/elspeth/plugins/clients/replayer.py:212-220`)

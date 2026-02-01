@@ -17,10 +17,8 @@
 
 ## Evidence
 
-- `src/elspeth/engine/executors.py:1703-1705` - `sink.flush()` is called with no exception handling
-- Lines 1684-1701 handle `sink.write()` exceptions and complete node_states with FAILED
-- If `sink.flush()` fails, exception bubbles up without completing node_states
-- Violates CLAUDE.md:637-647 "every row reaches exactly one terminal state"
+- **Original issue (now fixed):** `sink.flush()` previously had no exception handling, so failures left OPEN node_states.
+- **Current code (fix in place):** `sink.flush()` is wrapped and completes all node_states as FAILED before re-raising. (`src/elspeth/engine/executors.py:1720-1741`)
 
 ## Impact
 
@@ -44,3 +42,18 @@
 
 - Sink flush failures result in FAILED node_states, not OPEN
 - No dangling OPEN states after sink exceptions
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- `sink.flush()` exceptions are now handled and all open node_states are completed as FAILED before raising. (`src/elspeth/engine/executors.py:1720-1741`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- The fix is present in `SinkExecutor.write()` and preserves audit invariants on flush failure.
+- No additional remediation required beyond regression coverage.

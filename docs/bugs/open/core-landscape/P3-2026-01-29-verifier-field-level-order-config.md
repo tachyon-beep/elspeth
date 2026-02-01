@@ -137,3 +137,9 @@ This should be implemented BEFORE changing the default to `ignore_order=False`. 
 1. Phase 1: Add configurable `ignore_order` (keep default `True`)
 2. Phase 2: Add field-level config (this ticket)
 3. Phase 3: Change default to `False` with migration tooling
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `CallVerifier` still accepts only global `ignore_order` with no per-field configuration. (`src/elspeth/plugins/clients/verifier.py:120-142`)

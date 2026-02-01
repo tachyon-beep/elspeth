@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/mcp/server.py:931-946` - fork_count query has no run_id filter
+- `src/elspeth/mcp/server.py:1106-1121` - fork_count/join_count queries have no run_id filter
 - `tokens_table` lacks `run_id` column, would need join through `rows_table`
 
 ## Impact
@@ -31,3 +31,9 @@
 ## Acceptance Criteria
 
 - Fork/join counts scoped to requested run_id
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `fork_count`/`join_count` still query `tokens_table` without scoping to `run_id`. (`src/elspeth/mcp/server.py:1106-1121`)

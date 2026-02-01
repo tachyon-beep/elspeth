@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/llm/azure_batch.py:730-758` - validates JSON but not membership in row_mapping
-- Line 867 `original_request = requests_data[custom_id]` - KeyError if unknown
+- `src/elspeth/plugins/llm/azure_batch.py:732-772` - validates JSON but not membership in row_mapping/requests
+- Line 881 `original_request = requests_data[custom_id]` - KeyError if unknown
 - Requires corrupted/unexpected Azure response (rare)
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Unknown custom_ids handled gracefully with clear error
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Batch output parsing still accepts any `custom_id` and later indexes `requests_data[custom_id]` without membership check. (`src/elspeth/plugins/llm/azure_batch.py:732-772`, `src/elspeth/plugins/llm/azure_batch.py:881-883`)

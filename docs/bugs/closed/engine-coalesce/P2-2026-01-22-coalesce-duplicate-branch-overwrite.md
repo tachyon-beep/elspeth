@@ -151,3 +151,19 @@ This bug is architecturally related to P1-2026-01-22-coalesce-late-arrivals-dupl
 3. Document whether duplicates are considered an engine bug (crash) or an expected failure mode (quarantine)
 
 Per CLAUDE.md "Plugin Ownership" section, this should crash immediately since duplicates indicate a bug in the engine's token routing logic, not a problem with user data.
+
+---
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Duplicate arrivals are now detected and raise immediately before overwriting. (`src/elspeth/engine/coalesce_executor.py:241-249`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Duplicate branch arrivals now raise a hard error, preventing silent overwrite.

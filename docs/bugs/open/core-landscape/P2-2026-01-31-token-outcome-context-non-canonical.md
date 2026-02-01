@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/landscape/recorder.py:2136` - `context_json = json.dumps(context)`
+- `src/elspeth/core/landscape/recorder.py:2433` - `context_json = json.dumps(context)`
 - Uses `json.dumps` instead of `canonical_json`, allowing NaN/Infinity
 - Violates CLAUDE.md canonical JSON policy
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - `record_token_outcome` uses canonical JSON and rejects NaN/Infinity
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `record_token_outcome()` still serializes `context` via plain `json.dumps()`. (`src/elspeth/core/landscape/recorder.py:2433`)

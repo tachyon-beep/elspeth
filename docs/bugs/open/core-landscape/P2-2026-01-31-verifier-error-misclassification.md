@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/plugins/clients/verifier.py:208-222` - treats `recorded_response is None` as missing
+- `src/elspeth/plugins/clients/verifier.py:208-222` - treats `recorded_response is None` as missing without checking call status.
 - Never checks `call.status` or `call.error_json`
 - ERROR calls with no response_ref are legitimate
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - ERROR calls with no response_ref not counted as missing payloads
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `CallVerifier` still marks `payload_missing` when `recorded_response` is `None` without checking `call.status`. (`src/elspeth/plugins/clients/verifier.py:208-222`)

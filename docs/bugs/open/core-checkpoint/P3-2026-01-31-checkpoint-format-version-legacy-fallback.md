@@ -27,3 +27,9 @@
 ## Acceptance Criteria
 
 - Checkpoints without format_version are rejected, not date-checked
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Compatibility check still falls back to a date-based path when `format_version` is None. (`src/elspeth/core/checkpoint/manager.py:234-249`)

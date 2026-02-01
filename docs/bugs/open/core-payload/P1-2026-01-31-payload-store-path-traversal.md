@@ -17,9 +17,9 @@
 
 ## Evidence
 
-- Path construction uses raw `content_hash` without validation: `src/elspeth/core/payload_store.py:39-42`
-- `exists()` and `delete()` call `_path_for_hash()` directly with no validation: `src/elspeth/core/payload_store.py:77-90`
-- Contract requires `content_hash` to be a SHA-256 hex digest: `src/elspeth/contracts/payload_store.py:44-75`
+- Path construction uses raw `content_hash` without validation: `src/elspeth/core/payload_store.py:39-42`.
+- `retrieve()`, `exists()`, and `delete()` call `_path_for_hash()` directly with no validation: `src/elspeth/core/payload_store.py:56-90`.
+- Contract explicitly states `content_hash` is a SHA-256 hex digest: `src/elspeth/contracts/payload_store.py:29-75`.
 - Audit tier rules require crashing on invalid audit data: `CLAUDE.md:34-41`
 
 ## Impact
@@ -45,3 +45,9 @@
 - Invalid `content_hash` values raise immediately without touching the filesystem
 - Path traversal attempts cannot access or delete files outside `base_path`
 - Tests for invalid hashes/path traversal pass
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `FilesystemPayloadStore` still accepts arbitrary `content_hash` strings and uses them in filesystem paths without validation or containment checks. (`src/elspeth/core/payload_store.py:39-90`)

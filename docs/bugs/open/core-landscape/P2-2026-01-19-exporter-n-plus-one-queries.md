@@ -106,6 +106,12 @@
 
 The N+1 query pattern remains present in the current codebase. No fixes have been applied since this bug was filed.
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `_iter_records()` still performs nested per-row/per-token/per-state queries. (`src/elspeth/core/landscape/exporter.py:231-320`)
+
 ### Current State Analysis
 
 **Code examination confirms the nested query structure:**

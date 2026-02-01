@@ -25,3 +25,9 @@
 ## Acceptance Criteria
 
 - Missing latency shows as "N/A", not "0.0ms"
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Formatter still substitutes `0.0` when `latency_ms` is missing. (`src/elspeth/core/landscape/formatters.py:173-174`)

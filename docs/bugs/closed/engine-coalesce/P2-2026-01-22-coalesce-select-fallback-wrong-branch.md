@@ -153,3 +153,19 @@ Yes, the root cause is exactly as described:
    - `first`: Contradictory semantics - "first" suggests any branch, "select" suggests specific branch
 3. **Test updates:** The test at line 273 needs to be updated or removed - it validates broken behavior
 4. **Audit trail:** When merge fails due to missing select branch, record appropriate failure reason in coalesce metadata
+
+---
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- `_merge_data()` now raises if `select_branch` is missing; no fallback exists. (`src/elspeth/engine/coalesce_executor.py:452-467`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Select-merge no longer falls back to an arbitrary branch; missing selected branch now raises.

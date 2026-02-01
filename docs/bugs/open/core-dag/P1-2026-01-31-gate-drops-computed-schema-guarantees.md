@@ -17,10 +17,10 @@
 
 ## Evidence
 
-- `src/elspeth/core/dag.py:449-455` - gate copies raw `config["schema"]`
-- Line 557-562 - config gate also copies raw schema
-- `_get_effective_guaranteed_fields()` at lines 1217-1241 checks upstream for gates with no own guarantees
-- But gates DO get their own guarantees from the raw schema copy, which may not include computed fields from LLM transforms
+- `src/elspeth/core/dag.py:446-456` - gate nodes overwrite `node_config["schema"]` with the **raw** upstream schema config (`config["schema"]`).
+- `src/elspeth/core/dag.py:460-472` - `output_schema_config` is only taken from the gate instance itself (typically `None`), so computed upstream schema config is not propagated.
+- `src/elspeth/core/dag.py:1088-1122` - `_get_schema_config_from_node()` prefers `output_schema_config` when present, otherwise parses the raw `config["schema"]`.
+- Because gate nodes lack `output_schema_config`, they fall back to raw schema and lose upstream computed guarantees (LLM `_output_schema_config`).
 
 ## Impact
 
@@ -44,3 +44,9 @@
 
 - Gates correctly pass through upstream's computed guaranteed fields
 - DAG validation passes for valid transform->gate->transform chains
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Gate nodes still copy raw schema config and do not inherit upstream `output_schema_config`, so computed guarantees are dropped in contract validation. (`src/elspeth/core/dag.py:446-472`, `src/elspeth/core/dag.py:1088-1122`)

@@ -17,10 +17,9 @@
 
 ## Evidence
 
-- `src/elspeth/engine/expression_parser.py:305-358`:
-  - `visit_Subscript()` line 309: `return value[key]` can raise `KeyError`
-  - `visit_BinOp()` line 358: `return op_func(left, right)` can raise `ZeroDivisionError`
-- `evaluate()` at lines 503-513 does not wrap these in a dedicated exception type
+- `src/elspeth/engine/expression_parser.py:305-309` - `visit_Subscript()` returns `value[key]` directly and can raise `KeyError`.
+- `src/elspeth/engine/expression_parser.py:353-358` - `visit_BinOp()` returns `op_func(left, right)` directly and can raise `ZeroDivisionError` / `TypeError`.
+- `src/elspeth/engine/expression_parser.py:503-513` - `evaluate()` calls `evaluator.visit()` without wrapping or re-raising as a dedicated evaluation error.
 - Design doc `docs/plans/completed/plugin-refactor/2026-01-18-wp09-engine-level-gates.md` specifies `ExpressionEvaluationError` which does not exist
 
 ## Impact
@@ -46,3 +45,9 @@
 
 - Expression evaluation errors raise `ExpressionEvaluationError` with expression text and original error
 - Error messages are actionable (include field name, expression, row context)
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `evaluate()` still propagates raw exceptions from evaluator methods; no `ExpressionEvaluationError` wrapper exists. (`src/elspeth/engine/expression_parser.py:305-358`, `src/elspeth/engine/expression_parser.py:503-513`)

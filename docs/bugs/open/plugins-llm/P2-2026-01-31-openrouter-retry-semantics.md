@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Transient HTTP errors trigger RetryManager retries
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- OpenRouter still converts HTTP/transient errors into `TransformResult.error()` instead of raising, so retry manager never sees exceptions. (`src/elspeth/plugins/llm/openrouter.py:306-315`, `src/elspeth/engine/processor.py:1061-1063`)

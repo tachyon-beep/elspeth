@@ -89,6 +89,13 @@
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md`
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `PooledExecutor` still appends only `entry.result`, dropping ordering metadata. (`src/elspeth/plugins/pooling/executor.py:232-244`)
+- `BufferEntry` still defines submit/complete timing metadata that never reaches the audit trail. (`src/elspeth/plugins/pooling/reorder_buffer.py:16-34`)
+
 ## Verification (2026-01-25)
 
 **Status: STILL VALID**

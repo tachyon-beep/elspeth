@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Guaranteed fields match actually emitted fields
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `get_llm_guaranteed_fields()` still includes the base field (empty suffix) while Azure multi-query only emits suffixed fields. (`src/elspeth/plugins/llm/__init__.py:37-73`, `src/elspeth/plugins/llm/azure_multi_query.py:456-505`)

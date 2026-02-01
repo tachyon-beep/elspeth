@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/retention/purge.py:93` and lines 137-141 - uses `status == "completed"`
+- `src/elspeth/core/retention/purge.py:94-96` and `137-141` - uses `status == "completed"` to define expired runs.
 - Failed runs older than retention cutoff are excluded from purge
 
 ## Impact
@@ -31,3 +31,9 @@
 ## Acceptance Criteria
 
 - Failed runs older than retention period are eligible for payload purge
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Expired-run checks still require `status == "completed"`, and `status != "completed"` is treated as active. (`src/elspeth/core/retention/purge.py:94-96`, `src/elspeth/core/retention/purge.py:137-152`)

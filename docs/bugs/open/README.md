@@ -9,123 +9,129 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── cli/                  # Command-line interface (1 P1, 1 P3)
-├── core-config/          # Configuration system (4 P2, 5 P3)
-├── core-dag/             # DAG validation, graph construction (1 P1)
-├── core-landscape/       # Audit trail, recovery, run repository (4 P1, 5 P2, 3 P3)
-├── cross-cutting/        # Schema validation, multi-subsystem (1 P1, 3 P2, 1 P3)
-├── engine-coalesce/      # Fork/join/merge logic (3 P1, 4 P2)
-├── engine-orchestrator/  # Pipeline execution, routing (6 P1, 8 P2, 4 P3)
-├── engine-pooling/       # Pooling infrastructure (2 P2, 3 P3)
-├── engine-processor/     # Token management, outcomes (2 P1, 3 P2)
-├── engine-retry/         # Retry logic (3 P2, 2 P3)
-├── engine-spans/         # Observability, tracing (2 P2, 1 P3)
-├── llm-azure/            # Azure LLM integration (1 P1, 8 P2, 1 P3)
-├── plugins-llm/          # Base LLM transforms (4 P1, 1 P2, 2 P3)
-├── plugins-sinks/        # Sink implementations (3 P1, 2 P2, 1 P3)
-├── plugins-sources/      # Source implementations (2 P2, 1 P3)
-└── plugins-transforms/   # Transform implementations (2 P1, 2 P2)
+├── cli/                      # Command-line interface (1 P1, 1 P2, 1 P3)
+├── contracts/                # Contract validation (3 P2, 3 P3)
+├── core-canonical/           # Canonicalization (1 P2)
+├── core-checkpoint/          # Checkpointing/recovery (2 P2, 2 P3)
+├── core-config/              # Configuration system (2 P2, 2 P3)
+├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
+├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 2 P3)
+├── core-logging/             # Logging/telemetry output (1 P2)
+├── core-payload/             # Payload storage (1 P1, 1 P3)
+├── core-rate-limit/          # Rate limiters (1 P2)
+├── core-retention/           # Retention/purge (2 P2)
+├── core-security/            # Secret handling (1 P2, 1 P3)
+├── engine-coalesce/          # Fork/join/merge logic (1 P1)
+├── engine-executors/         # Executor flow (1 P2)
+├── engine-expression-parser/ # Expression parsing (1 P1)
+├── engine-orchestrator/      # Pipeline execution, routing (1 P1, 3 P2, 2 P3)
+├── engine-pooling/           # Pooling infrastructure (1 P2, 2 P3)
+├── engine-processor/         # Token management, outcomes (1 P2, 2 P3)
+├── engine-retry/             # Retry logic (1 P2, 2 P3)
+├── engine-spans/             # Observability, tracing (2 P2, 1 P3)
+├── engine-tokens/            # Token lineage (1 P2)
+├── engine-triggers/          # Trigger evaluation (1 P2)
+├── mcp/                      # MCP tooling (2 P2)
+├── plugins-azure/            # Azure plugin pack (1 P2, 1 P3)
+├── plugins-llm/              # Base LLM transforms (1 P1, 5 P2, 1 P3)
+├── plugins-sinks/            # Sink implementations (2 P2, 1 P3)
+├── plugins-sources/          # Source implementations (1 P3)
+└── plugins-transforms/       # Transform implementations (1 P1)
 ```
 
 ## Bug Counts by Subsystem
 
-| Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Focus Area |
-|-----------|---------|---------|---------|-------|------------|
-| **engine-orchestrator** | 6 | 8 | 4 | 18 | Aggregations, routing, quarantine ⚠️ LARGEST HOTSPOT |
-| **llm-azure** | 1 | 8 | 1 | 10 | Azure integration, error handling ⚠️ HOTSPOT |
-| **core-landscape** | 4 | 5 | 3 | 12 | Audit trail, recovery, verifier ⚠️ HOTSPOT |
-| **core-config** | 0 | 4 | 5 | 9 | Expression validation, config contracts |
-| **engine-coalesce** | 3 | 4 | 0 | 7 | Fork/join semantics, timeouts |
-| **plugins-llm** | 4 | 1 | 2 | 7 | Client infrastructure, audit recording |
-| **plugins-sinks** | 3 | 2 | 1 | 6 | Schema validation, mode handling |
-| **engine-pooling** | 0 | 2 | 3 | 5 | Pooling infrastructure (NEW) |
-| **engine-processor** | 2 | 3 | 0 | 5 | Token management, outcomes |
-| **engine-retry** | 0 | 3 | 2 | 5 | Retry logic, backoff, audit |
-| **cross-cutting** | 1 | 3 | 1 | 5 | Schema architecture, code quality |
-| **plugins-transforms** | 2 | 2 | 0 | 4 | Type coercion, batch operations |
-| **cli** | 1 | 0 | 1 | 2 | Command-line UX, explain command |
-| **engine-spans** | 0 | 2 | 1 | 3 | Observability, tracing |
-| **plugins-sources** | 0 | 2 | 1 | 3 | JSON parsing, validation |
-| **core-dag** | 1 | 0 | 0 | 1 | Branch name validation |
-| **TOTAL** | **28** | **49** | **25** | **102** | All bugs organized |
-
-**Note:** Total includes bugs from both original triage (73) and pending verification (33 STILL VALID).
+| Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Notes |
+|-----------|---------|---------|---------|-------|-------|
+| **core-landscape** | 0 | 8 | 2 | 10 | Export + verifier gaps |
+| **engine-orchestrator** | 1 | 3 | 2 | 6 | Run lifecycle + cleanup |
+| **contracts** | 0 | 3 | 3 | 6 | Schema/contract validation |
+| **plugins-llm** | 1 | 5 | 1 | 7 | LLM audit + semantics |
+| **engine-coalesce** | 1 | 0 | 0 | 1 | Fork/join timeouts |
+| **core-checkpoint** | 0 | 2 | 2 | 4 | Resume + checkpoint format |
+| **core-config** | 0 | 2 | 2 | 4 | Plugin config validation |
+| **engine-pooling** | 0 | 1 | 2 | 3 | Pooling/batching |
+| **engine-processor** | 0 | 1 | 2 | 3 | Token handling |
+| **engine-retry** | 0 | 1 | 2 | 3 | Retry semantics |
+| **engine-spans** | 0 | 2 | 1 | 3 | Tracing |
+| **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiter correctness |
+| **plugins-sinks** | 0 | 2 | 1 | 3 | Sink validation |
+| **cli** | 1 | 1 | 1 | 3 | CLI behavior |
+| **core-dag** | 1 | 1 | 0 | 2 | DAG validation |
+| **core-payload** | 1 | 0 | 1 | 2 | Payload storage |
+| **core-retention** | 0 | 2 | 0 | 2 | Retention |
+| **core-security** | 0 | 1 | 1 | 2 | Secret handling |
+| **engine-executors** | 0 | 1 | 0 | 1 | Executor failures |
+| **mcp** | 0 | 2 | 0 | 2 | MCP tooling |
+| **plugins-azure** | 0 | 1 | 1 | 2 | Azure plugin pack |
+| **core-canonical** | 0 | 1 | 0 | 1 | Canonicalization |
+| **core-logging** | 0 | 1 | 0 | 1 | Logging output |
+| **engine-expression-parser** | 1 | 0 | 0 | 1 | Expression errors |
+| **engine-tokens** | 0 | 1 | 0 | 1 | Token lineage |
+| **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
+| **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
+| **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
+| **TOTAL** | **8** | **44** | **25** | **77** | All bugs organized |
 
 ## Recommended Fix Order
 
-### Phase 1: Critical Data Integrity (P0 Severity - Fix This Week)
-1. **plugins-sinks/P1-databasesink-noncanonical-hash** - Audit integrity violation
-2. **engine-coalesce/P1-coalesce-timeouts-never-fired** - Feature completely broken
-3. **engine-coalesce/P1-coalesce-late-arrivals-duplicate-merge** - Data corruption
-4. ~~**llm-azure/P1-azure-batch-missing-audit-payloads** - Auditability violation~~ ✅ FIXED (2026-01-29)
-5. **core-dag/P1-duplicate-branch-names-break-coalesce** - Silent data loss
-6. **engine-orchestrator/P1-orchestrator-aggregation-flush-output-mode-ignored** - Token identity broken
-7. **core-landscape/P1-recovery-skips-rows-multi-sink** - Recovery broken
+### Phase 1: Critical Data Integrity (P1 - Fix This Sprint)
+1. **core-payload/P1-2026-01-31-payload-store-path-traversal** - Security + data integrity breach
+2. **engine-coalesce/P1-2026-01-30-require-all-timeout-ignored** - Non-terminal rows in streaming
+3. **engine-orchestrator/P1-2026-01-31-quarantine-outcome-before-durability** - Audit ordering violation
+4. **engine-expression-parser/P1-2026-01-31-expression-errors-bubble-raw** - Hard crash + opaque errors
+5. **core-dag/P1-2026-01-31-gate-drops-computed-schema-guarantees** - Schema contract break
+6. **plugins-transforms/P1-2026-01-31-context-record-call-bypasses-allocator** - call_index collisions
+7. **plugins-llm/P1-2026-01-31-multi-query-output-key-collisions** - Silent data loss
+8. **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Hidden config drift
 
-### Phase 2: Audit Trail Completeness (Fix This Sprint)
-- **engine-coalesce/** - Fix all 4 coalesce bugs together
-- **llm-azure/** - Fix all 3 Azure audit tracking bugs
-- **engine-orchestrator/** - Fix quarantine outcomes
-- **engine-processor/** - Fix group ID propagation
+### Phase 2: Audit Trail Completeness (Fix This Sprint/Next)
+- **core-landscape/** - Exporter completeness, verifier correctness
+- **contracts/** - Schema compatibility and enum validation
+- **engine-orchestrator/** - Cleanup error surfacing + output canonical validation
+- **plugins-llm/** - Azure/OpenRouter call recording and retry semantics
 
-### Phase 3: Type Safety & Validation (Next Sprint)
-- **plugins-transforms/** - Remove type coercion from transforms
-- **plugins-sinks/** - Add schema/mode validation
-- **cross-cutting/** - Design hybrid schema system
-- **core-landscape/** - Fix export status enum validation
+### Phase 3: Quality & Observability (Next Sprint)
+- **engine-spans/** - Span naming/metadata issues
+- **engine-pooling/** - Pool stats + batching examples
+- **core-logging/** - JSON log output consistency
 
 ## Subsystem Ownership
 
 ### CORE Subsystem
 **Owner:** Systems architect
 **Files:** `src/elspeth/core/`
-- `landscape/` - 3 bugs (recovery, run repository, reproducibility)
-- `dag.py` - 1 bug (branch name validation)
+- `landscape/` - export, verifier, run repository
+- `checkpoint/` - resume + checkpoint format
+- `dag.py` - edge compatibility + coalesce validation
+- `payload_store.py` - path traversal + required payload storage
+- `rate_limit/` - atomicity + stale counters
 
 ### ENGINE Subsystem
 **Owner:** Pipeline execution expert
 **Files:** `src/elspeth/engine/`
-- `coalesce_executor.py` - 4 bugs (timeouts, duplicates, outcomes, metadata)
-- `orchestrator.py` - 2 bugs (quarantine outcomes, flush modes)
-- `processor.py` - 1 bug (token group IDs)
+- `coalesce_executor.py` - timeouts + branch handling
+- `orchestrator.py` - cleanup + quarantine durability ordering
+- `executors.py` - config gate missing-edge handling
+- `processor.py` - token span + outcome handling
 
 ### PLUGINS Subsystem
 **Owner:** Plugin developer
 **Files:** `src/elspeth/plugins/`
-- `transforms/batch_*.py` - 2 bugs (type coercion violations)
-- `sinks/csv_sink.py` - 2 bugs (append schema, mode validation)
-- `sinks/database_sink.py` - 1 bug (canonical hash)
-
-### LLM Integration
-**Owner:** LLM/Azure specialist
-**Files:** `src/elspeth/plugins/llm/`, `src/elspeth/plugins/transforms/azure/`
-- `azure_batch.py` - ✅ 2 bugs FIXED (BUG-AZURE-01, BUG-AZURE-02 - 2026-01-29)
-- `azure/content_safety.py`, `azure/prompt_shield.py` - 1 bug (global call_index)
-- `azure_multi_query.py` - 1 bug (synthetic state_id)
-
-### CROSS-CUTTING
-**Owner:** Architecture team
-**Files:** Multiple subsystems
-- Schema validation system - 2 bugs (dynamic schema skipping, config-dependent fields)
+- `llm/` - multi-query output semantics, call recording
+- `transforms/` - call_index allocation
+- `sinks/` - schema validation, payload size issues
 
 ## Verification Status
 
-**All bugs (28 P1, 49 P2, 25 P3 = 102 total) verified and organized by subsystem (2026-01-29):**
-- ✅ **93% STILL VALID** (97/104 bugs) - Real technical debt, accurate triage
-- 🔄 **7 OBE** - Fixed by refactors or documentation-only
-- ❌ **0 LOST** - No bugs invalidated by code changes
-- ✅ **Detailed verification reports** - Each bug has comprehensive code analysis
-- ✅ **Fix guidance** - Each bug has recommended fix with examples
+**Open bugs (as of 2026-02-01): 8 P1, 44 P2, 25 P3 = 77 total.**
 
-**Verification Sources:**
-- **Original triage (73 bugs):** 66 STILL VALID, 4 OBE (94% validation rate)
-- **Pending triage (34 bugs):** 33 STILL VALID, 1 OBE (97% validation rate)
-- **Combined:** 97 STILL VALID, 7 OBE (93% validation rate)
-
-**Results by Priority:**
-- **P1:** 27/28 STILL VALID (96%) - BUG-AZURE-01 and BUG-AZURE-02 fixed (2026-01-29)
-- **P2:** 46/49 STILL VALID (94%) - High validation rate
-- **P3:** 22/25 STILL VALID (88%) - Quality/enhancement issues
+**Triage updates (2026-02-01):**
+- Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
+- Moved `P3-2026-01-21-verifier-ignore-order-hides-drift.md` to closed (Phase 1 implemented).
+- Normalized four misfiled bugs into subsystem folders with standard filenames.
+- Verified all remaining P1s; closed two that are now fixed (`P1-2026-01-30-payload-store-optional`, `P1-2026-01-31-sink-flush-failure-leaves-open-states`).
+- Closed `P2-2026-01-22-coalesce-timeout-failures-unrecorded` (fixed coalesce failure recording).
 
 **Reports:**
 - Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`

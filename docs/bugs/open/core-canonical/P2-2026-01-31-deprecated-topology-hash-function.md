@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/canonical.py:214-224` - function docstring states "kept for backwards compatibility"
+- `src/elspeth/core/canonical.py:214-224` - docstring explicitly says the function is kept for backwards compatibility.
 - CLAUDE.md:797-834 explicitly forbids backwards compatibility code
 
 ## Impact
@@ -32,3 +32,9 @@
 
 - No backwards compatibility functions remain
 - All call sites updated
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `compute_upstream_topology_hash()` remains and still documents backwards compatibility usage. (`src/elspeth/core/canonical.py:214-224`)

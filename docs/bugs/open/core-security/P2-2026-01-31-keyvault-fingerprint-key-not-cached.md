@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/security/fingerprint.py:58-100` - `get_fingerprint_key()` has no caching
+- `src/elspeth/core/security/fingerprint.py:58-99` - `get_fingerprint_key()` has no caching.
 - Every call when env var unset makes Key Vault API call
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Key Vault called at most once per process
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `get_fingerprint_key()` still performs a Key Vault lookup on every call when env var is unset. (`src/elspeth/core/security/fingerprint.py:58-95`)

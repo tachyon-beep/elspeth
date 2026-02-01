@@ -26,3 +26,9 @@
 ## Acceptance Criteria
 
 - No backwards compatibility properties remain
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `RowResult` still exposes legacy `token_id` and `row_id` accessors. (`src/elspeth/contracts/results.py:272-280`)

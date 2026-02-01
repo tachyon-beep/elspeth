@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/checkpoint/manager.py:82` - `agg_json = json.dumps(aggregation_state)`
+- `src/elspeth/core/checkpoint/manager.py:82` - `agg_json = json.dumps(aggregation_state)` (no `allow_nan=False` / canonicalization).
 - Uses default `json.dumps()` which allows NaN/Infinity
 - CLAUDE.md requires canonical JSON
 
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Checkpoints use canonical JSON and reject NaN/Infinity
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Checkpoint aggregation state is still serialized with plain `json.dumps()` (NaN/Infinity allowed). (`src/elspeth/core/checkpoint/manager.py:82`)

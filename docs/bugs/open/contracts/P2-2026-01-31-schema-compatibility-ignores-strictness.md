@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/contracts/data.py:225-245` - `_types_compatible()` at line 244: `if expected is float and actual is int: return True`
-- `check_compatibility()` at lines 134-199 never inspects consumer schema strictness
+- `src/elspeth/contracts/data.py:225-245` - `_types_compatible()` unconditionally allows `int -> float` (lines 243-245).
+- `src/elspeth/contracts/data.py:134-187` - `check_compatibility()` never inspects consumer schema strictness before calling `_types_compatible()`.
 - CLAUDE.md Data Manifesto: transforms/sinks must NOT coerce
 
 ## Impact
@@ -33,3 +33,9 @@
 
 - Strict schemas reject int->float coercion
 - Non-strict schemas continue to allow it
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `_types_compatible()` still allows `int -> float` with no strictness gating, and `check_compatibility()` does not consider consumer schema strictness. (`src/elspeth/contracts/data.py:134-187`, `src/elspeth/contracts/data.py:225-245`)

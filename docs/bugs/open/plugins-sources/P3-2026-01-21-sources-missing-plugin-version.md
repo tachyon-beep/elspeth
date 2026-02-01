@@ -96,6 +96,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `CSVSource` and `JSONSource` still lack explicit `plugin_version` attributes. (`src/elspeth/plugins/sources/csv_source.py:37-62`, `src/elspeth/plugins/sources/json_source.py:56-74`)
+- Base classes still default to `plugin_version = "0.0.0"`. (`src/elspeth/plugins/base.py:65-68`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

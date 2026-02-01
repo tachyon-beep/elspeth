@@ -40,8 +40,8 @@
 
 ## Evidence
 
-- Suppressed `on_complete()` exceptions in main run cleanup: `src/elspeth/engine/orchestrator.py:1541-1552`.
-- Suppressed `on_complete()` and `close()` exceptions in resume cleanup: `src/elspeth/engine/orchestrator.py:2410-2428`.
+- Suppressed `on_complete()` exceptions in main run cleanup: `src/elspeth/engine/orchestrator.py:1649-1657`.
+- Suppressed `on_complete()` and `close()` exceptions in resume cleanup: `src/elspeth/engine/orchestrator.py:2520-2535`.
 
 ## Impact
 
@@ -68,6 +68,13 @@
 
 - If any plugin `on_complete()` or resume `close()` raises, the run/resume fails with a clear exception after all cleanup attempts are made.
 - Tests demonstrate that cleanup exceptions are no longer suppressed.
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Main run cleanup still wraps `on_complete()` calls in `suppress(Exception)` with no re-raise. (`src/elspeth/engine/orchestrator.py:1649-1657`)
+- Resume cleanup still suppresses `on_complete()` and `close()` exceptions. (`src/elspeth/engine/orchestrator.py:2520-2535`)
 
 ## Tests
 

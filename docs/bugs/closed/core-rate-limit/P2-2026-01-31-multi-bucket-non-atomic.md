@@ -31,3 +31,17 @@
 ## Acceptance Criteria
 
 - Behavior documented, or atomicity guaranteed across processes
+
+## Verification (2026-02-01)
+
+**Status: OBE**
+
+- The current `RateLimiter` implementation only configures a **single** rate bucket (`rates = [Rate(requests_per_minute, ...)]`), so multi-bucket acquisition no longer exists in this code path. (`src/elspeth/core/rate_limit/limiter.py:151-168`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (OBE)
+
+### Closure Notes
+
+- Multi-bucket acquisition is no longer present in the current rate limiter implementation.

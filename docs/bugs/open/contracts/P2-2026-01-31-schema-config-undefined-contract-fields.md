@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/contracts/schema.py:283-352` - `from_dict()` parses contract fields without subset validation
-- `get_effective_guaranteed_fields()` at lines 389-409 unions explicit guarantees with declared fields
+- `src/elspeth/contracts/schema.py:283-351` - `from_dict()` parses `guaranteed_fields` / `required_fields` / `audit_fields` with no subset validation.
+- `src/elspeth/contracts/schema.py:389-409` - `get_effective_guaranteed_fields()` unions explicit guarantees with declared required fields, so typos become “guaranteed.”
 - Typos in `guaranteed_fields` create impossible contracts
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - Undefined field names in contracts raise ValueError at config load time
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Contract fields are still accepted without checking they exist in declared fields. (`src/elspeth/contracts/schema.py:283-351`, `src/elspeth/contracts/schema.py:389-409`)

@@ -27,3 +27,9 @@
 ## Acceptance Criteria
 
 - CONTINUE with COPY mode raises ValueError
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `RoutingAction.__post_init__()` still lacks a guard for `CONTINUE` + `COPY` mode. (`src/elspeth/contracts/routing.py:63-80`)

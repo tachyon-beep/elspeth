@@ -33,3 +33,9 @@
 
 - Non-boolean expression results raise ValueError
 - Boolean results work as expected
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Trigger condition still coerces result with `bool(result)` instead of enforcing boolean. (`src/elspeth/engine/triggers.py:125-135`)

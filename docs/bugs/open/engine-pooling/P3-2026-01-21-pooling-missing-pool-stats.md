@@ -88,6 +88,12 @@
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md`
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `get_stats()` still omits `max_concurrent_reached` and `dispatch_delay_at_completion_ms`. (`src/elspeth/plugins/pooling/executor.py:132-150`)
+
 ## Verification (2026-01-25)
 
 **Status: STILL VALID**

@@ -32,3 +32,10 @@
 ## Acceptance Criteria
 
 - MissingEdgeError results in FAILED node_state, not OPEN
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Config gate routing still calls `_record_routing()` without a try/except after `begin_node_state()`. (`src/elspeth/engine/executors.py:753-813`)
+- `_record_routing()` still raises `MissingEdgeError` when an edge is missing. (`src/elspeth/engine/executors.py:848-878`)

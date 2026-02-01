@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/cli.py:1675-1684` - `resume()` always instantiates `FilesystemPayloadStore` without checking backend
-- `src/elspeth/cli.py:815-821` - `run()` explicitly validates `payload_store.backend == "filesystem"`
+- `src/elspeth/cli.py:1717-1725` - `resume()` instantiates `FilesystemPayloadStore` without checking `payload_store.backend`.
+- `src/elspeth/cli.py:526-534` - `run()` explicitly validates `payload_store.backend == "filesystem"` before instantiating the payload store.
 
 ## Impact
 
@@ -31,3 +31,9 @@
 ## Acceptance Criteria
 
 - `elspeth resume` exits with explicit error if `payload_store.backend` is not `filesystem`
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `resume()` still skips backend validation and always constructs `FilesystemPayloadStore`. (`src/elspeth/cli.py:1717-1725`)

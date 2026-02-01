@@ -26,3 +26,9 @@
 ## Acceptance Criteria
 
 - Checkpoint IDs use full UUID
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Checkpoint IDs are still truncated to 12 hex chars (`uuid.uuid4().hex[:12]`). (`src/elspeth/core/checkpoint/manager.py:78`)

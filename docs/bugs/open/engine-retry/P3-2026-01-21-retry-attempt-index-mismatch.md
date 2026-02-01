@@ -93,6 +93,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- RetryManager still passes tenacity’s 1-based `attempt_number` to `on_retry` without normalization. (`src/elspeth/engine/retry.py:114-121`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID (but latent/not currently exploited)

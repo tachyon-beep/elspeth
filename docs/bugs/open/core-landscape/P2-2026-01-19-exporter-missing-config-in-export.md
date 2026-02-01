@@ -108,6 +108,12 @@
 
 - Related issues/PRs: N/A
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `export_run()` still emits `config_hash` but omits `settings_json` and `config_json` for run/node records. (`src/elspeth/core/landscape/exporter.py:163-186`)
+
 ## Verification (2026-01-25)
 
 **Status: STILL VALID**

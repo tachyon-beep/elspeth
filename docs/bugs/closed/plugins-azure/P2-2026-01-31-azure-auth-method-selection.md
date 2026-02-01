@@ -32,3 +32,12 @@
 ## Acceptance Criteria
 
 - Whitespace-only strings treated as empty consistently
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Added `_is_set()` helper method that checks `value is not None and bool(value.strip())`
+- Updated `auth_method` property and `create_blob_service_client()` to use `_is_set()`
+- Added 3 regression tests in `TestAzureAuthConfigWhitespaceConsistency`
+- All 28 tests pass, mypy clean

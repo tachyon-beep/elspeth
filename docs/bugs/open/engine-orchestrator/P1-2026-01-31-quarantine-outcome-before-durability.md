@@ -17,10 +17,10 @@
 
 ## Evidence
 
-- `src/elspeth/engine/orchestrator.py:1164-1170` - `record_token_outcome(QUARANTINED)` called immediately
-- Line 1173 - Token added to `pending_tokens[quarantine_sink]` for later sink write
-- Lines 1483-1504 - Sink writes happen later in separate loop
-- If sink write fails, QUARANTINED outcome already recorded but no durable output
+- `src/elspeth/engine/orchestrator.py:1194-1229` - `record_token_outcome(QUARANTINED)` is called immediately after creating the quarantine token.
+- `src/elspeth/engine/orchestrator.py:1231-1232` - token is enqueued into `pending_tokens[quarantine_sink]` for later sink write.
+- `src/elspeth/engine/orchestrator.py:1586-1623` - sink writes occur later, outside the source loop, via `SinkExecutor.write()`.
+- If the quarantine sink write fails, the QUARANTINED outcome has already been recorded without durable output.
 
 ## Impact
 
@@ -44,3 +44,9 @@
 
 - QUARANTINED outcome is only recorded after sink confirms durability
 - Failed sink writes result in appropriate error handling, not false outcomes
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- QUARANTINED outcomes are still recorded before quarantine sink durability; sink writes happen later via `pending_tokens` flush. (`src/elspeth/engine/orchestrator.py:1194-1232`, `src/elspeth/engine/orchestrator.py:1586-1623`)

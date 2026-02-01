@@ -27,3 +27,10 @@
 ## Acceptance Criteria
 
 - Failed transforms have `output_hash=None`, not empty string
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `TransformCompleted.output_hash` is still a non-optional `str`. (`src/elspeth/contracts/events.py:156-167`)
+- Telemetry emission still coerces missing hashes to empty string. (`src/elspeth/engine/processor.py:210-221`)

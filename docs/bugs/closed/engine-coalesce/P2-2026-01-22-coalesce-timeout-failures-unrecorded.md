@@ -198,6 +198,31 @@ None addressed the missing audit recording for coalesce failures.
 
 The bug is exactly as described in the original report:
 
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- `check_timeouts()` now records FAILED node states and token outcomes when quorum is not met at timeout. (`src/elspeth/engine/coalesce_executor.py:540-579`)
+- `flush_pending()` now records FAILED node states and token outcomes for `quorum` and `require_all` failure paths. (`src/elspeth/engine/coalesce_executor.py:640-738`)
+- Failure outcomes set `outcomes_recorded=True`, matching orchestrator expectations. (`src/elspeth/engine/coalesce_executor.py:676-738`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Coalesce failure paths now complete pending node states and record terminal outcomes with failure reasons and error hashes.
+- Pending entries are removed and marked completed, preventing silent drops after timeouts.
+
+---
+
+## Verification (2026-02-01)
+
+**Status: FIXED**
+
+- Failure paths now record node states and token outcomes for quorum/require_all failures in `flush_pending()`, and quorum timeout failures in `check_timeouts()`. (`src/elspeth/engine/coalesce_executor.py:530-579`, `src/elspeth/engine/coalesce_executor.py:611-735`)
+
 1. Failure outcomes are created with metadata but never persisted to Landscape
 2. Tokens that arrived at a failed coalesce have no node states recorded
 3. The orchestrator incorrectly assumes failures are recorded (line 1050 comment)

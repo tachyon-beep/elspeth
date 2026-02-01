@@ -27,3 +27,10 @@
 ## Acceptance Criteria
 
 - Aggregation flushes emit TransformCompleted telemetry events
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Aggregation flush path still calls `execute_flush()` without emitting `TransformCompleted`. (`src/elspeth/engine/processor.py:485-491`)
+- Regular transforms still emit `TransformCompleted` for comparison. (`src/elspeth/engine/processor.py:1609-1615`)

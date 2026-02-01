@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- `src/elspeth/core/retention/purge.py:343-350` - no try/except around I/O operations
+- `src/elspeth/core/retention/purge.py:393-401` - no try/except around `exists()` / `delete()` I/O operations.
 - Code has `failed_refs` list but exceptions abort before populating it
 
 ## Impact
@@ -32,3 +32,9 @@
 
 - I/O errors don't abort entire purge
 - Grade updates reflect actual state
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `purge_payloads()` still calls `exists()` / `delete()` without exception handling. (`src/elspeth/core/retention/purge.py:393-401`)

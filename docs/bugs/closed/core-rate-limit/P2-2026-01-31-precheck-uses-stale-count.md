@@ -32,3 +32,17 @@
 ## Acceptance Criteria
 
 - Rate limiting matches configured limits, not stricter
+
+## Verification (2026-02-01)
+
+**Status: OBE**
+
+- The `_would_all_buckets_accept()` pre-check and any `bucket.count()` usage are no longer present in the current rate limiter implementation. (`src/elspeth/core/rate_limit/limiter.py` has no such function or count usage.)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (OBE)
+
+### Closure Notes
+
+- Pre-check logic was removed; current limiter relies on `Limiter.try_acquire()` directly.

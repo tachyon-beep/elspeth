@@ -16,8 +16,8 @@
 
 ## Evidence
 
-- `src/elspeth/core/logging.py:26-32` - uses `PrintLoggerFactory()` which outputs directly
-- Lines 57-61 - stdlib logging configured with `format="%(message)s"` (not JSON)
+- `src/elspeth/core/logging.py:26-31` - stdlib logging configured with `format="%(message)s"`.
+- `src/elspeth/core/logging.py:57-62` - uses `structlog.PrintLoggerFactory()` which prints directly.
 - Modules using `logging.getLogger(__name__)` emit plain text even when JSON enabled
 
 ## Impact
@@ -32,3 +32,9 @@
 ## Acceptance Criteria
 
 - All log output is valid JSON when `--json-logs` enabled
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- JSON mode still uses stdlib logging with plain `%(message)s` and `PrintLoggerFactory()`, allowing mixed output. (`src/elspeth/core/logging.py:26-31`, `src/elspeth/core/logging.py:57-62`)
