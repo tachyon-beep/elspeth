@@ -58,7 +58,7 @@ class AuditedClientBase:
         run_id: str,
         telemetry_emit: TelemetryEmitCallback,
         *,
-        limiter: "RateLimiter | NoOpLimiter | None" = None,
+        limiter: RateLimiter | NoOpLimiter | None = None,
     ) -> None:
         """Initialize audited client.
 

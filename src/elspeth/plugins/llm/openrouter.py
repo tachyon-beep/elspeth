@@ -209,11 +209,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for OpenRouter service (None if rate limiting disabled)
-        self._limiter = (
-            ctx.rate_limit_registry.get_limiter("openrouter")
-            if ctx.rate_limit_registry is not None
-            else None
-        )
+        self._limiter = ctx.rate_limit_registry.get_limiter("openrouter") if ctx.rate_limit_registry is not None else None
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.

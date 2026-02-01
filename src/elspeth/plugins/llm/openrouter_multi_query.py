@@ -391,11 +391,7 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for OpenRouter service (None if rate limiting disabled)
-        self._limiter = (
-            ctx.rate_limit_registry.get_limiter("openrouter")
-            if ctx.rate_limit_registry is not None
-            else None
-        )
+        self._limiter = ctx.rate_limit_registry.get_limiter("openrouter") if ctx.rate_limit_registry is not None else None
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
