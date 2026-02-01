@@ -1,5 +1,17 @@
 # Bug Report: DatabaseSink rejects extra fields in free/dynamic schemas
 
+## FIXED: 2026-02-02
+
+**Status:** FIXED (Option B implemented)
+
+**Fix:** DatabaseSink now fails fast during `__init__` if `schema_config.allows_extra_fields` is True, with a clear error message directing users to JSONSink for flexible schemas.
+
+**Location:** `src/elspeth/plugins/sinks/database_sink.py` lines 109-115
+
+**Tests:** `tests/plugins/sinks/test_database_sink.py::TestDatabaseSinkSchemaValidation` (3 tests)
+
+---
+
 ## Summary
 
 - DatabaseSink creates table columns from explicit schema fields (or first row for dynamic), so rows with extra fields permitted by free/dynamic schemas cause SQLAlchemy insert errors (unconsumed column names).
