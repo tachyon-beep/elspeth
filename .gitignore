@@ -126,12 +126,9 @@ mutants/
 # Git worktrees
 .worktrees/
 
-# Example outputs (keep directory structure with .gitkeep)
+# Example outputs (dynamic data, not tracked)
 examples/*/output/*
 examples/*/runs/*
-!examples/*/.gitkeep
-!examples/*/output/.gitkeep
-!examples/*/runs/.gitkeep
 
 # Real/production data - never commit
 real/
@@ -139,3 +136,7 @@ examples/large_scale_test/input.csv
 landscape.db-shm
 landscape.db-wal
 .elspeth/
+
+# FINAL RULE: Always keep .gitkeep files (preserve directory structure)
+# This must be at the end to override any earlier ignore patterns
+!.gitkeep
