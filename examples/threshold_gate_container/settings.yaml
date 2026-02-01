@@ -22,7 +22,9 @@ source:
       mode: strict
       fields:
         - "id: int"
+        - "name: str"
         - "amount: int"
+        - "category: str"
     on_validation_failure: discard
 
 gates:
@@ -41,7 +43,9 @@ sinks:
         mode: strict
         fields:
           - "id: int"
+          - "name: str"
           - "amount: int"
+          - "category: str"
   high_values:
     plugin: csv
     options:
@@ -50,7 +54,9 @@ sinks:
         mode: strict
         fields:
           - "id: int"
+          - "name: str"
           - "amount: int"
+          - "category: str"
 
 default_sink: output
 
