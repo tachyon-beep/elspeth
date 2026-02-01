@@ -2735,3 +2735,9 @@ allow_hits:
   reason: Compile-time type fallback - provides Exception type when azure.core not installed
   safety: Not a runtime error handler; _get_client() will raise ImportError before this path executes
   expires: null
+# Gate executor route resolution (configuration validation)
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=23ccaa4356b62333
+  owner: bugfix
+  reason: Configuration validation - checking if route label exists in route_resolution_map
+  safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
+  expires: null

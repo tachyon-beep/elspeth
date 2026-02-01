@@ -39,3 +39,21 @@
 
 - Config gate routing still calls `_record_routing()` without a try/except after `begin_node_state()`. (`src/elspeth/engine/executors.py:753-813`)
 - `_record_routing()` still raises `MissingEdgeError` when an edge is missing. (`src/elspeth/engine/executors.py:848-878`)
+
+## Resolution (2026-02-02)
+
+**Status: CLOSED**
+
+Fixed by wrapping routing logic in try/except blocks in BOTH gate executor methods:
+
+1. **`execute_gate()`** (plugin gates): Wrapped routing section (lines 552-629) in try/except
+   - Catches `MissingEdgeError` and `RuntimeError`
+   - Completes node_state as FAILED before re-raising
+
+2. **`execute_config_gate()`** (config gates): Same pattern applied (lines 746-806)
+   - Simplified token_manager check to just raise (outer except handles completion)
+   - Ensures node_state is never left OPEN
+
+3. **Test updated**: `test_missing_edge_raises_error` now verifies BOTH gate types record FAILED status (was only checking plugin gates)
+
+All 55 executor tests pass.

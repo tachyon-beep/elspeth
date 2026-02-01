@@ -616,19 +616,17 @@ class TestGateExecutorParametrized:
         assert exc_info.value.label == expected_label
         assert "Audit trail would be incomplete" in str(exc_info.value)
 
-        # Verify node state exists
+        # Verify node state exists and is properly completed as FAILED
         states = recorder.get_node_states_for_token(token.token_id)
         assert len(states) == 1
 
-        # Plugin gates record FAILED status before raising; config gates raise from
-        # _record_routing which happens after successful evaluation but before
-        # state completion (state is left OPEN - see test_plugin_gate_missing_edge_records_failure)
-        if gate_type == PLUGIN_GATE:
-            assert states[0].status == NodeStateStatus.FAILED
-            # Verify audit fields are populated (P3 fix completeness)
-            state = states[0]
-            assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
-            assert state.duration_ms >= 0, "duration_ms must be non-negative"
+        # Both gate types must record FAILED status - node_state must never be left OPEN
+        # (P2 fix: config gates now wrap _record_routing() in try/except)
+        assert states[0].status == NodeStateStatus.FAILED
+        # Verify audit fields are populated (P3 fix completeness)
+        state = states[0]
+        assert state.duration_ms is not None, "duration_ms must be recorded on failed state"
+        assert state.duration_ms >= 0, "duration_ms must be non-negative"
 
 
 class TestPluginGateExecutor:

@@ -549,84 +549,77 @@ class GateExecutor:
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
 
-        if action.kind == RoutingKind.CONTINUE:
-            # Record explicit continue routing for audit completeness (AUD-002)
-            # Preserve gate's reason and mode for full auditability
-            self._record_routing(
-                state_id=state.state_id,
-                node_id=gate.node_id,
-                action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
-            )
-
-        elif action.kind == RoutingKind.ROUTE:
-            # Gate returned a route label - resolve via routes config
-            route_label = action.destinations[0]
-            destination = self._route_resolution_map.get((NodeID(gate.node_id), route_label))
-
-            if destination is None:
-                # Label not in routes config - this is a configuration error
-                # Record failure before raising (per execute_config_gate pattern)
-                route_error: ExecutionError = {
-                    "exception": f"Route label '{route_label}' not found in routes config",
-                    "type": "MissingEdgeError",
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=route_error,
-                )
-                raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
-
-            if destination == "continue":
-                # Route label resolves to "continue" - record routing event (AUD-002)
+        try:
+            if action.kind == RoutingKind.CONTINUE:
+                # Record explicit continue routing for audit completeness (AUD-002)
                 # Preserve gate's reason and mode for full auditability
                 self._record_routing(
                     state_id=state.state_id,
                     node_id=gate.node_id,
                     action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
                 )
-            else:
-                # Route label resolves to a sink name
-                sink_name = destination
-                # Record routing event using the route label to find the edge
+
+            elif action.kind == RoutingKind.ROUTE:
+                # Gate returned a route label - resolve via routes config
+                route_label = action.destinations[0]
+                destination = self._route_resolution_map.get((NodeID(gate.node_id), route_label))
+
+                if destination is None:
+                    # Label not in routes config - this is a configuration error
+                    raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
+
+                if destination == "continue":
+                    # Route label resolves to "continue" - record routing event (AUD-002)
+                    # Preserve gate's reason and mode for full auditability
+                    self._record_routing(
+                        state_id=state.state_id,
+                        node_id=gate.node_id,
+                        action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
+                    )
+                else:
+                    # Route label resolves to a sink name
+                    sink_name = destination
+                    # Record routing event using the route label to find the edge
+                    self._record_routing(
+                        state_id=state.state_id,
+                        node_id=gate.node_id,
+                        action=action,
+                    )
+
+            elif action.kind == RoutingKind.FORK_TO_PATHS:
+                if token_manager is None:
+                    raise RuntimeError(
+                        f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
+                        "Cannot create child tokens - audit integrity would be compromised."
+                    )
+                # Record routing events for all paths
                 self._record_routing(
                     state_id=state.state_id,
                     node_id=gate.node_id,
                     action=action,
                 )
+                # Create child tokens (ATOMIC: also records parent FORKED outcome)
+                child_tokens, _fork_group_id = token_manager.fork_token(
+                    parent_token=token,
+                    branches=list(action.destinations),
+                    step_in_pipeline=step_in_pipeline,
+                    run_id=ctx.run_id,
+                    row_data=result.row,
+                )
 
-        elif action.kind == RoutingKind.FORK_TO_PATHS:
-            if token_manager is None:
-                # Record failure before raising (per execute_config_gate pattern)
-                fork_error: ExecutionError = {
-                    "exception": "fork_to_paths requires TokenManager",
-                    "type": "RuntimeError",
-                }
-                self._recorder.complete_node_state(
-                    state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=fork_error,
-                )
-                raise RuntimeError(
-                    f"Gate {gate.node_id} returned fork_to_paths but no TokenManager provided. "
-                    "Cannot create child tokens - audit integrity would be compromised."
-                )
-            # Record routing events for all paths
-            self._record_routing(
+        except (MissingEdgeError, RuntimeError) as e:
+            # Record failure before re-raising - ensures node_state is never left OPEN
+            routing_error: ExecutionError = {
+                "exception": str(e),
+                "type": type(e).__name__,
+            }
+            self._recorder.complete_node_state(
                 state_id=state.state_id,
-                node_id=gate.node_id,
-                action=action,
+                status=NodeStateStatus.FAILED,
+                duration_ms=duration_ms,
+                error=routing_error,
             )
-            # Create child tokens (ATOMIC: also records parent FORKED outcome)
-            child_tokens, _fork_group_id = token_manager.fork_token(
-                parent_token=token,
-                branches=list(action.destinations),
-                step_in_pipeline=step_in_pipeline,
-                run_id=ctx.run_id,
-                row_data=result.row,
-            )
+            raise
 
         # Complete node state - always "completed" for successful execution
         # Terminal state is DERIVED from routing_events, not stored here
@@ -750,67 +743,72 @@ class GateExecutor:
         sink_name: str | None = None
         reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
 
-        if destination == "continue":
-            # Continue to next node - record routing event (AUD-002)
-            # Use CONTINUE kind for GateResult, ROUTE for recording (matches edge label)
-            action = RoutingAction.continue_(reason=reason)
-            self._record_routing(
-                state_id=state.state_id,
-                node_id=node_id,
-                action=RoutingAction.route("continue", mode=RoutingMode.MOVE, reason=reason),
-            )
-
-        elif destination == "fork":
-            # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-            # (Pydantic validation ensures fork_to is not None when routes include "fork")
-            # Local binding for type narrowing (mypy can't see Pydantic validation)
-            fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
-
-            if token_manager is None:
-                error = {
-                    "exception": "fork requires TokenManager",
-                    "type": "RuntimeError",
-                }
-                self._recorder.complete_node_state(
+        try:
+            if destination == "continue":
+                # Continue to next node - record routing event (AUD-002)
+                # Use CONTINUE kind for GateResult, ROUTE for recording (matches edge label)
+                action = RoutingAction.continue_(reason=reason)
+                self._record_routing(
                     state_id=state.state_id,
-                    status=NodeStateStatus.FAILED,
-                    duration_ms=duration_ms,
-                    error=error,
-                )
-                raise RuntimeError(
-                    f"Gate {node_id} routes to fork but no TokenManager provided. "
-                    "Cannot create child tokens - audit integrity would be compromised."
+                    node_id=node_id,
+                    action=RoutingAction.route("continue", mode=RoutingMode.MOVE, reason=reason),
                 )
 
-            action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
+            elif destination == "fork":
+                # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
+                # (Pydantic validation ensures fork_to is not None when routes include "fork")
+                # Local binding for type narrowing (mypy can't see Pydantic validation)
+                fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
 
-            # Record routing events for all paths
-            self._record_routing(
+                if token_manager is None:
+                    raise RuntimeError(
+                        f"Gate {node_id} routes to fork but no TokenManager provided. "
+                        "Cannot create child tokens - audit integrity would be compromised."
+                    )
+
+                action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
+
+                # Record routing events for all paths
+                self._record_routing(
+                    state_id=state.state_id,
+                    node_id=node_id,
+                    action=action,
+                )
+
+                # Create child tokens (ATOMIC: also records parent FORKED outcome)
+                child_tokens, _fork_group_id = token_manager.fork_token(
+                    parent_token=token,
+                    branches=fork_branches,
+                    step_in_pipeline=step_in_pipeline,
+                    run_id=ctx.run_id,
+                    row_data=token.row_data,
+                )
+
+            else:
+                # Route to a named sink
+                sink_name = destination
+                action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
+
+                # Record routing event
+                self._record_routing(
+                    state_id=state.state_id,
+                    node_id=node_id,
+                    action=action,
+                )
+
+        except (MissingEdgeError, RuntimeError) as e:
+            # Record failure before re-raising - ensures node_state is never left OPEN
+            routing_error: ExecutionError = {
+                "exception": str(e),
+                "type": type(e).__name__,
+            }
+            self._recorder.complete_node_state(
                 state_id=state.state_id,
-                node_id=node_id,
-                action=action,
+                status=NodeStateStatus.FAILED,
+                duration_ms=duration_ms,
+                error=routing_error,
             )
-
-            # Create child tokens (ATOMIC: also records parent FORKED outcome)
-            child_tokens, _fork_group_id = token_manager.fork_token(
-                parent_token=token,
-                branches=fork_branches,
-                step_in_pipeline=step_in_pipeline,
-                run_id=ctx.run_id,
-                row_data=token.row_data,
-            )
-
-        else:
-            # Route to a named sink
-            sink_name = destination
-            action = RoutingAction.route(route_label, mode=RoutingMode.MOVE, reason=reason)
-
-            # Record routing event
-            self._record_routing(
-                state_id=state.state_id,
-                node_id=node_id,
-                action=action,
-            )
+            raise
 
         # Create GateResult for audit fields
         result = GateResult(
