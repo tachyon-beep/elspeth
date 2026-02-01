@@ -418,14 +418,15 @@ class TestAzureLLMStress:
             assert pos_i < pos_next, "FIFO ordering violated"
 
     @pytest.mark.chaosllm(rate_limit_pct=15.0, capacity_529_pct=5.0)
-    def test_long_run_500_rows(
+    def test_long_run_200_rows(
         self,
         chaosllm_http_server: ChaosLLMHTTPFixture,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        """Extended run with 500 rows under mixed error conditions.
+        """Extended run with 200 rows under mixed error conditions.
 
-        This test takes longer but validates sustained operation.
+        Validates sustained operation while fitting in CI timeout.
+        (Reduced from 500 to stay within 15-minute CI limit.)
 
         Verifies:
         - No memory leaks (stable resource usage)
@@ -447,7 +448,7 @@ class TestAzureLLMStress:
         start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
         transform.on_start(start_ctx)
 
-        rows = generate_test_rows(500)
+        rows = generate_test_rows(200)
         start_time = time.monotonic()
 
         for i, row in enumerate(rows):
@@ -482,14 +483,14 @@ class TestAzureLLMStress:
         elapsed = time.monotonic() - start_time
 
         # All rows should be processed
-        assert output.total_count == 500
+        assert output.total_count == 200
 
         # Verify reasonable completion time (not hung)
-        # With 500 rows at ~5ms/req + retries, should finish within 5 minutes
-        assert elapsed < 300, f"Long run took too long: {elapsed:.1f}s"
+        # With 200 rows at ~5ms/req + retries, should finish within 2 minutes
+        assert elapsed < 120, f"Long run took too long: {elapsed:.1f}s"
 
         # Verify stats
         stats = chaosllm_http_server.get_stats()
         # With 15% + 5% errors, expect retries
-        assert stats["total_requests"] >= 500
-        assert output.success_count > 300, f"Expected >60% success rate, got {output.success_count}/500"
+        assert stats["total_requests"] >= 200
+        assert output.success_count > 120, f"Expected >60% success rate, got {output.success_count}/200"

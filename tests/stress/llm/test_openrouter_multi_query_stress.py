@@ -357,12 +357,15 @@ class TestOpenRouterMultiQueryLLMStress:
             assert "reason" in error, "Error should have reason"
 
     @pytest.mark.chaosllm(rate_limit_pct=10.0, template_body=MULTI_QUERY_JSON_TEMPLATE)
-    def test_multi_query_long_run_100_rows(
+    def test_multi_query_long_run_50_rows(
         self,
         chaosllm_http_server: ChaosLLMHTTPFixture,
         tmp_path_factory: pytest.TempPathFactory,
     ) -> None:
-        """Extended run with 100 rows (400 queries total).
+        """Extended run with 50 rows (200 queries total).
+
+        Validates sustained operation while fitting in CI timeout.
+        (Reduced from 100 to stay within 15-minute CI limit.)
 
         Verifies:
         - Stable operation over many HTTP requests
@@ -384,7 +387,7 @@ class TestOpenRouterMultiQueryLLMStress:
         start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
         transform.on_start(start_ctx)
 
-        rows = generate_multi_query_rows(100)
+        rows = generate_multi_query_rows(50)
         start_time = time.monotonic()
 
         for i, row in enumerate(rows):
@@ -419,14 +422,14 @@ class TestOpenRouterMultiQueryLLMStress:
         elapsed = time.monotonic() - start_time
 
         # All rows should be processed
-        assert output.total_count == 100
+        assert output.total_count == 50
 
-        # Should complete within 5 minutes
-        assert elapsed < 300, f"Long run took too long: {elapsed:.1f}s"
+        # Should complete within 2 minutes
+        assert elapsed < 120, f"Long run took too long: {elapsed:.1f}s"
 
         stats = chaosllm_http_server.get_stats()
-        assert stats["total_requests"] >= 400
-        assert output.success_count > 50, "Expected >50% success rate"
+        assert stats["total_requests"] >= 200
+        assert output.success_count > 25, "Expected >50% success rate"
 
     @pytest.mark.chaosllm(preset="stress_aimd", template_body=MULTI_QUERY_JSON_TEMPLATE)
     def test_multi_query_fifo_ordering(
