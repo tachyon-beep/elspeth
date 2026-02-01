@@ -4,13 +4,10 @@
 Uses pluggy for hook-based plugin registration.
 """
 
-from dataclasses import dataclass
 from typing import Any
 
 import pluggy
 
-from elspeth.contracts import Determinism, NodeType
-from elspeth.core.canonical import stable_hash
 from elspeth.plugins.hookspecs import (
     PROJECT_NAME,
     ElspethSinkSpec,
@@ -19,89 +16,11 @@ from elspeth.plugins.hookspecs import (
 )
 from elspeth.plugins.protocols import (
     GateProtocol,
-    PluginProtocol,
     SinkProtocol,
     SourceProtocol,
     TransformProtocol,
 )
 from elspeth.plugins.validation import PluginConfigValidator
-
-
-def _schema_hash(schema_cls: Any) -> str | None:
-    """Compute stable hash for a schema class.
-
-    Hashes the schema's field names and types to detect compatibility changes.
-
-    Args:
-        schema_cls: A PluginSchema subclass, or None
-
-    Returns:
-        SHA-256 hex digest of field names/types, or None if no schema
-
-    Raises:
-        TypeError: If schema_cls is not None and not a Pydantic model
-    """
-    if schema_cls is None:
-        return None
-
-    # Use Pydantic model_fields for accurate field introspection
-    # All schemas MUST be PluginSchema subclasses (Pydantic models)
-    # A non-Pydantic schema is a protocol violation - crash immediately
-    if not hasattr(schema_cls, "model_fields"):
-        raise TypeError(
-            f"Schema {schema_cls} must be a PluginSchema (Pydantic BaseModel) subclass. "
-            f"All plugin schemas must inherit from elspeth.contracts.data.PluginSchema."
-        )
-
-    # Build deterministic representation
-    fields_repr = {name: str(field.annotation) for name, field in schema_cls.model_fields.items()}
-    return stable_hash(fields_repr)
-
-
-@dataclass(frozen=True)
-class PluginSpec:
-    """Registration record for a plugin.
-
-    Captures metadata that Phase 3 stores in Landscape nodes table.
-    Frozen for immutability - plugin specs shouldn't change after creation.
-    """
-
-    name: str
-    node_type: NodeType
-    version: str
-    determinism: Determinism
-    input_schema_hash: str | None = None
-    output_schema_hash: str | None = None
-
-    @classmethod
-    def from_plugin(cls, plugin_cls: type[PluginProtocol], node_type: NodeType) -> "PluginSpec":
-        """Create spec from plugin class with schema hashes.
-
-        Args:
-            plugin_cls: Plugin class implementing PluginProtocol
-            node_type: Type of node this plugin represents
-
-        Returns:
-            PluginSpec with extracted metadata
-        """
-        # PluginProtocol guarantees these attributes exist (enforced by mypy)
-        name = plugin_cls.name
-        version = plugin_cls.plugin_version
-        determinism = plugin_cls.determinism
-
-        # Schemas vary by plugin type: sources have only output_schema,
-        # sinks have only input_schema, transforms have both.
-        input_schema = getattr(plugin_cls, "input_schema", None)
-        output_schema = getattr(plugin_cls, "output_schema", None)
-
-        return cls(
-            name=name,
-            node_type=node_type,
-            version=version,
-            determinism=determinism,
-            input_schema_hash=_schema_hash(input_schema),
-            output_schema_hash=_schema_hash(output_schema),
-        )
 
 
 class PluginManager:

@@ -55,7 +55,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.hookspecs import hookimpl, hookspec
 
 # Manager
-from elspeth.plugins.manager import PluginManager, PluginSpec
+from elspeth.plugins.manager import PluginManager
 
 # Protocols
 from elspeth.plugins.protocols import (
@@ -110,7 +110,6 @@ __all__ = [  # Grouped by category for readability
     "TransformDataConfig",
     # Manager
     "PluginManager",
-    "PluginSpec",
     # Hookspecs
     "hookimpl",
     "hookspec",
