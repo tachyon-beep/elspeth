@@ -221,7 +221,10 @@ def get_node_schema(node: NodeInfo) -> dict[str, Any]:
         return config.schema
     if isinstance(config, (SourceNodeConfig, SinkNodeConfig)):
         raise ValueError(f"Node {node.node_id} ({node.node_type}) has no schema field")
-    raise NodeConfigTypeMismatch(node.node_id, node.node_type, NodeConfig, type(config))
+    raise TypeError(
+        f"Node {node.node_id} ({node.node_type}) has unsupported config type "
+        f"{type(config).__name__}"
+    )
 
 
 def get_node_schema_optional(node: NodeInfo) -> dict[str, Any] | None:
