@@ -95,6 +95,15 @@ class TestGetFingerprintKey:
 class TestKeyVaultIntegration:
     """Test Azure Key Vault integration for fingerprint key."""
 
+    @pytest.fixture(autouse=True)
+    def clear_cache(self) -> None:
+        """Clear fingerprint key cache before each test."""
+        from elspeth.core.security.fingerprint import clear_fingerprint_key_cache
+
+        clear_fingerprint_key_cache()
+        yield
+        clear_fingerprint_key_cache()
+
     def test_keyvault_used_when_env_var_missing_and_vault_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When ELSPETH_FINGERPRINT_KEY is missing but ELSPETH_KEYVAULT_URL is set, uses Key Vault."""
         from unittest.mock import MagicMock, patch
@@ -109,7 +118,7 @@ class TestKeyVaultIntegration:
         mock_client.get_secret.return_value = mock_secret
 
         with patch(
-            "elspeth.core.security.fingerprint._get_keyvault_client",
+            "elspeth.core.security.secret_loader._get_keyvault_client",
             return_value=mock_client,
         ):
             key = get_fingerprint_key()
@@ -131,7 +140,7 @@ class TestKeyVaultIntegration:
         mock_client.get_secret.return_value = mock_secret
 
         with patch(
-            "elspeth.core.security.fingerprint._get_keyvault_client",
+            "elspeth.core.security.secret_loader._get_keyvault_client",
             return_value=mock_client,
         ):
             key = get_fingerprint_key()
@@ -169,7 +178,7 @@ class TestKeyVaultIntegration:
 
         with (
             patch(
-                "elspeth.core.security.fingerprint._get_keyvault_client",
+                "elspeth.core.security.secret_loader._get_keyvault_client",
                 return_value=mock_client,
             ),
             pytest.raises(ValueError, match="Failed to retrieve fingerprint key from Key Vault"),
@@ -189,7 +198,7 @@ class TestKeyVaultIntegration:
         mock_client.get_secret.return_value = mock_secret
 
         with (
-            patch("elspeth.core.security.fingerprint._get_keyvault_client", return_value=mock_client),
+            patch("elspeth.core.security.secret_loader._get_keyvault_client", return_value=mock_client),
             pytest.raises(ValueError, match="has no value"),
         ):
             get_fingerprint_key()

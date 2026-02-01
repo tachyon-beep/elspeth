@@ -34,6 +34,15 @@ class TestFingerprintKeySecurityBoundary:
     NOT proceed with a hardcoded key.
     """
 
+    @pytest.fixture(autouse=True)
+    def clear_cache(self) -> None:
+        """Clear fingerprint key cache before each test."""
+        from elspeth.core.security.fingerprint import clear_fingerprint_key_cache
+
+        clear_fingerprint_key_cache()
+        yield
+        clear_fingerprint_key_cache()
+
     def test_missing_all_config_raises_value_error(self) -> None:
         """Must raise ValueError when no key source is configured.
 
@@ -72,7 +81,7 @@ class TestFingerprintKeySecurityBoundary:
             os.environ.pop(_ENV_VAR, None)
 
             # Mock the Key Vault client to fail
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.side_effect = Exception("Network error: Key Vault unreachable")
                 mock_get_client.return_value = mock_client
@@ -99,7 +108,7 @@ class TestFingerprintKeySecurityBoundary:
             mock_secret = MagicMock()
             mock_secret.value = None
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.return_value = mock_secret
                 mock_get_client.return_value = mock_client
@@ -150,7 +159,7 @@ class TestFingerprintKeySecurityBoundary:
             os.environ.pop(_ENV_VAR, None)
 
             # Mock the _get_keyvault_client to raise ImportError
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_get_client.side_effect = ImportError("azure-keyvault-secrets and azure-identity are required")
 
                 with pytest.raises(ImportError, match="azure-keyvault-secrets"):
@@ -171,7 +180,7 @@ class TestFingerprintKeySecurityBoundary:
         ):
             os.environ.pop(_ENV_VAR, None)
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.side_effect = TimeoutError("Connection to Key Vault timed out")
                 mock_get_client.return_value = mock_client
@@ -194,7 +203,7 @@ class TestFingerprintKeySecurityBoundary:
         ):
             os.environ.pop(_ENV_VAR, None)
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 # Simulate Azure SDK authentication error
                 mock_client.get_secret.side_effect = Exception(
@@ -220,7 +229,7 @@ class TestFingerprintKeySecurityBoundary:
             mock_secret = MagicMock()
             mock_secret.value = "secret-from-custom-name"
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.return_value = mock_secret
                 mock_get_client.return_value = mock_client
@@ -245,7 +254,7 @@ class TestFingerprintKeySecurityBoundary:
         ):
             os.environ.pop(_ENV_VAR, None)
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.side_effect = Exception("Some Azure error")
                 mock_get_client.return_value = mock_client
@@ -281,7 +290,7 @@ class TestNoHardcodedFallback:
         ):
             os.environ.pop(_ENV_VAR, None)
 
-            with patch("elspeth.core.security.fingerprint._get_keyvault_client") as mock_get_client:
+            with patch("elspeth.core.security.secret_loader._get_keyvault_client") as mock_get_client:
                 mock_client = MagicMock()
                 mock_client.get_secret.side_effect = Exception("Key Vault down")
                 mock_get_client.return_value = mock_client

@@ -203,3 +203,65 @@ The fingerprint implementation was built for a specific use case and not general
 **Status: STILL VALID**
 
 - Key Vault integration remains limited to fingerprint key loading (`get_fingerprint_key`), with no general-purpose secret loader abstraction. (`src/elspeth/core/security/fingerprint.py:58-95`)
+
+## Resolution (2026-02-02)
+
+**Status: RESOLVED**
+
+### Implementation
+
+Created `src/elspeth/core/security/secret_loader.py` with:
+
+1. **`SecretRef`** - Frozen dataclass for audit-safe secret references (name, fingerprint, source)
+2. **`SecretLoader`** - Protocol defining the interface for secret backends
+3. **`EnvSecretLoader`** - Loads secrets from environment variables
+4. **`KeyVaultSecretLoader`** - Loads secrets from Azure Key Vault with built-in caching
+5. **`CachedSecretLoader`** - Caching wrapper for any loader
+6. **`CompositeSecretLoader`** - Tries multiple backends in order (fallback chain)
+7. **`SecretNotFoundError`** - Exception for missing secrets
+
+### Usage Example
+
+```python
+from elspeth.core.security import (
+    CompositeSecretLoader,
+    EnvSecretLoader,
+    KeyVaultSecretLoader,
+)
+
+# Create a loader chain (env first, then Key Vault)
+loader = CompositeSecretLoader(backends=[
+    EnvSecretLoader(),
+    KeyVaultSecretLoader(vault_url="https://my-vault.vault.azure.net"),
+])
+
+# Get a secret (cached automatically)
+value, ref = loader.get_secret("OPENAI_API_KEY")
+# ref.source = "env" or "keyvault"
+```
+
+### Acceptance Criteria Status
+
+- [x] `SecretLoader` protocol defined with clear contract
+- [x] `EnvSecretLoader` backend (reads from env vars)
+- [x] `KeyVaultSecretLoader` backend (Azure Key Vault)
+- [x] `CompositeSecretLoader` with fallback chain
+- [x] Caching built into `KeyVaultSecretLoader`
+- [x] Existing `get_fingerprint_key()` refactored to use new loader
+- [ ] All loaded secrets are fingerprinted (deferred - caller responsibility)
+- [ ] Secret fingerprints recorded in run metadata (deferred - future enhancement)
+- [ ] At least one plugin (LLM) updated to use secret loader (deferred - future PR)
+- [ ] Documentation updated (inline docstrings added)
+
+### Files Changed
+
+- `src/elspeth/core/security/secret_loader.py` (new - 230 lines)
+- `src/elspeth/core/security/fingerprint.py` (modified)
+- `src/elspeth/core/security/__init__.py` (modified - exports new types)
+- `tests/core/security/test_secret_loader.py` (new - 350 lines, 19 tests)
+
+### Future Work
+
+- Update LLM plugins to use `CompositeSecretLoader` for API keys
+- Record secret fingerprints in run metadata for audit trail
+- Add AWS Secrets Manager backend
