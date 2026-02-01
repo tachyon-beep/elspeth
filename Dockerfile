@@ -21,21 +21,21 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /build
 
 # Copy only dependency specification first (layer caching)
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install all dependencies
-# We install [all] to bundle all plugins (LLM, Azure)
+# Create virtual environment and sync locked dependencies
+# We install the "all" extra to bundle all plugins (LLM, Azure)
 RUN uv venv /opt/venv && \
     . /opt/venv/bin/activate && \
-    uv pip install hatchling
+    uv sync --frozen --extra all --no-install-project --active
 
 # Copy source code
 COPY src/ ./src/
 COPY README.md ./
 
-# Build wheel and install with all optional dependencies (LLM, Azure)
+# Install project from lockfile (non-editable) with all optional dependencies
 RUN . /opt/venv/bin/activate && \
-    uv pip install ".[all]"
+    uv sync --frozen --extra all --no-editable --active
 
 # =============================================================================
 # Stage 2: Runtime
