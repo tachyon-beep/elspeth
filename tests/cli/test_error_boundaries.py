@@ -474,8 +474,10 @@ concurrency:
 
         assert result.exit_code == 1
         output = result.output.lower()
-        # Should show "configuration errors" and field paths
-        assert "configuration errors" in output or "error" in output
+        # Should show validation failure and field paths
+        assert "configuration validation failed" in output or "validation" in output
+        # Should show the specific field that failed
+        assert "concurrency.max_workers" in output
 
     def test_validate_file_not_found_shows_path(self) -> None:
         """Missing settings file shows the attempted path."""
