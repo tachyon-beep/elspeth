@@ -8,6 +8,7 @@ from elspeth.contracts import NodeID, RoutingMode
 from elspeth.contracts.audit import NodeStateFailed
 from elspeth.contracts.enums import NodeStateStatus, NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.engine.expression_parser import ExpressionEvaluationError
 from tests.conftest import as_gate
 
 # Dynamic schema for tests that don't care about specific fields
@@ -973,7 +974,7 @@ class TestConfigGateExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ExpressionEvaluationError):
             executor.execute_config_gate(
                 gate_config=gate_config,
                 node_id=gate_node.node_id,

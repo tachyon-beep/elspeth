@@ -148,117 +148,152 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_none_constant:fp=430d77434f5eb7b7
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_none_constant:fp=f490c0aa548a4194
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_none_constant:fp=66b3bc3a992e3978
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_none_constant:fp=e86191aa33077f06
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=2a1265dd57523285
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=b8da9b8ae8f43f64
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=467dc498660ac444
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=8943d822ebe19545
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=f178b28ab98ef9ae
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=3cc040fb756e5fa1
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=9c7cf4f649cfc773
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=3a169e3dca7884db
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=888be899df6c228e
+- key: engine/expression_parser.py:R5:_ExpressionValidator:_is_row_derived:fp=40eba87e628c602f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Subscript:fp=29f2d2ffb802b63a
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Subscript:fp=6f55f45ddbed25a0
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Attribute:fp=d207ccf6aaaf4972
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Subscript:fp=72ca060b8da8fdeb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=dacbd1b65de6cec8
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Attribute:fp=d4f4ee8b2cf16edb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=7168eedf0ecf0dcd
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Attribute:fp=cb82df64aebd1c63
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Compare:fp=d923ac59db4dad69
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=1ce3a5a3bced2b79
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Constant:fp=34e76020bc109585
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=4ddd10b58e0c4ad3
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionEvaluator:visit_BoolOp:fp=25dc1d50b5283f83
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=b80bad867a007653
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:_ExpressionEvaluator:visit_BoolOp:fp=f459253284542243
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Call:fp=acc23c49ad01b3ac
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=4d71cc42dbd95f70
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Compare:fp=40fecf81214f27a6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=4c93595e555afa1b
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Compare:fp=6297a9128c098172
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=224896e2100fdf0b
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Constant:fp=4ea1f16a53e77d43
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=6c78b31ddb558f9e
+- key: engine/expression_parser.py:R5:_ExpressionValidator:visit_Constant:fp=436fbab3859aefbb
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=03bdcfa69944e7e7
+- key: engine/expression_parser.py:R5:_ExpressionEvaluator:visit_Subscript:fp=32dd192ddc7e45a0
+  owner: architecture
+  reason: Dict type check for helpful error message - shows available fields on KeyError
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:_ExpressionEvaluator:visit_BoolOp:fp=afa76efc0fb28164
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=ec3fcf821300ad0b
+- key: engine/expression_parser.py:R5:_ExpressionEvaluator:visit_BoolOp:fp=950b0ebb84fdeac3
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=b91bf7d099152a77
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=20560443b7b10e60
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=158dc1a152a19b72
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=93d5f84a0e6b81a9
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=b1d36474737daceb
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=97071b14f595dd72
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=db1a14b95e3b573c
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=e2d1f60194cb47e5
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=6e12db801b2343ad
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: engine/expression_parser.py:R5:ExpressionParser:_is_boolean_node:fp=5356a190e8d1d082
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

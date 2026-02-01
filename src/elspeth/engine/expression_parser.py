@@ -29,6 +29,19 @@ class ExpressionSyntaxError(Exception):
     """Raised when expression is not valid Python syntax."""
 
 
+class ExpressionEvaluationError(Exception):
+    """Raised when expression evaluation fails at runtime.
+
+    This wraps operational errors (KeyError, ZeroDivisionError, TypeError)
+    that occur when evaluating expressions against row data. Unlike
+    ExpressionSecurityError (rejected at parse time) or ExpressionSyntaxError
+    (invalid Python syntax), this occurs when the expression is valid but
+    fails during evaluation.
+
+    The original exception is chained via __cause__ for debugging.
+    """
+
+
 # Allowed comparison operators
 _COMPARISON_OPS: dict[type[ast.cmpop], Any] = {
     ast.Eq: operator.eq,
@@ -306,7 +319,24 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         """Evaluate subscript access."""
         value = self.visit(node.value)
         key = self.visit(node.slice)
-        return value[key]
+        try:
+            return value[key]
+        except KeyError as e:
+            # Provide helpful error message with available fields
+            if isinstance(value, dict):
+                available = list(value.keys())
+                msg = f"Field '{key}' not found. Available fields: {available}"
+            else:
+                msg = f"Key '{key}' not found in {type(value).__name__}"
+            raise ExpressionEvaluationError(msg) from e
+        except IndexError as e:
+            # Handle out-of-range index on lists/tuples
+            msg = f"Index {key} out of range for {type(value).__name__} of length {len(value)}"
+            raise ExpressionEvaluationError(msg) from e
+        except TypeError as e:
+            # Handle cases like subscripting None or non-subscriptable types
+            msg = f"Cannot access '{key}' on {type(value).__name__}: {e}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         """Evaluate attribute access (only row.get allowed)."""
@@ -320,7 +350,12 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         """Evaluate function calls (only row.get allowed)."""
         func = self.visit(node.func)
         args = [self.visit(arg) for arg in node.args]
-        return func(*args)
+        try:
+            return func(*args)
+        except TypeError as e:
+            # Handle unhashable key in row.get (e.g., row.get([]) or row.get({'a': 1}))
+            msg = f"invalid argument to row.get(): {e}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_Compare(self, node: ast.Compare) -> Any:
         """Evaluate comparison chains."""
@@ -328,8 +363,13 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         for op, comparator in zip(node.ops, node.comparators, strict=True):
             right = self.visit(comparator)
             op_func = _COMPARISON_OPS[type(op)]
-            if not op_func(left, right):
-                return False
+            try:
+                if not op_func(left, right):
+                    return False
+            except TypeError as e:
+                op_name = type(op).__name__
+                msg = f"type error in comparison ({op_name}): cannot compare {type(left).__name__} and {type(right).__name__}"
+                raise ExpressionEvaluationError(msg) from e
             left = right
         return True
 
@@ -355,13 +395,27 @@ class _ExpressionEvaluator(ast.NodeVisitor):
         left = self.visit(node.left)
         right = self.visit(node.right)
         op_func = _BINARY_OPS[type(node.op)]
-        return op_func(left, right)
+        try:
+            return op_func(left, right)
+        except ZeroDivisionError as e:
+            op_name = type(node.op).__name__
+            msg = f"division by zero in {op_name} operation"
+            raise ExpressionEvaluationError(msg) from e
+        except TypeError as e:
+            op_name = type(node.op).__name__
+            msg = f"type error in {op_name}: cannot apply to {type(left).__name__} and {type(right).__name__}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
         """Evaluate unary operations."""
         operand = self.visit(node.operand)
         op_func = _UNARY_OPS[type(node.op)]
-        return op_func(operand)
+        try:
+            return op_func(operand)
+        except TypeError as e:
+            op_name = type(node.op).__name__
+            msg = f"type error in unary {op_name}: cannot apply to {type(operand).__name__}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_List(self, node: ast.List) -> Any:
         """Evaluate list literals."""
@@ -369,11 +423,16 @@ class _ExpressionEvaluator(ast.NodeVisitor):
 
     def visit_Dict(self, node: ast.Dict) -> Any:
         """Evaluate dict literals."""
-        return {
-            self.visit(k): self.visit(v)
-            for k, v in zip(node.keys, node.values, strict=True)
-            if k is not None  # Handle **spread (not allowed, but be safe)
-        }
+        try:
+            return {
+                self.visit(k): self.visit(v)
+                for k, v in zip(node.keys, node.values, strict=True)
+                if k is not None  # Handle **spread (not allowed, but be safe)
+            }
+        except TypeError as e:
+            # Unhashable key type in dict literal
+            msg = f"cannot create dict literal: {e}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_Tuple(self, node: ast.Tuple) -> Any:
         """Evaluate tuple literals."""
@@ -381,7 +440,12 @@ class _ExpressionEvaluator(ast.NodeVisitor):
 
     def visit_Set(self, node: ast.Set) -> Any:
         """Evaluate set literals."""
-        return {self.visit(elt) for elt in node.elts}
+        try:
+            return {self.visit(elt) for elt in node.elts}
+        except TypeError as e:
+            # Unhashable type in set literal (e.g., {[1]})
+            msg = f"cannot create set literal: {e}"
+            raise ExpressionEvaluationError(msg) from e
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
         """Evaluate ternary expressions."""

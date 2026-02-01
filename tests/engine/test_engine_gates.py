@@ -23,6 +23,7 @@ from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
+from elspeth.engine.expression_parser import ExpressionEvaluationError
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
@@ -1350,13 +1351,14 @@ class TestGateRuntimeErrors:
     doesn't meet expectations, and that optional field patterns work correctly.
     """
 
-    def test_missing_field_raises_key_error(self) -> None:
-        """Gate condition referencing missing field should fail clearly.
+    def test_missing_field_raises_evaluation_error(self) -> None:
+        """Gate condition referencing missing field should fail with context.
 
         Per ELSPETH's design: operations on row values can fail, and when they
         do, the failure should be clear and auditable. A gate condition that
-        references row['missing_field'] should raise KeyError when the field
-        doesn't exist, and this should be recorded as a failed node state.
+        references row['missing_field'] should raise ExpressionEvaluationError
+        (wrapping the KeyError with helpful context like field name and
+        available fields), and this should be recorded as a failed node state.
         """
         from elspeth.contracts import TokenInfo
         from elspeth.contracts.schema import SchemaConfig
@@ -1412,9 +1414,10 @@ class TestGateRuntimeErrors:
 
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        # The expression parser evaluates row['nonexistent'], which raises KeyError
+        # The expression parser evaluates row['nonexistent'], which raises
+        # ExpressionEvaluationError (wrapping the KeyError with context).
         # The executor should catch this and re-raise after recording failure
-        with pytest.raises(KeyError) as exc_info:
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
             executor.execute_config_gate(
                 gate_config=gate_config,
                 node_id=node.node_id,
@@ -1447,7 +1450,8 @@ class TestGateRuntimeErrors:
             import json
 
             error = json.loads(error_json)
-            assert error["type"] == "KeyError", f"Expected KeyError, got {error['type']}"
+            # ExpressionEvaluationError wraps the KeyError with context
+            assert error["type"] == "ExpressionEvaluationError", f"Expected ExpressionEvaluationError, got {error['type']}"
 
     def test_optional_field_with_get_succeeds(self) -> None:
         """Gate using row.get() for optional field should succeed safely.

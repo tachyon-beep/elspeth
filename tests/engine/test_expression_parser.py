@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from elspeth.engine.expression_parser import (
+    ExpressionEvaluationError,
     ExpressionParser,
     ExpressionSecurityError,
     ExpressionSyntaxError,
@@ -683,9 +684,9 @@ class TestExpressionParserFuzz:
             parser = ExpressionParser(expression)
             # If parsing succeeds, the expression must be in the safe subset.
             # Try evaluating with empty row to ensure evaluator also handles it.
-            # Expected runtime errors (KeyError, TypeError, ZeroDivisionError) are
-            # not parser bugs - they're valid expressions failing on empty row data.
-            with contextlib.suppress(KeyError, TypeError, ZeroDivisionError):
+            # Expected runtime errors are now wrapped in ExpressionEvaluationError
+            # (valid expressions failing on empty row data - not parser bugs).
+            with contextlib.suppress(ExpressionEvaluationError):
                 parser.evaluate({})
         except self.ALLOWED_EXCEPTIONS:
             # Security or syntax error - this is expected for malformed input
@@ -1213,3 +1214,144 @@ class TestExpressionParserBugFixes:
         # Default case
         parser2 = ExpressionParser("row.get('missing', {'key': 'default'})['key'] == 'default'")
         assert parser2.evaluate({}) is True
+
+
+class TestExpressionEvaluationError:
+    """Tests for ExpressionEvaluationError wrapping.
+
+    P1-2026-01-31: Expression evaluation errors (KeyError, ZeroDivisionError,
+    TypeError) should be caught and wrapped in ExpressionEvaluationError with
+    contextual information, not bubble up as raw exceptions.
+    """
+
+    def test_missing_field_raises_evaluation_error(self) -> None:
+        """Accessing missing field raises ExpressionEvaluationError with field name."""
+        parser = ExpressionParser("row['nonexistent'] > 0")
+        with pytest.raises(ExpressionEvaluationError, match="nonexistent"):
+            parser.evaluate({"other_field": 1})
+
+    def test_missing_field_error_includes_available_fields(self) -> None:
+        """Error message includes list of available fields for debugging."""
+        parser = ExpressionParser("row['missing'] == 'value'")
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
+            parser.evaluate({"field_a": 1, "field_b": 2})
+        error_msg = str(exc_info.value)
+        assert "missing" in error_msg
+        assert "field_a" in error_msg or "Available fields" in error_msg
+
+    def test_division_by_zero_raises_evaluation_error(self) -> None:
+        """Division by zero raises ExpressionEvaluationError with context."""
+        parser = ExpressionParser("row['numerator'] / row['denominator']")
+        with pytest.raises(ExpressionEvaluationError, match="division"):
+            parser.evaluate({"numerator": 10, "denominator": 0})
+
+    def test_floor_division_by_zero_raises_evaluation_error(self) -> None:
+        """Floor division by zero raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['x'] // row['y']")
+        with pytest.raises(ExpressionEvaluationError, match="division"):
+            parser.evaluate({"x": 10, "y": 0})
+
+    def test_modulo_by_zero_raises_evaluation_error(self) -> None:
+        """Modulo by zero raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['x'] % row['y']")
+        with pytest.raises(ExpressionEvaluationError, match="division"):
+            parser.evaluate({"x": 10, "y": 0})
+
+    def test_type_error_raises_evaluation_error(self) -> None:
+        """Type mismatch in operations raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['text'] + row['number']")
+        with pytest.raises(ExpressionEvaluationError, match="type"):
+            parser.evaluate({"text": "hello", "number": 42})
+
+    def test_nested_field_missing_raises_evaluation_error(self) -> None:
+        """Missing nested field raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['data']['nested'] == 'value'")
+        with pytest.raises(ExpressionEvaluationError, match="nested"):
+            parser.evaluate({"data": {"other": "value"}})
+
+    def test_evaluation_error_includes_expression_text(self) -> None:
+        """Error message includes the expression that failed."""
+        expr_text = "row['missing_field'] > 100"
+        parser = ExpressionParser(expr_text)
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
+            parser.evaluate({})
+        error_msg = str(exc_info.value)
+        assert "missing_field" in error_msg
+
+    def test_evaluation_error_preserves_original_exception(self) -> None:
+        """ExpressionEvaluationError chains the original exception."""
+        parser = ExpressionParser("row['x'] / row['y']")
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
+            parser.evaluate({"x": 1, "y": 0})
+        # Original exception should be chained via __cause__
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, ZeroDivisionError)
+
+    def test_comparison_type_error_raises_evaluation_error(self) -> None:
+        """Type error in comparison raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['x'] < row['y']")
+        with pytest.raises(ExpressionEvaluationError, match="type"):
+            parser.evaluate({"x": "string", "y": 42})
+
+    def test_index_out_of_range_raises_evaluation_error(self) -> None:
+        """Accessing index beyond list bounds raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['items'][5]")
+        with pytest.raises(ExpressionEvaluationError, match="out of range"):
+            parser.evaluate({"items": [1, 2, 3]})
+
+    def test_index_error_includes_length_info(self) -> None:
+        """IndexError message includes collection length for debugging."""
+        parser = ExpressionParser("row['data'][10]")
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
+            parser.evaluate({"data": ["a", "b"]})
+        error_msg = str(exc_info.value)
+        assert "10" in error_msg
+        assert "2" in error_msg  # Length of the list
+
+    def test_unary_minus_type_error_raises_evaluation_error(self) -> None:
+        """Unary minus on string raises ExpressionEvaluationError."""
+        parser = ExpressionParser("-row['text']")
+        with pytest.raises(ExpressionEvaluationError, match="type"):
+            parser.evaluate({"text": "hello"})
+
+    def test_unary_not_on_any_type_succeeds(self) -> None:
+        """Unary not works on any type (Python truthiness)."""
+        parser = ExpressionParser("not row['value']")
+        # Empty string is falsy
+        assert parser.evaluate({"value": ""}) is True
+        # Non-empty string is truthy
+        assert parser.evaluate({"value": "hello"}) is False
+
+    def test_negative_index_out_of_range_raises_evaluation_error(self) -> None:
+        """Negative index beyond bounds raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['items'][-10]")
+        with pytest.raises(ExpressionEvaluationError, match="out of range"):
+            parser.evaluate({"items": [1, 2, 3]})
+
+    def test_unary_plus_type_error_raises_evaluation_error(self) -> None:
+        """Unary plus on string raises ExpressionEvaluationError."""
+        parser = ExpressionParser("+row['text']")
+        with pytest.raises(ExpressionEvaluationError, match="type"):
+            parser.evaluate({"text": "hello"})
+
+    def test_tuple_index_out_of_range_raises_evaluation_error(self) -> None:
+        """Index out of range on tuple raises ExpressionEvaluationError."""
+        parser = ExpressionParser("row['data'][5]")
+        with pytest.raises(ExpressionEvaluationError, match="out of range"):
+            parser.evaluate({"data": (1, 2)})
+
+    def test_row_get_unhashable_key_raises_evaluation_error(self) -> None:
+        """row.get with unhashable key raises ExpressionEvaluationError."""
+        # This expression passes validation but fails at runtime
+        parser = ExpressionParser("row.get(['list', 'key'])")
+        with pytest.raises(ExpressionEvaluationError, match=r"row\.get"):
+            parser.evaluate({"field": "value"})
+
+    def test_missing_field_error_preserves_cause(self) -> None:
+        """KeyError is preserved as __cause__ for missing field errors."""
+        parser = ExpressionParser("row['missing']")
+        with pytest.raises(ExpressionEvaluationError) as exc_info:
+            parser.evaluate({})
+        # Original KeyError should be chained
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, KeyError)
