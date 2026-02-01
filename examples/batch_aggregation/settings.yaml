@@ -25,7 +25,8 @@ aggregations:
     plugin: batch_stats
     trigger:
       count: 5  # Aggregate every 5 rows
-    output_mode: single  # Produce one summary row per batch
+    output_mode: transform  # Produce one summary row per batch
+    # Use expected_output_count: 1 to validate N→1 cardinality
     options:
       schema:
         fields: dynamic
