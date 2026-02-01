@@ -9,74 +9,73 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── cli/                      # Command-line interface (0 P1, 1 P2, 1 P3)
-├── contracts/                # Contract validation (3 P2, 2 P3)
-├── core-canonical/           # Canonicalization (1 P2)
-├── core-checkpoint/          # Checkpointing/recovery (2 P2, 0 P3)
-├── core-config/              # Configuration system (2 P2, 1 P3)
-├── core-dag/                 # DAG validation, graph construction (1 P1, 2 P2)
-├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 1 P3)
-├── core-logging/             # Logging/telemetry output (1 P2)
-├── core-rate-limit/          # Rate limiters (1 P2)
-├── core-retention/           # Retention/purge (2 P2)
-├── core-security/            # Secret handling (1 P2, 1 P3)
-├── engine-coalesce/          # Fork/join/merge logic (0 P1) - EMPTY
-├── engine-executors/         # Executor flow (1 P2)
-├── engine-expression-parser/ # Expression parsing (1 P1)
-├── engine-orchestrator/      # Pipeline execution, routing (1 P1, 3 P2, 2 P3)
-├── engine-pooling/           # Pooling infrastructure (1 P2, 1 P3)
-├── engine-processor/         # Token management, outcomes (1 P2, 2 P3)
-├── engine-retry/             # Retry logic (1 P2, 2 P3)
-├── engine-spans/             # Observability, tracing (2 P2, 0 P3)
-├── engine-tokens/            # Token lineage (1 P2)
-├── engine-triggers/          # Trigger evaluation (1 P2)
-├── mcp/                      # MCP tooling (2 P2)
-├── plugins-azure/            # Azure plugin pack (1 P2, 1 P3)
-├── plugins-llm/              # Base LLM transforms (5 P2, 1 P3)
-├── plugins-sinks/            # Sink implementations (2 P2, 0 P3)
-├── plugins-sources/          # Source implementations (1 P3)
-└── plugins-transforms/       # Transform implementations (1 P1)
+├── cli/                      # Command-line interface (0 P1, 0 P2, 0 P3)
+├── contracts/                # Contract validation (0 P1, 0 P2, 0 P3)
+├── core-canonical/           # Canonicalization (0 P1, 0 P2, 0 P3)
+├── core-checkpoint/          # Checkpointing/recovery (0 P1, 0 P2, 0 P3)
+├── core-config/              # Configuration system (0 P1, 0 P2, 1 P3)
+├── core-dag/                 # DAG validation, graph construction (0 P1, 1 P2, 0 P3)
+├── core-landscape/           # Audit trail, recovery, verifier (0 P1, 0 P2, 0 P3)
+├── core-logging/             # Logging/telemetry output (0 P1, 0 P2, 0 P3)
+├── core-rate-limit/          # Rate limiters (0 P1, 0 P2, 0 P3)
+├── core-retention/           # Retention/purge (0 P1, 0 P2, 0 P3)
+├── core-security/            # Secret handling (0 P1, 0 P2, 0 P3)
+├── engine-coalesce/          # Fork/join/merge logic (0 P1, 0 P2, 0 P3) - EMPTY
+├── engine-executors/         # Executor flow (0 P1, 0 P2, 0 P3)
+├── engine-expression-parser/ # Expression parsing (0 P1, 0 P2, 0 P3)
+├── engine-orchestrator/      # Pipeline execution, routing (0 P1, 0 P2, 0 P3)
+├── engine-pooling/           # Pooling infrastructure (0 P1, 1 P2, 1 P3)
+├── engine-processor/         # Token management, outcomes (0 P1, 0 P2, 2 P3)
+├── engine-retry/             # Retry logic (0 P1, 0 P2, 2 P3)
+├── engine-spans/             # Observability, tracing (0 P1, 0 P2, 0 P3)
+├── engine-tokens/            # Token lineage (0 P1, 0 P2, 0 P3)
+├── engine-triggers/          # Trigger evaluation (0 P1, 0 P2, 0 P3)
+├── mcp/                      # MCP tooling (0 P1, 0 P2, 0 P3)
+├── plugins-azure/            # Azure plugin pack (0 P1, 0 P2, 0 P3)
+├── plugins-llm/              # Base LLM transforms (0 P1, 0 P2, 0 P3)
+├── plugins-sinks/            # Sink implementations (0 P1, 0 P2, 0 P3)
+├── plugins-sources/          # Source implementations (0 P1, 0 P2, 0 P3)
+└── plugins-transforms/       # Transform implementations (0 P1, 0 P2, 0 P3)
 ```
 
 ## Bug Counts by Subsystem
 
 | Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Notes |
 |-----------|---------|---------|---------|-------|-------|
-| **core-landscape** | 0 | 8 | 1 | 9 | Export + verifier gaps |
-| **engine-orchestrator** | 1 | 3 | 2 | 6 | Run lifecycle + cleanup |
-| **contracts** | 0 | 3 | 2 | 5 | Schema/contract validation |
-| **plugins-llm** | 0 | 5 | 1 | 6 | LLM audit + semantics |
+| **core-landscape** | 0 | 0 | 0 | 0 | — |
+| **engine-orchestrator** | 0 | 0 | 0 | 0 | — |
+| **contracts** | 0 | 0 | 0 | 0 | — |
+| **plugins-llm** | 0 | 0 | 0 | 0 | — |
 | **engine-coalesce** | 0 | 0 | 0 | 0 | Fork/join timeouts (all fixed) |
-| **core-checkpoint** | 0 | 2 | 0 | 2 | Resume + checkpoint format |
-| **core-config** | 0 | 2 | 1 | 3 | Plugin config validation |
+| **core-checkpoint** | 0 | 0 | 0 | 0 | — |
+| **core-config** | 0 | 0 | 1 | 1 | Plugin config validation |
 | **engine-pooling** | 0 | 1 | 1 | 2 | Pooling/batching |
-| **engine-processor** | 0 | 1 | 2 | 3 | Token handling |
-| **engine-retry** | 0 | 1 | 2 | 3 | Retry semantics |
-| **engine-spans** | 0 | 2 | 0 | 2 | Tracing |
-| **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiter correctness |
-| **plugins-sinks** | 0 | 2 | 0 | 2 | Sink validation |
-| **cli** | 0 | 1 | 1 | 2 | CLI behavior |
-| **core-dag** | 1 | 2 | 0 | 3 | DAG validation |
+| **engine-processor** | 0 | 0 | 2 | 2 | Token handling |
+| **engine-retry** | 0 | 0 | 2 | 2 | Retry semantics |
+| **engine-spans** | 0 | 0 | 0 | 0 | — |
+| **core-rate-limit** | 0 | 0 | 0 | 0 | — |
+| **plugins-sinks** | 0 | 0 | 0 | 0 | — |
+| **cli** | 0 | 0 | 0 | 0 | — |
+| **core-dag** | 0 | 1 | 0 | 1 | DAG validation |
 | **core-payload** | 0 | 0 | 0 | 0 | Payload storage (all fixed) |
-| **core-retention** | 0 | 2 | 0 | 2 | Retention |
-| **core-security** | 0 | 1 | 1 | 2 | Secret handling |
-| **engine-executors** | 0 | 1 | 0 | 1 | Executor failures |
-| **mcp** | 0 | 2 | 0 | 2 | MCP tooling |
-| **plugins-azure** | 0 | 1 | 1 | 2 | Azure plugin pack |
-| **core-canonical** | 0 | 1 | 0 | 1 | Canonicalization |
-| **core-logging** | 0 | 1 | 0 | 1 | Logging output |
-| **engine-expression-parser** | 1 | 0 | 0 | 1 | Expression errors |
-| **engine-tokens** | 0 | 1 | 0 | 1 | Token lineage |
-| **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
-| **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
-| **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **2** | **44** | **15** | **61** | All bugs organized |
+| **core-retention** | 0 | 0 | 0 | 0 | — |
+| **core-security** | 0 | 0 | 0 | 0 | — |
+| **engine-executors** | 0 | 0 | 0 | 0 | — |
+| **mcp** | 0 | 0 | 0 | 0 | — |
+| **plugins-azure** | 0 | 0 | 0 | 0 | — |
+| **core-canonical** | 0 | 0 | 0 | 0 | — |
+| **core-logging** | 0 | 0 | 0 | 0 | — |
+| **engine-expression-parser** | 0 | 0 | 0 | 0 | — |
+| **engine-tokens** | 0 | 0 | 0 | 0 | — |
+| **engine-triggers** | 0 | 0 | 0 | 0 | — |
+| **plugins-sources** | 0 | 0 | 0 | 0 | — |
+| **plugins-transforms** | 0 | 0 | 0 | 0 | — |
+| **TOTAL** | **0** | **2** | **6** | **8** | All bugs organized |
 
 ## Recommended Fix Order
 
 ### Phase 1: Critical Data Integrity (P1 - Fix This Sprint)
-1. **engine-expression-parser/P1-2026-01-31-expression-errors-bubble-raw** - Hard crash + opaque errors
-2. **plugins-transforms/P1-2026-01-31-context-record-call-bypasses-allocator** - call_index collisions
+- None (no open P1s as of 2026-02-01).
 
 Note: P1s closed during RC1 bug hunt:
 - **engine-coalesce/P1-2026-01-30-require-all-timeout-ignored** - Fixed with require_all timeout handling
@@ -124,7 +123,7 @@ Note: P1s closed during RC1 bug hunt:
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 2 P1, 44 P2, 15 P3 = 61 total.**
+**Open bugs (as of 2026-02-01): 0 P1, 2 P2, 6 P3 = 8 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
