@@ -19,11 +19,11 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
+from elspeth.plugins.clients.llm import NetworkError, RateLimitError, ServerError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
-from elspeth.plugins.pooling import is_capacity_error
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -304,15 +304,21 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 )
                 response.raise_for_status()
             except httpx.HTTPStatusError as e:
+                # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
+                # Matching Azure pattern: non-retryable errors return TransformResult.error()
+                status_code = e.response.status_code
+                if status_code == 429:
+                    raise RateLimitError(f"Rate limited: {e}") from e
+                elif status_code >= 500:
+                    raise ServerError(f"Server error ({status_code}): {e}") from e
+                # Non-retryable HTTP errors (4xx except 429) return error result
                 return TransformResult.error(
-                    {"reason": "api_call_failed", "error": str(e)},
-                    retryable=is_capacity_error(e.response.status_code),
-                )
-            except httpx.RequestError as e:
-                return TransformResult.error(
-                    {"reason": "api_call_failed", "error": str(e)},
+                    {"reason": "api_call_failed", "error": str(e), "status_code": status_code},
                     retryable=False,
                 )
+            except httpx.RequestError as e:
+                # Network errors (timeout, connection refused) are retryable
+                raise NetworkError(f"Network error: {e}") from e
 
             # 5. Parse JSON response (EXTERNAL DATA - wrap)
             try:

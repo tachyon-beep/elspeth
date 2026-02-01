@@ -160,3 +160,77 @@ Analyze these entries:
         template = PromptTemplate("Hello, {{ row.name }}!", lookup_data={})
         assert template.lookup_hash is not None  # Empty dict still gets hashed
         assert template.lookup_source is None  # No source file specified
+
+
+class TestPromptTemplateCanonicalSafety:
+    """Tests for canonicalization error handling in render_with_metadata().
+
+    Regression tests for P2-2026-01-31-azure-canonicalization-crash:
+    Row data containing NaN or Infinity should raise TemplateError
+    (row-scoped failure) instead of crashing the entire pipeline.
+    """
+
+    def test_nan_in_row_raises_template_error(self) -> None:
+        """NaN in row data raises TemplateError, not ValueError.
+
+        Per Three-Tier Trust Model: row data failures should be quarantined,
+        not crash the entire run. TemplateError is caught by transform plugins
+        and converted to TransformResult.error().
+        """
+        template = PromptTemplate("Value: {{ row.value }}")
+        row = {"value": float("nan")}
+
+        with pytest.raises(TemplateError, match="Cannot compute variables hash"):
+            template.render_with_metadata(row)
+
+    def test_infinity_in_row_raises_template_error(self) -> None:
+        """Infinity in row data raises TemplateError, not ValueError."""
+        template = PromptTemplate("Value: {{ row.value }}")
+        row = {"value": float("inf")}
+
+        with pytest.raises(TemplateError, match="Cannot compute variables hash"):
+            template.render_with_metadata(row)
+
+    def test_negative_infinity_in_row_raises_template_error(self) -> None:
+        """Negative infinity in row data raises TemplateError, not ValueError."""
+        template = PromptTemplate("Value: {{ row.value }}")
+        row = {"value": float("-inf")}
+
+        with pytest.raises(TemplateError, match="Cannot compute variables hash"):
+            template.render_with_metadata(row)
+
+    def test_nan_in_nested_structure_raises_template_error(self) -> None:
+        """NaN in nested dict/list raises TemplateError."""
+        template = PromptTemplate("Data: {{ row.data }}")
+        row = {"data": {"nested": [1, 2, float("nan"), 4]}}
+
+        with pytest.raises(TemplateError, match="Cannot compute variables hash"):
+            template.render_with_metadata(row)
+
+    def test_normal_render_still_works(self) -> None:
+        """Normal row data still renders correctly (sanity check)."""
+        template = PromptTemplate("Name: {{ row.name }}, Age: {{ row.age }}")
+        row = {"name": "Alice", "age": 30}
+
+        result = template.render_with_metadata(row)
+
+        assert result.prompt == "Name: Alice, Age: 30"
+        assert result.variables_hash is not None
+        assert result.template_hash is not None
+
+    def test_render_without_metadata_unaffected(self) -> None:
+        """render() (without metadata) is unaffected by NaN since it doesn't canonicalize.
+
+        The rendering itself works - it's only the hash computation that fails.
+        This confirms the bug is specifically in render_with_metadata().
+        """
+        template = PromptTemplate("Value: {{ row.value }}")
+        row = {"value": float("nan")}
+
+        # render() works (doesn't compute hash)
+        result = template.render(row)
+        assert result == "Value: nan"
+
+        # render_with_metadata() fails (computes hash)
+        with pytest.raises(TemplateError, match="Cannot compute variables hash"):
+            template.render_with_metadata(row)

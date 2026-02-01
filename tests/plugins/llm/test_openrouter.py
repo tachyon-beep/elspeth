@@ -364,10 +364,40 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.reason["reason"] == "template_rendering_failed"
         assert "template_hash" in result.reason
 
-    def test_http_error_emits_error(
+    def test_http_error_400_returns_error_result(
         self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
     ) -> None:
-        """HTTP error emits TransformResult.error()."""
+        """Non-retryable HTTP errors (4xx except 429) return TransformResult.error()."""
+        with mock_httpx_client(
+            chaosllm_server,
+            side_effect=httpx.HTTPStatusError(
+                "Bad Request",
+                request=Mock(),
+                response=Mock(status_code=400),
+            ),
+        ):
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "api_call_failed"
+        assert result.reason["status_code"] == 400
+        assert result.retryable is False
+
+    def test_http_error_500_raises_server_error(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+    ) -> None:
+        """Server errors (5xx) raise ServerError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics.
+        """
+        from elspeth.plugins.clients.llm import ServerError
+
         with mock_httpx_client(
             chaosllm_server,
             side_effect=httpx.HTTPStatusError(
@@ -381,21 +411,23 @@ class TestOpenRouterLLMTransformPipelining:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, ServerError)
+        assert result.exception.retryable is True
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is False
-
-    def test_rate_limit_429_is_retryable(
+    def test_rate_limit_429_raises_rate_limit_error(
         self,
         ctx: PluginContext,
         transform: OpenRouterLLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
-        """Rate limit (429) errors are marked retryable."""
+        """Rate limit (429) errors raise RateLimitError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics.
+        """
+        from elspeth.plugins.clients.llm import RateLimitError
+
         with mock_httpx_client(
             chaosllm_server,
             side_effect=httpx.HTTPStatusError(
@@ -409,21 +441,23 @@ class TestOpenRouterLLMTransformPipelining:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, RateLimitError)
+        assert result.exception.retryable is True
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is True
-
-    def test_service_unavailable_503_is_retryable(
+    def test_service_unavailable_503_raises_server_error(
         self,
         ctx: PluginContext,
         transform: OpenRouterLLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
-        """Service unavailable (503) errors are marked retryable for consistency with pooled mode."""
+        """Service unavailable (503) errors raise ServerError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics.
+        """
+        from elspeth.plugins.clients.llm import ServerError
+
         with mock_httpx_client(
             chaosllm_server,
             side_effect=httpx.HTTPStatusError(
@@ -437,21 +471,23 @@ class TestOpenRouterLLMTransformPipelining:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, ServerError)
+        assert result.exception.retryable is True
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is True
-
-    def test_overloaded_529_is_retryable(
+    def test_overloaded_529_raises_server_error(
         self,
         ctx: PluginContext,
         transform: OpenRouterLLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
-        """Overloaded (529) errors are marked retryable for consistency with pooled mode."""
+        """Overloaded (529) errors raise ServerError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics.
+        """
+        from elspeth.plugins.clients.llm import ServerError
+
         with mock_httpx_client(
             chaosllm_server,
             side_effect=httpx.HTTPStatusError(
@@ -465,33 +501,33 @@ class TestOpenRouterLLMTransformPipelining:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, ServerError)
+        assert result.exception.retryable is True
 
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is True
-
-    def test_request_error_not_retryable(
+    def test_network_error_raises_network_error(
         self,
         ctx: PluginContext,
         transform: OpenRouterLLMTransform,
         collector: CollectorOutputPort,
         chaosllm_server,
     ) -> None:
-        """Network/connection errors (RequestError) are not retryable."""
+        """Network/connection errors raise NetworkError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics:
+        Network errors are transient and should be retried.
+        """
+        from elspeth.plugins.clients.llm import NetworkError
+
         with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
-
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is False
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, NetworkError)
+        assert result.exception.retryable is True
 
     def test_missing_state_id_propagates_exception(
         self, mock_recorder: Mock, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
@@ -855,8 +891,13 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.row is not None
         assert result.row["llm_response_usage"] == {}
 
-    def test_connection_error_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
-        """Network connection error emits TransformResult.error()."""
+    def test_connection_error_raises_network_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
+        """Network connection error raises NetworkError for engine RetryManager.
+
+        Regression test for P2-2026-01-31-openrouter-retry-semantics.
+        """
+        from elspeth.plugins.clients.llm import NetworkError
+
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -888,12 +929,9 @@ class TestOpenRouterLLMTransformIntegration:
 
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
-        assert isinstance(result, TransformResult)
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert "connect" in result.reason["error"].lower()
-        assert result.retryable is False  # Connection errors not auto-retryable
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, NetworkError)
+        assert result.exception.retryable is True
 
     def test_timeout_passed_to_http_client(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Custom timeout_seconds is used when creating HTTP client."""

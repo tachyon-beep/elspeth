@@ -20,7 +20,7 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
+from elspeth.plugins.llm import get_llm_audit_fields, get_multi_query_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
     OutputFieldConfig,
@@ -156,7 +156,18 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Multi-query: collect fields from all query specs
         # TransformDataConfig guarantees schema_config is not None
         schema_config = cfg.schema_config
-        all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
+
+        # Multi-query emits suffixed fields only, NOT the base field
+        # e.g., category_score, category_rationale, category_usage, category_model
+        # NOT category (the base field)
+        all_guaranteed: set[str] = set()
+        for spec in self._query_specs:
+            # Metadata fields (_usage, _model)
+            all_guaranteed.update(get_multi_query_guaranteed_fields(spec.output_prefix))
+            # Output mapping fields (e.g., _score, _rationale)
+            for field_config in self._output_mapping.values():
+                all_guaranteed.add(f"{spec.output_prefix}_{field_config.suffix}")
+
         all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
 
         # Merge with base schema

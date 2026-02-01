@@ -1331,3 +1331,212 @@ class TestAzureBatchLLMTransformClose:
 
         # Should not raise
         transform.close()
+
+
+class TestAzureBatchLLMTransformMissingResults:
+    """Tests for handling missing results from Azure batch output.
+
+    Regression tests for P2-2026-01-31-azure-batch-missing-call-records:
+    When a row's result is missing from Azure batch output, we must still
+    record an LLM Call to maintain audit trail completeness.
+    """
+
+    @pytest.fixture
+    def transform(self) -> AzureBatchLLMTransform:
+        """Create a basic transform."""
+        return AzureBatchLLMTransform(
+            {
+                "deployment_name": "my-gpt4o-batch",
+                "endpoint": "https://my-resource.openai.azure.com",
+                "api_key": "azure-api-key",
+                "template": "Analyze: {{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+                "required_input_fields": [],
+            }
+        )
+
+    def test_missing_result_records_error_call(self, transform: AzureBatchLLMTransform) -> None:
+        """Missing result from batch output records an ERROR Call for audit trail.
+
+        Per CLAUDE.md: "External calls - Full request AND response recorded"
+        A missing response is still recordable - request was made, no response.
+        """
+        # Create context with mocked landscape
+        mock_landscape = MagicMock()
+        # Use incrementing call_index (multiple calls: HTTP for retrieve, HTTP for download, then LLM calls)
+        call_index_counter = iter(range(100))
+        mock_landscape.allocate_call_index.side_effect = lambda _: next(call_index_counter)
+
+        ctx = PluginContext(run_id="test-run", config={})
+        ctx.landscape = mock_landscape
+        ctx.state_id = "test-state-123"  # Required for record_call
+
+        # Set up checkpoint as if batch was submitted with 2 rows
+        checkpoint = {
+            "batch_id": "batch-999",
+            "input_file_id": "file-input",
+            "row_mapping": {
+                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
+                "row-1-def": {"index": 1, "variables_hash": "hash1"},
+            },
+            "template_errors": [],
+            "submitted_at": "2026-01-31T12:00:00Z",
+            "row_count": 2,
+            "requests": {
+                "row-0-abc": {
+                    "model": "my-gpt4o-batch",
+                    "messages": [{"role": "user", "content": "Analyze: Hello"}],
+                    "temperature": 0.0,
+                },
+                "row-1-def": {
+                    "model": "my-gpt4o-batch",
+                    "messages": [{"role": "user", "content": "Analyze: World"}],
+                    "temperature": 0.0,
+                },
+            },
+        }
+        ctx._checkpoint = checkpoint
+
+        # Mock Azure client - batch is completed
+        mock_batch = Mock()
+        mock_batch.id = "batch-999"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "file-output"
+
+        mock_file_content = Mock()
+        # Only return result for row-0, NOT row-1 (simulating missing result)
+        mock_file_content.text = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "choices": [{"message": {"content": "Analysis result"}}],
+                        "usage": {"total_tokens": 10},
+                        "model": "gpt-4o-batch",
+                    },
+                },
+            }
+        )
+
+        mock_client = Mock()
+        mock_client.batches.retrieve.return_value = mock_batch
+        mock_client.files.content.return_value = mock_file_content
+
+        transform._client = mock_client
+
+        # Process with rows
+        rows = [{"text": "Hello"}, {"text": "World"}]
+        result = transform.process(rows, ctx)
+
+        # Result should succeed (partial results are allowed)
+        assert result.status == "success"
+        assert len(result.rows) == 2
+
+        # First row should have response
+        assert result.rows[0]["llm_response"] == "Analysis result"
+
+        # Second row should have error
+        assert result.rows[1]["llm_response"] is None
+        assert result.rows[1]["llm_response_error"]["reason"] == "result_not_found"
+
+        # CRITICAL: Verify record_call was called for BOTH rows
+        # The fix adds a record_call for the missing result
+        call_args_list = mock_landscape.record_call.call_args_list
+
+        # Should have 4 calls: 2 HTTP (retrieve + download) + 2 LLM (missing + success)
+        assert len(call_args_list) == 4, f"Expected 4 record_call invocations, got {len(call_args_list)}"
+
+        # Find the LLM calls only (filter out HTTP calls)
+        from elspeth.contracts import CallStatus, CallType
+
+        llm_calls = [call for call in call_args_list if call.kwargs.get("call_type") == CallType.LLM]
+        assert len(llm_calls) == 2, f"Expected 2 LLM calls, got {len(llm_calls)}"
+
+        # Find the error call (for missing result)
+        error_calls = [call for call in llm_calls if call.kwargs.get("status") == CallStatus.ERROR]
+        assert len(error_calls) == 1, "Expected exactly 1 ERROR LLM call for missing result"
+
+        error_call = error_calls[0]
+        assert error_call.kwargs["call_type"] == CallType.LLM
+        assert error_call.kwargs["request_data"]["custom_id"] == "row-1-def"
+        assert error_call.kwargs["request_data"]["row_index"] == 1
+        assert error_call.kwargs["error"]["reason"] == "result_not_found"
+
+    def test_all_results_present_no_error_calls(self, transform: AzureBatchLLMTransform) -> None:
+        """When all results are present, only SUCCESS calls are recorded."""
+        mock_landscape = MagicMock()
+        # Use incrementing call_index (multiple calls: HTTP for retrieve, HTTP for download, then LLM calls)
+        call_index_counter = iter(range(100))
+        mock_landscape.allocate_call_index.side_effect = lambda _: next(call_index_counter)
+
+        ctx = PluginContext(run_id="test-run", config={})
+        ctx.landscape = mock_landscape
+        ctx.state_id = "test-state-456"
+
+        checkpoint = {
+            "batch_id": "batch-888",
+            "input_file_id": "file-input",
+            "row_mapping": {
+                "row-0-abc": {"index": 0, "variables_hash": "hash0"},
+            },
+            "template_errors": [],
+            "submitted_at": "2026-01-31T12:00:00Z",
+            "row_count": 1,
+            "requests": {
+                "row-0-abc": {
+                    "model": "my-gpt4o-batch",
+                    "messages": [{"role": "user", "content": "Analyze: Hello"}],
+                    "temperature": 0.0,
+                },
+            },
+        }
+        ctx._checkpoint = checkpoint
+
+        mock_batch = Mock()
+        mock_batch.id = "batch-888"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "file-output"
+
+        mock_file_content = Mock()
+        mock_file_content.text = json.dumps(
+            {
+                "custom_id": "row-0-abc",
+                "response": {
+                    "status_code": 200,
+                    "body": {
+                        "choices": [{"message": {"content": "Analysis result"}}],
+                        "usage": {"total_tokens": 10},
+                        "model": "gpt-4o-batch",
+                    },
+                },
+            }
+        )
+
+        mock_client = Mock()
+        mock_client.batches.retrieve.return_value = mock_batch
+        mock_client.files.content.return_value = mock_file_content
+
+        transform._client = mock_client
+
+        rows = [{"text": "Hello"}]
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.rows[0]["llm_response"] == "Analysis result"
+
+        # Only SUCCESS calls for LLM, no ERROR LLM calls
+        from elspeth.contracts import CallStatus, CallType
+
+        call_args_list = mock_landscape.record_call.call_args_list
+
+        # Find LLM calls only
+        llm_calls = [call for call in call_args_list if call.kwargs.get("call_type") == CallType.LLM]
+        assert len(llm_calls) == 1, f"Expected 1 LLM call, got {len(llm_calls)}"
+
+        # Should be SUCCESS, not ERROR
+        assert llm_calls[0].kwargs["status"] == CallStatus.SUCCESS
+
+        # No ERROR LLM calls when all results present
+        error_llm_calls = [call for call in llm_calls if call.kwargs.get("status") == CallStatus.ERROR]
+        assert len(error_llm_calls) == 0, "Should have no ERROR LLM calls when all results present"

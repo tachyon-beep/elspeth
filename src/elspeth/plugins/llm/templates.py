@@ -168,11 +168,20 @@ class PromptTemplate:
 
         Returns:
             RenderedPrompt with prompt string and all hashes
+
+        Raises:
+            TemplateError: If rendering fails or row contains non-canonicalizable values
+                (e.g., NaN, Infinity)
         """
         prompt = self.render(row)
 
         # Compute variables hash using canonical JSON (row data only)
-        variables_hash = _sha256(canonical_json(row))
+        # Wrap ValueError/TypeError from canonical_json (NaN/Infinity rejection, non-serializable types)
+        # This ensures row-scoped failures don't crash the entire run (Tier 2 trust model)
+        try:
+            variables_hash = _sha256(canonical_json(row))
+        except (ValueError, TypeError) as e:
+            raise TemplateError(f"Cannot compute variables hash: {e}") from e
 
         # Compute rendered prompt hash
         rendered_hash = _sha256(prompt)

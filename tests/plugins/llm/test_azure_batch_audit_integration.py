@@ -8,6 +8,8 @@ row states.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from elspeth.contracts import (
@@ -340,7 +342,114 @@ def test_failed_llm_call_recorded(real_landscape_db) -> None:
     assert failed_call.call_type == CallType.LLM
     assert failed_call.error_json is not None
     # Error is stored as JSON string in error_json field
-    import json
-
     error = json.loads(failed_call.error_json)
     assert error["code"] == "content_filter"
+
+
+@pytest.mark.integration
+def test_missing_result_gets_call_record(real_landscape_db) -> None:
+    """Verify rows missing from Azure batch output still get Call records.
+
+    Regression test for P2-2026-01-31-azure-batch-missing-call-records:
+    When a row's result is missing from Azure batch output, we must still
+    record an LLM Call to maintain audit trail completeness.
+
+    Per CLAUDE.md: "External calls - Full request AND response recorded"
+    A missing response is still a response (absence of data is data).
+    """
+    recorder = LandscapeRecorder(real_landscape_db)
+
+    run = recorder.begin_run(
+        config={"pipeline": "test-missing-result"},
+        canonical_version="v1",
+    )
+
+    source_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="csv_source",
+        node_type=NodeType.SOURCE,
+        plugin_version="1.0",
+        config={},
+        schema_config=DYNAMIC_SCHEMA,
+    )
+
+    batch_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="azure_batch_llm",
+        node_type=NodeType.AGGREGATION,
+        plugin_version="1.0",
+        config={"deployment_name": "gpt-4o-batch"},
+        schema_config=DYNAMIC_SCHEMA,
+    )
+
+    row = recorder.create_row(
+        run_id=run.run_id,
+        source_node_id=source_node.node_id,
+        row_index=0,
+        data={"text": "Row that Azure didn't return"},
+    )
+
+    token = recorder.create_token(row_id=row.row_id)
+
+    state = recorder.begin_node_state(
+        token_id=token.token_id,
+        node_id=batch_node.node_id,
+        run_id=run.run_id,
+        step_index=1,
+        input_data={"batch_rows": [{"text": "Row that Azure didn't return"}]},
+    )
+
+    # Record a "result_not_found" LLM call - this is what the fix adds
+    recorder.record_call(
+        state_id=state.state_id,
+        call_index=0,
+        call_type=CallType.LLM,
+        status=CallStatus.ERROR,
+        request_data={
+            "custom_id": "row-0-missing",
+            "row_index": 0,
+            "messages": [{"role": "user", "content": "Analyze: Row that Azure didn't return"}],
+            "model": "gpt-4o-batch",
+        },
+        response_data=None,
+        error={
+            "reason": "result_not_found",
+            "custom_id": "row-0-missing",
+        },
+    )
+
+    recorder.complete_node_state(
+        state_id=state.state_id,
+        status=NodeStateStatus.FAILED,
+        output_data=None,
+        duration_ms=100.0,
+        error={"reason": "result_not_found"},
+    )
+
+    recorder.record_token_outcome(
+        run_id=run.run_id,
+        token_id=token.token_id,
+        outcome=RowOutcome.FAILED,
+        error_hash="missing-result",
+    )
+
+    lineage = explain(
+        recorder=recorder,
+        run_id=run.run_id,
+        token_id=token.token_id,
+    )
+
+    assert lineage is not None
+
+    # Verify Call record exists for the missing result
+    error_calls = [c for c in lineage.calls if c.status == CallStatus.ERROR]
+    assert len(error_calls) == 1, f"Expected 1 error call, got {len(error_calls)}"
+
+    error_call = error_calls[0]
+    assert error_call.call_type == CallType.LLM
+    assert error_call.request_hash is not None  # Request was recorded
+    assert error_call.error_json is not None  # Error was recorded
+
+    # Verify error contains "result_not_found"
+    error = json.loads(error_call.error_json)
+    assert error["reason"] == "result_not_found"

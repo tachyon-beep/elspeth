@@ -753,6 +753,12 @@ class AzureBatchLLMTransform(BaseTransform):
                 malformed_lines.append(f"Line {line_num}: Missing 'custom_id' field")
                 continue
 
+            # Validate custom_id is one we sent (membership check at Tier 3 boundary)
+            # Azure returning an unknown custom_id would indicate a serious API issue
+            if custom_id not in row_mapping:
+                malformed_lines.append(f"Line {line_num}: Unknown 'custom_id': {custom_id}")
+                continue
+
             # Tier 3 -> Tier 2 boundary: Validate structure immediately
             # Azure Batch API returns either "error" OR "response", never both
             has_error = "error" in result
@@ -818,7 +824,8 @@ class AzureBatchLLMTransform(BaseTransform):
             custom_id = idx_to_custom_id[idx]
 
             if custom_id not in results_by_id:
-                # Result not found - should not happen
+                # Result not found in Azure batch output - request was sent but no response received
+                # This is rare but can happen with Azure Batch API edge cases
                 output_row = dict(row)
                 output_row[self._response_field] = None
                 output_row[f"{self._response_field}_error"] = {
@@ -827,6 +834,23 @@ class AzureBatchLLMTransform(BaseTransform):
                 }
                 output_rows.append(output_row)
                 row_errors.append({"row_index": idx, "reason": "result_not_found"})
+
+                # Record Call for audit trail completeness - request WAS made but no response
+                # Without this, explain(token_id) would show incomplete lineage
+                # Access directly from checkpoint (Tier 1 data - we wrote it)
+                original_request = checkpoint["requests"][custom_id]
+                ctx.record_call(
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data={
+                        "custom_id": custom_id,
+                        "row_index": idx,
+                        **original_request,
+                    },
+                    response_data=None,
+                    error={"reason": "result_not_found", "custom_id": custom_id},
+                    provider="azure",
+                )
                 continue
 
             result = results_by_id[custom_id]

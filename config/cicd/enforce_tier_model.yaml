@@ -2593,3 +2593,8 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: plugins/llm/azure_batch.py:R5:AzureBatchLLMTransform:_download_results:fp=b460f2168f2a65be
+  owner: bugfix
+  reason: Tier-3 boundary validation - Azure batch API response is external data requiring type validation
+  safety: Malformed response is recorded in malformed_lines and batch fails gracefully with audit trail
+  expires: '2026-05-02'
