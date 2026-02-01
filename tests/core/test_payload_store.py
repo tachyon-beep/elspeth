@@ -10,7 +10,7 @@ class TestPayloadStoreProtocol:
     """Test PayloadStore protocol definition."""
 
     def test_protocol_has_required_methods(self) -> None:
-        from elspeth.core.payload_store import PayloadStore
+        from elspeth.contracts.payload_store import PayloadStore
 
         # Protocol should define these methods
         assert hasattr(PayloadStore, "store")
@@ -107,7 +107,8 @@ class TestFilesystemPayloadStore:
 
     def test_retrieve_corrupted_file_raises_integrity_error(self, tmp_path: Path) -> None:
         """Corrupted content must raise IntegrityError, never return silently."""
-        from elspeth.core.payload_store import FilesystemPayloadStore, IntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
+        from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
         content = b"original content"
@@ -125,7 +126,8 @@ class TestFilesystemPayloadStore:
 
     def test_retrieve_truncated_file_raises_integrity_error(self, tmp_path: Path) -> None:
         """Truncated files are also integrity violations."""
-        from elspeth.core.payload_store import FilesystemPayloadStore, IntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
+        from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
         content = b"this is some longer content that will be truncated"
@@ -142,7 +144,8 @@ class TestFilesystemPayloadStore:
         """IntegrityError message should include actual hash for investigation."""
         import hashlib
 
-        from elspeth.core.payload_store import FilesystemPayloadStore, IntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
+        from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
         original = b"original"

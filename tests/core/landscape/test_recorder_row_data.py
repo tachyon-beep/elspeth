@@ -182,7 +182,7 @@ class TestGetRowDataTier1Corruption:
         This must propagate to the caller - Tier 1 data corruption
         is a crash-worthy event.
         """
-        from elspeth.core.payload_store import IntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")

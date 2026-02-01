@@ -29,6 +29,15 @@
 
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `payload_store.py` still exposes a backwards-compatibility re-export via `__all__`. (`src/elspeth/core/payload_store.py:15-18`)
+- Removed the backwards-compatibility `__all__` re-export and now only exports `FilesystemPayloadStore`.
+- Updated imports to use `elspeth.contracts.payload_store` for `PayloadStore` / `IntegrityError`.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Deleted the compatibility re-export and migrated code/test imports to the canonical contracts path.

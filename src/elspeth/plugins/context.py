@@ -23,11 +23,10 @@ if TYPE_CHECKING:
     # Using string annotations to avoid import errors in Phase 2
     from opentelemetry.trace import Span, Tracer
 
-    from elspeth.contracts import Call, CallStatus, CallType, TransformErrorReason
+    from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
     from elspeth.core.landscape.recorder import LandscapeRecorder
-    from elspeth.core.payload_store import PayloadStore
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.plugins.clients.http import AuditedHTTPClient
     from elspeth.plugins.clients.llm import AuditedLLMClient

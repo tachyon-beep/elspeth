@@ -1600,3 +1600,28 @@ allow_hits:
   reason: 'Config fingerprinting: check source section exists and is dict'
   safety: Safe skip if not dict - external YAML structure
   expires: null
+# plugins/context.py - Plugin context handling at pipeline data boundary
+- key: plugins/context.py:R5:PluginContext:get:fp=84b544c54924a7e6
+  owner: architecture
+  reason: 'Context traversal: dict check for nested key lookup in plugin context -
+    handles both dict and non-dict values gracefully'
+  safety: Returns None for non-dict values, no error hiding
+  expires: null
+- key: plugins/context.py:R5:PluginContext:record_call:fp=4698705f028d4fef
+  owner: architecture
+  reason: 'LLM usage recording: dict check for optional token_usage field from LLM
+    response - external API data at Tier 3 boundary'
+  safety: Safe skip if not dict - usage recording is best-effort
+  expires: null
+- key: plugins/context.py:R5:PluginContext:record_validation_error:fp=9b41ec5656bf9160
+  owner: architecture
+  reason: 'Error context extraction: dict check for extracting row_id from row data
+    - row may be malformed at validation error time'
+  safety: Safe fallback to None if row is not dict - error still recorded
+  expires: null
+- key: plugins/context.py:R6:PluginContext:record_validation_error:fp=55a0622bc2c4ea37
+  owner: architecture
+  reason: 'Best-effort audit recording: validation error recording should not crash
+    pipeline if audit fails'
+  safety: Logs warning with full error context, pipeline continues
+  expires: null

@@ -17,7 +17,7 @@ open/
 ├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
 ├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 2 P3)
 ├── core-logging/             # Logging/telemetry output (1 P2)
-├── core-payload/             # Payload storage (1 P1, 1 P3)
+├── core-payload/             # Payload storage (1 P1)
 ├── core-rate-limit/          # Rate limiters (1 P2)
 ├── core-retention/           # Retention/purge (2 P2)
 ├── core-security/            # Secret handling (1 P2, 1 P3)
@@ -58,7 +58,7 @@ open/
 | **plugins-sinks** | 0 | 2 | 1 | 3 | Sink validation |
 | **cli** | 1 | 1 | 1 | 3 | CLI behavior |
 | **core-dag** | 1 | 1 | 0 | 2 | DAG validation |
-| **core-payload** | 1 | 0 | 1 | 2 | Payload storage |
+| **core-payload** | 1 | 0 | 0 | 1 | Payload storage |
 | **core-retention** | 0 | 2 | 0 | 2 | Retention |
 | **core-security** | 0 | 1 | 1 | 2 | Secret handling |
 | **engine-executors** | 0 | 1 | 0 | 1 | Executor failures |
@@ -71,7 +71,7 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **7** | **43** | **23** | **73** | All bugs organized |
+| **TOTAL** | **7** | **43** | **22** | **72** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -123,7 +123,7 @@ open/
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 23 P3 = 73 total.**
+**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 22 P3 = 72 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
@@ -132,6 +132,7 @@ open/
 - Verified all remaining P1s; closed two that are now fixed (`P1-2026-01-30-payload-store-optional`, `P1-2026-01-31-sink-flush-failure-leaves-open-states`).
 - Closed `P2-2026-01-22-coalesce-timeout-failures-unrecorded` (fixed coalesce failure recording).
 - Closed `P3-2026-01-22-engine-artifacts-legacy-shim` (removed legacy re-export).
+- Closed `P3-2026-01-31-payload-store-legacy-reexport` (removed legacy re-export).
 
 **Reports:**
 - Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`
