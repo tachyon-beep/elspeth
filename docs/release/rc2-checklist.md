@@ -4,9 +4,9 @@
 
 **Criterion:** If any item fails, RC-2 cannot ship.
 
-**Status note (2026-02-01):** This checklist shows **known gaps only** from code review. Items are otherwise **unverified** until tests/verification are run per the procedure below.
+**Status note (2026-02-01):** Checkmarks indicate **code-review evidence only** (implementation + tests present). Items are otherwise **unverified** until tests/verification are run per the procedure below.
 
-**Legend:** `[GAP: ...]` marks a known failure that blocks RC-2.
+**Legend:** `[CR]` code-review evidence only; `[GAP: ...]` known failure that blocks RC-2; `[KNOWN LIMITATION]` acceptable RC-2 limitation (see list below).
 
 ---
 
@@ -16,36 +16,36 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 1.1 Source Data Capture
 
-- [ ] Every source row has `source_data_ref` populated before any processing
-- [ ] Source row payload persisted to PayloadStore (not just hash)
-- [ ] `elspeth run` command wires PayloadStore (currently broken per CLI-016)
-- [ ] Quarantined rows recorded with original data and failure reason
+- [x] Every source row has `source_data_ref` populated before any processing **[CR]**
+- [x] Source row payload persisted to PayloadStore (not just hash) **[CR]**
+- [x] `elspeth run` command wires PayloadStore **[CR]**
+- [x] Quarantined rows recorded with original data and failure reason **[CR]**
 
 ### 1.2 Transform Boundaries
 
-- [ ] Every transform execution creates node_state record
-- [ ] Input hash recorded before transform runs
-- [ ] Output hash recorded after successful transform
-- [ ] Failed transforms record error details with retryable flag
+- [x] Every transform execution creates node_state record **[CR]**
+- [x] Input hash recorded before transform runs **[CR]**
+- [x] Output hash recorded after successful transform **[CR]**
+- [x] Failed transforms record error details with retryable flag **[CR]**
 
 ### 1.3 External Call Recording
 
-- [ ] LLM calls record full request/response payloads
-- [ ] HTTP calls record request/response with status codes
-- [ ] Call latency captured
-- [ ] Calls linked to correct node_state
+- [x] LLM calls record full request/response payloads **[CR]**
+- [x] HTTP calls record request/response with status codes **[CR]**
+- [x] Call latency captured **[CR]**
+- [x] Calls linked to correct node_state **[CR]**
 
 ### 1.4 Terminal States
 
-- [ ] Every token reaches exactly one terminal state
-- [ ] No silent drops (row enters system → row has recorded outcome)
-- [ ] Terminal states: COMPLETED, ROUTED, FORKED, CONSUMED_IN_BATCH, COALESCED, QUARANTINED, FAILED
+- [x] Every token reaches exactly one terminal state **[CR]**
+- [x] No silent drops (row enters system → row has recorded outcome) **[CR]**
+- [x] Terminal states: COMPLETED, ROUTED, FORKED, CONSUMED_IN_BATCH, COALESCED, QUARANTINED, FAILED **[CR]**
 
 ### 1.5 Lineage Query
 
-- [ ] `explain_token()` returns complete lineage for any token
-- [ ] Lineage includes: source_row → tokens → node_states → calls → routing_events → outcome
-- [ ] Fork/coalesce lineage traversable (parent_token_id chain)
+- [x] `explain_token()` returns complete lineage for any token **[CR]**
+- [x] Lineage includes: source_row → tokens → node_states → calls → routing_events → outcome **[CR]**
+- [x] Fork/coalesce lineage traversable (parent_token_id chain) **[CR]**
 
 ---
 
@@ -53,38 +53,38 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 2.1 Linear Pipeline
 
-- [ ] Source → Transform chain → Sink works
-- [ ] Multiple transforms execute in sequence
-- [ ] Output sink receives all non-routed rows
+- [x] Source → Transform chain → Sink works **[CR]**
+- [x] Multiple transforms execute in sequence **[CR]**
+- [x] Output sink receives all non-routed rows **[CR]**
 
 ### 2.2 Gate Routing
 
-- [ ] Gates evaluate conditions correctly
-- [ ] `continue` passes row to next node
-- [ ] `route_to_sink` sends row to named sink with reason
-- [ ] Routing events recorded in audit trail
+- [x] Gates evaluate conditions correctly **[CR]**
+- [x] `continue` passes row to next node **[CR]**
+- [x] `route_to_sink` sends row to named sink with reason **[CR]**
+- [x] Routing events recorded in audit trail **[CR]**
 
 ### 2.3 Fork/Coalesce
 
-- [ ] Fork creates child tokens with correct parent linkage
-- [ ] Each branch executes independently
-- [ ] Coalesce merges tokens when all branches complete
-- [ ] Coalesce timeout fires (not just at end-of-source) - **CRIT-03 in RC2 plan**
+- [x] Fork creates child tokens with correct parent linkage **[CR]**
+- [x] Each branch executes independently **[CR]**
+- [x] Coalesce merges tokens when all branches complete **[CR]**
+- [x] Coalesce timeout fires (not just at end-of-source) - **CRIT-03 in RC2 plan** **[CR]**
 
 ### 2.4 Aggregation
 
-- [ ] Count trigger fires at threshold
-- [ ] Timeout trigger fires (with known limitation: only on next row arrival)
-- [ ] End-of-source flushes remaining buffers
-- [ ] Batch members linked to batch in audit trail
-- [ ] Trigger type recorded in metadata
+- [x] Count trigger fires at threshold **[CR]**
+- [x] Timeout trigger fires (with known limitation: only on next row arrival) **[CR]**
+- [x] End-of-source flushes remaining buffers **[CR]**
+- [x] Batch members linked to batch in audit trail **[CR]**
+- [x] Trigger type recorded in metadata **[CR]**
 
 ### 2.5 Retry Logic
 
-- [ ] Transient failures retry with backoff
-- [ ] Max retries respected
-- [ ] Each attempt recorded separately
-- [ ] Non-retryable errors fail immediately
+- [x] Transient failures retry with backoff **[CR]**
+- [x] Max retries respected **[CR]**
+- [x] Each attempt recorded separately **[CR]**
+- [x] Non-retryable errors fail immediately **[CR]**
 
 ---
 
@@ -92,40 +92,40 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 3.1 `elspeth run`
 
-- [ ] `--settings` loads configuration
-- [ ] `--execute` required to actually run (safety gate)
-- [ ] `--dry-run` validates without executing
-- [ ] PayloadStore instantiated and passed to engine (FIX REQUIRED)
+- [x] `--settings` loads configuration **[CR]**
+- [x] `--execute` required to actually run (safety gate) **[CR]**
+- [x] `--dry-run` validates without executing **[CR]**
+- [x] PayloadStore instantiated and passed to engine **[CR]**
 
 ### 3.2 `elspeth validate`
 
-- [ ] Validates YAML syntax
-- [ ] Validates plugin references exist
-- [ ] Validates sink references in routes
-- [ ] Reports clear error messages
+- [x] Validates YAML syntax **[CR]**
+- [x] Validates plugin references exist **[CR]**
+- [x] Validates sink references in routes **[CR]**
+- [x] Reports clear error messages **[CR]**
 
 ### 3.3 `elspeth resume`
 
-- [ ] Loads checkpoint from previous run
-- [ ] Resumes from last known good state
-- [ ] PayloadStore wired correctly (already works)
+- [x] Loads checkpoint from previous run **[CR]**
+- [x] Resumes from last known good state **[CR]**
+- [x] PayloadStore wired correctly (already works) **[CR]**
 
 ### 3.4 `elspeth explain`
 
-- [ ] `--run` and `--row` parameters work
-- [ ] Returns lineage data (JSON mode minimum)
+- [x] `--run` and `--row` parameters work **[CR]**
+- [x] Returns lineage data (JSON mode minimum) **[CR]**
 - [ ] TUI mode acceptable as "preview" for RC2 **[GAP: CLI launches ExplainApp without DB; TUI shows placeholder instead of lineage]**
 
 ### 3.5 `elspeth plugins list`
 
-- [ ] Lists all available plugins
-- [ ] `--type` filter works
+- [x] Lists all available plugins **[CR]**
+- [x] `--type` filter works **[CR]**
 
 ### 3.6 `elspeth purge`
 
-- [ ] `--retention-days` respected
-- [ ] `--dry-run` shows what would be deleted
-- [ ] Preserves hashes after payload deletion
+- [x] `--retention-days` respected **[CR]**
+- [x] `--dry-run` shows what would be deleted **[CR]**
+- [x] Preserves hashes after payload deletion **[CR]**
 
 ---
 
@@ -133,29 +133,29 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 4.1 Sources
 
-- [ ] CSV source handles multiline quoted fields
-- [ ] JSON source handles both array and JSONL formats
-- [ ] Field normalization produces valid Python identifiers
-- [ ] Collision detection reports clear errors
+- [x] CSV source handles multiline quoted fields **[CR]**
+- [x] JSON source handles both array and JSONL formats **[CR]**
+- [x] Field normalization produces valid Python identifiers **[CR]**
+- [x] Collision detection reports clear errors **[CR]**
 
 ### 4.2 Core Transforms
 
-- [ ] Passthrough passes rows unchanged
-- [ ] Field mapper renames fields correctly
-- [ ] Truncate respects length limits
+- [x] Passthrough passes rows unchanged **[CR]**
+- [x] Field mapper renames fields correctly **[CR]**
+- [x] Truncate respects length limits **[CR]**
 
 ### 4.3 LLM Transforms (if using LLM pack)
 
-- [ ] Azure LLM transform calls API and records response
-- [ ] Template variables substituted correctly
-- [ ] Structured output mode returns parsed JSON
-- [ ] Rate limiting prevents 429 errors
+- [x] Azure LLM transform calls API and records response **[CR]**
+- [x] Template variables substituted correctly **[CR]**
+- [x] Structured output mode returns parsed JSON **[CR]**
+- [ ] Rate limiting prevents 429 errors **[KNOWN LIMITATION]**
 
 ### 4.4 Sinks
 
-- [ ] CSV sink writes valid CSV
-- [ ] JSON sink writes valid JSON/JSONL
-- [ ] Database sink inserts rows correctly
+- [x] CSV sink writes valid CSV **[CR]**
+- [x] JSON sink writes valid JSON/JSONL **[CR]**
+- [x] Database sink inserts rows correctly **[CR]**
 
 ---
 
@@ -163,24 +163,24 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 5.1 Canonical JSON
 
-- [ ] NaN rejected with clear error (not silently converted)
-- [ ] Infinity rejected with clear error
-- [ ] numpy types converted correctly
-- [ ] pandas Timestamp → UTC ISO8601
-- [ ] Hash stable across process restarts
+- [x] NaN rejected with clear error (not silently converted) **[CR]**
+- [x] Infinity rejected with clear error **[CR]**
+- [x] numpy types converted correctly **[CR]**
+- [x] pandas Timestamp → UTC ISO8601 **[CR]**
+- [x] Hash stable across process restarts **[CR]**
 
 ### 5.2 Payload Store
 
-- [ ] `put()` stores data and returns ref
-- [ ] `get()` retrieves data by ref
-- [ ] `exists()` returns correct boolean
-- [ ] Hash verification on read
+- [x] `put()` stores data and returns ref **[CR]**
+- [x] `get()` retrieves data by ref **[CR]**
+- [x] `exists()` returns correct boolean **[CR]**
+- [x] Hash verification on read **[CR]**
 
 ### 5.3 Database Integrity
 
-- [ ] Foreign keys enforced
-- [ ] No orphan records
-- [ ] Unique constraints respected
+- [x] Foreign keys enforced **[CR]**
+- [x] No orphan records **[CR]**
+- [x] Unique constraints respected **[CR]**
 
 ---
 
@@ -188,21 +188,21 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 6.1 Source Errors
 
-- [ ] Malformed rows quarantined (not crash)
-- [ ] Quarantine records original data
-- [ ] Processing continues for valid rows
+- [x] Malformed rows quarantined (not crash) **[CR]**
+- [x] Quarantine records original data **[CR]**
+- [x] Processing continues for valid rows **[CR]**
 
 ### 6.2 Transform Errors
 
-- [ ] Errors recorded with reason
-- [ ] Row routed to error sink if configured
-- [ ] Pipeline continues for other rows
+- [x] Errors recorded with reason **[CR]**
+- [x] Row routed to error sink if configured **[CR]**
+- [x] Pipeline continues for other rows **[CR]**
 
 ### 6.3 External Call Errors
 
-- [ ] Timeouts recorded with details
-- [ ] 4xx/5xx responses recorded
-- [ ] Retry logic engages for transient errors
+- [x] Timeouts recorded with details **[CR]**
+- [x] 4xx/5xx responses recorded **[CR]**
+- [x] Retry logic engages for transient errors **[CR]**
 
 ---
 
@@ -210,15 +210,15 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 
 ### 7.1 Basic Loading
 
-- [ ] YAML syntax parsed correctly
-- [ ] Environment variable interpolation `${VAR}` works
-- [ ] Default values applied
+- [x] YAML syntax parsed correctly **[CR]**
+- [x] Environment variable interpolation `${VAR}` works **[CR]**
+- [x] Default values applied **[CR]**
 
 ### 7.2 Validation
 
-- [ ] Invalid plugin names rejected
-- [ ] Invalid sink references in routes rejected
-- [ ] Missing required fields reported
+- [x] Invalid plugin names rejected **[CR]**
+- [x] Invalid sink references in routes rejected **[CR]**
+- [x] Missing required fields reported **[CR]**
 
 ---
 
