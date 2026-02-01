@@ -189,6 +189,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
 
         # Create pooled executor if pool_size > 1 (for internal concurrency)
         if cfg.pool_config is not None:
@@ -205,10 +206,16 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         self._batch_initialized = False
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder and telemetry context for pooled execution."""
+        """Capture recorder, telemetry, and rate limit context for pooled execution."""
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
+        # Get rate limiter for Azure Content Safety service (None if rate limiting disabled)
+        self._limiter = (
+            ctx.rate_limit_registry.get_limiter("azure-content-safety")
+            if ctx.rate_limit_registry is not None
+            else None
+        )
 
     def connect_output(
         self,
@@ -413,6 +420,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
                         "Ocp-Apim-Subscription-Key": self._api_key,
                         "Content-Type": "application/json",
                     },
+                    limiter=self._limiter,
                 )
             return self._http_clients[state_id]
 

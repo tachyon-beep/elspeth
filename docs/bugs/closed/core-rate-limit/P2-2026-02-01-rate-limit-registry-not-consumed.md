@@ -95,3 +95,65 @@
 ## Notes / Links
 
 - Related docs: `docs/release/rc2-checklist.md`, `docs/plans/in-progress/RC2-remediation.md` (CRIT-01)
+
+## Resolution
+
+**Status:** FIXED (2026-02-02)
+
+### Solution Implemented
+
+Rate limiting was wired at the **audited client level** (Option A from investigation). This provides automatic enforcement for all external calls without requiring each transform to manually implement rate limiting.
+
+### Changes Made
+
+1. **`src/elspeth/plugins/clients/base.py`**
+   - Added optional `limiter` parameter to `AuditedClientBase.__init__()`
+   - Added `_acquire_rate_limit()` helper method that calls `limiter.acquire()` when present
+
+2. **`src/elspeth/plugins/clients/llm.py`**
+   - Added `limiter` parameter to `AuditedLLMClient.__init__()`
+   - Added `_acquire_rate_limit()` call at start of `chat_completion()`
+
+3. **`src/elspeth/plugins/clients/http.py`**
+   - Added `limiter` parameter to `AuditedHTTPClient.__init__()`
+   - Added `_acquire_rate_limit()` call at start of `post()`
+
+4. **Transform client factories** (7 files updated):
+   - `plugins/llm/azure.py` - captures limiter in `on_start()`, passes to `_get_llm_client()`
+   - `plugins/llm/azure_multi_query.py` - same pattern
+   - `plugins/llm/openrouter.py` - captures limiter, passes to `_get_http_client()`
+   - `plugins/llm/openrouter_multi_query.py` - same pattern
+   - `plugins/transforms/azure/content_safety.py` - same pattern
+   - `plugins/transforms/azure/prompt_shield.py` - same pattern
+   - `plugins/llm/base.py` - updated docstring example
+
+### Service Naming Convention
+
+Service names used for rate limiting:
+- `azure-openai` - Azure OpenAI LLM transforms
+- `openrouter` - OpenRouter LLM transforms
+- `azure-content-safety` - Azure Content Safety transforms
+- `azure-prompt-shield` - Azure Prompt Shield transforms
+
+Users can configure per-service rate limits in settings:
+```yaml
+rate_limit:
+  enabled: true
+  default_requests_per_minute: 60
+  services:
+    azure-openai:
+      requests_per_minute: 120
+    openrouter:
+      requests_per_minute: 30
+```
+
+### Tests Added
+
+New test class `TestAuditedClientRateLimiting` in `tests/integration/test_rate_limit_integration.py`:
+- `test_audited_llm_client_acquires_rate_limit` - verifies LLM client calls `acquire()`
+- `test_audited_http_client_acquires_rate_limit` - verifies HTTP client calls `acquire()`
+- `test_audited_client_without_limiter_no_throttle` - verifies backward compatibility
+
+### Verification
+
+All 10 rate limit integration tests pass. All 193 client and rate limit tests pass. Type checking passes.

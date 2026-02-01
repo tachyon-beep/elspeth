@@ -187,6 +187,15 @@ class BaseLLMTransform(BaseTransform):
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
                 self._api_key = config["api_key"]
+                self._limiter = None  # Set in on_start
+
+            def on_start(self, ctx: PluginContext) -> None:
+                # Capture rate limiter for throttling
+                self._limiter = (
+                    ctx.rate_limit_registry.get_limiter("openai")
+                    if ctx.rate_limit_registry is not None
+                    else None
+                )
 
             def _get_llm_client(self, ctx: PluginContext) -> AuditedLLMClient:
                 from openai import OpenAI
@@ -194,8 +203,11 @@ class BaseLLMTransform(BaseTransform):
                 return AuditedLLMClient(
                     recorder=ctx.landscape,
                     state_id=ctx.state_id,
+                    run_id=ctx.run_id,
+                    telemetry_emit=ctx.telemetry_emit,
                     underlying_client=underlying,
                     provider="openai",
+                    limiter=self._limiter,
                 )
     """
 

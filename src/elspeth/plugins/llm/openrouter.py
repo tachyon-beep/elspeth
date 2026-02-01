@@ -160,6 +160,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
 
         # HTTP client cache - ensures call_index uniqueness across retries
         # Each state_id gets its own client with monotonically increasing call indices
@@ -199,14 +200,20 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder and telemetry context.
+        """Capture recorder, telemetry, and rate limit context.
 
         Called by the engine at pipeline start. Captures the landscape
-        recorder, run_id, and telemetry callback for use in worker threads.
+        recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
         """
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
+        # Get rate limiter for OpenRouter service (None if rate limiting disabled)
+        self._limiter = (
+            ctx.rate_limit_registry.get_limiter("openrouter")
+            if ctx.rate_limit_registry is not None
+            else None
+        )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -401,6 +408,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                         "Authorization": f"Bearer {self._api_key}",
                         "HTTP-Referer": "https://github.com/elspeth-rapid",  # Required by OpenRouter
                     },
+                    limiter=self._limiter,
                 )
             return self._http_clients[state_id]
 

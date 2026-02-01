@@ -204,6 +204,7 @@ class AuditedLLMClient(AuditedClientBase):
     - Error recording with retry classification
     - Token usage tracking
     - Telemetry emission after successful audit recording
+    - Rate limiting (when limiter provided)
 
     Example:
         client = AuditedLLMClient(
@@ -213,6 +214,7 @@ class AuditedLLMClient(AuditedClientBase):
             telemetry_emit=telemetry_emit,
             underlying_client=openai.OpenAI(api_key="..."),
             provider="openai",
+            limiter=registry.get_limiter("openai"),
         )
 
         response = client.chat_completion(
@@ -231,6 +233,7 @@ class AuditedLLMClient(AuditedClientBase):
         underlying_client: Any,  # openai.OpenAI or openai.AzureOpenAI
         *,
         provider: str = "openai",
+        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
     ) -> None:
         """Initialize audited LLM client.
 
@@ -241,8 +244,9 @@ class AuditedLLMClient(AuditedClientBase):
             telemetry_emit: Callback to emit telemetry events
             underlying_client: OpenAI-compatible client instance
             provider: Provider name for audit trail (default: "openai")
+            limiter: Optional rate limiter for throttling requests
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit)
+        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter)
         self._client = underlying_client
         self._provider = provider
 
@@ -271,6 +275,9 @@ class AuditedLLMClient(AuditedClientBase):
             RateLimitError: If rate limited (retryable)
             LLMClientError: For other errors (check retryable flag)
         """
+        # Acquire rate limit permission before making external call
+        self._acquire_rate_limit()
+
         call_index = self._next_call_index()
 
         # Build request_data - only include max_tokens if explicitly set

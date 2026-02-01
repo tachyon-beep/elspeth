@@ -177,10 +177,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             required_fields=schema_config.required_fields,
         )
 
-        # Recorder and telemetry context (set in on_start)
+        # Recorder, telemetry, and rate limit context (set in on_start)
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
 
         # LLM client cache - ensures call_index uniqueness
         # Each state_id gets its own client with monotonically increasing call indices
@@ -222,14 +223,20 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder and telemetry context.
+        """Capture recorder, telemetry, and rate limit context.
 
         Called by the engine at pipeline start. Captures the landscape
-        recorder, run_id, and telemetry callback for use in worker threads.
+        recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
         """
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
+        # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
+        self._limiter = (
+            ctx.rate_limit_registry.get_limiter("azure-openai")
+            if ctx.rate_limit_registry is not None
+            else None
+        )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -388,6 +395,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                     telemetry_emit=self._telemetry_emit,
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
+                    limiter=self._limiter,
                 )
             return self._llm_clients[state_id]
 

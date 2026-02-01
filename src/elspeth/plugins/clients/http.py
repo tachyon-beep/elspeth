@@ -34,6 +34,7 @@ class AuditedHTTPClient(AuditedClientBase):
     - Latency measurement
     - Error recording
     - Telemetry emission after successful audit recording
+    - Rate limiting (when limiter provided)
 
     Example:
         client = AuditedHTTPClient(
@@ -43,6 +44,7 @@ class AuditedHTTPClient(AuditedClientBase):
             telemetry_emit=telemetry_emit,
             base_url="https://api.example.com",
             headers={"Authorization": "Bearer ..."},
+            limiter=registry.get_limiter("api.example.com"),
         )
 
         response = client.post("/v1/process", json={"data": "value"})
@@ -59,6 +61,7 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float = 30.0,
         base_url: str | None = None,
         headers: dict[str, str] | None = None,
+        limiter: Any = None,  # RateLimiter | NoOpLimiter | None
     ) -> None:
         """Initialize audited HTTP client.
 
@@ -70,8 +73,9 @@ class AuditedHTTPClient(AuditedClientBase):
             timeout: Request timeout in seconds (default: 30.0)
             base_url: Optional base URL to prepend to all requests
             headers: Default headers for all requests
+            limiter: Optional rate limiter for throttling requests
         """
-        super().__init__(recorder, state_id, run_id, telemetry_emit)
+        super().__init__(recorder, state_id, run_id, telemetry_emit, limiter=limiter)
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
@@ -217,6 +221,9 @@ class AuditedHTTPClient(AuditedClientBase):
         Raises:
             httpx.HTTPError: For network/HTTP errors
         """
+        # Acquire rate limit permission before making external call
+        self._acquire_rate_limit()
+
         call_index = self._next_call_index()
 
         # Properly join base_url and url, handling slash combinations

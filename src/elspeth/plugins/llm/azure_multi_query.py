@@ -202,6 +202,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._recorder: LandscapeRecorder | None = None
         self._run_id: str = ""
         self._telemetry_emit: Callable[[Any], None] = lambda event: None
+        self._limiter: Any = None  # RateLimiter | NoOpLimiter | None
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
@@ -239,10 +240,16 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder and telemetry context for pooled execution."""
+        """Capture recorder, telemetry, and rate limit context for pooled execution."""
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
+        # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
+        self._limiter = (
+            ctx.rate_limit_registry.get_limiter("azure-openai")
+            if ctx.rate_limit_registry is not None
+            else None
+        )
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""
@@ -269,6 +276,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                     telemetry_emit=self._telemetry_emit,
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
+                    limiter=self._limiter,
                 )
             return self._llm_clients[state_id]
 
