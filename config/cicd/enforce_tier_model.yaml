@@ -2603,3 +2603,18 @@ allow_hits:
   reason: Tier-3 boundary validation - user config 'schema' field is external data requiring type validation before SchemaConfig.from_dict()
   safety: Raises explicit PluginConfigError with helpful message; prevents confusing TypeError from downstream code
   expires: null
+- key: contracts/results.py:R5:ArtifactDescriptor:for_database:fp=2300432a3c93d6b5
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedDatabaseUrl to prevent credentials leaking to audit trail
+  safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
+  expires: null
+- key: contracts/results.py:R5:ArtifactDescriptor:for_webhook:fp=e2fada7e3814d17c
+  owner: bugfix
+  reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking to audit trail
+  safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
+  expires: null
+- key: contracts/data.py:R1:check_compatibility:fp=c7144b503d9599f9
+  owner: bugfix
+  reason: Pydantic model_config may not have 'strict' key explicitly set - accessing directly would KeyError on most schemas
+  safety: Default False matches Pydantic's behavior; schema compatibility check is construction-time validation
+  expires: null

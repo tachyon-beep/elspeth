@@ -14,8 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
+
 if TYPE_CHECKING:
-    from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
@@ -317,8 +318,8 @@ class ArtifactDescriptor:
         URL must be pre-sanitized using SanitizedDatabaseUrl.from_raw_url().
         This ensures credentials are never stored in the audit trail.
         """
-        # Type safety: enforce SanitizedDatabaseUrl, not plain str
-        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+        # Type safety: enforce SanitizedDatabaseUrl, not duck-typed objects
+        if not isinstance(url, SanitizedDatabaseUrl):
             raise TypeError(
                 "url must be a SanitizedDatabaseUrl instance. Use SanitizedDatabaseUrl.from_raw_url(url) to sanitize raw database URLs."
             )
@@ -348,8 +349,8 @@ class ArtifactDescriptor:
         URL must be pre-sanitized using SanitizedWebhookUrl.from_raw_url().
         This ensures tokens are never stored in the audit trail.
         """
-        # Type safety: enforce SanitizedWebhookUrl, not plain str
-        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+        # Type safety: enforce SanitizedWebhookUrl, not duck-typed objects
+        if not isinstance(url, SanitizedWebhookUrl):
             raise TypeError(
                 "url must be a SanitizedWebhookUrl instance. Use SanitizedWebhookUrl.from_raw_url(url) to sanitize raw webhook URLs."
             )

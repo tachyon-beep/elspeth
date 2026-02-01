@@ -425,6 +425,92 @@ class TestArtifactDescriptorFactories:
         assert descriptor.metadata == {"response_code": 500}
 
 
+class TestArtifactDescriptorTypeSafety:
+    """Tests for strict type enforcement in ArtifactDescriptor factories.
+
+    Bug: P2-2026-01-31-artifactdescriptor-duck-typed-urls
+
+    These tests verify that only properly sanitized URL types are accepted,
+    not duck-typed objects that happen to have the same attributes.
+    """
+
+    def test_for_database_rejects_duck_typed_objects(self) -> None:
+        """for_database rejects objects that look like SanitizedDatabaseUrl but aren't.
+
+        This prevents security bypass where unsanitized URLs could reach audit trail.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeSanitizedUrl:
+            """Duck-typed fake that has same attributes but isn't the real type."""
+
+            sanitized_url: str
+            fingerprint: str | None
+
+        fake_url = FakeSanitizedUrl(
+            sanitized_url="postgresql://user:SECRET@host/db",  # Contains secret!
+            fingerprint=None,
+        )
+
+        with pytest.raises(TypeError, match="must be a SanitizedDatabaseUrl instance"):
+            ArtifactDescriptor.for_database(
+                url=fake_url,  # type: ignore[arg-type]
+                table="test",
+                content_hash="abc",
+                payload_size=100,
+                row_count=10,
+            )
+
+    def test_for_webhook_rejects_duck_typed_objects(self) -> None:
+        """for_webhook rejects objects that look like SanitizedWebhookUrl but aren't.
+
+        This prevents security bypass where unsanitized URLs could reach audit trail.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeSanitizedUrl:
+            """Duck-typed fake that has same attributes but isn't the real type."""
+
+            sanitized_url: str
+            fingerprint: str | None
+
+        fake_url = FakeSanitizedUrl(
+            sanitized_url="https://api.example.com?token=sk-secret-key",  # Contains secret!
+            fingerprint=None,
+        )
+
+        with pytest.raises(TypeError, match="must be a SanitizedWebhookUrl instance"):
+            ArtifactDescriptor.for_webhook(
+                url=fake_url,  # type: ignore[arg-type]
+                content_hash="abc",
+                request_size=100,
+                response_code=200,
+            )
+
+    def test_for_database_rejects_plain_string(self) -> None:
+        """for_database rejects plain string URLs."""
+        with pytest.raises(TypeError, match="must be a SanitizedDatabaseUrl instance"):
+            ArtifactDescriptor.for_database(
+                url="postgresql://user:pass@host/db",  # type: ignore[arg-type]
+                table="test",
+                content_hash="abc",
+                payload_size=100,
+                row_count=10,
+            )
+
+    def test_for_webhook_rejects_plain_string(self) -> None:
+        """for_webhook rejects plain string URLs."""
+        with pytest.raises(TypeError, match="must be a SanitizedWebhookUrl instance"):
+            ArtifactDescriptor.for_webhook(
+                url="https://api.example.com?token=secret",  # type: ignore[arg-type]
+                content_hash="abc",
+                request_size=100,
+                response_code=200,
+            )
+
+
 class TestArtifactDescriptorTypes:
     """Tests for artifact_type values."""
 

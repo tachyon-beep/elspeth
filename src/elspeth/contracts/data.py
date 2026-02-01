@@ -143,8 +143,9 @@ def check_compatibility(
     Compatibility means:
     - All REQUIRED fields in consumer are provided by producer
     - Fields with defaults in consumer are optional
-    - Field types are compatible (exact match or coercible)
+    - Field types are compatible (exact match or coercible when consumer allows)
     - If consumer has extra="forbid", producer must not have extra fields
+    - If consumer has strict=True, no type coercion is allowed (int->float rejected)
 
     Args:
         producer_schema: Output schema of upstream plugin
@@ -156,6 +157,11 @@ def check_compatibility(
     # Use Pydantic v2 model_fields for accurate field introspection
     producer_fields = producer_schema.model_fields
     consumer_fields = consumer_schema.model_fields
+
+    # Check if consumer schema is strict (no type coercion allowed)
+    # NOTE: We control all schemas via PluginSchema base class which sets model_config.
+    # Default is strict=False per PluginSchema base class.
+    consumer_strict = consumer_schema.model_config.get("strict", False)
 
     missing: list[str] = []
     mismatches: list[tuple[str, str, str]] = []
@@ -170,7 +176,11 @@ def check_compatibility(
                 missing.append(field_name)
         else:
             producer_field = producer_fields[field_name]
-            if not _types_compatible(producer_field.annotation, consumer_field.annotation):
+            if not _types_compatible(
+                producer_field.annotation,
+                consumer_field.annotation,
+                consumer_strict=consumer_strict,
+            ):
                 mismatches.append(
                     (
                         field_name,
@@ -222,15 +232,26 @@ def _is_union_type(t: Any) -> bool:
     return origin is Union or isinstance(t, UnionType)
 
 
-def _types_compatible(actual: Any, expected: Any) -> bool:
+def _types_compatible(
+    actual: Any,
+    expected: Any,
+    *,
+    consumer_strict: bool = False,
+) -> bool:
     """Check if actual type is compatible with expected type.
 
     Handles:
     - Exact matches
     - Any type (accepts everything)
-    - Numeric compatibility (int -> float)
+    - Numeric compatibility (int -> float) - ONLY when consumer_strict=False
     - Optional[X] on consumer side (producer can send X or X | None)
-    - Union types with coercion (int compatible with float | None)
+    - Union types with coercion (int compatible with float | None when not strict)
+
+    Args:
+        actual: The producer's output type annotation
+        expected: The consumer's input type annotation
+        consumer_strict: If True, no type coercion allowed (int->float rejected).
+                        Respects Data Manifesto: transforms/sinks must NOT coerce.
     """
     # Exact match
     if actual == expected:
@@ -240,19 +261,20 @@ def _types_compatible(actual: Any, expected: Any) -> bool:
     if expected is Any:
         return True
 
-    # Numeric compatibility (int -> float is OK)
+    # Numeric compatibility (int -> float is OK) - but ONLY when consumer allows coercion
+    # Per Data Manifesto: transforms/sinks with strict=True must NOT coerce
     if expected is float and actual is int:
-        return True
+        return not consumer_strict
 
     # Handle Optional/Union types (both typing.Union and types.UnionType)
     if _is_union_type(expected):
         expected_args = get_args(expected)
-        # Check if actual type matches any of the union members (with coercion)
-        if any(_types_compatible(actual, expected_member) for expected_member in expected_args):
+        # Check if actual type matches any of the union members (with coercion rules)
+        if any(_types_compatible(actual, expected_member, consumer_strict=consumer_strict) for expected_member in expected_args):
             return True
         # Check if actual is a Union where all members are compatible
         if _is_union_type(actual):
             actual_args = get_args(actual)
-            return all(any(_types_compatible(a, e) for e in expected_args) for a in actual_args)
+            return all(any(_types_compatible(a, e, consumer_strict=consumer_strict) for e in expected_args) for a in actual_args)
 
     return False
