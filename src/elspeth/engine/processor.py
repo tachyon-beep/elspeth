@@ -549,6 +549,17 @@ class RowProcessor:
 
             return (results, child_items)
 
+        # SUCCESS PATH: Emit TransformCompleted telemetry for all buffered tokens
+        # Each input token was processed by this aggregation transform as part of the batch.
+        # Emitting per-token (rather than per-batch) maintains consistency with regular
+        # transform telemetry and allows accurate token counting in observability dashboards.
+        for token in buffered_tokens:
+            self._emit_transform_completed(
+                token=token,
+                transform=transform,
+                transform_result=result,
+            )
+
         # Calculate if there are more transforms after this aggregation
         more_transforms = step < total_steps
 
@@ -818,6 +829,17 @@ class RowProcessor:
                             )
                         )
                 return (results, child_items)
+
+            # SUCCESS PATH: Emit TransformCompleted telemetry for all buffered tokens
+            # Each input token was processed by this aggregation transform as part of the batch.
+            # Emitting per-token (rather than per-batch) maintains consistency with regular
+            # transform telemetry and allows accurate token counting in observability dashboards.
+            for token in buffered_tokens:
+                self._emit_transform_completed(
+                    token=token,
+                    transform=transform,
+                    transform_result=result,
+                )
 
             # Handle output modes
             if output_mode == OutputMode.PASSTHROUGH:

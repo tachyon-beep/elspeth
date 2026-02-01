@@ -7,6 +7,7 @@ Tests verify:
 3. TokenCompleted is emitted when tokens reach terminal state
 4. Events are emitted ONLY AFTER Landscape recording succeeds
 5. TelemetryManager is optional (no telemetry when not provided)
+6. Aggregation flushes emit TransformCompleted telemetry (P3-2026-01-31)
 """
 
 from __future__ import annotations
@@ -503,3 +504,245 @@ class TestTelemetryEventOrdering:
         # All events should have the same run_id
         run_ids = {e.run_id for e in exporter.events}
         assert len(run_ids) == 1
+
+
+# =============================================================================
+# Aggregation Flush Telemetry Tests (P3-2026-01-31)
+# =============================================================================
+
+
+class BatchAwareTransformForTelemetry(BaseTransform):
+    """Batch-aware transform for telemetry testing."""
+
+    name = "batch_telemetry"
+    input_schema = DynamicSchema
+    output_schema = DynamicSchema
+    is_batch_aware = True
+    plugin_version = "1.0.0"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"fields": "dynamic"}})
+
+    def process(self, row: Any, ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            # Batch mode - aggregate
+            total = sum(r.get("value", 0) for r in row)
+            return TransformResult.success(
+                {"batch_total": total, "count": len(row)},
+                success_reason={"action": "batch_aggregate"},
+            )
+        else:
+            # Single row mode
+            return TransformResult.success(row, success_reason={"action": "passthrough"})
+
+
+class TelemetryTestSource:
+    """Simple test source for telemetry tests."""
+
+    name = "telemetry_test_source"
+    output_schema = DynamicSchema
+    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    node_id: str | None = None
+    determinism = Determinism.IO_READ
+    plugin_version = "1.0.0"
+    _on_validation_failure = "discard"
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+        self.config = {"schema": {"fields": "dynamic"}}
+
+    def load(self, ctx: Any) -> Any:
+        for row in self._rows:
+            yield SourceRow.valid(row)
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        return None
+
+
+class TelemetryTestSink:
+    """Simple test sink for telemetry tests."""
+
+    name = "telemetry_test_sink"
+    input_schema = DynamicSchema
+    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    node_id: str | None = None
+    determinism = Determinism.IO_WRITE
+    plugin_version = "1.0.0"
+    idempotent = True
+
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+        self.config = {"schema": {"fields": "dynamic"}}
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        for row in rows:
+            self.rows.append(row)
+        return ArtifactDescriptor.for_file(
+            path="memory://test",
+            size_bytes=0,
+            content_hash="test123",
+        )
+
+    def flush(self) -> None:
+        """Flush pending writes (no-op for memory sink)."""
+        pass
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+class TestAggregationFlushTelemetry:
+    """Tests for TransformCompleted telemetry on aggregation flushes.
+
+    Bug: P3-2026-01-31-aggregation-flush-missing-telemetry
+    - Regular transforms emit TransformCompleted telemetry
+    - Aggregation flushes did NOT emit TransformCompleted
+    - Fix: Emit TransformCompleted for each buffered token after successful flush
+    """
+
+    def test_aggregation_count_flush_emits_transform_completed(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Aggregation count trigger flush should emit TransformCompleted for each buffered token."""
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        # Create a batch-aware transform
+        transform = BatchAwareTransformForTelemetry()
+
+        # Create source with 3 rows (will trigger count=3 flush)
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+                {"id": 3, "value": 30},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        # Build graph
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        # Get transform node_id
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # Configure aggregation with count=3 trigger
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_telemetry",
+            trigger=TriggerConfig(count=3),  # Will trigger after 3 rows
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Verify TransformCompleted events were emitted for buffered tokens
+        transform_events = [e for e in exporter.events if isinstance(e, TransformCompleted)]
+
+        # We should have 3 TransformCompleted events - one for each buffered token
+        assert len(transform_events) == 3, (
+            f"Expected 3 TransformCompleted events (one per buffered token), "
+            f"got {len(transform_events)}. "
+            f"Bug P3-2026-01-31: Aggregation flush should emit TransformCompleted."
+        )
+
+        # All should reference the batch_telemetry transform
+        for event in transform_events:
+            assert event.plugin_name == "batch_telemetry"
+            assert event.status == NodeStateStatus.COMPLETED
+
+    def test_aggregation_end_of_source_flush_emits_transform_completed(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """End-of-source flush should emit TransformCompleted for buffered tokens."""
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        transform = BatchAwareTransformForTelemetry()
+
+        # Create source with 2 rows (won't hit count=10, will flush at end-of-source)
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # High count threshold - won't trigger during processing, only at end-of-source
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_telemetry",
+            trigger=TriggerConfig(count=10),
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Verify TransformCompleted events for the 2 buffered tokens
+        transform_events = [e for e in exporter.events if isinstance(e, TransformCompleted)]
+
+        assert len(transform_events) == 2, (
+            f"Expected 2 TransformCompleted events for end-of-source flush, "
+            f"got {len(transform_events)}. "
+            f"Bug P3-2026-01-31: End-of-source flush should emit TransformCompleted."
+        )
