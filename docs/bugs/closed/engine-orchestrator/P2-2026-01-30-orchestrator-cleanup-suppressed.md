@@ -80,3 +80,39 @@
 
 - Suggested tests to run: `.venv/bin/python -m pytest tests/unit/ -k "on_complete_exception or resume_close_exception"`
 - New tests required: yes, as described above.
+
+## Resolution (2026-02-02)
+
+**Status: ALREADY FIXED**
+
+Investigation revealed this bug was fixed prior to the 2026-02-01 verification (stale verification).
+
+### Current Implementation
+
+The orchestrator now correctly:
+1. Collects cleanup errors into a list
+2. Attempts ALL cleanups before failing (best-effort pattern)
+3. Re-raises aggregated errors after all cleanup attempts
+
+**Code locations:**
+- Main run: `orchestrator.py:1720-1724` - raises `RuntimeError(f"Plugin cleanup failed: {error_summary}")`
+- Resume: `orchestrator.py:2632-2636` - same pattern
+- `_cleanup_transforms()`: `orchestrator.py:289-291` - same pattern
+
+### Existing Test Coverage
+
+Tests already verify this behavior:
+
+| Test | File | Assertion |
+|------|------|-----------|
+| `test_cleanup_continues_if_one_close_fails` | `test_orchestrator_cleanup.py` | `pytest.raises(RuntimeError, match="Plugin cleanup failed")` |
+| `test_transform_close_called_when_on_complete_fails` | `test_orchestrator_resume.py` | `pytest.raises(RuntimeError, match="Plugin cleanup failed")` |
+
+### Verification
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_orchestrator_cleanup.py tests/engine/test_orchestrator_resume.py::TestOrchestratorResumeCleanup -v
+# 6 passed
+```
+
+No code changes required - bug was already fixed.
