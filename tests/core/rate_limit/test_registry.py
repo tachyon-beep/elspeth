@@ -24,6 +24,20 @@ class TestNoOpLimiter:
         limiter.acquire(weight=10)
         # No assertion needed - acquire() returns None by design
 
+    def test_acquire_accepts_timeout_parameter(self) -> None:
+        """acquire() accepts timeout parameter for API compatibility with RateLimiter.
+
+        NoOpLimiter must have the same signature as RateLimiter so that
+        callers can use either interchangeably via RateLimitRegistry.get_limiter().
+
+        Regression test for P2-2026-01-31-noop-limiter-signature-mismatch.
+        """
+        limiter = NoOpLimiter()
+        # Should not raise TypeError - timeout is accepted but ignored
+        limiter.acquire(timeout=0.1)
+        limiter.acquire(weight=5, timeout=1.0)
+        limiter.acquire(timeout=None)  # Explicit None should also work
+
     def test_try_acquire_always_succeeds(self) -> None:
         """try_acquire() always returns True."""
         limiter = NoOpLimiter()

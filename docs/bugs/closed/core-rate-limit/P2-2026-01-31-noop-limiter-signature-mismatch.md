@@ -32,8 +32,25 @@
 
 - NoOpLimiter and RateLimiter have matching signatures
 
-## Verification (2026-02-01)
+## Resolution (2026-02-02)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `NoOpLimiter.acquire()` still omits `timeout`, while `RateLimiter.acquire()` accepts it. (`src/elspeth/core/rate_limit/registry.py:22-27`, `src/elspeth/core/rate_limit/limiter.py:170-193`)
+### Root Cause
+
+When `timeout` parameter was added to `RateLimiter.acquire()`, the corresponding change to `NoOpLimiter.acquire()` was missed. Since `RateLimitRegistry.get_limiter()` returns `RateLimiter | NoOpLimiter`, both classes must have identical method signatures for callers to use them interchangeably.
+
+### Fix Applied
+
+1. Added `timeout: float | None = None` parameter to `NoOpLimiter.acquire()` in `registry.py:22`
+2. Added regression test `test_acquire_accepts_timeout_parameter` in `tests/core/rate_limit/test_registry.py`
+
+### Files Changed
+
+- `src/elspeth/core/rate_limit/registry.py` - Added timeout parameter to `NoOpLimiter.acquire()`
+- `tests/core/rate_limit/test_registry.py` - Added regression test
+
+### Verification
+
+- All 51 rate_limit tests pass
+- mypy type checking passes

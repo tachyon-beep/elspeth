@@ -19,8 +19,13 @@ class NoOpLimiter:
     All operations succeed instantly without any rate limiting.
     """
 
-    def acquire(self, weight: int = 1) -> None:
-        """No-op acquire (always succeeds instantly)."""
+    def acquire(self, weight: int = 1, timeout: float | None = None) -> None:
+        """No-op acquire (always succeeds instantly).
+
+        Args:
+            weight: Number of tokens to acquire (ignored)
+            timeout: Maximum wait time in seconds (ignored - always instant)
+        """
 
     def try_acquire(self, weight: int = 1) -> bool:
         """No-op try_acquire (always succeeds)."""
