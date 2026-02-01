@@ -444,7 +444,7 @@ coalesce:
 
 ## Landscape Settings (Audit Trail)
 
-Configure the audit trail database.
+Configure the audit trail database and optional change journal.
 
 ```yaml
 landscape:
@@ -456,14 +456,23 @@ landscape:
     sink: audit_archive
     format: json
     sign: true
+  # Optional: JSONL change journal for emergency backup
+  dump_to_jsonl: false
+  dump_to_jsonl_path: ./runs/audit.journal.jsonl
+  dump_to_jsonl_include_payloads: false
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Enable audit trail recording |
 | `backend` | string | `sqlite` | Database backend: `sqlite`, `postgresql` |
-| `url` | string | `sqlite:///./runs/audit.db` | SQLAlchemy database URL |
-| `export` | object | (disabled) | Post-run export configuration |
+| `url` | string | `sqlite:///./state/audit.db` | SQLAlchemy database URL |
+| `export` | object | (disabled) | Post-run audit export configuration |
+| `dump_to_jsonl` | bool | `false` | Write append-only JSONL change journal |
+| `dump_to_jsonl_path` | string | (derived from url) | Path for JSONL journal file |
+| `dump_to_jsonl_fail_on_error` | bool | `false` | Fail the run if journal write fails |
+| `dump_to_jsonl_include_payloads` | bool | `false` | Include request/response bodies in journal |
+| `dump_to_jsonl_payload_base_path` | string | (from payload_store) | Payload store path for inlining |
 
 ### Export Settings
 
@@ -473,6 +482,40 @@ landscape:
 | `sink` | string | - | Sink name to export to (required when enabled) |
 | `format` | string | `csv` | Export format: `csv`, `json` |
 | `sign` | bool | `false` | HMAC sign each record for integrity |
+
+### JSONL Change Journal
+
+Enable a redundant JSONL change journal for emergency backup. This is **not** the canonical audit record—use when you need a text-based, append-only backup stream.
+
+```yaml
+landscape:
+  enabled: true
+  url: sqlite:///./runs/audit.db
+
+  # Enable the change journal
+  dump_to_jsonl: true
+  dump_to_jsonl_path: ./runs/audit.journal.jsonl
+
+  # Include LLM/HTTP request and response bodies
+  dump_to_jsonl_include_payloads: true
+
+  # Fail the pipeline if journal writes fail (strict mode)
+  dump_to_jsonl_fail_on_error: false
+```
+
+**Use cases:**
+
+| Scenario | Recommended Settings |
+|----------|---------------------|
+| Debugging LLM calls | `dump_to_jsonl: true`, `include_payloads: true` |
+| Compliance backup | `dump_to_jsonl: true`, `fail_on_error: true` |
+| Production (minimal I/O) | `dump_to_jsonl: false` (default) |
+
+**Notes:**
+- Journal is append-only (never modified after write)
+- Each line is a self-contained JSON record
+- Includes all database commits: rows, transforms, calls, outcomes
+- With `include_payloads: true`, LLM prompts and responses are embedded
 
 ### PostgreSQL Example
 
@@ -713,7 +756,11 @@ transforms:
 
 ## Telemetry Settings
 
-Configure operational telemetry exports (OTLP, Azure Monitor, Datadog, console).
+Configure operational telemetry exports (OTLP, Azure Monitor, Datadog, console). Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
+
+**Key distinction:**
+- **Landscape**: Legal record, complete lineage, persisted forever, source of truth
+- **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
 
 ```yaml
 telemetry:
@@ -732,10 +779,57 @@ telemetry:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable telemetry emission |
-| `granularity` | string | `lifecycle` | `lifecycle`, `rows`, or `full` |
-| `backpressure_mode` | string | `block` | `block` or `drop` |
+| `granularity` | string | `lifecycle` | Event verbosity: `lifecycle`, `rows`, or `full` |
+| `backpressure_mode` | string | `block` | How to handle slow exporters: `block`, `drop`, or `slow` |
 | `fail_on_total_exporter_failure` | bool | `true` | Crash run if all exporters fail repeatedly |
 | `exporters` | list | `[]` | Exporter configurations |
+
+### Granularity Levels
+
+| Level | Events Emitted | Volume | Use Case |
+|-------|----------------|--------|----------|
+| `lifecycle` | Run start/complete, phase transitions | ~10-20/run | Production monitoring |
+| `rows` | Lifecycle + row creation, transform completion, gate routing | N × M events | Debugging, progress tracking |
+| `full` | Rows + external call details (LLM prompts/responses, HTTP, SQL) | High | Deep debugging, call analysis |
+
+**Choosing a granularity:**
+
+```yaml
+# Production: minimal overhead, just run lifecycle
+telemetry:
+  enabled: true
+  granularity: lifecycle
+  exporters:
+    - name: datadog
+
+# Development: see row-by-row progress
+telemetry:
+  enabled: true
+  granularity: rows
+  exporters:
+    - name: console
+      options:
+        format: pretty
+
+# Debugging LLM issues: full call details
+telemetry:
+  enabled: true
+  granularity: full
+  exporters:
+    - name: console
+      options:
+        format: json
+```
+
+### Backpressure Modes
+
+| Mode | Behavior | Trade-off |
+|------|----------|-----------|
+| `block` | Block pipeline when exporters can't keep up | Complete telemetry, may slow pipeline |
+| `drop` | Drop events when buffer is full | No pipeline impact, lossy telemetry |
+| `slow` | Adaptive rate limiting | (Not yet implemented) |
+
+**Recommendation:** Use `block` for debugging sessions (complete data), `drop` for production (no pipeline impact).
 
 ### Exporter Configuration
 
@@ -744,7 +838,7 @@ Each exporter config has a required name and an `options` block. Exporter-specif
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | **Yes** | `console`, `otlp`, `azure_monitor`, `datadog` |
-| `options` | object | No | Exporter-specific settings (see telemetry guide) |
+| `options` | object | No | Exporter-specific settings (see below) |
 
 **Secrets convention:** keep non-sensitive values in YAML and secrets in `.env`, referenced with `${VAR}`. For example, `options.endpoint` can be set in YAML while `options.headers.Authorization` comes from `.env`.
 
@@ -783,6 +877,33 @@ options:
   agent_port: 8126                # optional
   version: "1.0.0"                # optional
 ```
+
+### Correlation with Audit Trail
+
+Telemetry events include `run_id` and `token_id` fields that correlate directly with the Landscape audit database. This enables tracing from operational alerts to full lineage investigation.
+
+**Workflow:**
+
+1. **Alert fires** in Datadog/Grafana (e.g., "high error rate on transform X")
+2. **Extract `run_id`** from the telemetry event
+3. **Investigate with `explain`** command:
+   ```bash
+   elspeth explain --run <run_id> --database ./runs/audit.db
+   ```
+4. **Or use the Landscape MCP server** for programmatic access:
+   ```bash
+   elspeth-mcp --database ./runs/audit.db
+   # Then: get_failure_context(run_id)
+   ```
+
+**Key correlation fields in telemetry events:**
+
+| Field | Description | Maps To |
+|-------|-------------|---------|
+| `run_id` | Pipeline execution identifier | `runs.run_id` |
+| `token_id` | Row instance identifier | `node_states.token_id` |
+| `node_id` | Transform/gate instance | `nodes.node_id` |
+| `state_id` | Processing state record | `node_states.state_id` |
 
 ---
 
