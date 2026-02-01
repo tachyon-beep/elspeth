@@ -154,3 +154,28 @@ YES - the bug is still present in the code:
 4. Consider adding a test that verifies `on_retry` attempt numbers match what would be passed to `recorder.record_node_state()`
 
 **Rationale:** While not currently causing failures, this violates the principle of least surprise and creates a landmine for future developers who might use `on_retry` expecting system-standard 0-based numbering.
+
+---
+
+## RESOLUTION: 2026-02-02
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code (Opus 4.5)
+
+**Fix Summary:**
+
+Moved `on_retry` callback invocation from manual call inside the attempt block to tenacity's `before_sleep` hook, which:
+
+1. **Normalizes to 0-based:** `on_retry(retry_state.attempt_number - 1, exc)` converts tenacity's 1-based to audit convention
+2. **Fires only when retry scheduled:** `before_sleep` is only called when tenacity will actually sleep before another attempt
+3. **Documents convention:** Updated docstring to explicitly document 0-based attempt numbering
+
+**Files Changed:**
+- `src/elspeth/engine/retry.py` - Added `before_sleep_handler`, updated docstring
+- `tests/engine/test_retry.py` - Renamed test and fixed assertion to expect 0-based
+
+**Tests Added:**
+- `test_on_retry_uses_zero_based_attempts` - Verifies 0-based numbering
+- `test_on_retry_not_called_on_final_attempt` - Verifies no callback with max_attempts=1
+- `test_on_retry_not_called_on_exhausted_retries` - Verifies callback count with max_attempts=3

@@ -63,7 +63,12 @@ class TestRetryManager:
 
         assert exc_info.value.attempts == 2
 
-    def test_records_attempts(self) -> None:
+    def test_on_retry_uses_zero_based_attempts(self) -> None:
+        """on_retry receives 0-based attempt numbers matching audit convention.
+
+        Landscape audit system uses 0-based attempts (first attempt = 0).
+        The on_retry callback must use the same convention for consistency.
+        """
         manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
         attempts: list[tuple[int, str]] = []
 
@@ -84,7 +89,47 @@ class TestRetryManager:
 
         assert result == "ok"
         assert len(attempts) == 1
-        assert attempts[0][0] == 1
+        # First attempt is 0, so callback receives 0 (not 1)
+        assert attempts[0][0] == 0, "on_retry should use 0-based attempt numbering"
+
+    def test_on_retry_not_called_on_final_attempt(self) -> None:
+        """on_retry should NOT fire when no retry will occur.
+
+        With max_attempts=1, there's only one attempt and no retries possible.
+        The callback should never be invoked because no retry is scheduled.
+        """
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=1, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
+        attempts: list[tuple[int, BaseException]] = []
+
+        with pytest.raises(MaxRetriesExceeded):
+            manager.execute_with_retry(
+                lambda: (_ for _ in ()).throw(ValueError("Fail")),
+                is_retryable=lambda e: isinstance(e, ValueError),
+                on_retry=lambda attempt, error: attempts.append((attempt, error)),
+            )
+
+        assert len(attempts) == 0, "on_retry should not fire with max_attempts=1"
+
+    def test_on_retry_not_called_on_exhausted_retries(self) -> None:
+        """on_retry should NOT fire for the final failing attempt.
+
+        With max_attempts=3 and all attempts failing, on_retry should be
+        called twice (after attempts 0 and 1), but NOT after attempt 2
+        because no retry will follow.
+        """
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
+        attempts: list[int] = []
+
+        with pytest.raises(MaxRetriesExceeded):
+            manager.execute_with_retry(
+                lambda: (_ for _ in ()).throw(ValueError("Always fails")),
+                is_retryable=lambda e: isinstance(e, ValueError),
+                on_retry=lambda attempt, error: attempts.append(attempt),
+            )
+
+        # With 3 max attempts, on_retry fires after attempts 0 and 1 (before retries 2 and 3)
+        # It should NOT fire after attempt 2 (the final attempt)
+        assert attempts == [0, 1], f"Expected [0, 1], got {attempts}"
 
     def test_from_policy_none_returns_no_retry(self) -> None:
         """Missing policy defaults to no-retry for safety."""

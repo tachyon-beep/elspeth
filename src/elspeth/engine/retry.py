@@ -27,6 +27,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from tenacity import (
+    RetryCallState,
     RetryError,
     Retrying,
     retry_if_exception,
@@ -86,7 +87,11 @@ class RetryManager:
         Args:
             operation: Operation to execute
             is_retryable: Function to check if error is retryable
-            on_retry: Optional callback on retry (attempt, error)
+            on_retry: Optional callback called when a retry is scheduled.
+                      Receives (attempt, error) where attempt is 0-based
+                      (matching Landscape audit convention: first attempt = 0).
+                      Only called when a retry will actually occur, never on
+                      the final attempt.
 
         Returns:
             Result of operation
@@ -97,6 +102,16 @@ class RetryManager:
         """
         attempt = 0
         last_error: BaseException | None = None
+
+        # Use tenacity's before_sleep hook to invoke on_retry callback.
+        # This ensures callback fires ONLY when a retry is actually scheduled,
+        # never on the final attempt when retries are exhausted.
+        def before_sleep_handler(retry_state: RetryCallState) -> None:
+            if on_retry:
+                exc = retry_state.outcome.exception() if retry_state.outcome else None
+                if exc is not None:
+                    # Convert tenacity's 1-based attempt_number to 0-based for audit convention
+                    on_retry(retry_state.attempt_number - 1, exc)
 
         try:
             for attempt_state in Retrying(
@@ -109,6 +124,7 @@ class RetryManager:
                 ),
                 retry=retry_if_exception(is_retryable),
                 reraise=False,  # We catch RetryError and convert to MaxRetriesExceeded
+                before_sleep=before_sleep_handler if on_retry else None,
             ):
                 with attempt_state:
                     attempt = attempt_state.retry_state.attempt_number
@@ -116,9 +132,6 @@ class RetryManager:
                         return operation()
                     except Exception as e:
                         last_error = e
-                        # Only call on_retry for retryable errors that will be retried
-                        if is_retryable(e) and on_retry:
-                            on_retry(attempt, e)
                         raise
 
         except RetryError as e:

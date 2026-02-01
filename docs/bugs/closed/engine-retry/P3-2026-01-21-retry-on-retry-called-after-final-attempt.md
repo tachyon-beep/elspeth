@@ -182,3 +182,28 @@ def test_on_retry_not_called_on_final_attempt(self) -> None:
 
     assert len(attempts) == 0, "on_retry should not fire with max_attempts=1"
 ```
+
+---
+
+## RESOLUTION: 2026-02-02
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code (Opus 4.5)
+
+**Fix Summary:**
+
+The fix uses tenacity's `before_sleep` hook instead of manual callback invocation. The `before_sleep` hook is called by tenacity ONLY when it decides to sleep before another attempt, which means:
+
+1. It never fires on the final attempt (no sleep before a non-existent next attempt)
+2. It never fires with `max_attempts=1` (no retries possible = no sleep)
+3. It fires exactly N-1 times for N attempts when all fail
+
+**Root Cause:** The original code called `on_retry` inside `with attempt_state:` whenever a retryable exception occurred, BEFORE tenacity evaluated stop conditions. This meant the callback fired for ALL failures, including the final one.
+
+**Files Changed:**
+- `src/elspeth/engine/retry.py` - Replaced manual `on_retry` call with `before_sleep` hook
+
+**Tests Added:**
+- `test_on_retry_not_called_on_final_attempt` - Verifies no callback with max_attempts=1
+- `test_on_retry_not_called_on_exhausted_retries` - Verifies callback fires N-1 times for N failed attempts
