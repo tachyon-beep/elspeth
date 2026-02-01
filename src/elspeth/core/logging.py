@@ -11,6 +11,31 @@ from typing import Any
 
 import structlog
 
+# Third-party loggers that are excessively verbose at DEBUG level.
+# These emit HTTP connection details, credential operations, etc. that
+# are noise rather than signal. Silence them to WARNING even when
+# ELSPETH runs in DEBUG mode.
+_NOISY_LOGGERS: tuple[str, ...] = (
+    # Azure SDK - emits HTTP request/response details for every call
+    "azure",
+    "azure.core",
+    "azure.core.pipeline",
+    "azure.core.pipeline.policies",
+    "azure.core.pipeline.policies.http_logging_policy",
+    "azure.identity",
+    "azure.monitor",
+    # urllib3 - connection pool management noise
+    "urllib3",
+    "urllib3.connectionpool",
+    # OpenTelemetry SDK internals - span processing details
+    "opentelemetry",
+    "opentelemetry.sdk",
+    "opentelemetry.exporter",
+    # httpx/httpcore - async HTTP client internals
+    "httpx",
+    "httpcore",
+)
+
 
 def configure_logging(
     *,
@@ -30,6 +55,12 @@ def configure_logging(
         level=getattr(logging, level.upper()),
         force=True,  # Allow reconfiguration
     )
+
+    # Silence noisy third-party loggers that spam DEBUG output.
+    # These inherit from root logger, so we must explicitly set them to WARNING
+    # AFTER basicConfig() sets the root level.
+    for logger_name in _NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
     # Shared processors
     shared_processors: list[Any] = [

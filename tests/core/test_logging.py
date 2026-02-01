@@ -70,3 +70,34 @@ class TestLoggingConfig:
         assert bound is not None
         # Bound logger is a new instance
         assert bound is not logger
+
+    def test_noisy_third_party_loggers_silenced(self) -> None:
+        """Third-party loggers (Azure SDK, urllib3, etc.) are silenced to WARNING.
+
+        Even when ELSPETH runs in DEBUG mode, we don't want HTTP connection
+        spam from Azure SDK, urllib3, and OpenTelemetry internals.
+        """
+        import logging
+
+        from elspeth.core.logging import configure_logging
+
+        # Configure with DEBUG level (verbose mode)
+        configure_logging(level="DEBUG")
+
+        # Root logger should be at DEBUG
+        assert logging.getLogger().level == logging.DEBUG
+
+        # Noisy third-party loggers should be silenced to WARNING
+        noisy_loggers = [
+            "azure",
+            "azure.core.pipeline.policies.http_logging_policy",
+            "azure.identity",
+            "urllib3",
+            "opentelemetry",
+        ]
+
+        for name in noisy_loggers:
+            logger = logging.getLogger(name)
+            assert logger.getEffectiveLevel() >= logging.WARNING, (
+                f"Logger '{name}' should be WARNING or higher, got level {logger.getEffectiveLevel()}"
+            )
