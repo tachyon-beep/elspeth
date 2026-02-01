@@ -15,6 +15,8 @@ chaosllm-mcp --database ./chaosllm-metrics.db
 python -m elspeth.testing.chaosllm_mcp.server --database ./metrics.db
 ```
 
+> **Note:** All `chaosllm-mcp` commands also work as `elspeth chaosllm-mcp`.
+
 ## Tool Reference
 
 ### High-Level Analysis Tools

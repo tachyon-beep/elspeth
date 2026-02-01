@@ -55,6 +55,16 @@ export OPENROUTER_API_KEY="sk-or-v1-..."
 uv run elspeth run -s examples/openrouter_multi_query_assessment/suite.yaml --execute
 ```
 
+### Run with JSONL Change Journal
+
+Enable the optional JSONL change journal for an append-only backup stream:
+
+```bash
+uv run elspeth run -s examples/openrouter_multi_query_assessment/suite_journal.yaml --execute
+```
+
+The journal is disabled by default. See [JSONL Change Journal](../../README.md#jsonl-change-journal-optional) for configuration details.
+
 ## Model Selection
 
 Change the model in `suite.yaml` to use different providers:

@@ -27,6 +27,8 @@ chaosllm presets
 chaosllm serve --port=9000 --rate-limit-pct=20
 ```
 
+> **Note:** All `chaosllm` commands also work as `elspeth chaosllm`.
+
 ### Pytest Fixture
 
 ```python
@@ -197,6 +199,32 @@ response:
   mode: echo
 ```
 
+### Preset Mode
+
+Returns responses from a JSONL preset bank (one JSON object per line). Each
+object must have a `content` field with the response text.
+
+Use this mode for deterministic responses in regression tests.
+
+```yaml
+response:
+  mode: preset
+  preset:
+    file: "./examples/chaosllm/responses.jsonl"
+    selection: sequential  # or "random"
+```
+
+**Example JSONL file** (`responses.jsonl`):
+
+```jsonl
+{"content": "{\"category\": \"fraud\", \"confidence\": 0.95}"}
+{"content": "{\"category\": \"legitimate\", \"confidence\": 0.88}"}
+```
+
+Selection modes:
+- `sequential`: Cycle through responses in order
+- `random`: Pick randomly from the bank
+
 ### Per-Request Override
 
 Override the server default for specific requests using headers:
@@ -227,7 +255,7 @@ metrics:
   timeseries_bucket_sec: 1
 
 response:
-  mode: template  # random, template, echo
+  mode: template  # random, template, echo, preset
   random:
     min_words: 10
     max_words: 100
