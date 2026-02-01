@@ -156,7 +156,7 @@ packages = ["src/elspeth"]
 
 # === Ruff Configuration ===
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 140
 src = ["src", "tests"]
 
@@ -197,7 +197,7 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 
 # === Mypy Configuration ===
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
