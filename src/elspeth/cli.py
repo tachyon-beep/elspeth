@@ -1590,42 +1590,48 @@ def _execute_resume_with_instances(
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.telemetry import create_telemetry_manager
 
-    rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
-    rate_limit_registry = RateLimitRegistry(rate_limit_config)
-    concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
-    checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
-    telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
-    telemetry_manager = create_telemetry_manager(telemetry_config)
+    # Initialize to None so they're defined in finally block even if creation fails
+    rate_limit_registry = None
+    telemetry_manager = None
 
-    # Create checkpoint manager and orchestrator for resume
-    checkpoint_manager = CheckpointManager(db)
-    orchestrator = Orchestrator(
-        db,
-        event_bus=event_bus,
-        checkpoint_manager=checkpoint_manager,
-        checkpoint_config=checkpoint_config,
-        rate_limit_registry=rate_limit_registry,
-        concurrency_config=concurrency_config,
-        telemetry_manager=telemetry_manager,
-    )
+    try:
+        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
 
-    # Execute resume (payload_store is required for resume)
-    if payload_store is None:
-        raise ValueError("payload_store is required for resume operations")
-    result = orchestrator.resume(
-        resume_point=resume_point,
-        config=pipeline_config,
-        graph=graph,
-        payload_store=payload_store,
-        settings=config,
-    )
+        # Create checkpoint manager and orchestrator for resume
+        checkpoint_manager = CheckpointManager(db)
+        orchestrator = Orchestrator(
+            db,
+            event_bus=event_bus,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
+            rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            telemetry_manager=telemetry_manager,
+        )
 
-    # Clean up rate limit registry and telemetry
-    rate_limit_registry.close()
-    if telemetry_manager is not None:
-        telemetry_manager.close()
+        # Execute resume (payload_store is required for resume)
+        if payload_store is None:
+            raise ValueError("payload_store is required for resume operations")
+        result = orchestrator.resume(
+            resume_point=resume_point,
+            config=pipeline_config,
+            graph=graph,
+            payload_store=payload_store,
+            settings=config,
+        )
 
-    return result
+        return result
+    finally:
+        # Clean up rate limit registry and telemetry (always, even on failure)
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
 
 
 def _build_validation_graph(settings_config: ElspethSettings) -> ExecutionGraph:
@@ -1815,6 +1821,14 @@ def resume(
 
         # Get payload store from settings
         from elspeth.core.payload_store import FilesystemPayloadStore
+
+        if settings_config.payload_store.backend != "filesystem":
+            typer.echo(
+                f"Error: Unsupported payload store backend '{settings_config.payload_store.backend}'. "
+                f"Only 'filesystem' is currently supported.",
+                err=True,
+            )
+            raise typer.Exit(1)
 
         payload_path = settings_config.payload_store.base_path
         if not payload_path.exists():

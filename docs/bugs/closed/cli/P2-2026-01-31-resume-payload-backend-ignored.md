@@ -32,8 +32,20 @@
 
 - `elspeth resume` exits with explicit error if `payload_store.backend` is not `filesystem`
 
-## Verification (2026-02-01)
+## Resolution (2026-02-02)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `resume()` still skips backend validation and always constructs `FilesystemPayloadStore`. (`src/elspeth/cli.py:1717-1725`)
+Added backend validation guard in `resume()` at `src/elspeth/cli.py:1825-1831` that mirrors the existing check in `run()`:
+
+```python
+if settings_config.payload_store.backend != "filesystem":
+    typer.echo(
+        f"Error: Unsupported payload store backend '{settings_config.payload_store.backend}'. "
+        f"Only 'filesystem' is currently supported.",
+        err=True,
+    )
+    raise typer.Exit(1)
+```
+
+All 123 resume-related tests pass.
