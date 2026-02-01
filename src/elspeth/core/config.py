@@ -132,7 +132,6 @@ class AggregationSettings(BaseModel):
     The engine evaluates trigger conditions - plugins only accept/reject rows.
 
     Output modes:
-    - single: Batch produces one aggregated result row
     - passthrough: Batch releases all accepted rows unchanged
     - transform: Batch applies a transform function to produce results
 
@@ -142,7 +141,8 @@ class AggregationSettings(BaseModel):
             plugin: stats_aggregation
             trigger:
               count: 100
-            output_mode: single
+            output_mode: transform
+            expected_output_count: 1  # Optional: validate N->1 aggregation
             options:
               fields: ["value"]
               compute_mean: true
@@ -153,14 +153,30 @@ class AggregationSettings(BaseModel):
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
     trigger: TriggerConfig = Field(description="When to flush the batch")
-    output_mode: Literal["single", "passthrough", "transform"] = Field(
-        default="single",
+    output_mode: Literal["passthrough", "transform"] = Field(
+        default="transform",
         description="How batch produces output rows",
+    )
+    expected_output_count: int | None = Field(
+        default=None,
+        description="Optional: validate aggregation produces exactly this many output rows.",
     )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("output_mode", mode="before")
+    @classmethod
+    def reject_single_mode(cls, v: Any) -> Any:
+        """Reject deprecated 'single' mode with helpful migration message."""
+        if v == "single":
+            raise ValueError(
+                "output_mode='single' has been removed (bug elspeth-rapid-nd3). "
+                "Use output_mode='transform' instead. For N->1 aggregations, add "
+                "expected_output_count=1 to validate cardinality."
+            )
+        return v
 
 
 class GateSettings(BaseModel):

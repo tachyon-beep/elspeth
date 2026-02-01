@@ -455,9 +455,8 @@ class RowProcessor:
         - END_OF_SOURCE: Triggered at end of source to flush remaining buffers
 
         Handles all output_modes correctly:
-        - single: Creates one output token from first buffered token
         - passthrough: Routes all buffered tokens through remaining transforms
-        - transform: Creates new tokens via expand_token
+        - transform: Creates new tokens via expand_token (N→M output)
 
         Args:
             node_id: The aggregation node ID
@@ -499,9 +498,9 @@ class RowProcessor:
             #
             # CRITICAL: Token outcome recording depends on output_mode:
             # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-            # - single/transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+            # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
             #
-            # For single/transform modes, the batch failure is already recorded in the
+            # For transform mode, the batch failure is already recorded in the
             # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
             # semantically correct (tokens were consumed into a batch that failed).
             # Recording FAILED would violate the unique terminal outcome constraint.
@@ -567,58 +566,7 @@ class RowProcessor:
                 # bug in graph construction that must crash immediately (Tier 1 data).
                 coalesce_at_step = self._coalesce_step_map[coalesce_name]
 
-        if output_mode == "single":
-            # Single output: one aggregated result row
-            # Contract: batch-aware transforms in single mode MUST return a row
-            if result.row is None:
-                raise RuntimeError(
-                    f"Aggregation transform '{transform.name}' returned None for result.row "
-                    f"in 'single' mode. Batch-aware transforms must return a row via "
-                    f"TransformResult.success(row). This is a plugin bug."
-                )
-            final_data = result.row
-
-            # Use first buffered token as parent for audit trail
-            # Create NEW token via expand_token (buffered tokens are CONSUMED_IN_BATCH)
-            # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
-            if buffered_tokens:
-                expanded, _expand_group_id = self._token_manager.expand_token(
-                    parent_token=buffered_tokens[0],
-                    expanded_rows=[final_data],
-                    step_in_pipeline=audit_step,
-                    run_id=self._run_id,
-                    record_parent_outcome=False,
-                )
-                output_token = expanded[0]
-
-                # Check if token needs to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and output_token.branch_name is not None
-
-                if more_transforms or needs_coalesce:
-                    # Queue for remaining transforms with coalesce metadata
-                    # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
-                    # If there's a coalesce point, orchestrator should skip directly there.
-                    child_items.append(
-                        _WorkItem(
-                            token=output_token,
-                            start_step=step,  # 0-indexed current position
-                            coalesce_at_step=coalesce_at_step,
-                            coalesce_name=coalesce_name,
-                        )
-                    )
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    results.append(
-                        RowResult(
-                            token=output_token,
-                            final_data=final_data,
-                            outcome=RowOutcome.COMPLETED,
-                        )
-                    )
-
-        elif output_mode == "passthrough":
+        if output_mode == "passthrough":
             # Passthrough: original tokens continue with enriched data
             if not result.is_multi_row:
                 raise ValueError(
@@ -763,7 +711,7 @@ class RowProcessor:
 
         Returns:
             (RowResult or list[RowResult], child_items) tuple
-            - Single RowResult for single/transform modes
+            - Single RowResult for transform mode (or list if N→M output)
             - List of RowResults for passthrough mode (one per buffered token)
         """
         raw_node_id = transform.node_id
@@ -800,9 +748,9 @@ class RowProcessor:
                 #
                 # CRITICAL: Token outcome recording depends on output_mode:
                 # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-                # - single/transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+                # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
                 #
-                # For single/transform modes, the batch failure is already recorded in the
+                # For transform mode, the batch failure is already recorded in the
                 # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
                 # semantically correct (tokens were consumed into a batch that failed).
                 # Recording FAILED would violate the unique terminal outcome constraint.
@@ -867,61 +815,7 @@ class RowProcessor:
                 return (results, child_items)
 
             # Handle output modes
-            if output_mode == "single":
-                # Single output: one aggregated result row
-                # The triggering token continues with aggregated data
-                # Contract: batch-aware transforms in single mode MUST return a row
-                if result.row is None:
-                    raise RuntimeError(
-                        f"Aggregation transform '{transform.name}' returned None for result.row "
-                        f"in 'single' mode. Batch-aware transforms must return a row via "
-                        f"TransformResult.success(row). This is a plugin bug."
-                    )
-                final_data = result.row
-                updated_token = TokenInfo(
-                    row_id=current_token.row_id,
-                    token_id=current_token.token_id,
-                    row_data=final_data,
-                    branch_name=current_token.branch_name,
-                )
-
-                # Check if there are more transforms after this one
-                more_transforms = step < total_steps
-
-                # Check if token needs to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
-
-                if more_transforms or needs_coalesce:
-                    # Queue aggregated token as work item for remaining transforms
-                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
-                    # 0-indexed position of the NEXT transform (since step = p + 1 where
-                    # p is current 0-indexed position). So transforms[step:] gives remaining.
-                    # If there's a coalesce point, skip directly there (matches fork behavior).
-                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
-                    child_items.append(
-                        _WorkItem(
-                            token=updated_token,
-                            start_step=continuation_start,
-                            coalesce_at_step=coalesce_at_step,
-                            coalesce_name=coalesce_name,
-                        )
-                    )
-                    # Return empty list - result will come from child item
-                    return ([], child_items)
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
-                    return (
-                        RowResult(
-                            token=updated_token,
-                            final_data=final_data,
-                            outcome=RowOutcome.COMPLETED,
-                        ),
-                        child_items,
-                    )
-
-            elif output_mode == "passthrough":
+            if output_mode == "passthrough":
                 # Passthrough: original tokens continue with enriched data
                 # Validate result is multi-row
                 if not result.is_multi_row:
@@ -1092,7 +986,7 @@ class RowProcessor:
 
         # Not flushing yet - row is buffered
         # In passthrough mode: BUFFERED (non-terminal, will reappear)
-        # In single/transform modes: CONSUMED_IN_BATCH (terminal)
+        # In transform mode: CONSUMED_IN_BATCH (terminal)
         if output_mode == "passthrough":
             buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
             self._recorder.record_token_outcome(
