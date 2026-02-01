@@ -95,7 +95,7 @@ cython_debug/
 *~
 
 # Project-specific
-runs/
+/runs/
 *.db
 *.sqlite
 *.sqlite3
@@ -129,6 +129,10 @@ mutants/
 # Example outputs (dynamic data, not tracked)
 examples/*/output/*
 examples/*/runs/*
+!examples/*/output/
+!examples/*/runs/
+!examples/*/output/.gitkeep
+!examples/*/runs/.gitkeep
 
 # Real/production data - never commit
 real/

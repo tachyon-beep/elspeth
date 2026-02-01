@@ -212,11 +212,6 @@ allow_hits:
   reason: 'Capability check: verify checkpoint API exists before using it'
   safety: Raises RuntimeError if method doesn't exist - fail-fast, not silent degradation
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_process_batch:fp=39567fccd8167667
-  owner: architecture
-  reason: Checkpoint may be None or empty dict - checking for batch_id existence
-  safety: None/missing batch_id means PHASE 1 (fresh submit), explicit logic follows
-  expires: null
 - key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:fp=df56c52f8175dea8
   owner: architecture
   reason: 'Trust boundary: Azure files.create API call (external system boundary)'
@@ -242,73 +237,38 @@ allow_hits:
   reason: 'Trust boundary: Azure batch.errors may not exist on all batch statuses'
   safety: Graceful handling - error info still returned without detailed errors
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_check_batch_status:fp=e63f5554c249bc60
-  owner: architecture
-  reason: submitted_at may not exist in old checkpoint format
-  safety: Missing submitted_at skips timeout check - graceful degradation
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=bef8f67d6fb2a06d
-  owner: architecture
-  reason: row_mapping may not exist in corrupted checkpoint
-  safety: Empty dict default allows graceful recovery - rows return with error
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=cdd5437abb7d0de9
-  owner: architecture
-  reason: template_errors may not exist in old checkpoint format
-  safety: Empty list default means no template errors tracked - graceful degradation
-  expires: null
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:fp=a18f2c093fd983f7
+- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:fp=a7f2c3e854147fc8
   owner: architecture
   reason: 'Trust boundary: Azure files.content API call (external system boundary)'
   safety: Caught, recorded via ctx.record_call(ERROR), returns TransformResult.error(retryable=True)
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9b5f9a2db289d209
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=017a4a193d5b397d
   owner: architecture
   reason: 'Trust boundary: Azure JSONL result custom_id field validated as external
     data'
   safety: None check follows on next line - returns error row if missing
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=0cd943822f05dfaf
-  owner: architecture
-  reason: 'Intentional Optional API: rows with template errors aren''t in mapping'
-  safety: None is checked explicitly on next line with 'if custom_id is None'
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9b3bcfac5008d241
-  owner: architecture
-  reason: 'Trust boundary: Azure batch result ''error'' field is optional'
-  safety: Graceful handling - checks for error before extracting response
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=fd4ba75828650c17
-  owner: architecture
-  reason: 'Trust boundary: Azure batch result ''response'' field structure varies'
-  safety: Graceful default to {} - handles missing/malformed responses
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=dad3d72e99157874
-  owner: architecture
-  reason: 'Trust boundary: Azure batch result ''response.body'' field structure varies'
-  safety: Graceful default to {} - handles missing/malformed body
-  expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=f11b50fcc31d71e0
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9ad8e39240bec41d
   owner: architecture
   reason: 'Trust boundary: Azure batch response ''choices'' field may be missing'
   safety: Graceful default to [] - explicit check for empty choices follows
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=fe355c1441419303
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=bd8f44baec572b84
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=393ca12a4cefbdec
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=1bfedfa1d1b51424
   owner: architecture
   reason: 'Trust boundary: Azure choice message.content structure may vary'
   safety: Graceful default to empty string - empty content is valid for audit trail
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=76aade499eec02cb
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=73774cb158f03b40
   owner: architecture
   reason: 'Trust boundary: Azure response usage field is optional'
   safety: Graceful default to {} - usage is metadata, not critical
   expires: null
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=b7c0e3f93644f552
+- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=845b632e3d490679
   owner: architecture
   reason: 'Trust boundary: Azure batch response may return different model'
   safety: Graceful fallback to deployment name - audit still captures actual value
@@ -386,18 +346,6 @@ allow_hits:
   reason: 'Optional field: required_input_fields is not present in all transform configs'
   safety: Returns None when not present, then checks options dict for aggregations
   expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=321a2cd68ee9cf0d
-  owner: architecture
-  reason: 'Aggregation config structure: options is nested dict for aggregation nodes'
-  safety: Default {} when options missing - then checks for required_input_fields
-    inside
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=183774ab59f5eafd
-  owner: architecture
-  reason: 'Optional field: required_input_fields may not be in aggregation options'
-  safety: Returns frozenset of fields if present, falls through to schema check if
-    not
-  expires: null
 - key: engine/executors.py:R3:TransformExecutor:_get_batch_adapter:fp=7a7503fa06420a75
   owner: architecture
   reason: 'Optional protocol extension: checking if transform supports batch adapter
@@ -423,17 +371,6 @@ allow_hits:
   owner: architecture
   reason: 'Optional protocol extension: batch_wait_timeout is optional on transforms'
   safety: Default 3600.0 seconds is generous timeout for batch results
-  expires: null
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=7931c1d6ceafdbca
-  owner: architecture
-  reason: 'Optional protocol extension: evict_submission is optional on batch transforms'
-  safety: None means transform doesn't support submission eviction - gracefully skipped
-  expires: null
-- key: engine/executors.py:R4:TransformExecutor:execute_transform:fp=f2135798ab651b57
-  owner: architecture
-  reason: 'Best-effort cleanup: evict_submission failure should not block timeout
-    handling'
-  safety: Logged with warning - original timeout error still raised
   expires: null
 - key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=dc75c0a50ecb9961
   owner: architecture
@@ -581,11 +518,6 @@ allow_hits:
     have trigger config
   safety: None means no trigger config - elapsed_age_seconds defaults to 0.0
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:fp=9d8ca60c63eaf2e2
-  owner: architecture
-  reason: 'Intentional Optional API: batch_id lookup for node_id'
-  safety: None is safe - means no batch exists yet, recorded as null in checkpoint
-  expires: null
 - key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=44de9b3e54172856
   owner: architecture
   reason: 'Optional field: _version in checkpoint state for migration compatibility'
@@ -595,16 +527,6 @@ allow_hits:
   owner: architecture
   reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
   safety: None default handled by dataclass
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=ab652420c6e681c3
-  owner: architecture
-  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
-  safety: None check with explicit handling
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=c45f5f4379db4b6a
-  owner: architecture
-  reason: Optional trigger evaluator lookup - node may not have trigger config
-  safety: None check with conditional elapsed time restoration
   expires: null
 - key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:fp=cb728c1a23ed45e2
   owner: architecture

@@ -7,6 +7,7 @@
 - Normalized **4 misfiled bugs** into subsystem folders with standard filenames.
 - Updated `docs/bugs/open/README.md` and added notes in `docs/bugs/README.md` to reflect the cleanup.
 - Completed a P2 verification pass and closed 1 fixed P2 (coalesce failure recording).
+- Closed `P3-2026-01-22-engine-artifacts-legacy-shim` after removing the legacy shim and migrating imports.
 
 ## P1 Verification Pass (2026-02-01)
 
@@ -24,8 +25,9 @@
 
 ## P3 Verification + Priority Review (2026-02-01)
 
-- Re-verified all open P3s; none were fixed/OBE.
+- Re-verified all open P3s; closed one P3 as fixed.
 - Added 2026-02-01 verification sections to the remaining P3s and validated that their priority remains P3.
+- Closed `docs/bugs/closed/core-config/P3-2026-01-22-engine-artifacts-legacy-shim.md` (shim removed, imports updated).
 
 ## Already Closed (Duplicate Open Entries Removed)
 
@@ -75,9 +77,9 @@ All removed duplicates are **P1** and still correctly prioritized:
 
 ## Current Open Totals (Post-Triage)
 
-- **P1:** 8
-- **P2:** 44
-- **P3:** 25
-- **Total:** 77
+- **P1:** 7
+- **P2:** 43
+- **P3:** 23
+- **Total:** 73
 
 See `docs/bugs/open/README.md` for the updated breakdown.

@@ -97,11 +97,19 @@
 
 ---
 
-## VERIFICATION: 2026-02-01
+## Verification (2026-02-01)
 
-**Status:** STILL VALID
+**Status: FIXED**
 
-- `src/elspeth/engine/artifacts.py` still exists as a re-export shim with no engine-specific logic.
+- Removed `src/elspeth/engine/artifacts.py` and updated all imports to use `elspeth.contracts.ArtifactDescriptor`.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Deleted the legacy shim and migrated all code/test imports to the canonical contracts path.
 
 ## VERIFICATION: 2026-01-25
 

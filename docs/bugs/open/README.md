@@ -13,7 +13,7 @@ open/
 ├── contracts/                # Contract validation (3 P2, 3 P3)
 ├── core-canonical/           # Canonicalization (1 P2)
 ├── core-checkpoint/          # Checkpointing/recovery (2 P2, 2 P3)
-├── core-config/              # Configuration system (2 P2, 2 P3)
+├── core-config/              # Configuration system (2 P2, 1 P3)
 ├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
 ├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 2 P3)
 ├── core-logging/             # Logging/telemetry output (1 P2)
@@ -33,7 +33,7 @@ open/
 ├── engine-triggers/          # Trigger evaluation (1 P2)
 ├── mcp/                      # MCP tooling (2 P2)
 ├── plugins-azure/            # Azure plugin pack (1 P2, 1 P3)
-├── plugins-llm/              # Base LLM transforms (1 P1, 5 P2, 1 P3)
+├── plugins-llm/              # Base LLM transforms (5 P2, 1 P3)
 ├── plugins-sinks/            # Sink implementations (2 P2, 1 P3)
 ├── plugins-sources/          # Source implementations (1 P3)
 └── plugins-transforms/       # Transform implementations (1 P1)
@@ -46,10 +46,10 @@ open/
 | **core-landscape** | 0 | 8 | 2 | 10 | Export + verifier gaps |
 | **engine-orchestrator** | 1 | 3 | 2 | 6 | Run lifecycle + cleanup |
 | **contracts** | 0 | 3 | 3 | 6 | Schema/contract validation |
-| **plugins-llm** | 1 | 5 | 1 | 7 | LLM audit + semantics |
+| **plugins-llm** | 0 | 5 | 1 | 6 | LLM audit + semantics |
 | **engine-coalesce** | 1 | 0 | 0 | 1 | Fork/join timeouts |
 | **core-checkpoint** | 0 | 2 | 2 | 4 | Resume + checkpoint format |
-| **core-config** | 0 | 2 | 2 | 4 | Plugin config validation |
+| **core-config** | 0 | 2 | 1 | 3 | Plugin config validation |
 | **engine-pooling** | 0 | 1 | 2 | 3 | Pooling/batching |
 | **engine-processor** | 0 | 1 | 2 | 3 | Token handling |
 | **engine-retry** | 0 | 1 | 2 | 3 | Retry semantics |
@@ -71,7 +71,7 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **8** | **44** | **25** | **77** | All bugs organized |
+| **TOTAL** | **7** | **43** | **23** | **73** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -82,8 +82,7 @@ open/
 4. **engine-expression-parser/P1-2026-01-31-expression-errors-bubble-raw** - Hard crash + opaque errors
 5. **core-dag/P1-2026-01-31-gate-drops-computed-schema-guarantees** - Schema contract break
 6. **plugins-transforms/P1-2026-01-31-context-record-call-bypasses-allocator** - call_index collisions
-7. **plugins-llm/P1-2026-01-31-multi-query-output-key-collisions** - Silent data loss
-8. **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Hidden config drift
+7. **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Hidden config drift
 
 ### Phase 2: Audit Trail Completeness (Fix This Sprint/Next)
 - **core-landscape/** - Exporter completeness, verifier correctness
@@ -124,7 +123,7 @@ open/
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 8 P1, 44 P2, 25 P3 = 77 total.**
+**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 23 P3 = 73 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
@@ -132,6 +131,7 @@ open/
 - Normalized four misfiled bugs into subsystem folders with standard filenames.
 - Verified all remaining P1s; closed two that are now fixed (`P1-2026-01-30-payload-store-optional`, `P1-2026-01-31-sink-flush-failure-leaves-open-states`).
 - Closed `P2-2026-01-22-coalesce-timeout-failures-unrecorded` (fixed coalesce failure recording).
+- Closed `P3-2026-01-22-engine-artifacts-legacy-shim` (removed legacy re-export).
 
 **Reports:**
 - Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`

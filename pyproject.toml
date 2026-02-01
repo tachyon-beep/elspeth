@@ -98,6 +98,7 @@ azure = [
     "azure-storage-blob>=12.28,<13",  # Azure Blob Storage
     "azure-identity>=1.25,<2",  # Azure authentication
     "azure-keyvault-secrets>=4.10,<5",  # Key Vault for fingerprint key
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error  # Azure Monitor / App Insights telemetry
     "jinja2>=3.1,<4",  # Template engine for path templating
 ]
 
@@ -129,6 +130,7 @@ all = [
     "azure-storage-blob>=12.28,<13",
     "azure-identity>=1.25,<2",
     "azure-keyvault-secrets>=4.10,<5",
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error
     # mcp dependencies
     "mcp>=1.0,<2",
 ]
