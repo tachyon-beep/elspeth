@@ -32,3 +32,15 @@
 **Status: STILL VALID**
 
 - Checkpoint IDs are still truncated to 12 hex chars (`uuid.uuid4().hex[:12]`). (`src/elspeth/core/checkpoint/manager.py:78`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Use full UUID hex for checkpoint IDs to eliminate collision risk.
+
+### Test Coverage
+
+- Not added (trivial ID length change).

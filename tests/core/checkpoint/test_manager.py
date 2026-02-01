@@ -242,11 +242,10 @@ class TestCheckpointManager:
         assert deleted == 0
 
     def test_old_checkpoint_rejected(self, manager: CheckpointManager) -> None:
-        """Checkpoints created before 2026-01-24 should be rejected.
+        """Checkpoints without format_version should be rejected.
 
-        Old checkpoints use random UUID-based node IDs which are incompatible
-        with the new deterministic hash-based node IDs. Loading such checkpoints
-        would cause resume failures as node IDs won't match.
+        Unversioned checkpoints predate deterministic node IDs and cannot be
+        safely resumed.
         """
         from elspeth.core.landscape.schema import (
             checkpoints_table,
@@ -258,14 +257,14 @@ class TestCheckpointManager:
 
         # Set up required foreign key references
         run_id = "run-old"
-        old_date = datetime(2026, 1, 23, 23, 59, 59, tzinfo=UTC)  # One second before cutoff
+        created_at = datetime(2026, 1, 23, 23, 59, 59, tzinfo=UTC)
 
         with manager._db.engine.connect() as conn:
             # Create run
             conn.execute(
                 runs_table.insert().values(
                     run_id=run_id,
-                    started_at=old_date,
+                    started_at=created_at,
                     config_hash="abc123",
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
@@ -283,7 +282,7 @@ class TestCheckpointManager:
                     determinism=Determinism.DETERMINISTIC,
                     config_hash="xyz",
                     config_json="{}",
-                    registered_at=old_date,
+                    registered_at=created_at,
                 )
             )
             # Create row
@@ -294,7 +293,7 @@ class TestCheckpointManager:
                     source_node_id="node-old",
                     row_index=0,
                     source_data_hash="hash1",
-                    created_at=old_date,
+                    created_at=created_at,
                 )
             )
             # Create token
@@ -302,7 +301,7 @@ class TestCheckpointManager:
                 tokens_table.insert().values(
                     token_id="tok-old",
                     row_id="row-old",
-                    created_at=old_date,
+                    created_at=created_at,
                 )
             )
             # Create checkpoint with old date
@@ -318,7 +317,7 @@ class TestCheckpointManager:
                     aggregation_state_json=None,
                     upstream_topology_hash="old-upstream-hash",  # Bug #12: required field
                     checkpoint_node_config_hash="old-node-config-hash",  # Bug #12: required field
-                    created_at=old_date,
+                    created_at=created_at,
                 )
             )
             conn.commit()
@@ -330,7 +329,7 @@ class TestCheckpointManager:
         # Verify error message contains useful information
         error_msg = str(exc_info.value)
         assert checkpoint_id in error_msg
-        assert "legacy checkpoint" in error_msg  # Legacy checkpoints without format_version
+        assert "format_version" in error_msg
         assert "Resume not supported" in error_msg
 
     def test_new_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
@@ -342,6 +341,7 @@ class TestCheckpointManager:
         # Create a checkpoint with new created_at date (on cutoff)
         new_date = datetime(2026, 1, 24, 0, 0, 0, tzinfo=UTC)  # Exactly at cutoff
 
+        from elspeth.contracts import Checkpoint
         from elspeth.core.landscape.schema import checkpoints_table
 
         checkpoint_id = "cp-new-checkpoint"
@@ -358,6 +358,7 @@ class TestCheckpointManager:
                     upstream_topology_hash="new-upstream-hash",  # Bug #12: required field
                     checkpoint_node_config_hash="new-node-config-hash",  # Bug #12: required field
                     created_at=new_date,
+                    format_version=Checkpoint.CURRENT_FORMAT_VERSION,
                 )
             )
             conn.commit()
@@ -370,13 +371,11 @@ class TestCheckpointManager:
         assert checkpoint.created_at.replace(tzinfo=None) == new_date.replace(tzinfo=None)
 
     def test_checkpoint_after_cutoff_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
-        """Checkpoints created after 2026-01-24 should be accepted.
-
-        Verifies that the cutoff is inclusive - any date >= 2026-01-24 00:00:00 is valid.
-        """
+        """Checkpoints created after 2026-01-24 should be accepted."""
         # Create a checkpoint well after cutoff
         future_date = datetime(2026, 2, 1, 12, 30, 0, tzinfo=UTC)
 
+        from elspeth.contracts import Checkpoint
         from elspeth.core.landscape.schema import checkpoints_table
 
         checkpoint_id = "cp-future-checkpoint"
@@ -393,6 +392,7 @@ class TestCheckpointManager:
                     upstream_topology_hash="future-upstream-hash",  # Bug #12: required field
                     checkpoint_node_config_hash="future-node-config-hash",  # Bug #12: required field
                     created_at=future_date,
+                    format_version=Checkpoint.CURRENT_FORMAT_VERSION,
                 )
             )
             conn.commit()

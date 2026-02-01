@@ -170,8 +170,11 @@ class LineageTextFormatter:
             lines.append("--- External Calls ---")
             for call in result.calls:
                 # Direct access to .value - Tier 1 trust (our audit data)
-                latency = call.latency_ms if call.latency_ms is not None else 0.0
-                lines.append(f"  {call.call_type.value}: {call.status.value} ({latency:.1f}ms)")
+                if call.latency_ms is None:
+                    latency_display = "N/A"
+                else:
+                    latency_display = f"{call.latency_ms:.1f}ms"
+                lines.append(f"  {call.call_type.value}: {call.status.value} ({latency_display})")
             lines.append("")
 
         # Errors

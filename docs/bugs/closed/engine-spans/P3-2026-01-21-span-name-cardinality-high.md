@@ -159,3 +159,15 @@ The existing tests (`tests/engine/test_spans.py`) verify that spans are created 
 3. Add tests verifying span names are stable (don't include variable IDs)
 
 Priority P3 is appropriate - this doesn't break functionality but will cause operational issues (cost, performance) when running at scale with tracing enabled.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Run/row spans now use stable names; IDs remain attributes.
+
+### Test Coverage
+
+- `tests/engine/test_spans.py::TestSpanFactory::test_span_names_stable`

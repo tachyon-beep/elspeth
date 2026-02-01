@@ -135,9 +135,9 @@ class TestDatabaseSink:
         assert artifact.metadata["row_count"] == 3
 
     def test_batch_write_empty_list(self, db_url: str, ctx: PluginContext) -> None:
-        """Batch write with empty list returns descriptor with zero size."""
+        """Batch write with empty list returns descriptor with canonical size."""
         from elspeth.contracts import ArtifactDescriptor
-        from elspeth.core.canonical import stable_hash
+        from elspeth.core.canonical import canonical_json, stable_hash
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
@@ -146,7 +146,7 @@ class TestDatabaseSink:
         sink.close()
 
         assert isinstance(artifact, ArtifactDescriptor)
-        assert artifact.size_bytes == 0
+        assert artifact.size_bytes == len(canonical_json([]).encode("utf-8"))
         # Empty payload hash (canonical JSON of empty list)
         assert artifact.content_hash == stable_hash([])
 

@@ -36,14 +36,14 @@ class OutputPortSinkAdapter:
     ) -> None:
         self._sink = sink
         self._batch_size = batch_size
-        self._buffer: list[tuple[TokenInfo, TransformResult]] = []
+        self._buffer: list[tuple[TokenInfo, TransformResult, str | None]] = []
 
-    def emit(self, token: TokenInfo, result: TransformResult) -> None:
+    def emit(self, token: TokenInfo, result: TransformResult, state_id: str | None) -> None:
         """Accept a result from upstream.
 
         Buffers results and writes in batches for efficiency.
         """
-        self._buffer.append((token, result))
+        self._buffer.append((token, result, state_id))
 
         if len(self._buffer) >= self._batch_size:
             self._flush()
@@ -54,7 +54,7 @@ class OutputPortSinkAdapter:
             return
 
         # Convert to the format your sink expects
-        _tokens = [token for token, _ in self._buffer]
+        _tokens = [token for token, _, _ in self._buffer]
         # Your sink.write() call here
         # self._sink.write(tokens=_tokens, ...)
 

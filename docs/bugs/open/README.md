@@ -12,10 +12,10 @@ open/
 ├── cli/                      # Command-line interface (0 P1, 1 P2, 1 P3)
 ├── contracts/                # Contract validation (3 P2, 2 P3)
 ├── core-canonical/           # Canonicalization (1 P2)
-├── core-checkpoint/          # Checkpointing/recovery (2 P2, 2 P3)
+├── core-checkpoint/          # Checkpointing/recovery (2 P2, 0 P3)
 ├── core-config/              # Configuration system (2 P2, 1 P3)
 ├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
-├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 2 P3)
+├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 1 P3)
 ├── core-logging/             # Logging/telemetry output (1 P2)
 ├── core-rate-limit/          # Rate limiters (1 P2)
 ├── core-retention/           # Retention/purge (2 P2)
@@ -24,16 +24,16 @@ open/
 ├── engine-executors/         # Executor flow (1 P2)
 ├── engine-expression-parser/ # Expression parsing (1 P1)
 ├── engine-orchestrator/      # Pipeline execution, routing (1 P1, 3 P2, 2 P3)
-├── engine-pooling/           # Pooling infrastructure (1 P2, 2 P3)
+├── engine-pooling/           # Pooling infrastructure (1 P2, 1 P3)
 ├── engine-processor/         # Token management, outcomes (1 P2, 2 P3)
 ├── engine-retry/             # Retry logic (1 P2, 2 P3)
-├── engine-spans/             # Observability, tracing (2 P2, 1 P3)
+├── engine-spans/             # Observability, tracing (2 P2, 0 P3)
 ├── engine-tokens/            # Token lineage (1 P2)
 ├── engine-triggers/          # Trigger evaluation (1 P2)
 ├── mcp/                      # MCP tooling (2 P2)
 ├── plugins-azure/            # Azure plugin pack (1 P2, 1 P3)
 ├── plugins-llm/              # Base LLM transforms (5 P2, 1 P3)
-├── plugins-sinks/            # Sink implementations (2 P2, 1 P3)
+├── plugins-sinks/            # Sink implementations (2 P2, 0 P3)
 ├── plugins-sources/          # Source implementations (1 P3)
 └── plugins-transforms/       # Transform implementations (1 P1)
 ```
@@ -42,19 +42,19 @@ open/
 
 | Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Notes |
 |-----------|---------|---------|---------|-------|-------|
-| **core-landscape** | 0 | 8 | 2 | 10 | Export + verifier gaps |
+| **core-landscape** | 0 | 8 | 1 | 9 | Export + verifier gaps |
 | **engine-orchestrator** | 1 | 3 | 2 | 6 | Run lifecycle + cleanup |
 | **contracts** | 0 | 3 | 2 | 5 | Schema/contract validation |
 | **plugins-llm** | 0 | 5 | 1 | 6 | LLM audit + semantics |
 | **engine-coalesce** | 0 | 0 | 0 | 0 | Fork/join timeouts (all fixed) |
-| **core-checkpoint** | 0 | 2 | 2 | 4 | Resume + checkpoint format |
+| **core-checkpoint** | 0 | 2 | 0 | 2 | Resume + checkpoint format |
 | **core-config** | 0 | 2 | 1 | 3 | Plugin config validation |
-| **engine-pooling** | 0 | 1 | 2 | 3 | Pooling/batching |
+| **engine-pooling** | 0 | 1 | 1 | 2 | Pooling/batching |
 | **engine-processor** | 0 | 1 | 2 | 3 | Token handling |
 | **engine-retry** | 0 | 1 | 2 | 3 | Retry semantics |
-| **engine-spans** | 0 | 2 | 1 | 3 | Tracing |
+| **engine-spans** | 0 | 2 | 0 | 2 | Tracing |
 | **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiter correctness |
-| **plugins-sinks** | 0 | 2 | 1 | 3 | Sink validation |
+| **plugins-sinks** | 0 | 2 | 0 | 2 | Sink validation |
 | **cli** | 0 | 1 | 1 | 2 | CLI behavior |
 | **core-dag** | 1 | 1 | 0 | 2 | DAG validation |
 | **core-payload** | 0 | 0 | 0 | 0 | Payload storage (all fixed) |
@@ -70,7 +70,7 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **2** | **43** | **21** | **66** | All bugs organized |
+| **TOTAL** | **2** | **43** | **15** | **60** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -124,7 +124,7 @@ Note: P1s closed during RC1 bug hunt:
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 2 P1, 43 P2, 21 P3 = 66 total.**
+**Open bugs (as of 2026-02-01): 2 P1, 43 P2, 15 P3 = 60 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).

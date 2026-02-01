@@ -31,3 +31,15 @@
 **Status: STILL VALID**
 
 - Formatter still substitutes `0.0` when `latency_ms` is missing. (`src/elspeth/core/landscape/formatters.py:173-174`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Render missing call latency as "N/A" instead of fabricating `0.0ms`.
+
+### Test Coverage
+
+- `tests/core/landscape/test_formatters.py::TestLineageTextFormatter::test_formats_missing_latency_as_na`

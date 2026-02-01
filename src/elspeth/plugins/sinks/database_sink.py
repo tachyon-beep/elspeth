@@ -292,7 +292,7 @@ class DatabaseSink(BaseSink):
                 url=self._sanitized_url,
                 table=self._table_name,
                 content_hash=content_hash,
-                payload_size=0,
+                payload_size=payload_size,
                 row_count=0,
             )
 

@@ -170,3 +170,15 @@ The test explicitly asserts `size_bytes == 0` while also verifying the hash matc
 **Recommendation:**
 
 Keep open. This is a valid P3 bug that violates the internal consistency contract between `content_hash` and `size_bytes`. The fix is trivial: change line 227 from `payload_size=0` to `payload_size=payload_size` (or just `payload_size` for brevity). The corresponding test assertion at line 164 should be updated to `assert artifact.size_bytes == 2` to verify the fix.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Empty batch now returns `payload_size` matching canonical JSON (`"[]"`).
+
+### Test Coverage
+
+- `tests/plugins/sinks/test_database_sink.py::TestDatabaseSink::test_batch_write_empty_list`

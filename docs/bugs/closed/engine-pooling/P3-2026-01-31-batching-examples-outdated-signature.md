@@ -33,3 +33,15 @@
 
 - Example `emit()` still omits `state_id`. (`src/elspeth/plugins/batching/examples.py:41-46`)
 - OutputPort protocol still requires `state_id` in `emit()`. (`src/elspeth/plugins/batching/ports.py:40-49`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Updated batching example `emit()` signature to include `state_id`.
+
+### Test Coverage
+
+- Not added (example-only change).

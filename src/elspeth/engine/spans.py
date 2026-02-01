@@ -89,7 +89,7 @@ class SpanFactory:
             yield self._NOOP_SPAN
             return
 
-        with self._tracer.start_as_current_span(f"run:{run_id}") as span:
+        with self._tracer.start_as_current_span("run") as span:
             span.set_attribute("run.id", run_id)
             yield span
 
@@ -131,7 +131,7 @@ class SpanFactory:
             yield self._NOOP_SPAN
             return
 
-        with self._tracer.start_as_current_span(f"row:{row_id}") as span:
+        with self._tracer.start_as_current_span("row") as span:
             span.set_attribute("row.id", row_id)
             span.set_attribute("token.id", token_id)
             yield span

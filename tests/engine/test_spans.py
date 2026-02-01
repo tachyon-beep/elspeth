@@ -50,6 +50,23 @@ class TestSpanFactory:
             assert span is not None
             assert span.is_recording()
 
+    def test_span_names_stable(self) -> None:
+        """Span names should not include variable IDs."""
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+
+        from elspeth.engine.spans import SpanFactory
+
+        provider = TracerProvider()
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.run_span("run-001") as span:
+            assert span.name == "run"
+
+        with factory.row_span("row-001", "token-001") as span:
+            assert span.name == "row"
+
     def test_noop_span_interface(self) -> None:
         """Test that NoOpSpan has the same interface as real spans."""
         from elspeth.engine.spans import NoOpSpan, SpanFactory

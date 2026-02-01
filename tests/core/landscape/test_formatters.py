@@ -413,6 +413,46 @@ class TestLineageTextFormatter:
         assert "Outcome: COMPLETED" in text
         assert "Sink: output" in text
 
+    def test_formats_missing_latency_as_na(self) -> None:
+        """Missing call latency should render as N/A."""
+        from elspeth.contracts import Call, CallStatus, CallType, RowLineage, Token
+        from elspeth.core.landscape.formatters import LineageTextFormatter
+        from elspeth.core.landscape.lineage import LineageResult
+
+        now = datetime(2026, 1, 29, 12, 0, 0, tzinfo=UTC)
+        result = LineageResult(
+            token=Token(token_id="tok-123", row_id="row-456", created_at=now),
+            source_row=RowLineage(
+                row_id="row-456",
+                run_id="run-789",
+                source_node_id="src-node",
+                row_index=0,
+                source_data_hash="abc123",
+                created_at=now,
+                source_data={"id": 1},
+                payload_available=True,
+            ),
+            node_states=[],
+            routing_events=[],
+            calls=[
+                Call(
+                    call_id="call-1",
+                    call_index=0,
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_hash="req-hash",
+                    created_at=now,
+                    latency_ms=None,
+                )
+            ],
+            parent_tokens=[],
+        )
+
+        formatter = LineageTextFormatter()
+        text = formatter.format(result)
+
+        assert "http: success (N/A)" in text
+
     def test_formats_none_gracefully(self) -> None:
         """Returns message for None result."""
         from elspeth.core.landscape.formatters import LineageTextFormatter

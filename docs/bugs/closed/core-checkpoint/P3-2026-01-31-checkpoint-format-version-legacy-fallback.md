@@ -33,3 +33,15 @@
 **Status: STILL VALID**
 
 - Compatibility check still falls back to a date-based path when `format_version` is None. (`src/elspeth/core/checkpoint/manager.py:234-249`)
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (IMPLEMENTED)
+
+### Fix Summary
+
+- Removed legacy date-based fallback; unversioned checkpoints are now rejected.
+
+### Test Coverage
+
+- `tests/core/checkpoint/test_manager.py::TestCheckpointManager::test_old_checkpoint_rejected`

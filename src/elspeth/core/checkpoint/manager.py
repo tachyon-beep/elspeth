@@ -75,7 +75,7 @@ class CheckpointManager:
         # All checkpoint data generation happens INSIDE transaction for atomicity
         with self._db.engine.begin() as conn:
             # Generate IDs and timestamps within transaction boundary
-            checkpoint_id = f"cp-{uuid.uuid4().hex[:12]}"
+            checkpoint_id = f"cp-{uuid.uuid4().hex}"
             created_at = datetime.now(UTC)
 
             # Prepare aggregation state JSON
@@ -219,31 +219,18 @@ class CheckpointManager:
         Raises:
             IncompatibleCheckpointError: If checkpoint format version is incompatible
         """
-        # Check format version if available (new checkpoints)
-        # CRITICAL: Reject BOTH older AND newer versions - cross-version resume is unsupported
-        if checkpoint.format_version is not None:
-            if checkpoint.format_version != Checkpoint.CURRENT_FORMAT_VERSION:
-                raise IncompatibleCheckpointError(
-                    f"Checkpoint '{checkpoint.checkpoint_id}' has incompatible format version "
-                    f"(checkpoint: v{checkpoint.format_version}, current: v{Checkpoint.CURRENT_FORMAT_VERSION}). "
-                    "Resume requires exact format version match. "
-                    "Please restart pipeline from beginning."
-                )
-            return  # Version matches exactly
-
-        # Legacy checkpoint (format_version is None) - fall back to date check
-        # This handles checkpoints created before versioning was added
-        cutoff_date = datetime(2026, 1, 24, tzinfo=UTC)
-
-        # Handle timezone-naive datetimes from SQLite (assume UTC if naive)
-        checkpoint_created_at = checkpoint.created_at
-        if checkpoint_created_at.tzinfo is None:
-            checkpoint_created_at = checkpoint_created_at.replace(tzinfo=UTC)
-
-        if checkpoint_created_at < cutoff_date:
+        if checkpoint.format_version is None:
             raise IncompatibleCheckpointError(
-                f"Checkpoint '{checkpoint.checkpoint_id}' is a legacy checkpoint without version "
-                f"(created: {checkpoint_created_at.isoformat()}). "
-                "Resume not supported for pre-versioned checkpoints. "
+                f"Checkpoint '{checkpoint.checkpoint_id}' is missing format_version. "
+                "Resume not supported for unversioned checkpoints. "
+                "Please restart pipeline from beginning."
+            )
+
+        # CRITICAL: Reject BOTH older AND newer versions - cross-version resume is unsupported
+        if checkpoint.format_version != Checkpoint.CURRENT_FORMAT_VERSION:
+            raise IncompatibleCheckpointError(
+                f"Checkpoint '{checkpoint.checkpoint_id}' has incompatible format version "
+                f"(checkpoint: v{checkpoint.format_version}, current: v{Checkpoint.CURRENT_FORMAT_VERSION}). "
+                "Resume requires exact format version match. "
                 "Please restart pipeline from beginning."
             )
