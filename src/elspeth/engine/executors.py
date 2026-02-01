@@ -32,7 +32,7 @@ from elspeth.contracts.enums import (
     RoutingMode,
     TriggerType,
 )
-from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.errors import OrchestrationInvariantError, PluginContractViolation
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -326,13 +326,23 @@ class TransformExecutor:
                 raise
 
         # Populate audit fields
+        # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
+        # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
+        # Per CLAUDE.md: plugin bugs must crash with clear error messages.
         result.input_hash = input_hash
-        if result.row is not None:
-            result.output_hash = stable_hash(result.row)
-        elif result.rows is not None:
-            result.output_hash = stable_hash(result.rows)
-        else:
-            result.output_hash = None
+        try:
+            if result.row is not None:
+                result.output_hash = stable_hash(result.row)
+            elif result.rows is not None:
+                result.output_hash = stable_hash(result.rows)
+            else:
+                result.output_hash = None
+        except (TypeError, ValueError) as e:
+            raise PluginContractViolation(
+                f"Transform '{transform.name}' emitted non-canonical data: {e}. "
+                f"Ensure output contains only JSON-serializable types. "
+                f"Use None instead of NaN for missing values."
+            ) from e
         result.duration_ms = duration_ms
 
         # Initialize error_sink - will be set if transform errors with on_error configured
@@ -1175,13 +1185,23 @@ class AggregationExecutor:
                 raise
 
         # Step 4: Populate audit fields on result
+        # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
+        # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.
+        # Per CLAUDE.md: plugin bugs must crash with clear error messages.
         result.input_hash = input_hash
-        if result.row is not None:
-            result.output_hash = stable_hash(result.row)
-        elif result.rows is not None:
-            result.output_hash = stable_hash(result.rows)
-        else:
-            result.output_hash = None
+        try:
+            if result.row is not None:
+                result.output_hash = stable_hash(result.row)
+            elif result.rows is not None:
+                result.output_hash = stable_hash(result.rows)
+            else:
+                result.output_hash = None
+        except (TypeError, ValueError) as e:
+            raise PluginContractViolation(
+                f"Aggregation transform '{transform.name}' emitted non-canonical data: {e}. "
+                f"Ensure output contains only JSON-serializable types. "
+                f"Use None instead of NaN for missing values."
+            ) from e
         result.duration_ms = duration_ms
 
         # Step 5: Complete node state

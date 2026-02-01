@@ -1300,3 +1300,227 @@ class TestSinkExecutor:
         assert len(callback_tokens) == 2
         assert callback_tokens[0].token_id == "tok-1"
         assert callback_tokens[1].token_id == "tok-2"
+
+
+# =============================================================================
+# Transform Output Canonical Validation Tests
+# =============================================================================
+
+
+class TestTransformCanonicalValidation:
+    """Tests for canonical output validation at transform boundary.
+
+    Per CLAUDE.md: plugin bugs must crash. Transforms that emit non-canonical
+    data (NaN, Infinity, non-serializable types) have a bug that must be fixed.
+
+    Bug: P3-2026-01-29-transform-output-canonical-validation
+    """
+
+    def test_transform_emitting_nan_raises_contract_violation(
+        self,
+        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
+        span_factory: SpanFactory,
+    ) -> None:
+        """Transform returning NaN in output raises PluginContractViolation."""
+        from math import nan
+
+        from elspeth.contracts.errors import PluginContractViolation
+
+        _db, recorder, run = landscape_setup
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="nan_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        class NaNTransform(_TestTransformBase):
+            """Transform that returns NaN - violates canonical contract."""
+
+            name: ClassVar[str] = "nan_transform"
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(
+                    {"value": nan},
+                    success_reason={"action": "added_nan"},
+                )
+
+        transform = NaNTransform()
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data={"x": 1},
+        )
+
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        executor = TransformExecutor(recorder, span_factory, run.run_id)
+
+        with pytest.raises(PluginContractViolation, match="non-canonical data"):
+            executor.execute_transform(
+                transform=as_transform(transform),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
+
+    def test_transform_emitting_infinity_raises_contract_violation(
+        self,
+        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
+        span_factory: SpanFactory,
+    ) -> None:
+        """Transform returning Infinity in output raises PluginContractViolation."""
+        from math import inf
+
+        from elspeth.contracts.errors import PluginContractViolation
+
+        _db, recorder, run = landscape_setup
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="inf_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        class InfTransform(_TestTransformBase):
+            """Transform that returns Infinity - violates canonical contract."""
+
+            name: ClassVar[str] = "inf_transform"
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(
+                    {"value": inf},
+                    success_reason={"action": "added_inf"},
+                )
+
+        transform = InfTransform()
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data={"x": 1},
+        )
+
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        executor = TransformExecutor(recorder, span_factory, run.run_id)
+
+        with pytest.raises(PluginContractViolation, match="non-canonical data"):
+            executor.execute_transform(
+                transform=as_transform(transform),
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=1,
+            )
+
+    def test_transform_emitting_valid_data_passes(
+        self,
+        landscape_setup: tuple[LandscapeDB, LandscapeRecorder, Any],
+        span_factory: SpanFactory,
+    ) -> None:
+        """Transform returning valid JSON-serializable data succeeds."""
+        _db, recorder, run = landscape_setup
+
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="valid_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        class ValidTransform(_TestTransformBase):
+            """Transform that returns valid canonical data."""
+
+            name: ClassVar[str] = "valid_transform"
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(
+                    {
+                        "string": "hello",
+                        "int": 42,
+                        "float": 3.14,
+                        "bool": True,
+                        "null": None,
+                        "list": [1, 2, 3],
+                        "nested": {"a": 1, "b": 2},
+                    },
+                    success_reason={"action": "transformed"},
+                )
+
+        transform = ValidTransform()
+        transform.node_id = node.node_id
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            node_id=node.node_id,
+            landscape=recorder,
+        )
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="tok-1",
+            row_data={"x": 1},
+        )
+
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        executor = TransformExecutor(recorder, span_factory, run.run_id)
+
+        # Should not raise - returns (result, updated_token, error_sink)
+        result, updated_token, _error_sink = executor.execute_transform(
+            transform=as_transform(transform),
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=1,
+        )
+
+        assert result.status == "success"
+        assert updated_token.row_data["string"] == "hello"
+        assert updated_token.row_data["int"] == 42

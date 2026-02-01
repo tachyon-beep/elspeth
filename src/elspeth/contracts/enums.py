@@ -255,3 +255,17 @@ class BackpressureMode(str, Enum):
 # Backpressure modes that are currently implemented.
 # Used by RuntimeTelemetryConfig.from_settings() to fail fast on unimplemented modes.
 _IMPLEMENTED_BACKPRESSURE_MODES = frozenset({BackpressureMode.BLOCK, BackpressureMode.DROP})
+
+
+class OutputMode(str, Enum):
+    """Output mode for aggregation batches.
+
+    Uses (str, Enum) for YAML config compatibility and database serialization.
+
+    Values:
+        PASSTHROUGH: Emit buffered rows unchanged after flush
+        TRANSFORM: Emit transformed output from aggregation plugin
+    """
+
+    PASSTHROUGH = "passthrough"
+    TRANSFORM = "transform"

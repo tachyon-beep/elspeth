@@ -102,3 +102,42 @@ This is an architectural enhancement to surface bugs earlier. The current deepco
 **Status: STILL VALID**
 
 - Transform execution still proceeds from `transform.process()` straight to audit field population without canonical JSON validation. (`src/elspeth/engine/executors.py:245-337`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Implementation
+
+1. **Added `PluginContractViolation` exception** to `contracts/errors.py`:
+   ```python
+   class PluginContractViolation(RuntimeError):
+       """Raised when a plugin violates its contract with the framework."""
+       pass
+   ```
+
+2. **Wrapped `stable_hash()` calls** in `TransformExecutor.execute_transform()`:
+   - `stable_hash()` already calls `canonical_json()` which rejects NaN/Infinity
+   - Wrapped with try/except to convert `ValueError` to `PluginContractViolation`
+   - Clear error message: `"Transform 'name' emitted non-canonical data: ..."`
+
+3. **Same wrapping** in `AggregationExecutor.execute_flush()`:
+   - Consistent error handling for batch transforms
+
+### Key Design Decision
+
+Rather than adding a separate validation step (redundant since `stable_hash` already calls `canonical_json`), we wrap the existing `stable_hash()` call to convert the generic `ValueError` into a more specific `PluginContractViolation` with a clear error message pointing to the offending transform.
+
+### Tests Added
+
+Added `TestTransformCanonicalValidation` class in `tests/engine/test_executors.py`:
+- `test_transform_emitting_nan_raises_contract_violation`
+- `test_transform_emitting_infinity_raises_contract_violation`
+- `test_transform_emitting_valid_data_passes`
+
+### Verification
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestTransformCanonicalValidation -v
+# 3 passed
+```

@@ -532,3 +532,21 @@ class FrameworkBugError(Exception):
     """
 
     pass
+
+
+class PluginContractViolation(RuntimeError):
+    """Raised when a plugin violates its contract with the framework.
+
+    This indicates a bug in a plugin (Source, Transform, Gate, Sink) that must
+    be fixed. Unlike user data errors (which are quarantined), plugin bugs
+    MUST crash the pipeline per CLAUDE.md's "plugin bugs must crash" rule.
+
+    Examples of conditions that trigger this:
+    - Transform emits non-canonical data (NaN, Infinity, non-serializable types)
+    - Plugin returns wrong type from method
+    - Plugin violates interface contract
+
+    Recovery: Fix the plugin. These errors indicate bugs in plugin code.
+    """
+
+    pass

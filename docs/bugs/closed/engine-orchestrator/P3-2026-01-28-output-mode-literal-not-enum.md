@@ -112,6 +112,36 @@
 - `AggregationSettings.output_mode` is still typed as a `Literal` in config. (`src/elspeth/core/config.py:156-159`)
 - Processor still compares `output_mode` using raw strings (e.g., `"passthrough"`/`"transform"`). (`src/elspeth/engine/processor.py:510-512`, `src/elspeth/engine/processor.py:771-776`)
 
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+### Implementation
+
+1. **Added `OutputMode(str, Enum)`** to `contracts/enums.py`:
+   ```python
+   class OutputMode(str, Enum):
+       PASSTHROUGH = "passthrough"
+       TRANSFORM = "transform"
+   ```
+
+2. **Updated `AggregationSettings.output_mode`** in `core/config.py`:
+   - Changed type from `Literal["passthrough", "transform"]` to `OutputMode`
+   - Changed default from `"transform"` to `OutputMode.TRANSFORM`
+
+3. **Updated all 7 string comparisons** in `engine/processor.py`:
+   - `if output_mode == "passthrough":` → `if output_mode == OutputMode.PASSTHROUGH:`
+   - `elif output_mode == "transform":` → `elif output_mode == OutputMode.TRANSFORM:`
+
+### Verification
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_processor_batch.py tests/core/test_config_aggregation.py -v
+# 32 passed
+```
+
+Existing YAML configs continue to work unchanged due to `(str, Enum)` coercion.
+
 ## Tests
 
 - Suggested tests to run:

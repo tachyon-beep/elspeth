@@ -106,6 +106,7 @@ from elspeth.contracts.errors import (
     ErrorDetail,
     ExecutionError,
     FrameworkBugError,
+    PluginContractViolation,
     PluginGateReason,
     QueryFailureDetail,
     RoutingReason,
@@ -164,6 +165,7 @@ __all__ = [  # Grouped by category for readability
     # errors
     "BatchPendingError",
     "FrameworkBugError",
+    "PluginContractViolation",
     "CoalesceFailureReason",
     "ConfigGateReason",
     "ErrorDetail",

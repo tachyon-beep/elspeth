@@ -13,7 +13,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from elspeth.contracts.enums import RunMode
+from elspeth.contracts.enums import OutputMode, RunMode
 
 # Reserved edge labels that cannot be used as route labels or fork branch names.
 # "continue" is used by the DAG builder for edges between sequential nodes.
@@ -153,8 +153,8 @@ class AggregationSettings(BaseModel):
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
     trigger: TriggerConfig = Field(description="When to flush the batch")
-    output_mode: Literal["passthrough", "transform"] = Field(
-        default="transform",
+    output_mode: OutputMode = Field(
+        default=OutputMode.TRANSFORM,
         description="How batch produces output rows",
     )
     expected_output_count: int | None = Field(

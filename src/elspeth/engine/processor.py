@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from elspeth.engine.executors import GateOutcome
     from elspeth.telemetry import TelemetryManager
 
-from elspeth.contracts.enums import RoutingKind, TriggerType
+from elspeth.contracts.enums import OutputMode, RoutingKind, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
@@ -507,7 +507,7 @@ class RowProcessor:
             error_msg = "Batch transform failed during timeout flush"
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
-            if output_mode == "passthrough":
+            if output_mode == OutputMode.PASSTHROUGH:
                 # Passthrough mode: tokens have BUFFERED outcome (non-terminal)
                 # Record FAILED to give them a terminal outcome
                 for token in buffered_tokens:
@@ -566,7 +566,7 @@ class RowProcessor:
                 # bug in graph construction that must crash immediately (Tier 1 data).
                 coalesce_at_step = self._coalesce_step_map[coalesce_name]
 
-        if output_mode == "passthrough":
+        if output_mode == OutputMode.PASSTHROUGH:
             # Passthrough: original tokens continue with enriched data
             if not result.is_multi_row:
                 raise ValueError(
@@ -619,7 +619,7 @@ class RowProcessor:
                         )
                     )
 
-        elif output_mode == "transform":
+        elif output_mode == OutputMode.TRANSFORM:
             # Transform mode: N input rows -> M output rows with NEW tokens
             # Get output rows
             if result.is_multi_row:
@@ -768,7 +768,7 @@ class RowProcessor:
                 error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
                 results: list[RowResult] = []
-                if output_mode == "passthrough":
+                if output_mode == OutputMode.PASSTHROUGH:
                     # Passthrough mode: tokens have BUFFERED outcome (non-terminal)
                     # Record FAILED for ALL buffered tokens to give them terminal outcome
                     for token in buffered_tokens:
@@ -825,7 +825,7 @@ class RowProcessor:
                 return (results, child_items)
 
             # Handle output modes
-            if output_mode == "passthrough":
+            if output_mode == OutputMode.PASSTHROUGH:
                 # Passthrough: original tokens continue with enriched data
                 # Validate result is multi-row
                 if not result.is_multi_row:
@@ -899,7 +899,7 @@ class RowProcessor:
                         )
                     return (passthrough_results, child_items)
 
-            elif output_mode == "transform":
+            elif output_mode == OutputMode.TRANSFORM:
                 # Transform mode: N input rows -> M output rows with NEW tokens
                 # Previously-buffered tokens already returned CONSUMED_IN_BATCH
                 # when they were buffered (non-flushing path at bottom of method).
@@ -1007,7 +1007,7 @@ class RowProcessor:
         # Not flushing yet - row is buffered
         # In passthrough mode: BUFFERED (non-terminal, will reappear)
         # In transform mode: CONSUMED_IN_BATCH (terminal)
-        if output_mode == "passthrough":
+        if output_mode == OutputMode.PASSTHROUGH:
             buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
             self._recorder.record_token_outcome(
                 run_id=self._run_id,
