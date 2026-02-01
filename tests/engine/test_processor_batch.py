@@ -99,7 +99,10 @@ class TestProcessorBatchTransforms:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 3 rows - should buffer first 2, flush on 3rd
-        results = []
+        # Note: default output_mode is "transform", which means:
+        # - All 3 original rows get CONSUMED_IN_BATCH
+        # - The flush produces a NEW row with the aggregated result
+        all_results = []
         for i in range(3):
             result_list = processor.process_row(
                 row_index=i,
@@ -107,17 +110,16 @@ class TestProcessorBatchTransforms:
                 transforms=[transform],
                 ctx=ctx,
             )
-            # process_row returns list[RowResult] - take first item
-            results.append(result_list[0])
+            all_results.extend(result_list)
 
-        # First two rows consumed into batch
-        assert results[0].outcome == RowOutcome.CONSUMED_IN_BATCH
-        assert results[1].outcome == RowOutcome.CONSUMED_IN_BATCH
+        # In transform mode, all original rows are CONSUMED_IN_BATCH
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        assert len(consumed) == 3, f"Expected 3 consumed rows, got {len(consumed)}"
 
-        # Third row triggers flush - transform receives [1, 2, 3]
-        # Result should have total = 6
-        assert results[2].outcome == RowOutcome.COMPLETED
-        assert results[2].final_data == {"total": 6}
+        # The flush produces a NEW aggregated row that gets COMPLETED
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
+        assert completed[0].final_data == {"total": 6}
 
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
@@ -317,6 +319,9 @@ class TestProcessorBatchTransforms:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 1 more row - should trigger flush (2 restored + 1 new = 3)
+        # Note: default output_mode is "transform", which means:
+        # - The triggering row gets CONSUMED_IN_BATCH
+        # - The flush produces a NEW row with the aggregated result
         result_list = processor.process_row(
             row_index=2,
             row_data={"value": 3},  # Third value
@@ -324,10 +329,14 @@ class TestProcessorBatchTransforms:
             ctx=ctx,
         )
 
-        # Should trigger and get total of all 3 rows
-        result = result_list[0]
-        assert result.outcome == RowOutcome.COMPLETED
-        assert result.final_data == {"total": 6}  # 1 + 2 + 3
+        # In transform mode: triggering row is CONSUMED_IN_BATCH,
+        # plus a NEW aggregated row that is COMPLETED
+        consumed = [r for r in result_list if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in result_list if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
+        assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
+        assert completed[0].final_data == {"total": 6}  # 1 + 2 + 3
 
 
 class TestProcessorDeaggregation:
@@ -551,7 +560,7 @@ class TestProcessorDeaggregation:
                 name="bad_agg",
                 plugin="bad_transform",
                 trigger=TriggerConfig(count=2),
-                output_mode="single",
+                output_mode="transform",
             ),
         }
 

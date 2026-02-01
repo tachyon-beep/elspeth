@@ -1109,7 +1109,7 @@ class TestForkAggregationCoalesce:
             name="sum_agg",
             plugin="sum_agg",
             trigger=TriggerConfig(count=2),  # Trigger after 2 rows
-            output_mode="single",  # Emit one aggregated result per batch
+            output_mode="transform",  # Emit one aggregated result per batch
         )
 
         # === Settings for coalesce computation ===

@@ -498,7 +498,7 @@ class TestAggregationRecoveryIntegration:
                 name="sum_aggregator",
                 plugin="test_aggregation",
                 trigger=trigger_config,
-                output_mode="single",
+                output_mode="transform",
                 options={},
             )
         }

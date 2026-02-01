@@ -612,7 +612,7 @@ class TestAggregationFlushAuditTrail:
             name="batch_pending_aggregation",
             plugin="batch_pending_transform",
             trigger=TriggerConfig(count=2),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Register node in landscape first to get node_id

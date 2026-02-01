@@ -726,21 +726,25 @@ class TestProcessorTransformMode:
 
 
 class TestProcessorSingleMode:
-    """Tests for single output_mode in aggregation.
+    """Tests for transform output_mode in aggregation (formerly 'single' mode).
 
-    Single mode: N input rows -> 1 aggregated output row.
-    The triggering token continues with aggregated data (not CONSUMED_IN_BATCH).
+    Transform mode: N input rows -> 1 aggregated output row as a NEW token.
+    All original tokens get CONSUMED_IN_BATCH, aggregated row continues.
+
+    Note: 'single' mode was removed - it had a bug where the triggering token
+    was reused for the aggregated output, which caused problems with token
+    identity. Transform mode creates a proper new token for the output.
     """
 
     def test_aggregation_single_mode_continues_to_next_transform(self) -> None:
-        """Single mode aggregated row continues through remaining transforms.
+        """Transform mode aggregated row continues through remaining transforms.
 
-        This is the critical bug test - single mode was previously returning
+        This is the critical bug test - the old single mode was returning
         COMPLETED immediately without checking for downstream transforms.
 
-        Pipeline: [SumTransform (single mode)] -> [AddMarker]
+        Pipeline: [SumTransform (transform mode)] -> [AddMarker]
         Expected: Aggregated row should have both 'total' and 'marker' fields.
-        Bug: Aggregated row only had 'total', skipping AddMarker entirely.
+        Bug (now fixed): Aggregated row only had 'total', skipping AddMarker entirely.
         """
         from elspeth.contracts import Determinism
         from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -822,7 +826,7 @@ class TestProcessorSingleMode:
                 name="batch_sum",
                 plugin="summer",
                 trigger=TriggerConfig(count=2),
-                output_mode="single",  # KEY: single mode
+                output_mode="transform",  # KEY: transform mode
             ),
         }
 
@@ -840,7 +844,7 @@ class TestProcessorSingleMode:
         marker = AddMarker(marker_node.node_id)
         ctx = PluginContext(run_id=run.run_id, config={})
 
-        # Process 2 rows through summer (single mode) then marker
+        # Process 2 rows through summer (transform mode) then marker
         all_results = []
         for i in range(2):
             results = processor.process_row(
@@ -851,14 +855,14 @@ class TestProcessorSingleMode:
             )
             all_results.extend(results)
 
-        # First row: CONSUMED_IN_BATCH (not triggering)
-        # Second row triggers flush:
-        #   - First row already CONSUMED_IN_BATCH
-        #   - Aggregated row continues through marker -> COMPLETED
+        # Transform mode:
+        # - First row: CONSUMED_IN_BATCH (buffered)
+        # - Second row: CONSUMED_IN_BATCH (triggers flush, both consumed)
+        # - Aggregated row: NEW token, continues through marker -> COMPLETED
         consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
 
-        assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
+        assert len(consumed) == 2, f"Expected 2 consumed, got {len(consumed)}"
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
 
         # CRITICAL: The aggregated row must have passed through AddMarker
@@ -868,8 +872,8 @@ class TestProcessorSingleMode:
         )
         assert completed[0].final_data["marker"] == "DOWNSTREAM_EXECUTED"
 
-    def test_aggregation_single_mode_no_downstream_completes_immediately(self) -> None:
-        """Single mode with no downstream transforms returns COMPLETED correctly."""
+    def test_aggregation_transform_mode_no_downstream_completes_immediately(self) -> None:
+        """Transform mode with no downstream transforms returns COMPLETED correctly."""
         from elspeth.contracts import Determinism
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -926,7 +930,7 @@ class TestProcessorSingleMode:
                 name="batch_sum",
                 plugin="summer",
                 trigger=TriggerConfig(count=2),
-                output_mode="single",
+                output_mode="transform",
             ),
         }
 
@@ -957,6 +961,7 @@ class TestProcessorSingleMode:
         consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
 
-        assert len(consumed) == 1
+        # Transform mode: both original rows are consumed, aggregated row completes
+        assert len(consumed) == 2
         assert len(completed) == 1
         assert completed[0].final_data["total"] == 30

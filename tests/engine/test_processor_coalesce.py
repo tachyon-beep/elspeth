@@ -1394,7 +1394,7 @@ class TestAggregationCoalesceMetadataPropagation:
             name="batch_agg_coalesce",
             plugin="batch_agg_coalesce",
             trigger=TriggerConfig(count=2),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Create coalesce executor

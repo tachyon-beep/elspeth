@@ -1162,7 +1162,7 @@ class TestNodeMetadataFromPlugin:
             name="test_agg",
             plugin="nondeterministic_batch",
             trigger=TriggerConfig(count=2),  # Trigger after 2 rows
-            output_mode="single",
+            output_mode="transform",
             options={"schema": {"fields": "dynamic"}},
         )
 

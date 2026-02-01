@@ -335,7 +335,7 @@ class TestAggregationSchemaConfigPropagation:
             name="test_agg",
             plugin="mock_agg_transform",
             trigger=trigger,
-            output_mode="single",
+            output_mode="transform",
             options={"schema": {"fields": "dynamic"}},
         )
 
