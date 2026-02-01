@@ -325,6 +325,24 @@ allowed_dict_patterns:
   - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree.get_tree_nodes:return (list)"
   - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree._flatten_tree:result (list)"
 
+  # Node detail panel - validation of JSON-parsed audit data (Tier 1 trust boundary)
+  # These functions receive raw dicts from json.loads() and validate them into TypedDicts.
+  # The input must be dict[str, Any] because it's the unvalidated type before validation.
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # LANDSCAPE JOURNAL - Emergency backup JSONL stream
+  # Journal records SQL statements with dynamically-structured parameters.
+  # The record shape varies depending on the SQL being executed.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._append_records:records (list)"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._serialize_record:record"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._enrich_with_payloads:record"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._payloads_for_params:return"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._columns_to_values:return"
+
   # ═══════════════════════════════════════════════════════════════════════════
   # TELEMETRY EXPORTERS - External observability trust boundary
   # Exporter config comes from YAML and is validated internally. The configure()
