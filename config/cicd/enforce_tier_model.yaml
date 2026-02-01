@@ -2704,3 +2704,29 @@ allow_hits:
   reason: Deserializing optional TokenInfo field - expand_group_id is None by default in TokenInfo contract
   safety: Returns None for missing keys which is the correct default for optional lineage field
   expires: null
+# Security module - environment variable lookups (Tier 3 boundary)
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=43784a01ff8211a5
+  owner: bugfix
+  reason: Tier-3 boundary - ELSPETH_FINGERPRINT_KEY is optional env var for direct key injection
+  safety: Returns None for missing, then falls through to Key Vault lookup
+  expires: null
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=5ea4cd72f7c66985
+  owner: bugfix
+  reason: Tier-3 boundary - ELSPETH_KEYVAULT_URL is optional env var for Key Vault config
+  safety: Returns None for missing, handled by explicit ValueError if neither source configured
+  expires: null
+- key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=d005721d98c9eef8
+  owner: bugfix
+  reason: Tier-3 boundary - ELSPETH_KEYVAULT_SECRET_NAME is optional with default fallback
+  safety: Uses _DEFAULT_SECRET_NAME when not set, valid optional config pattern
+  expires: null
+- key: core/security/secret_loader.py:R1:EnvSecretLoader:get_secret:fp=1e72a9b652be99b3
+  owner: bugfix
+  reason: Tier-3 boundary - EnvSecretLoader explicitly looks up optional env vars by name
+  safety: Raises SecretNotFoundError for missing keys, documented optional lookup behavior
+  expires: null
+- key: core/security/secret_loader.py:R6:CompositeSecretLoader:get_secret:fp=8846ddf2a85396bb
+  owner: bugfix
+  reason: Intentional fallback pattern - CompositeSecretLoader tries loaders in priority order
+  safety: SecretNotFoundError from one loader triggers fallback to next; raises if all fail
+  expires: null

@@ -119,13 +119,9 @@ def get_fingerprint_key() -> bytes:
         except ImportError:
             raise  # Re-raise ImportError as-is
         except SecretNotFoundError as e:
-            raise ValueError(
-                f"Failed to retrieve fingerprint key from Key Vault (url={vault_url}, secret={secret_name}): {e}"
-            ) from e
+            raise ValueError(f"Failed to retrieve fingerprint key from Key Vault (url={vault_url}, secret={secret_name}): {e}") from e
         except Exception as e:
-            raise ValueError(
-                f"Failed to retrieve fingerprint key from Key Vault (url={vault_url}, secret={secret_name}): {e}"
-            ) from e
+            raise ValueError(f"Failed to retrieve fingerprint key from Key Vault (url={vault_url}, secret={secret_name}): {e}") from e
 
     # Neither configured
     raise ValueError(

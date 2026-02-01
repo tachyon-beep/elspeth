@@ -98,8 +98,7 @@ def _get_keyvault_client(vault_url: str) -> SecretClient:
         from azure.keyvault.secrets import SecretClient
     except ImportError as e:
         raise ImportError(
-            "azure-keyvault-secrets and azure-identity are required for Key Vault support. "
-            "Install with: uv pip install 'elspeth[azure]'"
+            "azure-keyvault-secrets and azure-identity are required for Key Vault support. Install with: uv pip install 'elspeth[azure]'"
         ) from e
 
     credential = DefaultAzureCredential()
@@ -201,9 +200,7 @@ class KeyVaultSecretLoader:
             # Re-raise ImportError as-is - missing package is different from missing secret
             raise
         except Exception as e:
-            raise SecretNotFoundError(
-                f"Failed to retrieve secret '{name}' from Key Vault ({self._vault_url}): {e}"
-            ) from e
+            raise SecretNotFoundError(f"Failed to retrieve secret '{name}' from Key Vault ({self._vault_url}): {e}") from e
 
     def clear_cache(self) -> None:
         """Clear the secret cache, forcing refetch on next access."""

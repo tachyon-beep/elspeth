@@ -388,9 +388,7 @@ class TestCachedSecretLoader:
 class TestBackwardCompatibility:
     """Test backward compatibility with existing get_fingerprint_key() interface."""
 
-    def test_get_fingerprint_key_uses_secret_loader_with_caching(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_get_fingerprint_key_uses_secret_loader_with_caching(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """get_fingerprint_key() should use the new SecretLoader with caching."""
         from elspeth.core.security.fingerprint import (
             clear_fingerprint_key_cache,
