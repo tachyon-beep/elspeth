@@ -2613,8 +2613,3 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking to audit trail
   safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
   expires: null
-- key: contracts/data.py:R1:check_compatibility:fp=c7144b503d9599f9
-  owner: bugfix
-  reason: Pydantic model_config may not have 'strict' key explicitly set - accessing directly would KeyError on most schemas
-  safety: Default False matches Pydantic's behavior; schema compatibility check is construction-time validation
-  expires: null

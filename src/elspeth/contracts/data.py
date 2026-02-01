@@ -159,9 +159,9 @@ def check_compatibility(
     consumer_fields = consumer_schema.model_fields
 
     # Check if consumer schema is strict (no type coercion allowed)
-    # NOTE: We control all schemas via PluginSchema base class which sets model_config.
-    # Default is strict=False per PluginSchema base class.
-    consumer_strict = consumer_schema.model_config.get("strict", False)
+    # NOTE: We control all schemas via PluginSchema base class which sets model_config["strict"].
+    # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+    consumer_strict = consumer_schema.model_config["strict"]
 
     missing: list[str] = []
     mismatches: list[tuple[str, str, str]] = []
