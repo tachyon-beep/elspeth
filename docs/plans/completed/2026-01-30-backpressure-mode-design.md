@@ -2,8 +2,14 @@
 
 **Date:** 2026-01-30
 **Issue:** elspeth-rapid-ceq
-**Status:** Ready for implementation
+**Status:** ✅ IMPLEMENTED (2026-02-01)
 **Review:** Passed 4-perspective review (Architecture, Python, QA, Systems Thinking)
+
+## Implementation Summary
+
+- Design executed in `TelemetryManager` with queue-based BLOCK/DROP behavior (`src/elspeth/telemetry/manager.py`).
+- Runtime config now validates and wires `backpressure_mode` with internal queue defaults (`src/elspeth/contracts/config/runtime.py`, `src/elspeth/contracts/config/defaults.py`).
+- Behavior verified via telemetry manager and config tests (`tests/unit/telemetry/test_manager.py`, `tests/contracts/test_telemetry_config.py`).
 
 ## Problem Statement
 

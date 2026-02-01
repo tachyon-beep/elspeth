@@ -1,5 +1,7 @@
 # Complete Telemetry Wiring Implementation Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Ensure every plugin that makes external calls emits `ExternalCallCompleted` telemetry events.
@@ -9,6 +11,12 @@
 **Tech Stack:** Python, pytest, structlog telemetry events
 
 ---
+
+## Implementation Summary
+
+- `AuditedHTTPClient` now emits `ExternalCallCompleted` via `telemetry_emit` (`src/elspeth/plugins/clients/http.py`).
+- HTTP-based plugins pass telemetry callbacks through client construction (OpenRouter, Content Safety, Prompt Shield) (`src/elspeth/plugins/llm/openrouter.py`, `src/elspeth/plugins/llm/openrouter_multi_query.py`, `src/elspeth/plugins/transforms/azure/content_safety.py`, `src/elspeth/plugins/transforms/azure/prompt_shield.py`).
+- Telemetry emission for HTTP and LLM clients is validated in tests (`tests/plugins/clients/test_http_telemetry.py`, `tests/plugins/clients/test_llm_telemetry.py`).
 
 ## Current State Summary
 

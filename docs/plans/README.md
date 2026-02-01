@@ -6,35 +6,34 @@ This directory tracks implementation plans across all development phases.
 
 ```
 docs/plans/
-├── in-progress/                 # 2 plans currently being worked on
+├── in-progress/                 # 3 plans currently being worked on
 ├── paused/                      # 3 plans temporarily on hold
-├── completed/                   # 109 fully implemented plans
+├── completed/                   # 127 fully implemented plans
 │   └── plugin-refactor/         # 28 plans from the plugin refactor work
 ├── cancelled/                   # 1 cancelled plan
 ├── superseded/                  # 14 superseded plans
 │   └── schema-validation-attempts-jan24/
-├── *.md                         # 3 plans at root level (various states)
+├── *.md                         # 1 plan at root level (various states)
 └── README.md                    # This file
 ```
 
-## In-Progress Plans (2)
+## In-Progress Plans (3)
 
 Plans actively being worked on:
 
 | Plan | Description |
 |------|-------------|
-| `in-progress/2026-01-29-config-contracts-refactor.md` | Configuration and contracts refactoring |
-| `in-progress/2026-01-30-telemetry-design.md` | Telemetry system design |
+| `in-progress/2026-01-26-recorder-refactoring.md` | Landscape recorder refactor into repository modules |
+| `in-progress/2026-01-30-tier2-tracing-implementation.md` | Tier 2 plugin tracing (Azure AI + Langfuse) |
+| `in-progress/RC1-remediation.md` | RC-1 remediation and phased hardening roadmap |
 
-## Root-Level Plans (3)
+## Root-Level Plans (1)
 
 Plans at the root level in various states:
 
 | Plan | Description |
 |------|-------------|
-| `2026-01-26-recorder-refactoring.md` | Recorder subsystem refactoring |
-| `2026-01-29-verifier-ignore-order-config.md` | Verifier configuration for order-independent checks |
-| `RC1-remediation.md` | RC-1 release remediation tracking |
+| `2026-01-30-chaosllm-design.md` | ChaosLLM fake LLM server design |
 
 ## Paused Plans (3)
 
@@ -44,10 +43,10 @@ Plans temporarily on hold:
 - `paused/2026-01-17-chunk3-refactors-tui.md`
 - `paused/2026-01-20-world-class-test-regime.md`
 
-## Completed Plans (109)
+## Completed Plans (127)
 
 ### Summary
-- **81 plans** directly in `completed/`
+- **99 plans** directly in `completed/`
 - **28 plans** in `completed/plugin-refactor/`
 
 ### Major Phases (All Completed)

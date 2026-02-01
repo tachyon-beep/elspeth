@@ -1,5 +1,7 @@
 # RoutingReason Discriminated Union Implementation Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace loose `Mapping[str, Any]` typing on `RoutingAction.reason` with a 2-variant discriminated union, enabling compile-time type safety for audit reliability.
@@ -11,6 +13,12 @@
 **Bead:** elspeth-rapid-5vc
 
 ---
+
+## Implementation Summary
+
+- Introduced `ConfigGateReason`, `PluginGateReason`, and `RoutingReason` union (`src/elspeth/contracts/errors.py`).
+- `RoutingAction` now uses typed `RoutingReason` with defensive copy (`src/elspeth/contracts/routing.py`).
+- Property tests generate valid routing reasons (`tests/property/engine/test_executor_properties.py`, `tests/property/contracts/test_serialization_properties.py`).
 
 ## Task 1: Fix Broken routing.py Code
 

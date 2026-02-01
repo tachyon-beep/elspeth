@@ -1,5 +1,7 @@
 # Type Safety Lockdown for RC2
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Eliminate all avoidable `Any` types and `# type: ignore` directives to achieve strict type safety before RC2 release. After this plan, the only remaining `Any` usage should be genuinely dynamic data (row data, external API responses, plugin configs).
@@ -13,6 +15,12 @@
 **Bead:** TBD (create with `bd create --title="Type safety lockdown for RC2" --type=task --priority=1`)
 
 ---
+
+## Implementation Summary
+
+- PayloadStore typing wired through core entry points (`src/elspeth/core/landscape/recorder.py`, `src/elspeth/engine/processor.py`, `src/elspeth/engine/tokens.py`, `src/elspeth/engine/orchestrator.py`, `src/elspeth/cli.py`).
+- Telemetry exporter lazy imports typed (`src/elspeth/telemetry/exporters/otlp.py`, `src/elspeth/telemetry/exporters/azure_monitor.py`).
+- CLI protocol instantiation no longer relies on `# type: ignore` for plugin collections (`src/elspeth/cli.py`).
 
 ## Task 1: Fix PayloadStore Forward References
 

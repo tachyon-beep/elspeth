@@ -1,5 +1,7 @@
 # TransformReason (Success Reason) Implementation Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Wire up the existing `TransformReason` TypedDict to provide structured metadata for successful transform operations. This completes the audit symmetry: errors have `TransformErrorReason`, routing has `RoutingReason`, and now success has `TransformReason`.
@@ -12,6 +14,13 @@
 **Bead:** TBD (create with `bd create --title="Wire up TransformReason for success metadata" --type=feature --priority=2`)
 
 ---
+
+## Implementation Summary
+
+- Success metadata standardized via `TransformSuccessReason` (`src/elspeth/contracts/errors.py`).
+- `TransformResult.success()`/`success_multi()` require `success_reason` and enforce invariants (`src/elspeth/contracts/results.py`).
+- Success reason stored in audit trail (`success_reason_json` in `src/elspeth/core/landscape/schema.py`, recorder write path in `src/elspeth/core/landscape/recorder.py`).
+- Tests cover contract shape and audit persistence (`tests/contracts/test_results.py`, `tests/engine/test_transform_success_reason.py`).
 
 ## Task 1: Rename TransformReason to TransformSuccessReason
 

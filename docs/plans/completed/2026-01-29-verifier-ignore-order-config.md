@@ -1,5 +1,7 @@
 # CallVerifier `ignore_order` Configuration Implementation Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add configurable `ignore_order` parameter to `CallVerifier` so users can opt into order-sensitive verification.
@@ -13,6 +15,12 @@
 - Enables: `docs/bugs/open/core-landscape/P3-2026-01-29-verifier-field-level-order-config.md` (Phase 2)
 
 ---
+
+## Implementation Summary
+
+- Added `ignore_order` parameter wiring in `CallVerifier.__init__()` and `verify()` to control DeepDiff order sensitivity (`src/elspeth/plugins/clients/verifier.py`).
+- Default behavior preserved (ignore_order=True), with explicit strict option supported for order-sensitive diffs.
+- Tests cover default and strict ordering semantics, including nested lists and duplicate elements (`tests/plugins/clients/test_verifier.py`).
 
 ## Pre-Implementation Checklist
 

@@ -1,5 +1,7 @@
 # Backpressure Mode Implementation Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Wire the orphaned `backpressure_mode` config field to actual runtime behavior by adding a background export thread with queue-based backpressure.
@@ -13,6 +15,12 @@
 **Issue:** elspeth-rapid-ceq
 
 ---
+
+## Implementation Summary
+
+- Telemetry queueing with BLOCK/DROP behavior implemented in `TelemetryManager.handle_event()` (`src/elspeth/telemetry/manager.py`).
+- Runtime config wires `backpressure_mode` to enum validation and internal defaults for queue size (`src/elspeth/contracts/config/runtime.py`, `src/elspeth/contracts/config/defaults.py`).
+- Coverage added for backpressure behavior and config validation (`tests/unit/telemetry/test_manager.py`, `tests/contracts/test_telemetry_config.py`).
 
 ## Review Board Feedback (2026-01-30)
 

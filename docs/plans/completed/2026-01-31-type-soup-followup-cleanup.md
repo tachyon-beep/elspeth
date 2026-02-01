@@ -1,5 +1,7 @@
 # Type Soup Follow-up Cleanup Plan
 
+**Status:** ✅ IMPLEMENTED (2026-02-01)
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Complete type safety improvements identified during review of RoutingReason and TransformErrorReason plans. Address remaining union type ambiguity, dead code, and redundant optionality patterns.
@@ -9,6 +11,12 @@
 **Bead:** TBD (create with `bd create --title="Type soup follow-up cleanup" --type=task --priority=3`)
 
 ---
+
+## Implementation Summary
+
+- Added `QueryFailureDetail` and `ErrorDetail` TypedDicts and exports (`src/elspeth/contracts/errors.py`, `src/elspeth/contracts/__init__.py`).
+- RoutingReason property test strategies updated to typed variants (`tests/property/engine/test_executor_properties.py`, `tests/property/contracts/test_serialization_properties.py`).
+- Error contract tests extended for new TypedDicts (`tests/contracts/test_errors.py`).
 
 ## Task 0: Commit Pending Work from Previous Plans
 

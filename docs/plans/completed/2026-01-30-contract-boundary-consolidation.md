@@ -1,6 +1,6 @@
 # Contract Boundary Consolidation Implementation Plan
 
-> **Status:** ✅ **COMPLETED** 2026-01-31
+**Status:** ✅ IMPLEMENTED (2026-01-31)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -22,6 +22,12 @@
 - Follow-up work tracked in bead `elspeth-rapid-m76` for eliminating remaining `cast()` calls
 
 ---
+
+## Implementation Summary
+
+- Cross-boundary contracts centralized (`ExceptionResult` in `src/elspeth/contracts/results.py`, core telemetry events in `src/elspeth/contracts/events.py`).
+- Landscape recorder now consumes typed `RoutingReason` without whitelist workarounds (`src/elspeth/core/landscape/recorder.py`).
+- Import surfaces cleaned and exports updated (`src/elspeth/contracts/__init__.py`, `src/elspeth/telemetry/__init__.py`).
 
 ## Phase 1: Move Cross-Boundary Types to Contracts
 
