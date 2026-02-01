@@ -1208,6 +1208,12 @@ class ExecutionGraph:
         For coalesce nodes, returns the intersection of all branch guarantees
         (only fields guaranteed by ALL branches are guaranteed after merge).
 
+        IMPORTANT: Gates ALWAYS inherit from upstream, even if they have raw schema
+        guarantees. This is because gates copy raw config["schema"] from upstream,
+        which may not include computed guarantees from output_schema_config
+        (e.g., LLM transforms compute additional guaranteed_fields like *_usage).
+        See P1-2026-01-31-gate-drops-computed-schema-guarantees for details.
+
         Args:
             node_id: Node to get effective guarantees for
 
@@ -1216,30 +1222,30 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # If node has its own guarantees, return them
-        own_guarantees = self._get_guaranteed_fields(node_id)
-        if own_guarantees:
-            return own_guarantees
-
-        # For pass-through nodes, inherit from upstream
-        if node_info.node_type in ("gate", "coalesce"):
+        # Gates ALWAYS inherit from upstream - they don't compute schemas.
+        # Their raw config["schema"] may miss computed guarantees from upstream's
+        # output_schema_config (e.g., LLM *_usage fields).
+        if node_info.node_type == "gate":
             incoming = list(self._graph.in_edges(node_id, data=True))
-
             if not incoming:
                 return frozenset()
+            # Gates pass through - inherit from single upstream
+            return self._get_effective_guaranteed_fields(incoming[0][0])
 
-            if node_info.node_type == "coalesce":
-                # Coalesce guarantees the INTERSECTION of branch guarantees
-                branch_guarantees = [self._get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
-                if not branch_guarantees:
-                    return frozenset()
-                # Start with first, intersect with rest
-                result = branch_guarantees[0]
-                for guarantees in branch_guarantees[1:]:
-                    result = result & guarantees
-                return result
-            else:
-                # Gates pass through - inherit from single upstream
-                return self._get_effective_guaranteed_fields(incoming[0][0])
+        # Coalesce nodes return intersection of branch guarantees
+        if node_info.node_type == "coalesce":
+            incoming = list(self._graph.in_edges(node_id, data=True))
+            if not incoming:
+                return frozenset()
+            # Coalesce guarantees the INTERSECTION of branch guarantees
+            branch_guarantees = [self._get_effective_guaranteed_fields(from_id) for from_id, _, _ in incoming]
+            if not branch_guarantees:
+                return frozenset()
+            # Start with first, intersect with rest
+            result = branch_guarantees[0]
+            for guarantees in branch_guarantees[1:]:
+                result = result & guarantees
+            return result
 
-        return own_guarantees
+        # Non-pass-through nodes return their own guarantees
+        return self._get_guaranteed_fields(node_id)

@@ -358,3 +358,123 @@ class TestAggregationSchemaConfigPropagation:
         assert node_info.output_schema_config is not None
         assert node_info.output_schema_config.guaranteed_fields == ("batch_result",)
         assert node_info.output_schema_config.audit_fields == ("batch_hash",)
+
+
+class TestGateSchemaConfigInheritance:
+    """Tests for gate nodes inheriting computed output_schema_config from upstream.
+
+    P1-2026-01-31: Gate nodes were short-circuiting on raw schema guarantees
+    instead of walking upstream to find computed guarantees from output_schema_config.
+    """
+
+    def test_gate_inherits_output_schema_config_from_upstream(self) -> None:
+        """Gate should inherit computed output_schema_config guarantees from upstream.
+
+        Scenario:
+        - Transform has output_schema_config with computed guaranteed_fields
+          (e.g., LLM transforms with ["result", "result_usage", "result_model"])
+        - Transform's raw config["schema"] only has a SUBSET of these fields
+          (e.g., ["result"]) because others are computed dynamically
+        - Gate copies raw config["schema"] from transform (only gets ["result"])
+        - Gate should still inherit ALL guarantees from upstream's output_schema_config
+        """
+        graph = ExecutionGraph()
+
+        # Source with some fields
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["input_field"]}},
+        )
+
+        # Transform with COMPUTED output_schema_config
+        # Raw config only declares "result", but computed schema adds more
+        transform_computed_schema = SchemaConfig(
+            mode=None,
+            fields=None,
+            is_dynamic=True,
+            guaranteed_fields=("result", "result_usage", "result_model"),
+            audit_fields=None,
+        )
+        graph.add_node(
+            "llm_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="azure_llm",
+            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["result"]}},
+            output_schema_config=transform_computed_schema,
+        )
+
+        # Gate that would copy raw schema from transform (simulates from_plugin_instances)
+        # The gate gets raw schema: {"fields": "dynamic", "guaranteed_fields": ["result"]}
+        graph.add_node(
+            "gate",
+            node_type=NodeType.GATE,
+            plugin_name="config_gate",
+            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["result"]}},
+            # NO output_schema_config - gate doesn't compute schema
+        )
+
+        graph.add_edge("source", "llm_transform", label="continue")
+        graph.add_edge("llm_transform", "gate", label="continue")
+
+        # Verify transform has computed guarantees
+        transform_guarantees = graph._get_effective_guaranteed_fields("llm_transform")
+        assert "result_usage" in transform_guarantees
+
+        # Gate should inherit computed guarantees from upstream
+        gate_guarantees = graph._get_effective_guaranteed_fields("gate")
+        assert "result_usage" in gate_guarantees, f"Gate should inherit result_usage from upstream transform, has: {gate_guarantees}"
+        assert "result_model" in gate_guarantees
+        assert "result" in gate_guarantees
+
+    def test_chained_gates_inherit_through_all(self) -> None:
+        """Multiple chained gates should all inherit from original transform."""
+        graph = ExecutionGraph()
+
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"fields": "dynamic"}},
+        )
+
+        transform_schema = SchemaConfig(
+            mode=None,
+            fields=None,
+            is_dynamic=True,
+            guaranteed_fields=("computed_a", "computed_b"),
+            audit_fields=None,
+        )
+        graph.add_node(
+            "transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            config={"schema": {"fields": "dynamic"}},
+            output_schema_config=transform_schema,
+        )
+
+        # Two gates in sequence
+        graph.add_node(
+            "gate1",
+            node_type=NodeType.GATE,
+            plugin_name="config_gate",
+            config={"schema": {"fields": "dynamic"}},
+        )
+        graph.add_node(
+            "gate2",
+            node_type=NodeType.GATE,
+            plugin_name="config_gate",
+            config={"schema": {"fields": "dynamic"}},
+        )
+
+        graph.add_edge("source", "transform", label="continue")
+        graph.add_edge("transform", "gate1", label="continue")
+        graph.add_edge("gate1", "gate2", label="continue")
+
+        # Both gates should inherit computed guarantees
+        gate1_guarantees = graph._get_effective_guaranteed_fields("gate1")
+        gate2_guarantees = graph._get_effective_guaranteed_fields("gate2")
+
+        assert gate1_guarantees == frozenset({"computed_a", "computed_b"})
+        assert gate2_guarantees == frozenset({"computed_a", "computed_b"})
