@@ -167,12 +167,25 @@ def narrow_config(config: NodeConfig, expected: type[T], node_id: str, node_type
 
 ```python
 def config_to_dict(config: NodeConfig) -> dict[str, Any]:
-    """Serialize NodeConfig to dict for Landscape storage.
+    """Serialize NodeConfig to dict for Landscape storage and topology hashing.
+
+    CRITICAL: Excludes None values to maintain hash stability.
+
+    Without this filter, asdict() includes all fields:
+        {"routes": {...}, "fork_to": None, "plugin_config": None}
+
+    But original dicts only had explicit fields:
+        {"routes": {...}}
+
+    The extra "field": null entries would change topology hashes,
+    breaking checkpoint validation for existing runs.
 
     Performance: Called once per node during graph construction.
     NOT on the hot path (not called per row).
     """
-    return asdict(config)
+    result = asdict(config)
+    # Filter out None values to match original dict behavior
+    return {k: v for k, v in result.items() if v is not None}
 ```
 
 ### Schema Access Helpers
@@ -203,6 +216,30 @@ def get_node_schema_optional(node: NodeInfo) -> dict[str, Any] | None:
                            AggregationNodeConfig, CoalesceNodeConfig)):
         return config.schema
     return None  # Source/Sink don't have schema
+
+
+def get_required_input_fields(node: NodeInfo) -> frozenset[str]:
+    """Extract required input fields from node config.
+
+    Replaces .get("required_input_fields") patterns at lines 1175, 1181-1183.
+    Checks both top-level and nested in options (for aggregations).
+    """
+    config = node.config
+
+    # Transform and Aggregation have top-level required_input_fields
+    if isinstance(config, (TransformNodeConfig, AggregationNodeConfig)):
+        if config.required_input_fields:
+            return frozenset(config.required_input_fields)
+
+    # Aggregation also checks nested in options (legacy pattern)
+    if isinstance(config, AggregationNodeConfig):
+        options = config.options
+        if isinstance(options, dict):
+            nested = options.get("required_input_fields")
+            if nested and isinstance(nested, list):
+                return frozenset(nested)
+
+    return frozenset()
 ```
 
 ### NodeInfo Update
@@ -636,6 +673,100 @@ This design incorporates feedback from the 4-perspective review:
 2. **Python Engineering:** Added `@overload` for `narrow_config()`, `TypeAlias` for union, `slots=True` for `NodeInfo`
 3. **Quality Assurance:** Added Landscape round-trip test, addressed mutation conflict with single-phase construction
 4. **Systems Thinking:** Chose Option B (refactor) over Option A (remove frozen) for architectural correctness
+
+## Risk Reduction Spikes (Run Before Implementation)
+
+Three targeted spikes to validate approach before committing to full implementation:
+
+### Spike 1: Coalesce Schema Ordering (30 min)
+
+**Goal:** Verify gate schemas are available before coalesce processing at line 770.
+
+```python
+# tests/spikes/test_coalesce_schema_ordering.py
+def test_branch_schemas_available_before_coalesce():
+    """Verify all gates have schema before coalesce loop."""
+    # Instrument from_plugin_instances or add assertion at line 770
+    # Verify: for each gate that feeds a coalesce branch,
+    # node.config["schema"] is already set
+```
+
+**Pass criteria:** All upstream nodes have schema before line 770.
+
+### Spike 2: Hash Stability (CRITICAL - 30 min)
+
+**Goal:** Verify `config_to_dict()` with None filtering produces identical hashes.
+
+```python
+# tests/spikes/test_hash_stability.py
+def test_typed_config_hash_matches_original():
+    """Verify serialization produces same hash as current dict."""
+    from elspeth.core.canonical import stable_hash
+
+    # Current dict (only explicit fields)
+    current_config = {"routes": {"true": "sink"}, "schema": {"fields": "dynamic"}}
+
+    # Typed config (with None for optional fields)
+    typed_config = GateNodeConfig(
+        routes={"true": "sink"},
+        schema={"fields": "dynamic"},
+        condition=None, fork_to=None, plugin_config=None
+    )
+
+    # config_to_dict filters None → should match
+    assert stable_hash(config_to_dict(typed_config)) == stable_hash(current_config)
+```
+
+**Pass criteria:** Hashes match for all node types.
+
+### Spike 3: Plugin Config Access Pattern (15 min)
+
+**Goal:** Verify plugin initialization doesn't break.
+
+```python
+# tests/spikes/test_plugin_config_access.py
+def test_gate_plugin_receives_correct_config():
+    """Verify gate plugins receive plugin_config dict, not NodeConfig."""
+    # Create a plugin gate
+    gate = MyGatePlugin(config={"routes": {...}, "my_option": "value"})
+
+    # Plugin should read from config dict directly
+    assert gate.routes == {...}
+    assert gate.config["my_option"] == "value"
+```
+
+**Key insight:** Plugins receive `plugin_config` dict at instantiation (before NodeInfo exists). They don't read from NodeInfo.config - that's framework code only.
+
+## Important Distinction: NodeInfo.config vs Plugin.config
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  INSTANTIATION TIME                              │
+│                                                                  │
+│  Plugin receives config dict ──► Plugin stores as self.config   │
+│  (before graph construction)      (plugin's own attribute)       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                  GRAPH CONSTRUCTION                              │
+│                                                                  │
+│  NodeInfo.config = GateNodeConfig(                              │
+│      routes=...,                                                 │
+│      plugin_config=dict(plugin.config),  ← Copy of plugin dict  │
+│  )                                                               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                  RUNTIME (Orchestrator)                          │
+│                                                                  │
+│  Framework reads NodeInfo.config (typed)                        │
+│  Plugin reads self.config (its own dict)                        │
+│                                                                  │
+│  Line 1740: sink.config["path"]  ← Plugin's config, NOT NodeInfo│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Clarification for line 1740:** `sink.config["path"]` accesses the **SinkProtocol instance's** config attribute, not NodeInfo.config. This is unchanged by our refactor - plugins keep their own config dict.
 
 ## Verification Summary
 
