@@ -217,3 +217,125 @@ class TestTokenOutcomeConstraints:
             results = conn.execute(query).fetchall()
 
         assert len(results) == 2
+
+
+class TestTokenOutcomeCanonicalJson:
+    """Tests for canonical JSON enforcement in token outcome context.
+
+    Bug: P2-2026-01-31-token-outcome-context-non-canonical
+
+    The context parameter in record_token_outcome() was using json.dumps()
+    instead of canonical_json(), allowing NaN/Infinity to slip into the
+    audit trail. This violates CLAUDE.md: "NaN and Infinity are strictly
+    rejected, not silently converted."
+    """
+
+    def test_context_with_nan_raises_value_error(self) -> None:
+        """Context containing NaN must be rejected, not silently serialized.
+
+        NaN in audit data corrupts the trail - it can't be deterministically
+        hashed and may fail to deserialize in other systems.
+        """
+        import math
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Setup
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={"value": 42},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Context with NaN must raise ValueError (canonical_json rejects NaN)
+        with pytest.raises(ValueError, match=r"[Nn]a[Nn]|non-finite"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output_sink",
+                context={"score": math.nan},
+            )
+
+    def test_context_with_infinity_raises_value_error(self) -> None:
+        """Context containing Infinity must be rejected."""
+        import math
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Setup
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={"value": 42},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Context with Infinity must raise ValueError
+        with pytest.raises(ValueError, match=r"[Ii]nf|non-finite"):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="output_sink",
+                context={"ratio": math.inf},
+            )
+
+    def test_context_with_valid_data_succeeds(self) -> None:
+        """Context with normal JSON-serializable data should succeed."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Setup
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={"value": 42},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Valid context should work fine
+        outcome_id = recorder.record_token_outcome(
+            run_id=run.run_id,
+            token_id=token.token_id,
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output_sink",
+            context={"score": 0.95, "label": "approved", "count": 42},
+        )
+
+        # Verify it was recorded
+        assert outcome_id is not None
+        assert outcome_id.startswith("out_")

@@ -88,6 +88,7 @@ class TestCallReplayer:
         request_hash: str = "hash123",
         latency_ms: float = 150.0,
         error_json: str | None = None,
+        response_ref: str | None = None,
     ) -> Call:
         """Create a mock Call object."""
         return Call(
@@ -100,6 +101,7 @@ class TestCallReplayer:
             created_at=datetime.now(UTC),
             latency_ms=latency_ms,
             error_json=error_json,
+            response_ref=response_ref,
         )
 
     def test_replay_returns_recorded_response(self) -> None:
@@ -197,8 +199,12 @@ class TestCallReplayer:
         assert recorder.find_call_by_request_hash.call_count == 3
         assert result3.response_data == {"content": "cached"}
 
-    def test_replay_handles_error_calls(self) -> None:
-        """Replays error status correctly."""
+    def test_replay_handles_error_calls_without_response(self) -> None:
+        """Error calls that never had a response get empty dict.
+
+        Some error calls legitimately have no response (e.g., connection timeout,
+        DNS failure). These have response_ref=None, so we allow empty dict.
+        """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
@@ -213,6 +219,7 @@ class TestCallReplayer:
             status=CallStatus.ERROR,
             latency_ms=50.0,
             error_json=json.dumps(error_details),
+            response_ref=None,  # Never had a response
         )
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = None
@@ -222,7 +229,77 @@ class TestCallReplayer:
 
         assert result.was_error is True
         assert result.error_data == error_details
-        assert result.response_data == {}  # Empty dict, not None
+        assert result.response_data == {}  # Empty dict is correct here
+
+    def test_replay_error_call_with_purged_response_raises(self) -> None:
+        """Error calls that HAD a response but it was purged must fail.
+
+        Bug: P2-2026-01-31-replayer-missing-payload-fallback
+
+        HTTP error responses (400, 500) often include response bodies that are
+        recorded in the audit trail. If the payload is purged, we can't silently
+        substitute {} - that would change replay behavior.
+
+        The key distinction is response_ref:
+        - response_ref=None → call never had a response (OK to use {})
+        - response_ref set but payload missing → response was purged (FAIL)
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        error_details = {
+            "type": "BadRequestError",
+            "message": "Invalid input format",
+        }
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            latency_ms=50.0,
+            error_json=json.dumps(error_details),
+            response_ref="payload_ref_123",  # Response WAS recorded
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None  # But payload is now missing
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+
+        # Should raise because response_ref exists but payload is missing
+        with pytest.raises(ReplayPayloadMissingError) as exc_info:
+            replayer.replay(call_type="llm", request_data=request_data)
+
+        assert exc_info.value.call_id == "call_123"
+        assert exc_info.value.request_hash == request_hash
+
+    def test_replay_error_call_with_response_succeeds(self) -> None:
+        """Error calls with available response data succeed normally."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        error_details = {
+            "type": "BadRequestError",
+            "message": "Invalid input format",
+        }
+        error_response = {
+            "error": {"code": 400, "message": "Missing required field 'prompt'"},
+        }
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            latency_ms=50.0,
+            error_json=json.dumps(error_details),
+            response_ref="payload_ref_123",  # Response was recorded
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = error_response  # And is available
+
+        replayer = CallReplayer(recorder, source_run_id="run_abc123")
+        result = replayer.replay(call_type="llm", request_data=request_data)
+
+        assert result.was_error is True
+        assert result.error_data == error_details
+        assert result.response_data == error_response  # Actual recorded response
 
     def test_replayed_call_includes_latency(self) -> None:
         """Original latency is preserved in replay result."""
@@ -271,17 +348,21 @@ class TestCallReplayer:
         replayer.replay(call_type="llm", request_data=request_data)
         assert recorder.find_call_by_request_hash.call_count == 2
 
-    def test_replay_with_none_response_data(self) -> None:
-        """Raises error when payload is missing for SUCCESS calls.
+    def test_replay_with_purged_response_data(self) -> None:
+        """Raises error when payload was recorded but is now missing (purged).
 
-        Missing payload for success calls would cause silent incorrect outputs,
-        so we fail fast instead of silently coercing to empty dict.
+        Missing payload would cause silent incorrect outputs (empty dict),
+        so we fail fast. The key is response_ref being set - that indicates
+        a response was recorded and should be available.
         """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
 
-        mock_call = self._create_mock_call(request_hash=request_hash)
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_abc",  # Response WAS recorded
+        )
         recorder.find_call_by_request_hash.return_value = mock_call
         recorder.get_call_response_data.return_value = None  # Payload purged
 

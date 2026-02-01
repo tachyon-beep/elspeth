@@ -179,6 +179,7 @@ class TestCallVerifier:
         status: CallStatus = CallStatus.SUCCESS,
         request_hash: str = "hash123",
         latency_ms: float = 150.0,
+        response_ref: str | None = None,
     ) -> Call:
         """Create a mock Call object."""
         return Call(
@@ -190,6 +191,7 @@ class TestCallVerifier:
             request_hash=request_hash,
             created_at=datetime.now(UTC),
             latency_ms=latency_ms,
+            response_ref=response_ref,
         )
 
     def test_verify_matching_response(self) -> None:
@@ -459,15 +461,22 @@ class TestCallVerifier:
             sequence_index=0,
         )
 
-    def test_verify_with_none_recorded_response(self) -> None:
-        """Handles calls where recorded response payload is missing/purged."""
+    def test_verify_with_purged_response_payload(self) -> None:
+        """Handles calls where response payload was recorded but is now purged.
+
+        When response_ref is set but get_call_response_data returns None,
+        the payload was purged. This should be tracked as missing_payload.
+        """
         recorder = self._create_mock_recorder()
         request_data = {"model": "gpt-4", "messages": []}
         request_hash = stable_hash(request_data)
 
-        mock_call = self._create_mock_call(request_hash=request_hash)
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            response_ref="payload_ref_123",  # Response WAS recorded
+        )
         recorder.find_call_by_request_hash.return_value = mock_call
-        recorder.get_call_response_data.return_value = None  # Payload purged
+        recorder.get_call_response_data.return_value = None  # But now missing
 
         verifier = CallVerifier(recorder, source_run_id="run_abc123")
         result = verifier.verify(
@@ -484,6 +493,71 @@ class TestCallVerifier:
         assert verifier.get_report().missing_payloads == 1
         # Should not increment mismatches
         assert verifier.get_report().mismatches == 0
+
+    def test_verify_error_call_without_response_not_missing_payload(self) -> None:
+        """Error calls that never had a response should NOT be flagged as missing payload.
+
+        Bug: P2-2026-01-31-verifier-error-misclassification
+
+        Some error calls legitimately have no response (connection timeout, DNS failure).
+        These have response_ref=None, meaning no response was ever recorded.
+        This should NOT be counted as payload_missing.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            response_ref=None,  # Never had a response
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"error": "timeout"},
+        )
+
+        # Should NOT be marked as payload_missing
+        assert result.payload_missing is False
+        assert verifier.get_report().missing_payloads == 0
+        # The call exists but has no response to compare
+        assert result.recorded_response is None
+        # Cannot match since there's no recorded response
+        assert result.is_match is False
+
+    def test_verify_error_call_with_purged_response_is_missing_payload(self) -> None:
+        """Error calls that HAD a response but it was purged SHOULD be flagged.
+
+        HTTP error responses (400, 500) include response bodies.
+        If that payload was purged, it's a genuine missing payload.
+        """
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+
+        mock_call = self._create_mock_call(
+            request_hash=request_hash,
+            status=CallStatus.ERROR,
+            response_ref="payload_ref_456",  # Error call with response body
+        )
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = None  # But now purged
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response={"error": "bad request"},
+        )
+
+        # SHOULD be marked as payload_missing (response was recorded but purged)
+        assert result.payload_missing is True
+        assert verifier.get_report().missing_payloads == 1
 
     def test_verify_order_independent_with_default_config(self) -> None:
         """Default configuration (ignore_order=True) ignores list ordering."""

@@ -266,6 +266,63 @@ class TestCSVFormatter:
         # Empty dict produces no keys for that prefix
         assert "empty" not in flat
 
+    def test_csv_formatter_rejects_nan_in_list(self) -> None:
+        """CSV formatter must reject NaN in lists per CLAUDE.md audit integrity.
+
+        Bug: P2-2026-01-31-csv-formatter-nan-in-lists
+
+        Lists are serialized to JSON strings for CSV. If NaN slips through,
+        the resulting JSON is non-standard and may fail in downstream systems.
+        """
+        import math
+
+        formatter = CSVFormatter()
+
+        record = {
+            "scores": [0.9, 0.8, math.nan],
+        }
+
+        with pytest.raises(ValueError, match="NaN"):
+            formatter.flatten(record)
+
+    def test_csv_formatter_rejects_infinity_in_list(self) -> None:
+        """CSV formatter must reject Infinity in lists."""
+        import math
+
+        formatter = CSVFormatter()
+
+        record = {
+            "values": [1.0, 2.0, math.inf],
+        }
+
+        with pytest.raises(ValueError, match="Infinity"):
+            formatter.flatten(record)
+
+    def test_csv_formatter_rejects_nested_nan_in_list(self) -> None:
+        """CSV formatter must reject NaN in nested list structures."""
+        import math
+
+        formatter = CSVFormatter()
+
+        record = {
+            "events": [{"score": math.nan}],
+        }
+
+        with pytest.raises(ValueError, match="NaN"):
+            formatter.flatten(record)
+
+    def test_csv_formatter_handles_valid_list_with_floats(self) -> None:
+        """CSV formatter should accept lists with valid float values."""
+        formatter = CSVFormatter()
+
+        record = {
+            "scores": [0.1, 0.5, 0.9],
+        }
+
+        flat = formatter.flatten(record)
+
+        assert flat["scores"] == "[0.1, 0.5, 0.9]"
+
 
 class TestJSONFormatter:
     """JSONFormatter preserves nested structure for JSON output."""

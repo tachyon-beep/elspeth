@@ -217,7 +217,8 @@ class CSVFormatter:
                 result.update(self.flatten(value, full_key))
             elif isinstance(value, list):
                 # Convert lists to JSON strings for CSV
-                result[full_key] = json.dumps(value)
+                # Use serialize_datetime to validate (rejects NaN/Infinity) and convert datetimes
+                result[full_key] = json.dumps(serialize_datetime(value))
             else:
                 result[full_key] = value
 

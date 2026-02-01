@@ -2430,7 +2430,7 @@ class LandscapeRecorder:
 
         outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
-        context_json = json.dumps(context) if context is not None else None
+        context_json = canonical_json(context) if context is not None else None
 
         self._ops.execute_insert(
             token_outcomes_table.insert().values(

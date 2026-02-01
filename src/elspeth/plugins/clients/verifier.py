@@ -208,8 +208,11 @@ class CallVerifier:
         # Get recorded response
         recorded_response = self._recorder.get_call_response_data(call.call_id)
 
-        # Handle missing/purged payload explicitly
-        if recorded_response is None:
+        # Handle missing/purged payload explicitly.
+        # Distinguish between:
+        # - response_ref=None → call never had a response (NOT a missing payload)
+        # - response_ref set but response=None → payload was purged (IS missing payload)
+        if recorded_response is None and call.response_ref is not None:
             result = VerificationResult(
                 request_hash=request_hash,
                 live_response=live_response,
@@ -218,6 +221,18 @@ class CallVerifier:
                 payload_missing=True,
             )
             self._report.missing_payloads += 1
+            self._report.results.append(result)
+            return result
+
+        # Call never had a response (e.g., connection timeout, DNS failure)
+        # Cannot compare, so not a match, but NOT a missing payload
+        if recorded_response is None:
+            result = VerificationResult(
+                request_hash=request_hash,
+                live_response=live_response,
+                recorded_response=None,
+                is_match=False,
+            )
             self._report.results.append(result)
             return result
 
