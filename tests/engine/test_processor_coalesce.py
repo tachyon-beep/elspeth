@@ -557,8 +557,8 @@ class TestRowProcessorCoalesce:
         # Simulate processing: sentiment and entities complete, summary is quarantined
         # sentiment child completes with enriched data
         sentiment_token = TokenInfo(
-            row_id=children[0].token.row_id,
-            token_id=children[0].token.token_id,
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
             row_data={"text": "ACME earnings report", "sentiment": "positive"},
             branch_name="sentiment",
         )
@@ -567,8 +567,8 @@ class TestRowProcessorCoalesce:
 
         # entities child completes with enriched data
         entities_token = TokenInfo(
-            row_id=children[1].token.row_id,
-            token_id=children[1].token.token_id,
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
             row_data={"text": "ACME earnings report", "entities": ["ACME"]},
             branch_name="entities",
         )
@@ -684,8 +684,8 @@ class TestRowProcessorCoalesce:
 
         # Simulate: fast arrives first with enriched data
         fast_token = TokenInfo(
-            row_id=children[0].token.row_id,
-            token_id=children[0].token.token_id,
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
             row_data={"text": "test input", "fast_result": "fast done"},
             branch_name="fast",
         )
@@ -697,8 +697,8 @@ class TestRowProcessorCoalesce:
 
         # Simulate: medium arrives second with enriched data
         medium_token = TokenInfo(
-            row_id=children[1].token.row_id,
-            token_id=children[1].token.token_id,
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
             row_data={"text": "test input", "medium_result": "medium done"},
             branch_name="medium",
         )
@@ -746,8 +746,8 @@ class TestRowProcessorCoalesce:
         # With Gap #2 fix, late arrivals are now rejected with failure_reason.
         # This prevents orphan pending entries and confusing duplicate audit records.
         slow_token = TokenInfo(
-            row_id=children[2].token.row_id,
-            token_id=children[2].token.token_id,
+            row_id=children[2].row_id,
+            token_id=children[2].token_id,
             row_data={"text": "test input", "slow_result": "slow done"},
             branch_name="slow",
         )
@@ -1150,14 +1150,14 @@ class TestRowProcessorCoalesce:
 
         # Simulate processing: create enriched tokens for each branch
         fast_token = TokenInfo(
-            row_id=children[0].token.row_id,
-            token_id=children[0].token.token_id,
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
             row_data={"text": "test", "fast_result": "done"},
             branch_name="fast",
         )
         slow_token = TokenInfo(
-            row_id=children[1].token.row_id,
-            token_id=children[1].token.token_id,
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
             row_data={"text": "test", "slow_result": "done"},
             branch_name="slow",
         )
