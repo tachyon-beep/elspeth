@@ -38,3 +38,11 @@
 **Status: STILL VALID**
 
 - LLM usage still compares `row.status` to `"completed"` while `CallStatus.SUCCESS` is `"success"`. (`src/elspeth/mcp/server.py:987`, `src/elspeth/contracts/enums.py:203-204`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+- Changed comparison to use `CallStatus.SUCCESS.value` instead of string literal `"completed"`
+- Added `CallStatus` import from `elspeth.contracts.enums`
+- Fix at `src/elspeth/mcp/server.py:988`

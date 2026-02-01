@@ -24,6 +24,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from elspeth.contracts.enums import CallStatus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.formatters import dataclass_to_dict, serialize_datetime
 from elspeth.core.landscape.lineage import explain
@@ -984,7 +985,7 @@ class LandscapeAnalyzer:
             stats = llm_by_plugin[plugin]
             call_count: int = row.count  # type: ignore[assignment]
             stats["total_calls"] += call_count
-            if row.status == "completed":
+            if row.status == CallStatus.SUCCESS.value:
                 stats["successful"] += call_count
             else:
                 stats["failed"] += call_count
@@ -1070,10 +1071,7 @@ class LandscapeAnalyzer:
         """
         from sqlalchemy import func, select
 
-        from elspeth.core.landscape.schema import (
-            token_outcomes_table,
-            tokens_table,
-        )
+        from elspeth.core.landscape.schema import token_outcomes_table
 
         run = self._recorder.get_run(run_id)
         if run is None:
@@ -1103,21 +1101,21 @@ class LandscapeAnalyzer:
             )
             sink_rows = conn.execute(sink_dist).fetchall()
 
-            # Fork/join counts (tokens with fork_group_id or join_group_id)
+            # Fork/join counts (outcomes with fork_group_id or join_group_id, scoped to run)
             fork_count = (
                 conn.execute(
-                    select(func.count(func.distinct(tokens_table.c.fork_group_id)))
-                    .select_from(tokens_table)
-                    .where(tokens_table.c.fork_group_id.isnot(None))
+                    select(func.count(func.distinct(token_outcomes_table.c.fork_group_id)))
+                    .select_from(token_outcomes_table)
+                    .where((token_outcomes_table.c.run_id == run_id) & (token_outcomes_table.c.fork_group_id.isnot(None)))
                 ).scalar()
                 or 0
             )
 
             join_count = (
                 conn.execute(
-                    select(func.count(func.distinct(tokens_table.c.join_group_id)))
-                    .select_from(tokens_table)
-                    .where(tokens_table.c.join_group_id.isnot(None))
+                    select(func.count(func.distinct(token_outcomes_table.c.join_group_id)))
+                    .select_from(token_outcomes_table)
+                    .where((token_outcomes_table.c.run_id == run_id) & (token_outcomes_table.c.join_group_id.isnot(None)))
                 ).scalar()
                 or 0
             )

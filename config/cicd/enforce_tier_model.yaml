@@ -55,12 +55,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_find_audit_databases:fp=8f9ba3e9e8cdc975
+- key: mcp/server.py:R6:_find_audit_databases:fp=572ebacbfb2c5e4e
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=17b4957dab400924
+- key: mcp/server.py:R6:_prompt_for_database:fp=511662d2990c72af
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -1275,139 +1275,144 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:fp=3433dbbd63dc90f7
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:fp=c7e57bf562b9dc29
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=0fd8df29318fc728
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=d27613d5304398ba
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=ffd9ddfab6088b6f
+- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=6f2d02735f901eb6
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:fp=07fc9b618d97e4f1
+- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:fp=8c457255e2933476
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=8509499193fbbd98
+- key: mcp/server.py:R1:create_server:call_tool:fp=b0b7906d22437683
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=3eb2a2adb9ec4dce
+- key: mcp/server.py:R1:create_server:call_tool:fp=3bf0be1812a90be4
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=218ce466e9ce8c5f
+- key: mcp/server.py:R1:create_server:call_tool:fp=ef52ed0e5b5aef3d
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=8a127369b3792c76
+- key: mcp/server.py:R1:create_server:call_tool:fp=65cff42471890af7
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=1da67078cba834c5
+- key: mcp/server.py:R1:create_server:call_tool:fp=9b1c747d983bcd40
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=a21dfbe2c3269811
+- key: mcp/server.py:R1:create_server:call_tool:fp=cc1a288b8bac6cd6
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=e842b41955adb8de
+- key: mcp/server.py:R1:create_server:call_tool:fp=8f9c57dfc9e6f7a8
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=d3fc0d42f8a000bc
+- key: mcp/server.py:R1:create_server:call_tool:fp=9e58a3b0547d3104
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=19b600859462f09e
+- key: mcp/server.py:R1:create_server:call_tool:fp=346cb40a79657283
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=26ff9492259b9726
+- key: mcp/server.py:R1:create_server:call_tool:fp=0c45c41e9d666dbb
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=3c5fb6339dc7b952
+- key: mcp/server.py:R1:create_server:call_tool:fp=64dc6e251ddabe13
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=a487f012486f6a0c
+- key: mcp/server.py:R1:create_server:call_tool:fp=cdd24235cb6cfb10
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=73548f08428f5f2d
+- key: mcp/server.py:R1:create_server:call_tool:fp=9a27977497180129
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=df258a91ffac3553
+- key: mcp/server.py:R1:create_server:call_tool:fp=81b02afd980c2c77
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=56cdf3a01851f606
+- key: mcp/server.py:R1:create_server:call_tool:fp=697651e3b0540c42
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=b97a99ed369f3cb0
+- key: mcp/server.py:R1:create_server:call_tool:fp=5e6b243dd7891d24
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=ca074575089daa3d
+- key: mcp/server.py:R1:create_server:call_tool:fp=7f639523183b0e46
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=b19bfa09d1795139
+- key: mcp/server.py:R1:create_server:call_tool:fp=d3caef07c438cee9
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=da9a91f6ac957e61
+- key: mcp/server.py:R1:create_server:call_tool:fp=862c765728101671
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=ad72fe21e72fe6dd
+- key: mcp/server.py:R1:create_server:call_tool:fp=941f0604f1cf5676
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R4:create_server:call_tool:fp=dcd241fb6c1a869e
+- key: mcp/server.py:R4:create_server:call_tool:fp=9387de44a997b269
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=7653d1412c9f7f07
+- key: mcp/server.py:R6:_prompt_for_database:fp=41048cde7fb560a1
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R6:_prompt_for_database:fp=54fb39c3f7862939
+- key: mcp/server.py:R6:_prompt_for_database:fp=7eb937bd5e55ab72
   owner: architecture
   reason: Silent recovery with explicit error handling path
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: mcp/server.py:R1:create_server:call_tool:fp=8967c15a5d62945b
+  owner: architecture
+  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=799383f3318c92d0

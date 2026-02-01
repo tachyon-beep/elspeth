@@ -37,3 +37,13 @@
 **Status: STILL VALID**
 
 - `fork_count`/`join_count` still query `tokens_table` without scoping to `run_id`. (`src/elspeth/mcp/server.py:1106-1121`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+- Changed queries to use `token_outcomes_table` instead of `tokens_table`
+- `token_outcomes_table` already has `run_id`, `fork_group_id`, and `join_group_id` columns
+- Added `run_id` filter to both fork_count and join_count queries
+- Removed unused `tokens_table` import from function
+- Fix at `src/elspeth/mcp/server.py:1107-1130`
