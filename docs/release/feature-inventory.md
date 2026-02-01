@@ -413,4 +413,4 @@ Entry point: `elspeth-mcp`
 ---
 
 *Inventory completed: January 29, 2026*
-*Next update: After RC-1 release*
+*Next update: After RC-2 release*

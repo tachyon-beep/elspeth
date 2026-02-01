@@ -225,6 +225,7 @@ class SpanFactory:
         aggregation_name: str,
         *,
         node_id: str | None = None,
+        input_hash: str | None = None,
         batch_id: str | None = None,
         token_ids: Sequence[str] | None = None,
     ) -> Iterator["Span | NoOpSpan"]:
@@ -233,6 +234,7 @@ class SpanFactory:
         Args:
             aggregation_name: Name of the aggregation plugin
             node_id: Unique node identifier for disambiguation (P2-2026-01-21 fix)
+            input_hash: Input data hash for trace-to-audit correlation (P3-2026-02-01 fix)
             batch_id: Optional batch identifier
             token_ids: Token identifiers in the batch (P2-2026-01-21 fix)
 
@@ -252,6 +254,8 @@ class SpanFactory:
             span.set_attribute("plugin.type", "aggregation")
             if node_id:
                 span.set_attribute("node.id", node_id)
+            if input_hash:
+                span.set_attribute("input.hash", input_hash)
             if batch_id:
                 span.set_attribute("batch.id", batch_id)
             if token_ids is not None:

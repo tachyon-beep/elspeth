@@ -719,6 +719,47 @@ class TestNodeIdOnSpans:
         # Also verify batch.id is still present
         assert attrs.get("batch.id") == "batch-001"
 
+    def test_aggregation_span_includes_input_hash(self) -> None:
+        """Aggregation span should include input.hash when provided.
+
+        BUG: P3-2026-02-01-aggregation-flush-span-missing-input-hash
+        Aggregation flushes compute input_hash for audit correlation, but
+        aggregation_span() was created without input_hash parameter when
+        migrating from transform_span(). This breaks trace-to-audit correlation.
+        """
+        pytest.importorskip("opentelemetry")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        from elspeth.engine.spans import SpanFactory
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(
+            __import__("opentelemetry.sdk.trace.export", fromlist=["SimpleSpanProcessor"]).SimpleSpanProcessor(exporter)
+        )
+        tracer = provider.get_tracer("test")
+        factory = SpanFactory(tracer=tracer)
+
+        with factory.aggregation_span(
+            "batch_stats",
+            node_id="aggregation_batch_stats_abc123",
+            batch_id="batch-001",
+            token_ids=["token-001", "token-002"],
+            input_hash="sha256:deadbeef1234567890",
+        ):
+            pass
+
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        # Core assertion: input.hash must be present for trace-to-audit correlation
+        assert attrs.get("input.hash") == "sha256:deadbeef1234567890"
+        # Verify other attributes still work
+        assert attrs.get("node.id") == "aggregation_batch_stats_abc123"
+        assert attrs.get("batch.id") == "batch-001"
+        assert attrs.get("token.ids") == ("token-001", "token-002")
+
     def test_duplicate_plugins_distinguishable_by_node_id(self) -> None:
         """Two instances of same plugin type should have different node.id."""
         pytest.importorskip("opentelemetry")

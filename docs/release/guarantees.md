@@ -1,7 +1,7 @@
 # What ELSPETH Guarantees
 
-**Version:** RC-1
-**Date:** January 2026
+**Version:** RC-2
+**Date:** February 2026
 
 This document defines the promises ELSPETH makes to its users. These are not aspirational features - they are contractual guarantees that the system must uphold.
 
@@ -239,11 +239,11 @@ LLM plugins include built-in rate limiting:
 ELSPETH prioritizes correctness and auditability over throughput. It is not designed for:
 - High-throughput streaming (use Kafka/Flink)
 - Sub-millisecond latency (audit recording has overhead)
-- Concurrent processing (single-threaded in RC-1)
+- Concurrent processing (single-threaded in RC-2)
 
 ### 7.2 Access Control
 
-RC-1 does not include:
+RC-2 does not include:
 - User authentication
 - Role-based access control
 - Data redaction profiles
@@ -287,6 +287,7 @@ This contract is versioned with the software.
 | Version | Date | Changes |
 |---------|------|---------|
 | RC-1 | Jan 2026 | Initial contract |
+| RC-2 | Feb 2026 | Bug fixes, checkpoint compatibility |
 
 Future versions may:
 - Add new guarantees (backward compatible)

@@ -4,7 +4,7 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-1. Core architecture, a core set of plugins and the audit trail are complete. Missing features are being patched in and a significant bug hunt is underway.
+**Current Status:** RC-2. Core architecture, plugins, and audit trail are complete. Bug fixes from RC-1 have been integrated and the system is stabilizing for release.
 
 ## Auditability Standard
 
@@ -518,7 +518,7 @@ elspeth validate --settings pipeline.yaml             # Validate config
 elspeth plugins list                                  # List available plugins
 elspeth purge --run <run_id>                          # Purge payload data
 
-# TUI-based commands (RC-1: limited functionality)
+# TUI-based commands (RC-2: limited functionality)
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
 

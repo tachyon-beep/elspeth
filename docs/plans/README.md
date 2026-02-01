@@ -25,7 +25,7 @@ Plans actively being worked on:
 |------|-------------|
 | `in-progress/2026-01-26-recorder-refactoring.md` | Landscape recorder refactor into repository modules |
 | `in-progress/2026-01-30-tier2-tracing-implementation.md` | Tier 2 plugin tracing (Azure AI + Langfuse) |
-| `in-progress/RC1-remediation.md` | RC-1 remediation and phased hardening roadmap |
+| `in-progress/RC2-remediation.md` | RC-2 remediation and phased hardening roadmap |
 
 ## Root-Level Plans (1)
 

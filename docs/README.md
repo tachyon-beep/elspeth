@@ -2,7 +2,7 @@
 
 ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines. Every decision is traceable to its source data, configuration, and code version.
 
-**Current Status:** RC-1
+**Current Status:** RC-2
 
 ---
 
@@ -68,12 +68,12 @@ ELSPETH is a domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipe
 
 - **[Plans](plans/)** - Implementation roadmaps
   - [Plans Index](plans/README.md)
-  - [RC-1 Remediation](plans/RC1-remediation.md)
+  - [RC-2 Remediation](plans/RC2-remediation.md)
 - **[Bug Tracking](bugs/)** - Issue tracking
   - [Bug Index](bugs/README.md)
   - [Active Bugs](bugs/BUGS.md)
-- **[Release](release/)** - RC-1 checklists and guarantees
-  - [RC-1 Checklist](release/rc1-checklist.md)
+- **[Release](release/)** - RC-2 checklists and guarantees
+  - [RC-2 Checklist](release/rc2-checklist.md)
   - [Feature Inventory](release/feature-inventory.md)
   - [Guarantees](release/guarantees.md)
 

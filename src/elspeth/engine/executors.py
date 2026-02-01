@@ -1136,10 +1136,12 @@ class AggregationExecutor:
         # P2-2026-01-21: Use aggregation_span (not transform_span) for flush operations
         # This ensures spans are distinguishable from regular transforms and carry batch_id
         # P2-2026-01-21: Pass node_id for disambiguation when multiple aggregations exist
+        # P3-2026-02-01: Pass input_hash for trace-to-audit correlation
         batch_token_ids = [t.token_id for t in buffered_tokens]
         with self._spans.aggregation_span(
             transform.name,
             node_id=node_id,
+            input_hash=input_hash,
             batch_id=batch_id,
             token_ids=batch_token_ids,
         ):

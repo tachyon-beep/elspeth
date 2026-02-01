@@ -42,3 +42,22 @@
 **Status: STILL VALID**
 
 - `execute_flush()` computes `input_hash` but `aggregation_span()` has no input hash parameter, so `input.hash` is not emitted. (`src/elspeth/engine/executors.py:1117-1144`, `src/elspeth/engine/spans.py:230-260`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+**Root Cause:** When aggregation flushes were migrated from `transform_span()` to `aggregation_span()` (P2-2026-01-21 fix), the `input_hash` parameter was not carried over to the new span type.
+
+**Fix Applied:**
+1. Added `input_hash: str | None = None` parameter to `aggregation_span()` in `spans.py:225`
+2. Added `input.hash` attribute emission when `input_hash` is provided in `spans.py:238-239`
+3. Updated `execute_flush()` call site in `executors.py:1145` to pass the computed `input_hash`
+
+**Test Added:**
+- `test_aggregation_span_includes_input_hash` in `tests/engine/test_spans.py` verifies `input.hash` is emitted
+
+**Verification:**
+- All 36 span tests pass
+- All 28 executor tests pass
+- mypy type check passes

@@ -1,4 +1,4 @@
-# ELSPETH RC-1 Comprehensive Remediation Plan
+# ELSPETH RC-2 Comprehensive Remediation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -22,7 +22,7 @@ ELSPETH has sound architecture but incomplete implementation. This plan captures
 | 4 | Architecture Cleanup | 3 weeks | 18 |
 | 5 | Quality & Documentation | Ongoing | 23+ |
 
-**Verdict:** Should be labeled Alpha, not RC-1, until Phase 1-2 complete.
+**Verdict:** RC-2 ready once Phase 1-2 complete.
 
 ---
 

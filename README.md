@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Status: RC-1](https://img.shields.io/badge/status-RC--1-yellow.svg)]()
+[![Status: RC-2](https://img.shields.io/badge/status-RC--2-yellow.svg)]()
 
 Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every decision traceable to its source.
 
