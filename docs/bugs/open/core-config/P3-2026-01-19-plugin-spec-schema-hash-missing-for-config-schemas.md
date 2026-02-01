@@ -98,6 +98,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `PluginSpec.from_plugin()` still reads schemas from the class via `getattr`. (`src/elspeth/plugins/manager.py:76-103`)
+- Built-in plugins still set schemas on instances during `__init__` (not on the class). (`src/elspeth/plugins/sources/csv_source.py:63-96`, `src/elspeth/plugins/transforms/field_mapper.py:52-80`, `src/elspeth/plugins/sinks/csv_sink.py:141-164`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

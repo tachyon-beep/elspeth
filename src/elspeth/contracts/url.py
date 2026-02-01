@@ -22,7 +22,10 @@ Usage:
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+# NOTE: Fingerprint functions are imported lazily inside methods to avoid
+# breaking the contracts leaf module boundary. Importing from elspeth.core
+# at module level would pull in 1,200+ modules (pandas, numpy, sqlalchemy, etc.)
+# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
 
 # Sensitive query parameter names that should be stripped from webhook URLs.
 # Expanded list per code review to cover OAuth, API keys, signed URLs, etc.
@@ -178,6 +181,12 @@ class SanitizedWebhookUrl:
         # Compute fingerprint only if there are non-empty values
         fingerprint: str | None = None
         if sensitive_values:
+            # Lazy import to avoid breaking contracts leaf boundary
+            from elspeth.core.security.fingerprint import (
+                get_fingerprint_key,
+                secret_fingerprint,
+            )
+
             # We have non-empty secrets - need to fingerprint them
             try:
                 get_fingerprint_key()

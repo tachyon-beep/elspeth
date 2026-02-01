@@ -20,10 +20,9 @@ import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import ArtifactDescriptor, GateName, NodeID, NodeType, PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 from tests.engine.orchestrator_test_helpers import build_production_graph
 
@@ -271,7 +270,7 @@ def verify_fork_audit_trail(
 class TestCompositeConditions:
     """WP-09 Verification: Composite conditions work correctly."""
 
-    def test_composite_and_condition(self, landscape_db: LandscapeDB) -> None:
+    def test_composite_and_condition(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify: row['a'] > 0 and row['b'] == 'x' works correctly.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -308,7 +307,7 @@ class TestCompositeConditions:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 4
@@ -327,7 +326,7 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"routed": 4},  # All rows routed to named sinks
         )
 
-    def test_composite_or_condition(self, landscape_db: LandscapeDB) -> None:
+    def test_composite_or_condition(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify: row['status'] == 'active' or row['priority'] > 5 works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -361,7 +360,7 @@ class TestCompositeConditions:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -378,7 +377,7 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"completed": 2, "routed": 1},
         )
 
-    def test_membership_condition(self, landscape_db: LandscapeDB) -> None:
+    def test_membership_condition(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify: row['status'] in ['active', 'pending'] works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -413,7 +412,7 @@ class TestCompositeConditions:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 4
@@ -432,7 +431,7 @@ class TestCompositeConditions:
             expected_terminal_outcomes={"completed": 2, "routed": 2},
         )
 
-    def test_optional_field_with_get(self, landscape_db: LandscapeDB) -> None:
+    def test_optional_field_with_get(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify: row.get('optional') is not None works.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -466,7 +465,7 @@ class TestCompositeConditions:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -554,7 +553,7 @@ class TestRouteLabelResolution:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review_queue"
 
-    def test_ternary_expression_returns_string_routes(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_ternary_expression_returns_string_routes(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify ternary expressions can return different route labels.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -629,7 +628,7 @@ class TestRouteLabelResolution:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -750,7 +749,7 @@ class TestForkCreatesChildTokens:
         assert node_info.config["fork_to"] == ["analysis_a", "analysis_b"]
         assert node_info.config["routes"]["true"] == "fork"
 
-    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Fork children with branch_name route to matching sinks.
 
         This is the core fork use case:
@@ -814,7 +813,7 @@ class TestForkCreatesChildTokens:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_forked == 1
@@ -836,7 +835,7 @@ class TestForkCreatesChildTokens:
             expected_gate_name="forking_gate",
         )
 
-    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Multiple source rows fork correctly with proper counting.
 
         When processing multiple source rows through a fork gate:
@@ -899,7 +898,7 @@ class TestForkCreatesChildTokens:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -1054,7 +1053,7 @@ class TestSecurityRejectionAtConfigTime:
 class TestEndToEndPipeline:
     """Full pipeline integration tests with gates."""
 
-    def test_source_transform_gate_sink_pipeline(self, landscape_db: LandscapeDB) -> None:
+    def test_source_transform_gate_sink_pipeline(self, landscape_db: LandscapeDB, payload_store) -> None:
         """End-to-end: Source -> Transform -> Config Gate -> Sink.
 
         P1 Fix: Added audit trail verification for the complete pipeline.
@@ -1075,7 +1074,7 @@ class TestEndToEndPipeline:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 normalized = row["raw_score"] / 100.0
-                return TransformResult.success({**row, "score": normalized})
+                return TransformResult.success({**row, "score": normalized}, success_reason={"action": "normalize"})
 
         source = ListSource(
             [
@@ -1103,7 +1102,7 @@ class TestEndToEndPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -1121,7 +1120,7 @@ class TestEndToEndPipeline:
             expected_terminal_outcomes={"completed": 2, "routed": 1},
         )
 
-    def test_audit_trail_records_gate_evaluation(self, landscape_db: LandscapeDB) -> None:
+    def test_audit_trail_records_gate_evaluation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Verify audit trail records gate condition and result.
 
         P1 Fix: Added comprehensive audit trail verification.
@@ -1148,7 +1147,7 @@ class TestEndToEndPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape for registered nodes
         with db.engine.connect() as conn:
@@ -1173,7 +1172,7 @@ class TestEndToEndPipeline:
             expected_terminal_outcomes={"completed": 1},
         )
 
-    def test_gate_audit_trail_includes_evaluation_metadata(self, landscape_db: LandscapeDB) -> None:
+    def test_gate_audit_trail_includes_evaluation_metadata(self, landscape_db: LandscapeDB, payload_store) -> None:
         """WP-14b: Verify gate audit trail includes condition, result, and route.
 
         ELSPETH is built for high-stakes accountability. Every gate decision
@@ -1210,7 +1209,7 @@ class TestEndToEndPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 2

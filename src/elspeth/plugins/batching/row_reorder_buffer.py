@@ -250,9 +250,11 @@ class RowReorderBuffer[T]:
                     entry = self._pending[self._next_release_seq]
                     if entry.is_complete:
                         # Ready to release!
-                        # Assert invariants: is_complete implies result and completed_at are set
-                        assert entry.result is not None, "is_complete=True but result is None (invariant violation)"
-                        assert entry.completed_at is not None, "is_complete=True but completed_at is None (invariant violation)"
+                        # Invariants: is_complete implies result and completed_at are set
+                        if entry.result is None:
+                            raise RuntimeError("Invariant violation: is_complete=True but result is None")
+                        if entry.completed_at is None:
+                            raise RuntimeError("Invariant violation: is_complete=True but completed_at is None")
 
                         now = time.perf_counter()
                         buffer_wait_ms = (now - entry.completed_at) * 1000

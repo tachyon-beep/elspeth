@@ -13,14 +13,18 @@ Integration Point (Phase 5):
     (run_id, row_id, transform_seq, attempt). The on_retry callback should
     call recorder.record_retry_attempt() to audit each attempt, ensuring
     complete traceability of transient failures and recovery.
+
+Configuration:
+    RetryManager accepts RuntimeRetryProtocol, allowing structural typing.
+    Use RuntimeRetryConfig from contracts/config for concrete instances:
+    - RuntimeRetryConfig.from_settings(settings.retry) - from YAML config
+    - RuntimeRetryConfig.from_policy(policy) - from plugin policies
+    - RuntimeRetryConfig.default() - standard retry behavior
+    - RuntimeRetryConfig.no_retry() - single attempt, no retries
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
-
-if TYPE_CHECKING:
-    from elspeth.core.config import RetrySettings
+from typing import TypeVar
 
 from tenacity import (
     RetryError,
@@ -30,7 +34,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from elspeth.contracts import RetryPolicy
+from elspeth.contracts.config import RuntimeRetryProtocol
 
 T = TypeVar("T")
 
@@ -44,63 +48,6 @@ class MaxRetriesExceeded(Exception):
         super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
 
 
-@dataclass
-class RetryConfig:
-    """Configuration for retry behavior.
-
-    max_attempts is the TOTAL number of tries, not the number of retries.
-    So max_attempts=3 means: try, retry, retry (3 total).
-    """
-
-    max_attempts: int = 3
-    base_delay: float = 1.0  # seconds
-    max_delay: float = 60.0  # seconds
-    jitter: float = 1.0  # seconds
-
-    def __post_init__(self) -> None:
-        if self.max_attempts < 1:
-            raise ValueError("max_attempts must be >= 1")
-
-    @classmethod
-    def no_retry(cls) -> "RetryConfig":
-        """Factory for no-retry configuration (single attempt)."""
-        return cls(max_attempts=1)
-
-    @classmethod
-    def from_policy(cls, policy: RetryPolicy | None) -> "RetryConfig":
-        """Factory from plugin policy dict with safe defaults.
-
-        Handles missing/malformed policy gracefully.
-        This is a trust boundary - external config may have invalid values.
-        """
-        if policy is None:
-            return cls.no_retry()
-
-        return cls(
-            max_attempts=max(1, policy.get("max_attempts", 3)),
-            base_delay=max(0.01, policy.get("base_delay", 1.0)),
-            max_delay=max(0.1, policy.get("max_delay", 60.0)),
-            jitter=max(0.0, policy.get("jitter", 1.0)),
-        )
-
-    @classmethod
-    def from_settings(cls, settings: "RetrySettings") -> "RetryConfig":
-        """Factory from RetrySettings config model.
-
-        Args:
-            settings: Validated Pydantic settings model
-
-        Returns:
-            RetryConfig with mapped values
-        """
-        return cls(
-            max_attempts=settings.max_attempts,
-            base_delay=settings.initial_delay_seconds,
-            max_delay=settings.max_delay_seconds,
-            jitter=1.0,  # Fixed jitter, not exposed in settings
-        )
-
-
 class RetryManager:
     """Manages retry logic for transform execution.
 
@@ -108,7 +55,9 @@ class RetryManager:
     Integrates with Landscape for attempt tracking.
 
     Example:
-        manager = RetryManager(RetryConfig(max_attempts=3))
+        from elspeth.contracts.config import RuntimeRetryConfig
+
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         result = manager.execute_with_retry(
             operation=lambda: transform.process(row, ctx),
@@ -117,11 +66,11 @@ class RetryManager:
         )
     """
 
-    def __init__(self, config: RetryConfig) -> None:
-        """Initialize with config.
+    def __init__(self, config: RuntimeRetryProtocol) -> None:
+        """Initialize with config implementing RuntimeRetryProtocol.
 
         Args:
-            config: Retry configuration
+            config: Retry configuration (must implement RuntimeRetryProtocol)
         """
         self._config = config
 
@@ -155,6 +104,7 @@ class RetryManager:
                 wait=wait_exponential_jitter(
                     initial=self._config.base_delay,
                     max=self._config.max_delay,
+                    exp_base=self._config.exponential_base,
                     jitter=self._config.jitter,
                 ),
                 retry=retry_if_exception(is_retryable),
@@ -175,7 +125,8 @@ class RetryManager:
             # Retries exhausted - wrap in MaxRetriesExceeded
             # last_error is always set because RetryError means at least one attempt failed
             final_error = last_error or e.last_attempt.exception()
-            assert final_error is not None, "RetryError without exception is impossible"
+            if final_error is None:
+                raise RuntimeError("RetryError raised without captured exception") from e
             raise MaxRetriesExceeded(attempt, final_error) from e
 
         # Should not reach here - Retrying always returns or raises

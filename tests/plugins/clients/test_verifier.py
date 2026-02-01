@@ -485,8 +485,8 @@ class TestCallVerifier:
         # Should not increment mismatches
         assert verifier.get_report().mismatches == 0
 
-    def test_verify_order_independent_comparison(self) -> None:
-        """Verifier ignores order in list comparisons."""
+    def test_verify_order_independent_with_default_config(self) -> None:
+        """Default configuration (ignore_order=True) ignores list ordering."""
         recorder = self._create_mock_recorder()
         request_data = {"id": 1}
         request_hash = stable_hash(request_data)
@@ -505,7 +505,7 @@ class TestCallVerifier:
             live_response=live_response,
         )
 
-        # Should match because ignore_order=True
+        # Should match because ignore_order=True by default
         assert result.is_match is True
 
     def test_verify_nested_differences(self) -> None:
@@ -650,3 +650,210 @@ class TestCallVerifier:
         assert report.total_calls == 3
         assert report.matches == 2
         assert report.mismatches == 1
+
+    def test_verify_order_sensitive_when_configured(self) -> None:
+        """Verifier detects order changes when ignore_order=False."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"items": ["a", "b", "c"]}
+        live_response = {"items": ["c", "b", "a"]}  # Same items, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result = verifier.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+
+        # Should NOT match because ignore_order=False
+        assert result.is_match is False
+        assert result.has_differences is True
+        # DeepDiff reports position changes as values_changed
+        assert "values_changed" in result.differences
+
+    def test_ignore_order_handles_duplicate_elements(self) -> None:
+        """List comparisons treat lists as multisets when ignore_order=True."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"tags": ["a", "a", "b"]}
+        live_response = {"tags": ["b", "a", "a"]}  # Same multiset, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True (default): should match (same multiset)
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: should NOT match (different positions)
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False
+
+    def test_ignore_order_applies_recursively_to_nested_lists(self) -> None:
+        """Document that ignore_order affects ALL list levels recursively."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {
+            "results": [
+                {"id": 1, "tags": ["a", "b"]},
+                {"id": 2, "tags": ["x", "y"]},
+            ]
+        }
+        live_response = {
+            "results": [
+                {"id": 2, "tags": ["y", "x"]},  # Both levels reordered
+                {"id": 1, "tags": ["b", "a"]},
+            ]
+        }
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True: matches (recursive order-independence)
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: does NOT match
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False
+
+    def test_ignore_order_does_not_affect_dict_keys(self) -> None:
+        """Dict key ordering is always ignored (JSON semantics)."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        # Python dicts maintain insertion order, but JSON treats them as unordered
+        recorded_response = {"z": 1, "a": 2, "m": 3}
+        live_response = {"a": 2, "m": 3, "z": 1}  # Same keys/values, different order
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # Both with and without ignore_order: dicts should match
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is True
+
+    def test_empty_lists_always_match(self) -> None:
+        """Empty lists match regardless of ignore_order setting."""
+        recorder = self._create_mock_recorder()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {"items": []}
+        live_response = {"items": []}
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # Both settings should match
+        for ignore_order in [True, False]:
+            verifier = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=ignore_order)
+            result = verifier.verify(
+                call_type="llm",
+                request_data=request_data,
+                live_response=live_response,
+            )
+            assert result.is_match is True, f"Failed with ignore_order={ignore_order}"
+
+    def test_order_sensitivity_with_realistic_llm_response(self) -> None:
+        """Verify order handling with actual LLM tool call structure."""
+        recorder = self._create_mock_recorder()
+        request_data = {"model": "gpt-4", "messages": [{"role": "user", "content": "test"}]}
+        request_hash = stable_hash(request_data)
+
+        recorded_response = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {"id": "call_1", "function": {"name": "search", "arguments": "{}"}},
+                            {"id": "call_2", "function": {"name": "summarize", "arguments": "{}"}},
+                            {"id": "call_3", "function": {"name": "respond", "arguments": "{}"}},
+                        ]
+                    }
+                }
+            ]
+        }
+        live_response = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {"id": "call_2", "function": {"name": "summarize", "arguments": "{}"}},
+                            {"id": "call_1", "function": {"name": "search", "arguments": "{}"}},
+                            {"id": "call_3", "function": {"name": "respond", "arguments": "{}"}},
+                        ]
+                    }
+                }
+            ]
+        }
+
+        mock_call = self._create_mock_call(request_hash=request_hash)
+        recorder.find_call_by_request_hash.return_value = mock_call
+        recorder.get_call_response_data.return_value = recorded_response
+
+        # With ignore_order=True (default): matches despite tool call reordering
+        verifier_loose = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=True)
+        result_loose = verifier_loose.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_loose.is_match is True
+
+        # With ignore_order=False: tool call reordering is detected as drift
+        verifier_strict = CallVerifier(recorder, source_run_id="run_abc123", ignore_order=False)
+        result_strict = verifier_strict.verify(
+            call_type="llm",
+            request_data=request_data,
+            live_response=live_response,
+        )
+        assert result_strict.is_match is False, "Tool call reordering should be detected"

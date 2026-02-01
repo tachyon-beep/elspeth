@@ -48,9 +48,9 @@ class MockBatchTransform(_TestTransformBase):
         if isinstance(row, list):
             # Batch mode: sum all 'x' values
             total = sum(r.get("x", 0) for r in row)
-            return TransformResult.success({"sum": total, "count": len(row)})
+            return TransformResult.success({"sum": total, "count": len(row)}, success_reason={"action": "sum_batch"})
         # Single row mode
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class FailingBatchTransform(_TestTransformBase):
@@ -78,7 +78,7 @@ class ErrorResultTransform(_TestTransformBase):
         ctx: PluginContext,
     ) -> TransformResult:
         """Returns an error result instead of raising."""
-        return TransformResult.error({"message": "batch processing failed", "code": "BATCH_ERROR"})
+        return TransformResult.error({"reason": "batch_error", "message": "batch processing failed"})
 
 
 class BatchPendingTransform(_TestTransformBase):
@@ -431,8 +431,8 @@ class TestAggregationFlushAuditTrail:
         # Verify result is error
         assert result.status == "error"
         assert result.reason == {
+            "reason": "batch_error",
             "message": "batch processing failed",
-            "code": "BATCH_ERROR",
         }
 
         # Verify batch status is "failed"
@@ -463,7 +463,7 @@ class TestAggregationFlushAuditTrail:
         assert error["type"] == "TransformError"
         # The exception field contains the stringified reason dict
         assert "batch processing failed" in error["exception"]
-        assert "BATCH_ERROR" in error["exception"]
+        assert "batch_error" in error["exception"]
 
         # Verify duration_ms is populated
         assert agg_state.duration_ms is not None
@@ -612,7 +612,7 @@ class TestAggregationFlushAuditTrail:
             name="batch_pending_aggregation",
             plugin="batch_pending_transform",
             trigger=TriggerConfig(count=2),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Register node in landscape first to get node_id

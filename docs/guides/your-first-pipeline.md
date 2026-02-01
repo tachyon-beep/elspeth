@@ -493,23 +493,12 @@ gates:
 
 ## Troubleshooting
 
-### "File not found" in Docker
+For comprehensive troubleshooting, see the [Troubleshooting Guide](troubleshooting.md). Quick fixes for common issues:
 
-**Symptom:** `FileNotFoundError: /app/input/transactions.csv`
+### Docker-Specific Issues
 
-**Fix:** Check that:
-1. Volume is mounted: `-v $(pwd)/input:/app/input:ro`
-2. Config uses container paths: `path: /app/input/...` (not `./input/...`)
-
-### "Permission denied" on output
-
-**Symptom:** `PermissionError` when writing to `/app/output/`
-
-**Fix:** Ensure output directory exists and is writable:
-```bash
-mkdir -p output
-chmod 777 output
-```
+- **"File not found"** - See [File Not Found Errors](troubleshooting.md#file-not-found-errors)
+- **"Permission denied"** - See [Permission Denied on Output](troubleshooting.md#permission-denied-on-output)
 
 ### "Invalid schema" error
 

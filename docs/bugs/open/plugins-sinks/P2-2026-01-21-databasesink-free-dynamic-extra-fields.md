@@ -92,6 +92,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- Table columns are still created from explicit schema fields (free mode), so extras are not represented. (`src/elspeth/plugins/sinks/database_sink.py:242-261`)
+- Inserts still pass full row dicts, so extra fields cause SQLAlchemy errors when schema is explicit. (`src/elspeth/plugins/sinks/database_sink.py:311-315`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

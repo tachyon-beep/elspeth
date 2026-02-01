@@ -2,7 +2,18 @@
 """Base classes for plugin implementations.
 
 These provide common functionality and ensure proper interface compliance.
-Plugins can subclass these for convenience, or implement protocols directly.
+Plugins MUST subclass these base classes (BaseSource, BaseTransform, BaseSink).
+
+Why base class inheritance is required:
+- Plugin discovery uses issubclass() checks against base classes
+- Python's Protocol with non-method members (name, determinism, etc.) cannot
+  support issubclass() - only isinstance() on already-instantiated objects
+- Base classes enforce self-consistency via __init_subclass__ hooks
+- Per CLAUDE.md "Plugin Ownership", all plugins are system code, not user extensions
+
+The protocol definitions (SourceProtocol, TransformProtocol, SinkProtocol) exist
+for type-checking purposes only - they define the interface contract but cannot
+be used for runtime discovery.
 
 Phase 3 Integration:
 - Lifecycle hooks (on_start, on_complete) are called by engine
@@ -40,7 +51,10 @@ class BaseTransform(ABC):
             output_schema = OutputSchema
 
             def process(self, row: dict, ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "new_field": "value"})
+                return TransformResult.success(
+                    {**row, "new_field": "value"},
+                    success_reason={"action": "processed"},
+                )
     """
 
     name: str
@@ -394,3 +408,22 @@ class BaseSource(ABC):
     def on_complete(self, ctx: PluginContext) -> None:  # noqa: B027 - optional hook
         """Called after load() completes (before close)."""
         pass
+
+    # === Audit Trail Metadata ===
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping computed during load().
+
+        Sources that perform field normalization (e.g., CSVSource with normalize_fields)
+        should override this to return the mapping from original header names to final
+        field names. This enables audit trail to recover original headers.
+
+        Must be called AFTER load() has been invoked (resolution is computed lazily
+        when file headers are read).
+
+        Returns:
+            Tuple of (resolution_mapping, normalization_version) if field resolution
+            was performed, or None if no normalization occurred. The resolution_mapping
+            is a dict mapping original header name → final field name.
+        """
+        return None  # Default: no field resolution metadata

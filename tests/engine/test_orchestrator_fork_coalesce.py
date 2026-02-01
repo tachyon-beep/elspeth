@@ -60,7 +60,7 @@ class TestOrchestratorForkExecution:
     test_processor.py::TestRowProcessorWorkQueue.
     """
 
-    def test_orchestrator_handles_list_results_from_processor(self) -> None:
+    def test_orchestrator_handles_list_results_from_processor(self, payload_store) -> None:
         """Orchestrator correctly iterates over list[RowResult] from processor.
 
         This tests the basic plumbing (list handling, counting) without forks.
@@ -68,8 +68,8 @@ class TestOrchestratorForkExecution:
         """
         import hashlib
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -105,7 +105,7 @@ class TestOrchestratorForkExecution:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class CollectSink(_TestSinkBase):
             name = "collect_sink"
@@ -145,7 +145,7 @@ class TestOrchestratorForkExecution:
         graph = build_production_graph(config)
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert run_result.status == "completed"
         # 3 rows from source
@@ -162,6 +162,7 @@ class TestCoalesceWiring:
     def test_orchestrator_creates_coalesce_executor_when_config_present(
         self,
         plugin_manager,
+        payload_store,
     ) -> None:
         """When settings.coalesce is non-empty, CoalesceExecutor should be created."""
         from unittest.mock import MagicMock, patch
@@ -229,7 +230,7 @@ class TestCoalesceWiring:
             mock_processor.return_value.process_row.return_value = []
             mock_processor.return_value.token_manager = MagicMock()
 
-            orchestrator.run(config, graph=graph, settings=settings)
+            orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
             # RowProcessor should have been called with coalesce_executor
             call_kwargs = mock_processor.call_args.kwargs
@@ -240,7 +241,7 @@ class TestCoalesceWiring:
             # Verify the coalesce_node_ids contains our registered coalesce
             assert "merge_results" in call_kwargs["coalesce_node_ids"]
 
-    def test_orchestrator_handles_coalesced_outcome(self, plugin_manager) -> None:
+    def test_orchestrator_handles_coalesced_outcome(self, plugin_manager, payload_store) -> None:
         """COALESCED outcome should route merged token to output sink."""
         from unittest.mock import MagicMock, patch
 
@@ -359,7 +360,7 @@ class TestCoalesceWiring:
 
             mock_record_outcome.return_value = "mock_outcome_id"
 
-            result = orchestrator.run(config, graph=graph, settings=settings)
+            result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
             # COALESCED should count toward rows_coalesced
             assert result.rows_coalesced == 1
@@ -372,7 +373,7 @@ class TestCoalesceWiring:
             assert len(tokens_written) == 1
             assert tokens_written[0].token_id == "merged_token_1"
 
-    def test_orchestrator_calls_flush_pending_at_end(self, plugin_manager) -> None:
+    def test_orchestrator_calls_flush_pending_at_end(self, plugin_manager, payload_store) -> None:
         """flush_pending should be called on coalesce executor at end of source."""
         from unittest.mock import MagicMock, patch
 
@@ -440,12 +441,12 @@ class TestCoalesceWiring:
             mock_executor.flush_pending.return_value = []
             mock_executor_cls.return_value = mock_executor
 
-            orchestrator.run(config, graph=graph, settings=settings)
+            orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
             # flush_pending should have been called
             mock_executor.flush_pending.assert_called_once()
 
-    def test_orchestrator_flush_pending_routes_merged_tokens_to_sink(self, plugin_manager) -> None:
+    def test_orchestrator_flush_pending_routes_merged_tokens_to_sink(self, plugin_manager, payload_store) -> None:
         """Merged tokens from flush_pending should be routed to output sink."""
         from unittest.mock import MagicMock, patch
 
@@ -560,7 +561,7 @@ class TestCoalesceWiring:
 
             mock_record_outcome.return_value = "mock_outcome_id"
 
-            result = orchestrator.run(config, graph=graph, settings=settings)
+            result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
             # flush_pending should have been called
             mock_executor.flush_pending.assert_called_once()
@@ -575,7 +576,7 @@ class TestCoalesceWiring:
             assert len(tokens_written) == 1
             assert tokens_written[0].token_id == "flushed_merged_token"
 
-    def test_orchestrator_flush_pending_handles_failures(self, plugin_manager) -> None:
+    def test_orchestrator_flush_pending_handles_failures(self, plugin_manager, payload_store) -> None:
         """Failed coalesce outcomes from flush_pending should not crash."""
         from unittest.mock import MagicMock, patch
 
@@ -657,7 +658,7 @@ class TestCoalesceWiring:
             mock_executor_cls.return_value = mock_executor
 
             # Should not raise - failures are recorded but don't crash
-            result = orchestrator.run(config, graph=graph, settings=settings)
+            result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
             # flush_pending should have been called
             mock_executor.flush_pending.assert_called_once()
@@ -665,7 +666,7 @@ class TestCoalesceWiring:
             # No merged tokens means no rows_coalesced increment
             assert result.rows_coalesced == 0
 
-    def test_orchestrator_computes_coalesce_step_map(self, plugin_manager) -> None:
+    def test_orchestrator_computes_coalesce_step_map(self, plugin_manager, payload_store) -> None:
         """Orchestrator should compute step positions for each coalesce point."""
 
         from elspeth.core.config import (

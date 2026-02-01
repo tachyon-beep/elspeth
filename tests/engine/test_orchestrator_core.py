@@ -33,10 +33,9 @@ if TYPE_CHECKING:
 class TestOrchestrator:
     """Full run orchestration."""
 
-    def test_run_simple_pipeline(self) -> None:
-        from elspeth.contracts import PluginSchema
+    def test_run_simple_pipeline(self, payload_store) -> None:
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -79,7 +78,8 @@ class TestOrchestrator:
                     {
                         "value": row["value"],
                         "doubled": row["value"] * 2,
-                    }
+                    },
+                    success_reason={"action": "double"},
                 )
 
         class CollectSink(_TestSinkBase):
@@ -112,18 +112,17 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 3
         assert len(sink.results) == 3
         assert sink.results[0] == {"value": 1, "doubled": 2}
 
-    def test_run_with_gate_routing(self) -> None:
-        from elspeth.contracts import PluginSchema
+    def test_run_with_gate_routing(self, payload_store) -> None:
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import GateSettings
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -186,7 +185,7 @@ class TestOrchestrator:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         # value=10 and value=30 go to default, value=100 goes to high
@@ -197,11 +196,10 @@ class TestOrchestrator:
 class TestOrchestratorMultipleTransforms:
     """Test pipelines with multiple transforms."""
 
-    def test_run_multiple_transforms_in_sequence(self) -> None:
+    def test_run_multiple_transforms_in_sequence(self, payload_store) -> None:
         """Test that multiple transforms execute in order."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -236,7 +234,7 @@ class TestOrchestratorMultipleTransforms:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] + 1})
+                return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
 
         class MultiplyTwoTransform(BaseTransform):
             name = "multiply_two"
@@ -247,7 +245,7 @@ class TestOrchestratorMultipleTransforms:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2})
+                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "multiply_two"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -280,7 +278,7 @@ class TestOrchestratorMultipleTransforms:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert len(sink.results) == 1
@@ -291,11 +289,10 @@ class TestOrchestratorMultipleTransforms:
 class TestOrchestratorEmptyPipeline:
     """Test edge cases."""
 
-    def test_run_no_transforms(self) -> None:
+    def test_run_no_transforms(self, payload_store) -> None:
         """Test pipeline with source directly to sink."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -349,18 +346,17 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 1
         assert len(sink.results) == 1
         assert sink.results[0] == {"value": 99}
 
-    def test_run_empty_source(self) -> None:
+    def test_run_empty_source(self, payload_store) -> None:
         """Test pipeline with no rows from source."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -391,7 +387,7 @@ class TestOrchestratorEmptyPipeline:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -423,7 +419,7 @@ class TestOrchestratorEmptyPipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert run_result.status == RunStatus.COMPLETED
         assert run_result.rows_processed == 0
@@ -433,7 +429,7 @@ class TestOrchestratorEmptyPipeline:
 class TestOrchestratorAcceptsGraph:
     """Orchestrator accepts ExecutionGraph parameter."""
 
-    def test_orchestrator_uses_graph_node_ids(self, plugin_manager) -> None:
+    def test_orchestrator_uses_graph_node_ids(self, plugin_manager, payload_store) -> None:
         """Orchestrator uses node IDs from graph, not generated IDs."""
         from unittest.mock import MagicMock
 
@@ -488,6 +484,7 @@ class TestOrchestratorAcceptsGraph:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([])  # Empty source
+        mock_source.get_field_resolution.return_value = None
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
@@ -507,7 +504,7 @@ class TestOrchestratorAcceptsGraph:
         )
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(pipeline_config, graph=graph)
+        orchestrator.run(pipeline_config, graph=graph, payload_store=payload_store)
 
         # Source should have node_id set from graph (was None, now should be set)
         expected_source_id = graph.get_source()
@@ -543,11 +540,10 @@ class TestOrchestratorAcceptsGraph:
         sig = inspect.signature(orchestrator.run)
         assert "graph" in sig.parameters
 
-    def test_orchestrator_run_requires_graph(self) -> None:
+    def test_orchestrator_run_requires_graph(self, payload_store) -> None:
         """Orchestrator.run() raises ValueError if graph is None."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -588,4 +584,4 @@ class TestOrchestratorAcceptsGraph:
 
         # graph=None should raise ValueError
         with pytest.raises(ValueError, match="ExecutionGraph is required"):
-            orchestrator.run(config, graph=None)
+            orchestrator.run(config, graph=None, payload_store=payload_store)

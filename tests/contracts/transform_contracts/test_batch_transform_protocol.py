@@ -40,7 +40,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import TransformResult
+from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.plugins.batching import OutputPort
 from elspeth.plugins.batching.mixin import BatchTransformMixin
@@ -167,6 +167,46 @@ class BatchTransformContractTestBase(ABC):
         assert isinstance(batch_transform, BatchTransformMixin), (
             f"Transform {type(batch_transform).__name__} does not use BatchTransformMixin"
         )
+
+    # =========================================================================
+    # Protocol Attribute Contracts (from TransformProtocol)
+    # =========================================================================
+
+    def test_transform_has_name(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have a 'name' attribute."""
+        assert hasattr(batch_transform, "name")
+        assert isinstance(batch_transform.name, str)
+        assert len(batch_transform.name) > 0
+
+    def test_transform_has_input_schema(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have an 'input_schema' attribute that is a PluginSchema subclass."""
+        assert isinstance(batch_transform.input_schema, type)
+        assert issubclass(batch_transform.input_schema, PluginSchema)
+
+    def test_transform_has_output_schema(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have an 'output_schema' attribute that is a PluginSchema subclass."""
+        assert isinstance(batch_transform.output_schema, type)
+        assert issubclass(batch_transform.output_schema, PluginSchema)
+
+    def test_transform_has_determinism(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have a 'determinism' attribute."""
+        assert hasattr(batch_transform, "determinism")
+        assert isinstance(batch_transform.determinism, Determinism)
+
+    def test_transform_has_plugin_version(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have a 'plugin_version' attribute."""
+        assert hasattr(batch_transform, "plugin_version")
+        assert isinstance(batch_transform.plugin_version, str)
+
+    def test_transform_has_batch_awareness_flag(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have 'is_batch_aware' attribute."""
+        assert hasattr(batch_transform, "is_batch_aware")
+        assert isinstance(batch_transform.is_batch_aware, bool)
+
+    def test_transform_has_creates_tokens_flag(self, batch_transform: BatchTransformMixin) -> None:
+        """Contract: Transform MUST have 'creates_tokens' attribute."""
+        assert hasattr(batch_transform, "creates_tokens")
+        assert isinstance(batch_transform.creates_tokens, bool)
 
     # =========================================================================
     # connect_output() Contracts

@@ -80,6 +80,12 @@ class TestExpandTokenPerformance:
 
 This is a follow-up enhancement, not a bug. The deepcopy is **required** for correctness - this ticket is about measuring its cost, not removing it.
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `expand_token()` still deep-copies each expanded row, but no benchmark has been added to quantify the overhead. (`src/elspeth/engine/tokens.py:270-279`)
+
 If benchmarks show unacceptable overhead for specific use cases, consider:
 1. Copy-on-write semantics (lazy copy)
 2. Immutable row data (frozen dicts)

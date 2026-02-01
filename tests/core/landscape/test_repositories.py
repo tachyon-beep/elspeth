@@ -511,6 +511,7 @@ class TestCallRepository:
             response_ref: str | None = None
             error_json: str | None = None
             latency_ms: float | None = None
+            operation_id: str | None = None
 
         db_row = CallRow(
             call_id="call-123",
@@ -521,6 +522,7 @@ class TestCallRepository:
             request_hash="abc123",
             created_at=datetime.now(UTC),
             latency_ms=150.5,
+            operation_id=None,
         )
 
         repo = CallRepository(session=None)
@@ -548,6 +550,7 @@ class TestCallRepository:
             response_ref: str | None = None
             error_json: str | None = None
             latency_ms: float | None = None
+            operation_id: str | None = None
 
         db_row = CallRow(
             call_id="call-123",
@@ -557,6 +560,7 @@ class TestCallRepository:
             status=CallStatus.SUCCESS,
             request_hash="abc123",
             created_at=datetime.now(UTC),
+            operation_id=None,
         )
 
         repo = CallRepository(session=None)
@@ -581,6 +585,7 @@ class TestCallRepository:
             response_ref: str | None = None
             error_json: str | None = None
             latency_ms: float | None = None
+            operation_id: str | None = None
 
         db_row = CallRow(
             call_id="call-123",
@@ -590,6 +595,7 @@ class TestCallRepository:
             status="invalid_status",  # Invalid!
             request_hash="abc123",
             created_at=datetime.now(UTC),
+            operation_id=None,
         )
 
         repo = CallRepository(session=None)

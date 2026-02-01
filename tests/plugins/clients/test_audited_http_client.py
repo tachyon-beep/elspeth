@@ -30,6 +30,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             timeout=30.0,
         )
 
@@ -77,6 +79,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -108,6 +112,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         with patch("httpx.Client") as mock_client_class:
@@ -142,6 +148,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             headers={
                 "Authorization": "Bearer secret-token",
                 "X-API-Key": "api-key-12345",
@@ -205,6 +213,8 @@ class TestAuditedHTTPClient:
         client1 = AuditedHTTPClient(
             recorder=recorder1,
             state_id="state_1",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             headers={"Authorization": "Bearer credential-A"},
         )
 
@@ -212,6 +222,8 @@ class TestAuditedHTTPClient:
         client2 = AuditedHTTPClient(
             recorder=recorder2,
             state_id="state_2",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             headers={"Authorization": "Bearer credential-B"},
         )
 
@@ -259,6 +271,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             headers={
                 "Authorization": "Bearer secret-token",
                 "Content-Type": "application/json",
@@ -295,6 +309,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             base_url="https://api.example.com",
         )
 
@@ -329,6 +345,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             base_url="https://api.example.com/",
         )
 
@@ -361,6 +379,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             base_url="https://api.example.com/v1",
         )
 
@@ -392,6 +412,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -418,6 +440,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             headers={"Content-Type": "application/json"},
         )
 
@@ -451,6 +475,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             timeout=60.0,
         )
 
@@ -478,6 +504,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -506,6 +534,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             # No base_url
         )
 
@@ -533,6 +563,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -560,6 +592,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -604,6 +638,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             timeout=30.0,
         )
 
@@ -632,6 +668,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             timeout=45.0,  # Default
         )
 
@@ -660,6 +698,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -687,6 +727,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -714,6 +756,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -750,6 +794,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -784,6 +830,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         # Test 201 Created
@@ -818,6 +866,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -857,6 +907,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -899,6 +951,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)
@@ -941,6 +995,8 @@ class TestAuditedHTTPClient:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id="state_123",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
         )
 
         mock_response = MagicMock(spec=httpx.Response)

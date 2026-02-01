@@ -91,6 +91,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- Span naming still uses plugin names only; no node_id or instance identity in span names/attributes. (`src/elspeth/engine/spans.py:140-239`)
+- Executors still pass `transform.name` / `gate.name` / `sink.name` to span creation. (`src/elspeth/engine/executors.py:246`, `src/elspeth/engine/executors.py:517`, `src/elspeth/engine/executors.py:1699`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

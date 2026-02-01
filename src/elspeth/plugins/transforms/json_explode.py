@@ -96,9 +96,6 @@ class JSONExplode(BaseTransform):
         self._output_field = cfg.output_field
         self._include_index = cfg.include_index
 
-        # Schema setup - DataPluginConfig validates schema_config is not None
-        assert cfg.schema_config is not None
-
         # Input schema from config for validation
         self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
 
@@ -150,7 +147,17 @@ class JSONExplode(BaseTransform):
             output[self._output_field] = None
             if self._include_index:
                 output["item_index"] = None
-            return TransformResult.success(output)
+            fields_added = [self._output_field]
+            if self._include_index:
+                fields_added.append("item_index")
+            return TransformResult.success(
+                output,
+                success_reason={
+                    "action": "transformed",
+                    "fields_added": fields_added,
+                    "fields_removed": [self._array_field],
+                },
+            )
 
         # Explode array into multiple rows
         output_rows = []
@@ -161,7 +168,17 @@ class JSONExplode(BaseTransform):
                 output["item_index"] = i
             output_rows.append(output)
 
-        return TransformResult.success_multi(output_rows)
+        fields_added = [self._output_field]
+        if self._include_index:
+            fields_added.append("item_index")
+        return TransformResult.success_multi(
+            output_rows,
+            success_reason={
+                "action": "transformed",
+                "fields_added": fields_added,
+                "fields_removed": [self._array_field],
+            },
+        )
 
     def close(self) -> None:
         """No resources to release."""

@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
+from elspeth.contracts import Determinism, NodeType, RowOutcome, RunStatus
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -23,6 +23,7 @@ class TestCheckpointRecoveryIntegration:
     @pytest.fixture
     def test_env(self, tmp_path: Path) -> dict[str, Any]:
         """Set up test environment with database and payload store."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.database import LandscapeDB
@@ -34,13 +35,14 @@ class TestCheckpointRecoveryIntegration:
         checkpoint_mgr = CheckpointManager(db)
         recovery_mgr = RecoveryManager(db, checkpoint_mgr)
         checkpoint_settings = CheckpointSettings(frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
 
         return {
             "db": db,
             "payload_store": payload_store,
             "checkpoint_manager": checkpoint_mgr,
             "recovery_manager": recovery_mgr,
-            "checkpoint_settings": checkpoint_settings,
+            "checkpoint_config": checkpoint_config,
             "tmp_path": tmp_path,
         }
 
@@ -307,240 +309,8 @@ class TestCheckpointRecoveryIntegration:
 
         return run_id
 
-    def test_full_resume_processes_remaining_rows(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
-        """Complete cycle: run -> crash simulation -> resume -> all rows processed."""
-        import json
-
-        from elspeth.core.landscape.schema import (
-            edges_table,
-            nodes_table,
-            rows_table,
-            runs_table,
-            token_outcomes_table,
-            tokens_table,
-        )
-        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-        from elspeth.plugins.sources.null_source import NullSource
-        from elspeth.plugins.transforms.passthrough import PassThrough
-
-        db = test_env["db"]
-        checkpoint_mgr = test_env["checkpoint_manager"]
-        recovery_mgr = test_env["recovery_manager"]
-        payload_store = test_env["payload_store"]
-        checkpoint_settings = test_env["checkpoint_settings"]
-        tmp_path = test_env["tmp_path"]
-
-        # Create graph for this test with the actual nodes used
-        test_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
-        test_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        test_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        test_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
-
-        # 1. Set up failed run with 5 rows, checkpoint at row 2
-        run_id = "integration-resume-test"
-        output_path = tmp_path / "resume_output.csv"
-        now = datetime.now(UTC)
-
-        # Create source schema for resume ({"id": int, "name": str})
-        source_schema_json = json.dumps({"properties": {"id": {"type": "integer"}, "name": {"type": "string"}}, "required": ["id", "name"]})
-
-        with db.engine.connect() as conn:
-            # Create run
-            conn.execute(
-                runs_table.insert().values(
-                    run_id=run_id,
-                    started_at=now,
-                    config_hash="x",
-                    settings_json="{}",
-                    canonical_version="v1",
-                    status=RunStatus.FAILED,
-                    source_schema_json=source_schema_json,
-                )
-            )
-
-            # Create nodes
-            conn.execute(
-                nodes_table.insert().values(
-                    node_id="src",
-                    run_id=run_id,
-                    plugin_name="null",
-                    node_type=NodeType.SOURCE,
-                    plugin_version="1.0.0",
-                    determinism=Determinism.DETERMINISTIC,
-                    config_hash="x",
-                    config_json="{}",
-                    registered_at=now,
-                )
-            )
-            conn.execute(
-                nodes_table.insert().values(
-                    node_id="xform",
-                    run_id=run_id,
-                    plugin_name="passthrough",
-                    node_type=NodeType.TRANSFORM,
-                    plugin_version="1.0.0",
-                    determinism=Determinism.DETERMINISTIC,
-                    config_hash="x",
-                    config_json="{}",
-                    registered_at=now,
-                )
-            )
-            conn.execute(
-                nodes_table.insert().values(
-                    node_id="sink",
-                    run_id=run_id,
-                    plugin_name="csv",
-                    node_type=NodeType.SINK,
-                    plugin_version="1.0.0",
-                    determinism=Determinism.IO_WRITE,
-                    config_hash="x",
-                    config_json="{}",
-                    registered_at=now,
-                )
-            )
-
-            # Create edges
-            conn.execute(
-                edges_table.insert().values(
-                    edge_id="e1",
-                    run_id=run_id,
-                    from_node_id="src",
-                    to_node_id="xform",
-                    label="continue",
-                    default_mode=RoutingMode.MOVE,
-                    created_at=now,
-                )
-            )
-            conn.execute(
-                edges_table.insert().values(
-                    edge_id="e2",
-                    run_id=run_id,
-                    from_node_id="xform",
-                    to_node_id="sink",
-                    label="continue",
-                    default_mode=RoutingMode.MOVE,
-                    created_at=now,
-                )
-            )
-
-            # Create 5 rows with payloads
-            for i in range(5):
-                row_data = {"id": i, "name": f"row-{i}"}
-                ref = payload_store.store(json.dumps(row_data).encode())
-                conn.execute(
-                    rows_table.insert().values(
-                        row_id=f"r{i}",
-                        run_id=run_id,
-                        source_node_id="src",
-                        row_index=i,
-                        source_data_hash=f"h{i}",
-                        source_data_ref=ref,
-                        created_at=now,
-                    )
-                )
-                conn.execute(
-                    tokens_table.insert().values(
-                        token_id=f"t{i}",
-                        row_id=f"r{i}",
-                        created_at=now,
-                    )
-                )
-                # Mark rows 0, 1, 2 as COMPLETED (processed before checkpoint)
-                # Rows 3, 4 have no terminal outcomes and will be returned as unprocessed
-                if i < 3:
-                    conn.execute(
-                        token_outcomes_table.insert().values(
-                            outcome_id=f"outcome-resume-{i}",
-                            run_id=run_id,
-                            token_id=f"t{i}",
-                            outcome=RowOutcome.COMPLETED.value,
-                            is_terminal=1,
-                            recorded_at=now,
-                            sink_name="default",
-                        )
-                    )
-            conn.commit()
-
-        # Simulate partial output (rows 0-2 already written)
-        with open(output_path, "w") as f:
-            f.write("id,name\n")
-            f.write("0,row-0\n")
-            f.write("1,row-1\n")
-            f.write("2,row-2\n")
-
-        # Create checkpoint at row 2
-        checkpoint_mgr.create_checkpoint(
-            run_id=run_id,
-            token_id="t2",
-            node_id="xform",
-            sequence_number=2,
-            graph=test_graph,
-        )
-
-        # 2. Verify can resume
-        assert recovery_mgr.can_resume(run_id, test_graph).can_resume
-        resume_point = recovery_mgr.get_resume_point(run_id, test_graph)
-        assert resume_point is not None
-
-        # 3. Resume
-        orchestrator = Orchestrator(
-            db,
-            checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=checkpoint_settings,
-        )
-
-        config = PipelineConfig(
-            source=NullSource({}),
-            transforms=[
-                PassThrough({"schema": {"fields": "dynamic"}}),
-            ],
-            sinks={
-                "default": CSVSink(
-                    {
-                        "path": str(output_path),
-                        "schema": {"fields": "dynamic"},
-                        "mode": "append",
-                    }
-                )
-            },
-        )
-
-        # Build graph using add_node() API
-        graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
-        graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
-        graph.add_edge("src", "xform", label="continue")
-        graph.add_edge("xform", "sink", label="continue")
-
-        # Manually set the sink_id_map and transform_id_map since we're building
-        # the graph manually (not from config)
-        from elspeth.contracts import NodeID, SinkName
-
-        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
-        graph._transform_id_map = {0: NodeID("xform")}
-        graph._default_sink = "default"
-
-        result = orchestrator.resume(
-            resume_point=resume_point,
-            config=config,
-            graph=graph,
-            payload_store=payload_store,
-        )
-
-        # 4. Verify
-        assert result.rows_processed == 2
-        assert result.rows_succeeded == 2
-        assert result.status == RunStatus.COMPLETED
-
-        # Check output file has all 5 rows
-        lines = output_path.read_text().strip().split("\n")
-        assert len(lines) == 6  # header + 5 rows
-        assert "0,row-0" in lines[1]
-        assert "4,row-4" in lines[5]
+    # NOTE: test_full_resume_processes_remaining_rows removed - duplicate of
+    # test_resume_comprehensive.py::TestResumeComprehensive::test_resume_normal_path_with_remaining_rows
 
 
 class TestCheckpointTopologyHashAtomicity:
@@ -753,3 +523,121 @@ class TestCheckpointTopologyHashAtomicity:
                 sequence_number=0,
                 graph=graph,
             )
+
+
+class TestResumeCheckpointCleanup:
+    """Integration tests for checkpoint cleanup on resume (Bug #8).
+
+    Verifies that resume deletes checkpoints even when taking
+    the early-exit path (no unprocessed rows remaining).
+
+    NOTE: Merged from test_resume_checkpoint_cleanup.py.
+    """
+
+    @pytest.fixture
+    def test_env(self, tmp_path: Path) -> dict[str, Any]:
+        """Set up test environment with database."""
+        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+        checkpoint_mgr = CheckpointManager(db)
+
+        return {
+            "db": db,
+            "checkpoint_manager": checkpoint_mgr,
+            "tmp_path": tmp_path,
+        }
+
+    @pytest.fixture
+    def simple_graph(self) -> ExecutionGraph:
+        """Create a simple source -> sink graph."""
+        graph = ExecutionGraph()
+        schema_config = {"schema": {"fields": "dynamic"}}
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_edge("source", "sink", label="continue")
+        return graph
+
+    def test_checkpoint_cleanup_called_on_early_exit(
+        self,
+        test_env: dict[str, Any],
+        simple_graph: ExecutionGraph,
+    ) -> None:
+        """Verify _delete_checkpoints() is called on early-exit path.
+
+        Scenario:
+        1. Create checkpoints for a run
+        2. Call _delete_checkpoints() (simulating early-exit cleanup)
+        3. Verify: Checkpoints are deleted from database
+
+        This is Bug #8 fix: early-exit path in resume() must call
+        _delete_checkpoints(run_id) before returning. This test verifies
+        the cleanup method works correctly.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import checkpoints_table, nodes_table
+
+        db = test_env["db"]
+        checkpoint_mgr = test_env["checkpoint_manager"]
+
+        # Create run and required parent records
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        now = datetime.now(UTC)
+        with db.engine.begin() as conn:
+            # Create node
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="source",
+                    run_id=run.run_id,
+                    plugin_name="test_source",
+                    node_type=NodeType.SOURCE,
+                    plugin_version="1.0",
+                    determinism=Determinism.DETERMINISTIC,
+                    config_hash="test",
+                    config_json="{}",
+                    registered_at=now,
+                )
+            )
+
+        # Create row and token
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="source",
+            row_index=0,
+            data={"id": 1},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Create checkpoint
+        checkpoint = checkpoint_mgr.create_checkpoint(
+            run_id=run.run_id,
+            token_id=token.token_id,
+            node_id="source",
+            sequence_number=0,
+            graph=simple_graph,
+        )
+
+        # Verify checkpoint exists
+        with db.engine.connect() as conn:
+            checkpoints_before = conn.execute(select(checkpoints_table).where(checkpoints_table.c.run_id == run.run_id)).fetchall()
+
+        assert len(checkpoints_before) == 1
+        assert checkpoints_before[0].checkpoint_id == checkpoint.checkpoint_id
+
+        # Call _delete_checkpoints() (this is what Bug #8 fix added to early-exit path)
+        from elspeth.engine.orchestrator import Orchestrator
+
+        orchestrator = Orchestrator(db=db, checkpoint_manager=checkpoint_mgr)
+        orchestrator._delete_checkpoints(run.run_id)
+
+        # Verify checkpoints are deleted
+        with db.engine.connect() as conn:
+            checkpoints_after = conn.execute(select(checkpoints_table).where(checkpoints_table.c.run_id == run.run_id)).fetchall()
+
+        # SUCCESS: Cleanup method deleted checkpoints
+        assert len(checkpoints_after) == 0, (
+            f"Expected 0 checkpoints after _delete_checkpoints(), found {len(checkpoints_after)}. "
+            f"Bug #8 fix: Early-exit path must call _delete_checkpoints(run_id) to clean up."
+        )

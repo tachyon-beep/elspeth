@@ -3,14 +3,15 @@
 
 import pytest
 
+from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
+
 
 class TestRetryManager:
     """Retry logic with tenacity."""
 
     def test_retry_on_retryable_error(self) -> None:
-        from elspeth.engine.retry import RetryConfig, RetryManager
-
-        manager = RetryManager(RetryConfig(max_attempts=3, base_delay=0.01))
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         call_count = 0
 
@@ -30,9 +31,7 @@ class TestRetryManager:
         assert call_count == 3
 
     def test_no_retry_on_non_retryable(self) -> None:
-        from elspeth.engine.retry import RetryConfig, RetryManager
-
-        manager = RetryManager(RetryConfig(max_attempts=3, base_delay=0.01))
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         call_count = 0
 
@@ -51,9 +50,7 @@ class TestRetryManager:
         assert call_count == 1
 
     def test_max_attempts_exceeded(self) -> None:
-        from elspeth.engine.retry import MaxRetriesExceeded, RetryConfig, RetryManager
-
-        manager = RetryManager(RetryConfig(max_attempts=2, base_delay=0.01))
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         def always_fails() -> None:
             raise ValueError("Always fails")
@@ -67,9 +64,7 @@ class TestRetryManager:
         assert exc_info.value.attempts == 2
 
     def test_records_attempts(self) -> None:
-        from elspeth.engine.retry import RetryConfig, RetryManager
-
-        manager = RetryManager(RetryConfig(max_attempts=3, base_delay=0.01))
+        manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=1.0, exponential_base=2.0))
         attempts: list[tuple[int, str]] = []
 
         call_count = 0
@@ -93,17 +88,13 @@ class TestRetryManager:
 
     def test_from_policy_none_returns_no_retry(self) -> None:
         """Missing policy defaults to no-retry for safety."""
-        from elspeth.engine.retry import RetryConfig
-
-        config = RetryConfig.from_policy(None)
+        config = RuntimeRetryConfig.from_policy(None)
 
         assert config.max_attempts == 1
 
     def test_from_policy_handles_malformed(self) -> None:
         """Malformed policy values are clamped to safe minimums."""
-        from elspeth.engine.retry import RetryConfig
-
-        config = RetryConfig.from_policy(
+        config = RuntimeRetryConfig.from_policy(
             {
                 "max_attempts": -5,  # Invalid, should clamp to 1
                 "base_delay": -1,  # Invalid, should clamp to 0.01
@@ -114,13 +105,12 @@ class TestRetryManager:
         assert config.base_delay >= 0.01
 
 
-class TestRetryConfig:
-    """RetryConfig validation and factories."""
+class TestRuntimeRetryConfig:
+    """RuntimeRetryConfig validation and factories."""
 
     def test_from_settings_creates_config(self) -> None:
-        """RetrySettings maps to RetryConfig."""
+        """RetrySettings maps to RuntimeRetryConfig."""
         from elspeth.core.config import RetrySettings
-        from elspeth.engine.retry import RetryConfig
 
         settings = RetrySettings(
             max_attempts=5,
@@ -129,49 +119,45 @@ class TestRetryConfig:
             exponential_base=3.0,
         )
 
-        config = RetryConfig.from_settings(settings)
+        config = RuntimeRetryConfig.from_settings(settings)
 
         assert config.max_attempts == 5
         assert config.base_delay == 2.0
         assert config.max_delay == 120.0
         # jitter defaults to 1.0 when not specified in settings
         assert config.jitter == 1.0
+        # exponential_base must be preserved (P2-2026-01-21 bug fix)
+        assert config.exponential_base == 3.0
 
     def test_default_values(self) -> None:
-        from elspeth.engine.retry import RetryConfig
-
-        config = RetryConfig()
+        config = RuntimeRetryConfig.default()
 
         assert config.max_attempts == 3
         assert config.base_delay == 1.0
         assert config.max_delay == 60.0
         assert config.jitter == 1.0
+        assert config.exponential_base == 2.0
 
     def test_invalid_max_attempts_raises(self) -> None:
-        from elspeth.engine.retry import RetryConfig
+        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+            RuntimeRetryConfig(max_attempts=0, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0)
 
         with pytest.raises(ValueError, match="max_attempts must be >= 1"):
-            RetryConfig(max_attempts=0)
-
-        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
-            RetryConfig(max_attempts=-1)
+            RuntimeRetryConfig(max_attempts=-1, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0)
 
     def test_no_retry_factory(self) -> None:
-        from elspeth.engine.retry import RetryConfig
-
-        config = RetryConfig.no_retry()
+        config = RuntimeRetryConfig.no_retry()
 
         assert config.max_attempts == 1
 
     def test_from_policy_with_valid_values(self) -> None:
-        from elspeth.engine.retry import RetryConfig
-
-        config = RetryConfig.from_policy(
+        config = RuntimeRetryConfig.from_policy(
             {
                 "max_attempts": 5,
                 "base_delay": 2.0,
                 "max_delay": 120.0,
                 "jitter": 0.5,
+                "exponential_base": 4.0,
             }
         )
 
@@ -179,14 +165,13 @@ class TestRetryConfig:
         assert config.base_delay == 2.0
         assert config.max_delay == 120.0
         assert config.jitter == 0.5
+        assert config.exponential_base == 4.0
 
 
 class TestMaxRetriesExceeded:
     """MaxRetriesExceeded exception."""
 
     def test_preserves_attempt_count(self) -> None:
-        from elspeth.engine.retry import MaxRetriesExceeded
-
         original = ValueError("original error")
         exc = MaxRetriesExceeded(attempts=3, last_error=original)
 
@@ -194,8 +179,6 @@ class TestMaxRetriesExceeded:
         assert exc.last_error is original
 
     def test_message_format(self) -> None:
-        from elspeth.engine.retry import MaxRetriesExceeded
-
         original = ValueError("original error")
         exc = MaxRetriesExceeded(attempts=5, last_error=original)
 

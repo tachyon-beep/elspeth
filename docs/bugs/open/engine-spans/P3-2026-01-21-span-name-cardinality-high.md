@@ -91,6 +91,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `run_span()` still names spans as `run:{run_id}` and `row_span()` uses `row:{row_id}`. (`src/elspeth/engine/spans.py:92-137`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

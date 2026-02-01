@@ -55,6 +55,8 @@ coverage.xml
 # Environments
 .env
 .venv
+.node_modules
+node_modules/
 env/
 venv/
 ENV/
@@ -76,6 +78,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# ruff
+.ruff_cache/
+
 # Pyre type checker
 .pyre/
 
@@ -93,7 +98,7 @@ cython_debug/
 *~
 
 # Project-specific
-runs/
+/runs/
 *.db
 *.sqlite
 *.sqlite3
@@ -121,16 +126,27 @@ Thumbs.db
 .mutmut-cache
 mutants/
 
+# uv
+.uv-cache/
+
 # Git worktrees
 .worktrees/
 
-# Example outputs (keep directory structure with .gitkeep)
+# Example outputs (dynamic data, not tracked)
 examples/*/output/*
 examples/*/runs/*
-!examples/*/.gitkeep
+!examples/*/output/
+!examples/*/runs/
 !examples/*/output/.gitkeep
 !examples/*/runs/.gitkeep
 
 # Real/production data - never commit
 real/
 examples/large_scale_test/input.csv
+landscape.db-shm
+landscape.db-wal
+.elspeth/
+
+# FINAL RULE: Always keep .gitkeep files (preserve directory structure)
+# This must be at the end to override any earlier ignore patterns
+!.gitkeep

@@ -32,6 +32,8 @@ class CoalesceOutcome:
         coalesce_metadata: Audit metadata about the merge (branches, policy, etc.)
         failure_reason: Reason for failure if merge failed (timeout, missing branches)
         coalesce_name: Name of the coalesce point that produced this outcome
+        outcomes_recorded: True if terminal outcomes were already recorded by executor.
+            When True, caller MUST NOT record outcomes again (Bug 9z8 fix).
     """
 
     held: bool
@@ -40,6 +42,7 @@ class CoalesceOutcome:
     coalesce_metadata: dict[str, Any] | None = None
     failure_reason: str | None = None
     coalesce_name: str | None = None
+    outcomes_recorded: bool = False
 
 
 @dataclass
@@ -235,6 +238,16 @@ class CoalesceExecutor:
 
         pending = self._pending[key]
 
+        # Detect duplicate arrivals (indicates bug in upstream code)
+        # Per "Plugin Ownership" principle: bugs in our code should crash, not hide
+        if token.branch_name in pending.arrived:
+            existing = pending.arrived[token.branch_name]
+            raise ValueError(
+                f"Duplicate arrival for branch '{token.branch_name}' at coalesce '{coalesce_name}'. "
+                f"Existing token: {existing.token_id}, new token: {token.token_id}. "
+                f"This indicates a bug in fork, retry, or checkpoint/resume logic."
+            )
+
         # Record arrival
         pending.arrived[token.branch_name] = token
         pending.arrival_times[token.branch_name] = now
@@ -280,7 +293,10 @@ class CoalesceExecutor:
             return arrived_count >= 1
 
         elif settings.policy == "quorum":
-            assert settings.quorum_count is not None
+            if settings.quorum_count is None:
+                raise RuntimeError(
+                    f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
+                )
             return arrived_count >= settings.quorum_count
 
         # settings.policy == "best_effort":
@@ -299,6 +315,49 @@ class CoalesceExecutor:
         """Execute the merge and create merged token."""
         now = self._clock.monotonic()
 
+        # Validate select_branch is present for select merge strategy
+        # (Bug 2ho fix: reject instead of silent fallback)
+        if settings.merge == "select" and settings.select_branch not in pending.arrived:
+            # select_branch not arrived - this is a failure, not a fallback
+            consumed_tokens = list(pending.arrived.values())
+            error_msg = "select_branch_not_arrived"
+            error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+
+            for branch_name, token in pending.arrived.items():
+                state_id = pending.pending_state_ids[branch_name]
+                self._recorder.complete_node_state(
+                    state_id=state_id,
+                    status=NodeStateStatus.FAILED,
+                    error={
+                        "failure_reason": "select_branch_not_arrived",
+                        "select_branch": settings.select_branch,
+                        "branches_arrived": list(pending.arrived.keys()),
+                    },
+                    duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
+                )
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
+
+            del self._pending[key]
+            self._mark_completed(key)
+            return CoalesceOutcome(
+                held=False,
+                failure_reason="select_branch_not_arrived",
+                consumed_tokens=consumed_tokens,
+                coalesce_metadata={
+                    "policy": settings.policy,
+                    "merge_strategy": settings.merge,
+                    "select_branch": settings.select_branch,
+                    "branches_arrived": list(pending.arrived.keys()),
+                },
+                coalesce_name=coalesce_name,
+                outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
+            )
+
         # Merge row data according to strategy
         merged_data = self._merge_data(settings, pending.arrived)
 
@@ -312,6 +371,23 @@ class CoalesceExecutor:
             step_in_pipeline=step_in_pipeline,
         )
 
+        # Build audit metadata BEFORE completing node states (Bug l4h fix)
+        # This allows us to include it in context_after for each consumed token
+        coalesce_metadata = {
+            "policy": settings.policy,
+            "merge_strategy": settings.merge,
+            "expected_branches": settings.branches,
+            "branches_arrived": list(pending.arrived.keys()),
+            "arrival_order": [
+                {
+                    "branch": branch,
+                    "arrival_offset_ms": (t - pending.first_arrival) * 1000,
+                }
+                for branch, t in sorted(pending.arrival_times.items(), key=lambda x: x[1])
+            ],
+            "wait_duration_ms": (now - pending.first_arrival) * 1000,
+        }
+
         # Complete pending node states for consumed tokens
         # (These states were created as "pending" when tokens were held in accept())
         for branch_name, token in pending.arrived.items():
@@ -319,11 +395,13 @@ class CoalesceExecutor:
             state_id = pending.pending_state_ids[branch_name]
 
             # Complete it now that merge is happening
+            # Bug l4h fix: include coalesce_context in context_after for audit trail
             self._recorder.complete_node_state(
                 state_id=state_id,
                 status=NodeStateStatus.COMPLETED,
                 output_data={"merged_into": merged_token.token_id},
                 duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
+                context_after={"coalesce_context": coalesce_metadata},
             )
 
             # Record terminal token outcome (COALESCED)
@@ -340,22 +418,6 @@ class CoalesceExecutor:
         #   consumed by an outer coalesce (nested coalesce scenario)
         # Recording COALESCED for merged token here would break nested coalesces where
         # the inner merge result becomes a consumed token in the outer merge.
-
-        # Build audit metadata
-        coalesce_metadata = {
-            "policy": settings.policy,
-            "merge_strategy": settings.merge,
-            "expected_branches": settings.branches,
-            "branches_arrived": list(pending.arrived.keys()),
-            "arrival_order": [
-                {
-                    "branch": branch,
-                    "arrival_offset_ms": (t - pending.first_arrival) * 1000,
-                }
-                for branch, t in sorted(pending.arrival_times.items(), key=lambda x: x[1])
-            ],
-            "wait_duration_ms": (now - pending.first_arrival) * 1000,
-        }
 
         # Clean up pending state and mark as completed
         del self._pending[key]
@@ -389,11 +451,20 @@ class CoalesceExecutor:
 
         # settings.merge == "select":
         # Take specific branch output
-        assert settings.select_branch is not None
-        if settings.select_branch in arrived:
-            return arrived[settings.select_branch].row_data.copy()
-        # Fallback to first arrived if select branch not present
-        return next(iter(arrived.values())).row_data.copy()
+        # Note: _execute_merge validates select_branch presence before calling this method
+        # If we get here without select_branch, it's a bug in our code
+        if settings.select_branch is None:
+            raise RuntimeError(
+                f"select_branch is None for select merge strategy at coalesce '{settings.name}'. This indicates a config validation bug."
+            )
+        if settings.select_branch not in arrived:
+            # This should be unreachable - _execute_merge catches this case first
+            # Per "Plugin Ownership" principle: crash on our bugs, don't hide them
+            raise RuntimeError(
+                f"select_branch '{settings.select_branch}' not in arrived branches {list(arrived.keys())}. "
+                f"This indicates a bug in _execute_merge validation (Bug 2ho fix should have caught this)."
+            )
+        return arrived[settings.select_branch].row_data.copy()
 
     def check_timeouts(
         self,
@@ -452,7 +523,10 @@ class CoalesceExecutor:
 
             # For quorum, merge on timeout only if quorum met
             elif settings.policy == "quorum":
-                assert settings.quorum_count is not None
+                if settings.quorum_count is None:
+                    raise RuntimeError(
+                        f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
+                    )
                 if len(pending.arrived) >= settings.quorum_count:
                     outcome = self._execute_merge(
                         settings=settings,
@@ -463,6 +537,47 @@ class CoalesceExecutor:
                         coalesce_name=coalesce_name,
                     )
                     results.append(outcome)
+                else:
+                    # Quorum not met at timeout - record failure
+                    # (Bug 6tb fix: mirrors flush_pending() failure handling)
+                    consumed_tokens = list(pending.arrived.values())
+                    error_msg = "quorum_not_met_at_timeout"
+                    error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+                    failure_time = self._clock.monotonic()
+
+                    # Complete pending node states with failure
+                    for branch_name, token in pending.arrived.items():
+                        state_id = pending.pending_state_ids[branch_name]
+                        self._recorder.complete_node_state(
+                            state_id=state_id,
+                            status=NodeStateStatus.FAILED,
+                            error={"failure_reason": "quorum_not_met_at_timeout"},
+                            duration_ms=(failure_time - pending.arrival_times[branch_name]) * 1000,
+                        )
+                        self._recorder.record_token_outcome(
+                            run_id=self._run_id,
+                            token_id=token.token_id,
+                            outcome=RowOutcome.FAILED,
+                            error_hash=error_hash,
+                        )
+
+                    del self._pending[key]
+                    self._mark_completed(key)
+                    results.append(
+                        CoalesceOutcome(
+                            held=False,
+                            failure_reason="quorum_not_met_at_timeout",
+                            consumed_tokens=consumed_tokens,
+                            coalesce_metadata={
+                                "policy": settings.policy,
+                                "quorum_required": settings.quorum_count,
+                                "branches_arrived": list(pending.arrived.keys()),
+                                "timeout_seconds": settings.timeout_seconds,
+                            },
+                            coalesce_name=coalesce_name,
+                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
+                        )
+                    )
 
         return results
 
@@ -507,7 +622,10 @@ class CoalesceExecutor:
                     results.append(outcome)
 
             elif settings.policy == "quorum":
-                assert settings.quorum_count is not None
+                if settings.quorum_count is None:
+                    raise RuntimeError(
+                        f"quorum_count is None for quorum policy at coalesce '{settings.name}'. This indicates a config validation bug."
+                    )
                 if len(pending.arrived) >= settings.quorum_count:
                     outcome = self._execute_merge(
                         settings=settings,
@@ -565,6 +683,7 @@ class CoalesceExecutor:
                                 "branches_arrived": list(pending.arrived.keys()),
                             },
                             coalesce_name=coalesce_name,
+                            outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                         )
                     )
 
@@ -615,10 +734,17 @@ class CoalesceExecutor:
                             "branches_arrived": list(pending.arrived.keys()),
                         },
                         coalesce_name=coalesce_name,
+                        outcomes_recorded=True,  # Bug 9z8 fix: token outcomes recorded above
                     )
                 )
 
-            # first policy: should never have pending entries (merges immediately)
+            elif settings.policy == "first":
+                # first policy merges immediately on first arrival - pending entries indicate a bug
+                raise RuntimeError(
+                    f"Invariant violation: 'first' policy should never have pending entries. "
+                    f"Found pending coalesce for row_id='{key[1]}' at '{coalesce_name}' with "
+                    f"branches {list(pending.arrived.keys())}. This indicates a bug in accept() logic."
+                )
 
         # Clear completed keys to prevent unbounded memory growth
         # After flush, no more tokens will arrive (source ended), so late-arrival

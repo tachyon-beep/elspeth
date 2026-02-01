@@ -7,10 +7,9 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
@@ -102,7 +101,7 @@ class TrackingTransform(BaseTransform):
         pass
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "test"})
 
     def close(self) -> None:
         self.close_called = True
@@ -121,7 +120,7 @@ class FailingCloseTransform(TrackingTransform):
 class TestOrchestratorCleanup:
     """Tests for Orchestrator calling close() on plugins."""
 
-    def test_transforms_closed_on_success(self, real_landscape_db: LandscapeDB) -> None:
+    def test_transforms_closed_on_success(self, real_landscape_db: LandscapeDB, payload_store) -> None:
         """All transforms should have close() called after successful run."""
         transform_1 = TrackingTransform("transform_1")
         transform_2 = TrackingTransform("transform_2")
@@ -146,7 +145,7 @@ class TestOrchestratorCleanup:
         )
 
         orchestrator = Orchestrator(real_landscape_db)
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Verify close() was called on all transforms
         assert transform_1.close_called, "transform_1.close() was not called"
@@ -154,7 +153,7 @@ class TestOrchestratorCleanup:
         assert transform_2.close_called, "transform_2.close() was not called"
         assert transform_2.close_call_count == 1, "transform_2.close() called multiple times"
 
-    def test_transforms_closed_on_failure(self, real_landscape_db: LandscapeDB) -> None:
+    def test_transforms_closed_on_failure(self, real_landscape_db: LandscapeDB, payload_store) -> None:
         """All transforms should have close() called even if run fails."""
         transform_1 = TrackingTransform("transform_1")
         transform_2 = TrackingTransform("transform_2")
@@ -182,13 +181,13 @@ class TestOrchestratorCleanup:
         orchestrator = Orchestrator(real_landscape_db)
 
         with pytest.raises(RuntimeError, match="Source failed intentionally"):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Verify close() was called on all transforms even though run failed
         assert transform_1.close_called, "transform_1.close() was not called after failure"
         assert transform_2.close_called, "transform_2.close() was not called after failure"
 
-    def test_cleanup_handles_missing_close_method(self, real_landscape_db: LandscapeDB) -> None:
+    def test_cleanup_handles_missing_close_method(self, real_landscape_db: LandscapeDB, payload_store) -> None:
         """Cleanup should handle transforms that use default close() method.
 
         BaseTransform provides a default no-op close() method, so transforms
@@ -206,7 +205,7 @@ class TestOrchestratorCleanup:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             # Uses default close() from BaseTransform (no-op)
 
@@ -232,11 +231,11 @@ class TestOrchestratorCleanup:
 
         orchestrator = Orchestrator(real_landscape_db)
         # Should not raise even though transform has no close()
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
 
-    def test_cleanup_continues_if_one_close_fails(self, real_landscape_db: LandscapeDB) -> None:
+    def test_cleanup_continues_if_one_close_fails(self, real_landscape_db: LandscapeDB, payload_store) -> None:
         """If one transform's close() fails, others should still be closed.
 
         Cleanup should be best-effort - one plugin failure shouldn't prevent
@@ -271,7 +270,7 @@ class TestOrchestratorCleanup:
         orchestrator = Orchestrator(real_landscape_db)
         # Should raise RuntimeError after attempting all cleanups (per CLAUDE.md, plugins are system code)
         with pytest.raises(RuntimeError, match="Plugin cleanup failed"):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Both close() methods should have been called (cleanup attempts all before failing)
         assert transform_1.close_called, "failing transform's close() was not called"

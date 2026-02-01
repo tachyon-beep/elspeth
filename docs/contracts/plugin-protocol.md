@@ -4,7 +4,7 @@
 > **Last Updated:** 2026-01-20
 > **Authority:** This document is the master reference for all plugin interactions.
 
-> ⚠️ **Implementation Status:** Features in v1.5 (multi-row output, `creates_tokens`, aggregation output modes) are **specified but not yet implemented**. See [`docs/plans/2026-01-19-multi-row-output.md`](../plans/2026-01-19-multi-row-output.md) for the implementation plan.
+> ⚠️ **Implementation Status:** Features in v1.5 (multi-row output, `creates_tokens`, aggregation output modes) are **specified but not yet implemented**. See [`docs/plans/completed/2026-01-19-multi-row-output.md`](../plans/completed/2026-01-19-multi-row-output.md) for the implementation plan.
 
 ## Overview
 
@@ -1176,28 +1176,26 @@ pipeline:
 
 #### Output Mode
 
-Aggregation supports three output modes that determine how batch results are handled:
+Aggregation supports two output modes that determine how batch results are handled:
 
 ```yaml
 aggregations:
   - node_id: batch_stats
     trigger: { count: 100 }
-    output_mode: single      # default: N inputs → 1 output
+    output_mode: transform          # default: N inputs → M outputs
+    expected_output_count: 1        # optional: validate N→1 cardinality
 ```
 
 | Mode | Input → Output | Token Handling | While Buffering | Use Case |
 |------|----------------|----------------|-----------------|----------|
-| `single` | N → 1 | Triggering token reused | `CONSUMED_IN_BATCH` | Aggregation (sum, count, mean) |
+| `transform` | N → M | New tokens created | `CONSUMED_IN_BATCH` | Aggregation, group-by, splitting |
 | `passthrough` | N → N | Same tokens preserved | `BUFFERED` | Batch enrichment |
-| `transform` | N → M | New tokens created | `CONSUMED_IN_BATCH` | Group-by, splitting |
 
 **Outcome semantics:**
 
-- **`single`** (default): Classic aggregation. N rows become 1 aggregated row. All input tokens are terminal (`CONSUMED_IN_BATCH`). The triggering token is reused for the output.
+- **`transform`** (default): Batch transformation. N rows become M rows with new tokens. All input tokens are terminal (`CONSUMED_IN_BATCH`). New tokens are created via `expand_token()` with parent linkage to the triggering token. Use `expected_output_count: 1` for classic N→1 aggregation (sum, count, mean) to validate cardinality.
 
 - **`passthrough`**: Batch enrichment. N rows become N enriched rows with the same token IDs. Buffered tokens get `BUFFERED` (non-terminal) while waiting, then reappear as `COMPLETED` on flush. Transform must return `success_multi()` with exactly N rows.
-
-- **`transform`**: Batch transformation. N rows become M rows with new tokens. All input tokens are terminal (`CONSUMED_IN_BATCH`). New tokens are created via `expand_token()` with parent linkage to the triggering token.
 
 **Error handling:** All modes are atomic - if the transform returns `error`, ALL buffered rows fail together.
 
@@ -1220,7 +1218,7 @@ Multiple triggers can be combined (first one to fire wins).
    - Records batch membership in audit trail
    - Updates trigger evaluator
    - Token outcome depends on `output_mode`:
-     - `single`/`transform`: `CONSUMED_IN_BATCH` (terminal)
+     - `transform`: `CONSUMED_IN_BATCH` (terminal)
      - `passthrough`: `BUFFERED` (non-terminal, will reappear as `COMPLETED`)
 3. Engine checks trigger conditions
 4. When trigger fires:
@@ -1228,7 +1226,6 @@ Multiple triggers can be combined (first one to fire wins).
    - Engine calls `transform.process(rows, ctx)` with the batch
    - Batch state: `draft` → `executing` → `completed`
    - Output handling depends on `output_mode`:
-     - `single`: Triggering token continues with aggregated data
      - `passthrough`: All buffered tokens continue with enriched data
      - `transform`: New tokens created via `expand_token()` continue
    - Buffer is cleared for next batch
@@ -1388,7 +1385,7 @@ Plugins make calls; the engine throttles them.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.6 | 2026-01-20 | Gate documentation: clarified two approaches (config expressions AND plugin gates via `BaseGate`), added `GateResult` contract, plugin gate lifecycle, when-to-use guidance |
-| 1.5 | 2026-01-19 | Multi-row output: `creates_tokens` attribute, `TransformResult.success_multi()`, `rows` field, aggregation `output_mode` (single/passthrough/transform), `BUFFERED` and `EXPANDED` outcomes |
+| 1.5 | 2026-01-19 | Multi-row output: `creates_tokens` attribute, `TransformResult.success_multi()`, `rows` field, aggregation `output_mode` (passthrough/transform), `BUFFERED` and `EXPANDED` outcomes |
 | 1.4 | 2026-01-19 | Batch-aware transforms (`is_batch_aware`), structural aggregation (engine owns buffers), crash recovery for batches |
 | 1.3 | 2026-01-17 | Source `on_validation_failure` (required), Transform `on_error` (optional), QuarantineEvent, TransformErrorEvent |
 | 1.2 | 2026-01-17 | Three-tier trust model, coercion rules by plugin type, type-safe ≠ operation-safe |

@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import io
 import json
+import logging
+import time
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import DataPluginConfig
@@ -26,6 +28,8 @@ from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
+
+logger = logging.getLogger(__name__)
 
 
 class CSVOptions(BaseModel):
@@ -261,7 +265,6 @@ class AzureBlobSource(BaseSource):
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # Store quarantine routing destination
@@ -320,16 +323,62 @@ class AzureBlobSource(BaseSource):
             azure.core.exceptions.ClientAuthenticationError: If connection fails.
         """
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
+        # Record call for audit trail (ctx.operation_id is set by orchestrator)
+        start_time = time.perf_counter()
         try:
             blob_client = self._get_blob_client()
             blob_data = blob_client.download_blob().readall()
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record successful blob download in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data={
+                    "operation": "download_blob",
+                    "container": self._container,
+                    "blob_path": self._blob_path,
+                },
+                response_data={"size_bytes": len(blob_data)},
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
             raise
         except Exception as e:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record failed blob download in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data={
+                    "operation": "download_blob",
+                    "container": self._container,
+                    "blob_path": self._blob_path,
+                },
+                error={"type": type(e).__name__, "message": str(e)},
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
+
             # Azure SDK errors (ResourceNotFoundError, ClientAuthenticationError, etc.)
             # are external system errors - propagate with context
             raise type(e)(f"Failed to download blob '{self._blob_path}' from container '{self._container}': {e}") from e
+
+        # Log blob download for operator visibility
+        blob_size_kb = len(blob_data) / 1024
+        if blob_size_kb >= 1024:
+            size_str = f"{blob_size_kb / 1024:.1f} MB"
+        else:
+            size_str = f"{blob_size_kb:.1f} KB"
+        logger.info(
+            "Downloaded blob '%s' from container '%s' (%s)",
+            self._blob_path,
+            self._container,
+            size_str,
+        )
 
         # Parse blob content based on format
         if self._format == "csv":
@@ -401,6 +450,10 @@ class AzureBlobSource(BaseSource):
                 )
             return  # No rows to process if file is completely unparseable
 
+        # Log row count for operator visibility
+        row_count = len(df)
+        logger.info("Parsed %d rows from CSV blob '%s'", row_count, self._blob_path)
+
         # DataFrame columns are strings from CSV headers
         for record in df.to_dict(orient="records"):
             row = {str(k): v for k, v in record.items()}
@@ -441,6 +494,9 @@ class AzureBlobSource(BaseSource):
         if not isinstance(data, list):
             raise ValueError(f"Expected JSON array, got {type(data).__name__}")
 
+        # Log row count for operator visibility
+        logger.info("Parsed %d rows from JSON array blob '%s'", len(data), self._blob_path)
+
         for row in data:
             yield from self._validate_and_yield(row, ctx)
 
@@ -463,7 +519,12 @@ class AzureBlobSource(BaseSource):
         except UnicodeDecodeError as e:
             raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
 
-        for line_num, line in enumerate(text_data.splitlines(), start=1):
+        # Split lines and count non-empty for logging
+        lines = text_data.splitlines()
+        non_empty_count = sum(1 for line in lines if line.strip())
+        logger.info("Parsed %d lines from JSONL blob '%s'", non_empty_count, self._blob_path)
+
+        for line_num, line in enumerate(lines, start=1):
             line = line.strip()
             if not line:  # Skip empty lines
                 continue

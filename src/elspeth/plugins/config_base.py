@@ -76,18 +76,23 @@ class DataPluginConfig(PluginConfig):
 
     Use 'schema: {fields: dynamic}' to accept any fields, or provide
     explicit field definitions with mode (strict/free).
+
+    Type Safety:
+        This class overrides schema_config from Optional to required.
+        Pydantic validates this at construction time, and mypy sees the
+        narrowed type - no cast() needed in plugin implementations.
     """
 
-    @model_validator(mode="after")
-    def _require_schema(self) -> Self:
-        """Validate that schema is provided."""
-        if self.schema_config is None:
-            raise ValueError(
-                "Data plugins require 'schema' configuration. "
-                "Use 'schema: {fields: dynamic}' to accept any fields, or "
-                "provide explicit field definitions with mode (strict/free)."
-            )
-        return self
+    # Override parent's Optional field with required field.
+    # This provides both runtime validation (Pydantic) and static typing (mypy).
+    schema_config: SchemaConfig = Field(
+        ...,
+        description=(
+            "Schema configuration for data validation. "
+            "Use 'schema: {fields: dynamic}' to accept any fields, or "
+            "provide explicit field definitions with mode (strict/free)."
+        ),
+    )
 
 
 class PathConfig(DataPluginConfig):
@@ -144,6 +149,45 @@ class SourceDataConfig(PathConfig):
         if not v or not v.strip():
             raise ValueError("on_validation_failure must be a sink name or 'discard'")
         return v.strip()
+
+
+class TabularSourceDataConfig(SourceDataConfig):
+    """Config for sources that read tabular external data with headers.
+
+    Extends SourceDataConfig with field normalization options:
+    - columns: Explicit column names for headerless files
+    - normalize_fields: Auto-normalize messy headers to identifiers
+    - field_mapping: Override specific normalized names
+
+    See docs/plans/2026-01-29-field-normalization-design.md for full specification.
+    """
+
+    columns: list[str] | None = None
+    normalize_fields: bool = False
+    field_mapping: dict[str, str] | None = None
+
+    @model_validator(mode="after")
+    def _validate_normalization_options(self) -> Self:
+        """Validate field normalization option interactions."""
+        from elspeth.core.identifiers import validate_field_names
+
+        # normalize_fields + columns is invalid
+        if self.columns is not None and self.normalize_fields:
+            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
+
+        # field_mapping requires normalize_fields or columns
+        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
+            raise ValueError("field_mapping requires normalize_fields: true or columns config")
+
+        # Validate columns entries are valid identifiers and not keywords
+        if self.columns is not None:
+            validate_field_names(self.columns, "columns")
+
+        # Validate field_mapping values are valid identifiers and not keywords
+        if self.field_mapping is not None and self.field_mapping:
+            validate_field_names(list(self.field_mapping.values()), "field_mapping values")
+
+        return self
 
 
 class TransformDataConfig(DataPluginConfig):

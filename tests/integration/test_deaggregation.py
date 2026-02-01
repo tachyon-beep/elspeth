@@ -162,7 +162,7 @@ class TestDeaggregationAuditTrail:
         return input_file
 
     @pytest.fixture
-    def run_pipeline(self, tmp_path: Path, input_data: Path, plugin_manager) -> tuple[str, "LandscapeDB"]:
+    def run_pipeline(self, tmp_path: Path, input_data: Path, plugin_manager, payload_store) -> tuple[str, "LandscapeDB"]:
         """Run pipeline and return run_id and database for verification.
 
         Returns:
@@ -254,7 +254,7 @@ class TestDeaggregationAuditTrail:
 
         # Run pipeline
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(pipeline_config, graph=graph, settings=settings)
+        result = orchestrator.run(pipeline_config, graph=graph, settings=settings, payload_store=payload_store)
 
         return (result.run_id, db)
 

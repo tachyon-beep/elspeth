@@ -12,10 +12,9 @@ import hashlib
 import hmac
 from pathlib import Path
 
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+import elspeth.contracts.payload_store as payload_contracts
 
-# Re-export for backwards compatibility
-__all__ = ["FilesystemPayloadStore", "IntegrityError", "PayloadStore"]
+__all__ = ["FilesystemPayloadStore"]
 
 
 class FilesystemPayloadStore:
@@ -70,7 +69,7 @@ class FilesystemPayloadStore:
         # Use timing-safe comparison to prevent timing attacks that could
         # allow an attacker to incrementally discover expected hashes
         if not hmac.compare_digest(actual_hash, content_hash):
-            raise IntegrityError(f"Payload integrity check failed: expected {content_hash}, got {actual_hash}")
+            raise payload_contracts.IntegrityError(f"Payload integrity check failed: expected {content_hash}, got {actual_hash}")
 
         return content
 

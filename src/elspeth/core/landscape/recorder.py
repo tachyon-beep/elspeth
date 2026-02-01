@@ -5,12 +5,16 @@ This is the main interface for recording audit trail entries during
 pipeline execution. It wraps the low-level database operations.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
+    from elspeth.contracts.errors import TransformSuccessReason
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
@@ -24,10 +28,12 @@ from elspeth.contracts import (
     Call,
     CallStatus,
     CallType,
+    CoalesceFailureReason,
     Determinism,
     Edge,
     ExecutionError,
     ExportStatus,
+    FrameworkBugError,
     Node,
     NodeState,
     NodeStateCompleted,
@@ -37,8 +43,10 @@ from elspeth.contracts import (
     NodeStateStatus,
     NodeType,
     NonCanonicalMetadata,
+    Operation,
     RoutingEvent,
     RoutingMode,
+    RoutingReason,
     RoutingSpec,
     Row,
     RowLineage,
@@ -48,10 +56,12 @@ from elspeth.contracts import (
     Token,
     TokenOutcome,
     TokenParent,
+    TransformErrorReason,
     TransformErrorRecord,
     TriggerType,
     ValidationErrorRecord,
 )
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
@@ -82,6 +92,7 @@ from elspeth.core.landscape.schema import (
     edges_table,
     node_states_table,
     nodes_table,
+    operations_table,
     routing_events_table,
     rows_table,
     runs_table,
@@ -112,7 +123,7 @@ class LandscapeRecorder:
         recorder.complete_run(run.run_id, status=RunStatus.COMPLETED)
     """
 
-    def __init__(self, db: LandscapeDB, *, payload_store: Any | None = None) -> None:
+    def __init__(self, db: LandscapeDB, *, payload_store: PayloadStore | None = None) -> None:
         """Initialize recorder with database connection.
 
         Args:
@@ -126,6 +137,10 @@ class LandscapeRecorder:
         # Ensures UNIQUE(state_id, call_index) across all client types and retries
         self._call_indices: dict[str, int] = {}  # state_id → next_index
         self._call_index_lock: Lock = Lock()
+
+        # Per-operation_id call index allocation (parallel to state call indices)
+        # Operations (source/sink I/O) need their own call numbering
+        self._operation_call_indices: dict[str, int] = {}  # operation_id → next_index
 
         # Database operations helper for reduced boilerplate
         self._ops = DatabaseOps(db)
@@ -235,7 +250,8 @@ class LandscapeRecorder:
         )
 
         result = self.get_run(run_id)
-        assert result is not None, f"Run {run_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"Run {run_id} not found after INSERT/UPDATE - database corruption or transaction failure")
         return result
 
     def get_run(self, run_id: str) -> Run | None:
@@ -284,6 +300,39 @@ class LandscapeRecorder:
             )
 
         return str(source_schema_json)
+
+    def record_source_field_resolution(
+        self,
+        run_id: str,
+        resolution_mapping: dict[str, str],
+        normalization_version: str | None,
+    ) -> None:
+        """Record field resolution mapping computed during source.load().
+
+        This captures the mapping from original header names (as read from the file)
+        to final field names (after normalization and/or field_mapping applied).
+        Must be called after source.load() completes but before processing begins.
+
+        Args:
+            run_id: Run to update
+            resolution_mapping: Dict mapping original header name → final field name
+            normalization_version: Algorithm version used for normalization, or None if
+                                   no normalization was applied (passthrough or explicit columns)
+
+        Note:
+            This is necessary because field resolution depends on actual file headers
+            which are only known after load() runs, but node config is registered
+            before load(). Without this, audit trail cannot recover original headers.
+        """
+        resolution_data = {
+            "resolution_mapping": resolution_mapping,
+            "normalization_version": normalization_version,
+        }
+        resolution_json = canonical_json(resolution_data)
+
+        self._ops.execute_update(
+            runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
+        )
 
     def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
         """Get edge mapping for a run (from_node_id, label) -> edge_id.
@@ -399,7 +448,7 @@ class LandscapeRecorder:
         sequence: int | None = None,
         schema_hash: str | None = None,
         determinism: Determinism = Determinism.DETERMINISTIC,
-        schema_config: "SchemaConfig",
+        schema_config: SchemaConfig,
     ) -> Node:
         """Register a plugin instance (node) in the execution graph.
 
@@ -701,21 +750,23 @@ class LandscapeRecorder:
         row_id: str,
         branches: list[str],
         *,
+        run_id: str,
         step_in_pipeline: int | None = None,
-    ) -> list[Token]:
+    ) -> tuple[list[Token], str]:
         """Fork a token to multiple branches.
 
-        Creates child tokens for each branch, all sharing a fork_group_id.
-        Records parent relationships.
+        ATOMIC: Creates children AND records parent FORKED outcome in single transaction.
+        Stores branch contract for recovery validation.
 
         Args:
             parent_token_id: Token being forked
             row_id: Row ID (same for all children)
             branches: List of branch names (must have at least one)
+            run_id: Run ID (required for outcome recording)
             step_in_pipeline: Step in the DAG where the fork occurs
 
         Returns:
-            List of child Token models
+            Tuple of (child Token models, fork_group_id)
 
         Raises:
             ValueError: If branches is empty (defense-in-depth for audit integrity)
@@ -730,6 +781,7 @@ class LandscapeRecorder:
         children = []
 
         with self._db.connection() as conn:
+            # 1. Create child tokens
             for ordinal, branch_name in enumerate(branches):
                 child_id = generate_id()
                 timestamp = now()
@@ -766,7 +818,22 @@ class LandscapeRecorder:
                     )
                 )
 
-        return children
+            # 2. Record parent FORKED outcome in SAME transaction (atomic)
+            outcome_id = f"out_{generate_id()[:12]}"
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=outcome_id,
+                    run_id=run_id,
+                    token_id=parent_token_id,
+                    outcome=RowOutcome.FORKED.value,
+                    is_terminal=1,
+                    recorded_at=now(),
+                    fork_group_id=fork_group_id,
+                    expected_branches_json=json.dumps(branches),
+                )
+            )
+
+        return children, fork_group_id
 
     def coalesce_tokens(
         self,
@@ -827,9 +894,15 @@ class LandscapeRecorder:
         parent_token_id: str,
         row_id: str,
         count: int,
-        step_in_pipeline: int,
-    ) -> list[Token]:
+        *,
+        run_id: str,
+        step_in_pipeline: int | None = None,
+        record_parent_outcome: bool = True,
+    ) -> tuple[list[Token], str]:
         """Expand a token into multiple child tokens (deaggregation).
+
+        ATOMIC: Creates children AND optionally records parent EXPANDED outcome
+        in single transaction.
 
         Creates N child tokens from a single parent for 1->N expansion.
         All children share the same row_id (same source row) and are
@@ -842,10 +915,13 @@ class LandscapeRecorder:
             parent_token_id: Token being expanded
             row_id: Row ID (same for all children)
             count: Number of child tokens to create (must be >= 1)
-            step_in_pipeline: Step where expansion occurs
+            run_id: Run ID (required for atomic outcome recording)
+            step_in_pipeline: Step where expansion occurs (optional)
+            record_parent_outcome: If True (default), record EXPANDED outcome for parent.
+                Set to False for batch aggregation where parent gets CONSUMED_IN_BATCH.
 
         Returns:
-            List of child Token models
+            Tuple of (child Token list, expand_group_id)
 
         Raises:
             ValueError: If count < 1
@@ -891,7 +967,29 @@ class LandscapeRecorder:
                     )
                 )
 
-        return children
+            # Optionally record parent EXPANDED outcome in SAME transaction (atomic)
+            # This eliminates the crash window where children exist but parent
+            # outcome is not yet recorded.
+            #
+            # Set record_parent_outcome=False for batch aggregation where the
+            # parent token gets CONSUMED_IN_BATCH instead of EXPANDED.
+            if record_parent_outcome:
+                outcome_id = f"out_{generate_id()[:12]}"
+                conn.execute(
+                    token_outcomes_table.insert().values(
+                        outcome_id=outcome_id,
+                        run_id=run_id,
+                        token_id=parent_token_id,
+                        outcome=RowOutcome.EXPANDED.value,
+                        is_terminal=1,
+                        recorded_at=now(),
+                        expand_group_id=expand_group_id,
+                        # Store expected count for recovery validation
+                        expected_branches_json=json.dumps({"count": count}),
+                    )
+                )
+
+        return children, expand_group_id
 
     # === Node State Recording ===
 
@@ -965,7 +1063,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStatePending: ...
 
@@ -977,7 +1075,8 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        success_reason: TransformSuccessReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStateCompleted: ...
 
@@ -989,7 +1088,7 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStateFailed: ...
 
@@ -1000,7 +1099,8 @@ class LandscapeRecorder:
         *,
         output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
         duration_ms: float | None = None,
-        error: ExecutionError | dict[str, Any] | None = None,
+        error: ExecutionError | TransformErrorReason | CoalesceFailureReason | None = None,
+        success_reason: TransformSuccessReason | None = None,
         context_after: dict[str, Any] | None = None,
     ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
         """Complete a node state.
@@ -1030,6 +1130,8 @@ class LandscapeRecorder:
         output_hash = stable_hash(output_data) if output_data is not None else None
         error_json = canonical_json(error) if error is not None else None
         context_json = canonical_json(context_after) if context_after is not None else None
+        # Serialize success reason if provided (use canonical_json for audit consistency)
+        success_reason_json = canonical_json(success_reason) if success_reason is not None else None
 
         self._ops.execute_update(
             node_states_table.update()
@@ -1039,15 +1141,18 @@ class LandscapeRecorder:
                 output_hash=output_hash,
                 duration_ms=duration_ms,
                 error_json=error_json,
+                success_reason_json=success_reason_json,
                 context_after_json=context_json,
                 completed_at=timestamp,
             )
         )
 
         result = self.get_node_state(state_id)
-        assert result is not None, f"NodeState {state_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"NodeState {state_id} not found after update - database corruption or transaction failure")
         # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
-        assert not isinstance(result, NodeStateOpen), "State should be terminal (PENDING/COMPLETED/FAILED) after completion"
+        if isinstance(result, NodeStateOpen):
+            raise AuditIntegrityError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:
@@ -1072,7 +1177,7 @@ class LandscapeRecorder:
         state_id: str,
         edge_id: str,
         mode: RoutingMode,
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
         *,
         event_id: str | None = None,
         routing_group_id: str | None = None,
@@ -1131,7 +1236,7 @@ class LandscapeRecorder:
         self,
         state_id: str,
         routes: list[RoutingSpec],
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
     ) -> list[RoutingEvent]:
         """Record multiple routing events (fork/multi-destination).
 
@@ -1327,7 +1432,8 @@ class LandscapeRecorder:
         )
 
         result = self.get_batch(batch_id)
-        assert result is not None, f"Batch {batch_id} not found after update"
+        if result is None:
+            raise AuditIntegrityError(f"Batch {batch_id} not found after update - database corruption or transaction failure")
         return result
 
     def get_batch(self, batch_id: str) -> Batch | None:
@@ -1793,6 +1899,7 @@ class LandscapeRecorder:
         values = {
             "call_id": call_id,
             "state_id": state_id,
+            "operation_id": None,  # State call, not operation call
             "call_index": call_index,
             "call_type": call_type.value,  # Store enum value
             "status": status.value,  # Store enum value
@@ -1809,18 +1916,298 @@ class LandscapeRecorder:
 
         return Call(
             call_id=call_id,
-            state_id=state_id,
             call_index=call_index,
             call_type=call_type,  # Pass enum directly per Call contract
             status=status,  # Pass enum directly per Call contract
             request_hash=request_hash,
+            created_at=timestamp,
+            state_id=state_id,  # Parent is node_state
+            operation_id=None,  # Not an operation call
             request_ref=request_ref,
             response_hash=response_hash,
             response_ref=response_ref,
             error_json=error_json,
             latency_ms=latency_ms,
-            created_at=timestamp,
         )
+
+    # === Operations (Source/Sink I/O) ===
+
+    def begin_operation(
+        self,
+        run_id: str,
+        node_id: str,
+        operation_type: Literal["source_load", "sink_write"],
+        *,
+        input_data: dict[str, Any] | None = None,
+    ) -> Operation:
+        """Begin an operation for source/sink I/O.
+
+        Operations are the source/sink equivalent of node_states - they provide
+        a parent context for external calls made during load() or write().
+
+        Args:
+            run_id: Run this operation belongs to
+            node_id: Source or sink node performing the operation
+            operation_type: Type of operation
+            input_data: Optional input context (stored via payload store)
+
+        Returns:
+            Operation with operation_id for call attribution
+        """
+        from uuid import uuid4
+
+        # Use pure UUID for operation_id - run_id + node_id can exceed 64 chars
+        # (run_id=36 + node_id=45 + prefixes would be 94+ chars)
+        operation_id = f"op_{uuid4().hex}"  # "op_" + 32 hex = 35 chars, well under 64
+
+        input_ref = None
+        if input_data and self._payload_store is not None:
+            input_bytes = canonical_json(input_data).encode("utf-8")
+            input_ref = self._payload_store.store(input_bytes)
+
+        timestamp = now()
+        operation = Operation(
+            operation_id=operation_id,
+            run_id=run_id,
+            node_id=node_id,
+            operation_type=operation_type,
+            started_at=timestamp,
+            status="open",
+            input_data_ref=input_ref,
+        )
+
+        self._ops.execute_insert(operations_table.insert().values(**operation.to_dict()))
+        return operation
+
+    def complete_operation(
+        self,
+        operation_id: str,
+        status: Literal["completed", "failed", "pending"],
+        *,
+        output_data: dict[str, Any] | None = None,
+        error: str | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        """Complete an operation.
+
+        Args:
+            operation_id: Operation to complete
+            status: Final status ('completed', 'failed', or 'pending' for BatchPendingError)
+            output_data: Optional output context
+            error: Error message if failed
+            duration_ms: Operation duration
+
+        Raises:
+            FrameworkBugError: If operation doesn't exist or is already completed
+        """
+        # Validate operation exists and is open (prevent double-complete)
+        query = select(operations_table.c.status).where(operations_table.c.operation_id == operation_id)
+        current = self._ops.execute_fetchone(query)
+
+        if current is None:
+            raise FrameworkBugError(f"Completing non-existent operation: {operation_id}")
+
+        if current.status != "open":
+            raise FrameworkBugError(
+                f"Completing already-completed operation {operation_id}: current status={current.status}, new status={status}"
+            )
+
+        output_ref = None
+        if output_data and self._payload_store is not None:
+            output_bytes = canonical_json(output_data).encode("utf-8")
+            output_ref = self._payload_store.store(output_bytes)
+
+        timestamp = now()
+        self._ops.execute_update(
+            operations_table.update()
+            .where(operations_table.c.operation_id == operation_id)
+            .values(
+                completed_at=timestamp,
+                status=status,
+                output_data_ref=output_ref,
+                error_message=error,
+                duration_ms=duration_ms,
+            )
+        )
+
+    def allocate_operation_call_index(self, operation_id: str) -> int:
+        """Allocate next call index for an operation_id (thread-safe).
+
+        Provides centralized call index allocation ensuring unique call numbering
+        within each operation. Parallel to allocate_call_index() for node_states.
+
+        Args:
+            operation_id: Operation ID to allocate index for
+
+        Returns:
+            Sequential call index (0-based), unique within this operation_id
+        """
+        with self._call_index_lock:  # Reuse existing lock
+            if operation_id not in self._operation_call_indices:
+                self._operation_call_indices[operation_id] = 0
+            idx = self._operation_call_indices[operation_id]
+            self._operation_call_indices[operation_id] += 1
+            return idx
+
+    def record_operation_call(
+        self,
+        operation_id: str,
+        call_type: CallType,
+        status: CallStatus,
+        request_data: dict[str, Any],
+        response_data: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+        latency_ms: float | None = None,
+        *,
+        request_ref: str | None = None,
+        response_ref: str | None = None,
+        provider: str | None = None,
+    ) -> Call:
+        """Record an external call made during an operation.
+
+        This is the operation equivalent of record_call() - attributes calls
+        to operations instead of node_states.
+
+        Args:
+            operation_id: The operation this call belongs to
+            call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
+            status: Outcome of the call (SUCCESS, ERROR)
+            request_data: Request payload (will be hashed)
+            response_data: Response payload (will be hashed, optional for errors)
+            error: Error details if status is ERROR (stored as JSON)
+            latency_ms: Call duration in milliseconds
+            request_ref: Optional payload store reference for request
+            response_ref: Optional payload store reference for response
+            provider: Optional provider name for telemetry
+
+        Returns:
+            The recorded Call model
+        """
+        call_index = self.allocate_operation_call_index(operation_id)
+        call_id = f"call_{operation_id}_{call_index}"
+        timestamp = now()
+
+        # Hash request (always required)
+        request_hash = stable_hash(request_data)
+
+        # Hash response (optional - None for errors without response)
+        response_hash = stable_hash(response_data) if response_data is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_data).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        if response_data is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_data).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        # Serialize error if present
+        error_json = canonical_json(error) if error is not None else None
+
+        values = {
+            "call_id": call_id,
+            "state_id": None,  # NOT a node_state call
+            "operation_id": operation_id,  # Operation call
+            "call_index": call_index,
+            "call_type": call_type.value,
+            "status": status.value,
+            "request_hash": request_hash,
+            "request_ref": request_ref,
+            "response_hash": response_hash,
+            "response_ref": response_ref,
+            "error_json": error_json,
+            "latency_ms": latency_ms,
+            "created_at": timestamp,
+        }
+
+        self._ops.execute_insert(calls_table.insert().values(**values))
+
+        return Call(
+            call_id=call_id,
+            call_index=call_index,
+            call_type=call_type,
+            status=status,
+            request_hash=request_hash,
+            created_at=timestamp,
+            state_id=None,  # Not a node_state call
+            operation_id=operation_id,  # Parent is operation
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+            latency_ms=latency_ms,
+        )
+
+    def get_operation(self, operation_id: str) -> Operation | None:
+        """Get an operation by ID.
+
+        Args:
+            operation_id: Operation ID to retrieve
+
+        Returns:
+            Operation model or None if not found
+        """
+        query = select(operations_table).where(operations_table.c.operation_id == operation_id)
+        row = self._ops.execute_fetchone(query)
+        if row is None:
+            return None
+
+        return Operation(
+            operation_id=row.operation_id,
+            run_id=row.run_id,
+            node_id=row.node_id,
+            operation_type=row.operation_type,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            status=row.status,
+            input_data_ref=row.input_data_ref,
+            output_data_ref=row.output_data_ref,
+            error_message=row.error_message,
+            duration_ms=row.duration_ms,
+        )
+
+    def get_operation_calls(self, operation_id: str) -> list[Call]:
+        """Get external calls for an operation.
+
+        Args:
+            operation_id: Operation ID
+
+        Returns:
+            List of Call models, ordered by call_index
+        """
+        query = select(calls_table).where(calls_table.c.operation_id == operation_id).order_by(calls_table.c.call_index)
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
+
+    def get_operations_for_run(self, run_id: str) -> list[Operation]:
+        """Get all operations for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Operation models, ordered by started_at
+        """
+        query = select(operations_table).where(operations_table.c.run_id == run_id).order_by(operations_table.c.started_at)
+        db_rows = self._ops.execute_fetchall(query)
+        return [
+            Operation(
+                operation_id=row.operation_id,
+                run_id=row.run_id,
+                node_id=row.node_id,
+                operation_type=row.operation_type,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                status=row.status,
+                input_data_ref=row.input_data_ref,
+                output_data_ref=row.output_data_ref,
+                error_message=row.error_message,
+                duration_ms=row.duration_ms,
+            )
+            for row in db_rows
+        ]
 
     # === Explain Methods (Graceful Degradation) ===
 
@@ -1878,7 +2265,7 @@ class LandscapeRecorder:
 
     # === Reproducibility Grade Management ===
 
-    def compute_reproducibility_grade(self, run_id: str) -> "ReproducibilityGrade":
+    def compute_reproducibility_grade(self, run_id: str) -> ReproducibilityGrade:
         """Compute reproducibility grade for a run based on node determinism.
 
         Logic:
@@ -2122,6 +2509,7 @@ class LandscapeRecorder:
                 token_outcomes_table.c.expand_group_id,
                 token_outcomes_table.c.error_hash,
                 token_outcomes_table.c.context_json,
+                token_outcomes_table.c.expected_branches_json,
             )
             .join(
                 tokens_table,
@@ -2208,7 +2596,7 @@ class LandscapeRecorder:
         token_id: str,
         transform_id: str,
         row_data: dict[str, Any],
-        error_details: dict[str, Any],
+        error_details: TransformErrorReason,
         destination: str,
     ) -> str:
         """Record a transform processing error in the audit trail.
@@ -2221,7 +2609,7 @@ class LandscapeRecorder:
             token_id: Token ID for the row
             transform_id: Transform that returned the error
             row_data: The row that could not be processed
-            error_details: Error details from TransformResult
+            error_details: Error details from TransformResult (TransformErrorReason TypedDict)
             destination: Where row was routed ("discard" or sink name)
 
         Returns:

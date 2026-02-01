@@ -15,17 +15,20 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field, field_validator
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.http import AuditedHTTPClient
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     CaseStudyConfig,
     CriterionConfig,
@@ -296,10 +299,29 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
 
-        # Schema from config
-        assert cfg.schema_config is not None
+        # Build output schema config with field categorization
+        # Multi-query: collect fields from all query specs
+        # TransformDataConfig guarantees schema_config is not None
+        schema_config = cfg.schema_config
+        all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
+        all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
+
+        # Merge with base schema
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
+            audit_fields=tuple(set(base_audit) | all_audit),
+            required_fields=schema_config.required_fields,
+        )
+
+        # Create schema from config
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,
         )
@@ -314,6 +336,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Client caching (same pattern as OpenRouterLLMTransform)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._http_clients: dict[str, AuditedHTTPClient] = {}
         self._http_clients_lock = Lock()
 
@@ -350,8 +374,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -369,6 +395,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 self._http_clients[state_id] = AuditedHTTPClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     timeout=self._timeout,
                     base_url=self._base_url,
                     headers={
@@ -525,16 +553,15 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             data = response.json()
         except (ValueError, TypeError) as e:
-            return TransformResult.error(
-                {
-                    "reason": "invalid_json_response",
-                    "error": f"Response is not valid JSON: {e}",
-                    "query": spec.output_prefix,
-                    "content_type": response.headers.get("content-type", "unknown"),
-                    "body_preview": response.text[:500] if response.text else None,
-                },
-                retryable=False,
-            )
+            json_error: TransformErrorReason = {
+                "reason": "invalid_json_response",
+                "error": f"Response is not valid JSON: {e}",
+                "query": spec.output_prefix,
+                "content_type": response.headers.get("content-type", "unknown"),
+            }
+            if response.text:
+                json_error["body_preview"] = response.text[:500]
+            return TransformResult.error(json_error, retryable=False)
 
         # 8. Extract content from OpenRouter response (EXTERNAL DATA - wrap)
         try:
@@ -570,21 +597,21 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # usage is Tier 3 external data - use .get() for optional fields
         completion_tokens = usage.get("completion_tokens", 0)
         if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "error": (
-                        f"LLM response was truncated at {completion_tokens} tokens "
-                        f"(max_tokens={effective_max_tokens}). "
-                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
-                    ),
-                    "query": spec.output_prefix,
-                    "max_tokens": effective_max_tokens,
-                    "completion_tokens": completion_tokens,
-                    "prompt_tokens": usage.get("prompt_tokens", 0),
-                    "raw_response_preview": content[:500] if content else None,
-                }
-            )
+            truncation_error: TransformErrorReason = {
+                "reason": "response_truncated",
+                "error": (
+                    f"LLM response was truncated at {completion_tokens} tokens "
+                    f"(max_tokens={effective_max_tokens}). "
+                    f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                ),
+                "query": spec.output_prefix,
+                "max_tokens": effective_max_tokens,
+                "completion_tokens": completion_tokens,
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+            }
+            if content:
+                truncation_error["raw_response_preview"] = content[:500]
+            return TransformResult.error(truncation_error)
 
         # 9. Parse LLM response content as JSON (THEIR DATA - wrap)
         content_str = content.strip()
@@ -602,26 +629,26 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             parsed = json.loads(content_str)
         except json.JSONDecodeError as e:
-            return TransformResult.error(
-                {
-                    "reason": "json_parse_failed",
-                    "error": str(e),
-                    "query": spec.output_prefix,
-                    "raw_response": content[:500] if content else None,  # Truncate for audit
-                }
-            )
+            parse_error: TransformErrorReason = {
+                "reason": "json_parse_failed",
+                "error": str(e),
+                "query": spec.output_prefix,
+            }
+            if content:
+                parse_error["raw_response"] = content[:500]  # Truncate for audit
+            return TransformResult.error(parse_error)
 
         # Validate JSON type is object (EXTERNAL DATA - validate structure)
         if not isinstance(parsed, dict):
-            return TransformResult.error(
-                {
-                    "reason": "invalid_json_type",
-                    "expected": "object",
-                    "actual": type(parsed).__name__,
-                    "query": spec.output_prefix,
-                    "raw_response": content[:500] if content else None,
-                }
-            )
+            json_type_error: TransformErrorReason = {
+                "reason": "invalid_json_type",
+                "expected": "object",
+                "actual": type(parsed).__name__,
+                "query": spec.output_prefix,
+            }
+            if content:
+                json_type_error["raw_response"] = content[:500]
+            return TransformResult.error(json_type_error)
 
         # 10. Map and validate output fields
         output: dict[str, Any] = {}
@@ -665,7 +692,12 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
         output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
 
-        return TransformResult.success(output)
+        # Build fields_added from output_mapping suffixes for this query
+        fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": fields_added},
+        )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -765,7 +797,13 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             return TransformResult.error(
                 {
                     "reason": "query_failed",
-                    "failed_queries": [{"query": spec.output_prefix, "error": r.reason} for spec, r in failed],
+                    "failed_queries": [
+                        {
+                            "query": spec.output_prefix,
+                            "error": r.reason.get("error", str(r.reason)) if isinstance(r.reason, dict) else str(r.reason),
+                        }
+                        for spec, r in failed
+                    ],
                     "succeeded_count": len(results) - len(failed),
                     "total_count": len(results),
                 }
@@ -780,7 +818,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             if result.row is not None:
                 output.update(result.row)
 
-        return TransformResult.success(output)
+        # Collect all fields added across all queries
+        all_fields_added = [
+            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
+        ]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": all_fields_added},
+        )
 
     def _execute_queries_parallel(
         self,
@@ -804,7 +849,8 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         from elspeth.plugins.pooling.executor import RowContext
 
         # Type narrowing - caller ensures executor is not None
-        assert self._executor is not None
+        if self._executor is None:
+            raise RuntimeError("LLM executor not initialized - call initialize() first")
 
         # Build RowContext for each query
         # All queries share the same state_id (FK constraint)

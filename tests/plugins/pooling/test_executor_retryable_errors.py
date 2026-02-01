@@ -46,7 +46,7 @@ class TestRetryableErrorHandling:
             if call_count[0] <= 2:
                 raise NetworkError("Connection timeout")
             # Third attempt succeeds
-            return TransformResult.success({"result": "success"})
+            return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(pool_config)
         contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
@@ -68,7 +68,7 @@ class TestRetryableErrorHandling:
             call_count[0] += 1
             if call_count[0] == 1:
                 raise ServerError("503 Service Unavailable")
-            return TransformResult.success({"result": "success"})
+            return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(pool_config)
         contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
@@ -90,7 +90,7 @@ class TestRetryableErrorHandling:
             call_count[0] += 1
             if call_count[0] <= 3:
                 raise RateLimitError("429 Rate limit exceeded")
-            return TransformResult.success({"result": "success"})
+            return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(pool_config)
         contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
@@ -209,13 +209,13 @@ class TestRetryableErrorHandling:
                 # Retryable - succeeds on second attempt
                 if call_counts[idx][0] == 1:
                     raise ServerError("503 Service Unavailable")
-                return TransformResult.success({"result": "success"})
+                return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
             elif idx == 1:
                 # Permanent - fails immediately
                 raise ContentPolicyError("Safety system rejected request")
             else:
                 # Immediate success
-                return TransformResult.success({"result": "success"})
+                return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(pool_config)
         contexts = [
@@ -253,7 +253,7 @@ class TestRetryableErrorHandling:
             call_count[0] += 1
             if call_count[0] == 1:
                 raise CapacityError(status_code=429, message="Rate limit")
-            return TransformResult.success({"result": "success"})
+            return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(pool_config)
         contexts = [RowContext(row={"id": 1}, state_id="test-1", row_index=0)]
@@ -343,7 +343,7 @@ class TestDispatchGateAfterRetry:
                 time.sleep(0.02)  # 20ms
                 raise CapacityError(status_code=429, message="Rate limit")
 
-            return TransformResult.success({"result": "success"})
+            return TransformResult.success({"result": "success"}, success_reason={"action": "test"})
 
         executor = PooledExecutor(config)
         contexts = [

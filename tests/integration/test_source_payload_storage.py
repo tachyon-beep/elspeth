@@ -47,7 +47,7 @@ def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     return graph
 
 
-def test_source_row_payloads_are_stored_during_run(tmp_path: Path) -> None:
+def test_source_row_payloads_are_stored_during_run(tmp_path: Path, payload_store) -> None:
     """Test that source row payloads are persisted to PayloadStore during normal runs.
 
     This is a P0 audit requirement from CLAUDE.md:
@@ -101,7 +101,7 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path) -> None:
             pass
 
         def write(self, rows: Any, ctx: Any) -> Any:
-            from elspeth.engine.artifacts import ArtifactDescriptor
+            from elspeth.contracts import ArtifactDescriptor
 
             self.received_rows.extend(rows)
             return ArtifactDescriptor.for_file(path="memory://test", size_bytes=len(rows), content_hash="test_hash")

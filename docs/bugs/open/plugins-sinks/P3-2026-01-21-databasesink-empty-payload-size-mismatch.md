@@ -92,6 +92,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- Empty batch path still returns `payload_size=0` while the hash is computed from canonical JSON (`"[]"`). (`src/elspeth/plugins/sinks/database_sink.py:281-297`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

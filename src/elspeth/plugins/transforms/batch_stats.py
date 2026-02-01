@@ -76,13 +76,11 @@ class BatchStats(BaseTransform):
         self._compute_mean = cfg.compute_mean
         self._on_error = cfg.on_error
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # Create input schema from config
         self.input_schema = create_schema_from_config(
-            self._schema_config,
+            cfg.schema_config,
             "BatchStatsInputSchema",
             allow_coercion=False,
         )
@@ -115,7 +113,14 @@ class BatchStats(BaseTransform):
         """
         if not rows:
             # Empty batch - should not happen in normal operation
-            return TransformResult.success({"count": 0, "sum": 0, "mean": None, "batch_empty": True})
+            return TransformResult.success(
+                {"count": 0, "sum": 0, "mean": None, "batch_empty": True},
+                success_reason={
+                    "action": "processed",
+                    "fields_added": ["count", "sum", "mean", "batch_empty"],
+                    "metadata": {"empty_batch": True},
+                },
+            )
 
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
@@ -153,7 +158,17 @@ class BatchStats(BaseTransform):
         if self._group_by and rows and self._group_by in rows[0]:
             result[self._group_by] = rows[0][self._group_by]
 
-        return TransformResult.success(result)
+        # Determine which fields were added
+        fields_added = ["count", "sum", "batch_size"]
+        if self._compute_mean:
+            fields_added.append("mean")
+        if self._group_by and rows and self._group_by in rows[0]:
+            fields_added.append(self._group_by)
+
+        return TransformResult.success(
+            result,
+            success_reason={"action": "processed", "fields_added": fields_added},
+        )
 
     def close(self) -> None:
         """No resources to release."""

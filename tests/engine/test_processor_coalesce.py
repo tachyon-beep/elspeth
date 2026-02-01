@@ -176,7 +176,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"})
+                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -188,7 +188,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]})
+                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -359,7 +359,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "sentiment": "positive"})
+                return TransformResult.success({**row, "sentiment": "positive"}, success_reason={"action": "enrich"})
 
         class EnrichB(BaseTransform):
             name = "enrich_b"
@@ -371,7 +371,7 @@ class TestRowProcessorCoalesce:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "entities": ["ACME"]})
+                return TransformResult.success({**row, "entities": ["ACME"]}, success_reason={"action": "enrich"})
 
         # Config-driven fork gate
         fork_gate_config = GateSettings(
@@ -425,7 +425,7 @@ class TestRowProcessorCoalesce:
         coalesced = coalesced_results[0]
 
         # === Audit Trail: Verify source row exists ===
-        row = recorder.get_row(forked.row_id)
+        row = recorder.get_row(forked.token.row_id)
         assert row is not None, "Source row should be recorded"
         assert row.row_index == 0
         assert row.source_node_id == source.node_id
@@ -452,7 +452,7 @@ class TestRowProcessorCoalesce:
         for child_token_id in child_token_ids:
             parents = recorder.get_token_parents(child_token_id)
             assert len(parents) == 1, "Child token should have 1 parent"
-            assert parents[0].parent_token_id == forked.token_id, "Parent should be the forked token"
+            assert parents[0].parent_token_id == forked.token.token_id, "Parent should be the forked token"
 
         # === Audit Trail: Verify consumed tokens have node_states at coalesce ===
         # The CoalesceExecutor records node_states for consumed tokens
@@ -547,10 +547,11 @@ class TestRowProcessorCoalesce:
             row_index=0,
             row_data={"text": "ACME earnings report"},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["sentiment", "entities", "summary"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate processing: sentiment and entities complete, summary is quarantined
@@ -674,10 +675,11 @@ class TestRowProcessorCoalesce:
             row_index=0,
             row_data={"text": "test input"},
         )
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "medium", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate: fast arrives first with enriched data
@@ -846,10 +848,11 @@ class TestRowProcessorCoalesce:
         )
 
         # === Level 1: Fork to path_a and path_b (gate1) ===
-        level1_children = token_manager.fork_token(
+        level1_children, _fork_group_id1 = token_manager.fork_token(
             parent_token=initial_token,
             branches=["path_a", "path_b"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
         assert len(level1_children) == 2
         path_a_token = level1_children[0]  # branch_name="path_a"
@@ -864,10 +867,11 @@ class TestRowProcessorCoalesce:
         assert path_b_token.branch_name == "path_b"
 
         # === Level 2: path_a forks again to A1 and A2 (gate2) ===
-        level2_children = token_manager.fork_token(
+        level2_children, _fork_group_id2 = token_manager.fork_token(
             parent_token=path_a_token,
             branches=["path_a1", "path_a2"],
             step_in_pipeline=2,
+            run_id=run.run_id,
         )
         assert len(level2_children) == 2
         path_a1_token = level2_children[0]  # branch_name="path_a1"
@@ -1137,10 +1141,11 @@ class TestRowProcessorCoalesce:
         )
 
         # Fork into fast and slow branches
-        children = token_manager.fork_token(
+        children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
             branches=["fast", "slow"],
             step_in_pipeline=1,
+            run_id=run.run_id,
         )
 
         # Simulate processing: create enriched tokens for each branch
@@ -1351,8 +1356,8 @@ class TestAggregationCoalesceMetadataPropagation:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total}, success_reason={"action": "aggregate"})
+                return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
         agg_transform = as_transform(BatchAggForCoalesce())
 
@@ -1389,7 +1394,7 @@ class TestAggregationCoalesceMetadataPropagation:
             name="batch_agg_coalesce",
             plugin="batch_agg_coalesce",
             trigger=TriggerConfig(count=2),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Create coalesce executor
@@ -1435,11 +1440,13 @@ class TestAggregationCoalesceMetadataPropagation:
         )
 
         # Fork to create a token with branch_name
-        forked_token = token_manager.fork_token(
+        forked_tokens, _fork_group_id = token_manager.fork_token(
             parent_token=source_token,
             branches=["path_a"],
             step_in_pipeline=0,
-        )[0]
+            run_id=run.run_id,
+        )
+        forked_token = forked_tokens[0]
 
         assert forked_token.branch_name == "path_a"
 
@@ -1462,11 +1469,13 @@ class TestAggregationCoalesceMetadataPropagation:
             row_index=1,
             row_data={"id": 2, "value": 200},
         )
-        forked_token2 = token_manager.fork_token(
+        forked_tokens2, _fork_group_id2 = token_manager.fork_token(
             parent_token=source_token2,
             branches=["path_a"],
             step_in_pipeline=0,
-        )[0]
+            run_id=run.run_id,
+        )
+        forked_token2 = forked_tokens2[0]
 
         # Process second token - triggers flush
         results2 = processor.process_token(
@@ -1496,3 +1505,180 @@ class TestAggregationCoalesceMetadataPropagation:
                     f"_WorkItem is missing coalesce_at_step and coalesce_name. "
                     f"Result: {result}"
                 )
+
+
+class TestCoalesceSelectBranchFailure:
+    """Tests for bug 9z8: Double terminal outcome recording on select-merge failure.
+
+    When coalesce uses merge="select" and the selected branch hasn't arrived,
+    CoalesceExecutor records FAILED outcomes for arrived tokens, then
+    RowProcessor._maybe_coalesce_token also tries to record FAILED for the
+    current token, causing a unique constraint violation.
+    """
+
+    def test_select_merge_failure_records_single_outcome(self, landscape_db: "LandscapeDB") -> None:
+        """Select merge failure should record exactly one terminal outcome per token.
+
+        Bug 9z8: When select_branch not arrived with first policy:
+        1. CoalesceExecutor records FAILED for all arrived tokens (including current)
+        2. RowProcessor also records FAILED for current token
+        3. CRASH: Unique constraint violation on token_outcomes
+
+        Expected: Only ONE FAILED outcome recorded for current token.
+        """
+        from elspeth.contracts import NodeType, RoutingMode
+        from elspeth.core.config import CoalesceSettings, GateSettings
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.engine.tokens import TokenManager
+
+        recorder = LandscapeRecorder(landscape_db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        fork_gate = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="splitter",
+            node_type=NodeType.GATE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="merger",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Register edges for fork paths
+        edge_a = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=fork_gate.node_id,
+            to_node_id=coalesce_node.node_id,
+            label="branch_a",
+            mode=RoutingMode.COPY,
+        )
+        edge_b = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=fork_gate.node_id,
+            to_node_id=coalesce_node.node_id,
+            label="branch_b",
+            mode=RoutingMode.COPY,
+        )
+
+        # Setup coalesce with:
+        # - policy="first" (merge on first arrival)
+        # - merge="select" with select_branch="branch_a"
+        # When branch_b arrives first, it should fail (select_branch not arrived)
+        coalesce_settings = CoalesceSettings(
+            name="merger",
+            branches=["branch_a", "branch_b"],
+            policy="first",
+            merge="select",
+            select_branch="branch_a",
+        )
+        coalesce_executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        coalesce_executor.register_coalesce(coalesce_settings, coalesce_node.node_id)
+
+        # Config-driven fork gate that forks to both paths
+        # CRITICAL: fork_to order determines work queue order
+        # We want branch_b to arrive FIRST so select_branch="branch_a" is NOT arrived
+        fork_gate_config = GateSettings(
+            name="splitter",
+            condition="True",
+            routes={"true": "fork", "false": "continue"},
+            fork_to=["branch_b", "branch_a"],  # branch_b arrives first!
+        )
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source.node_id),
+            edge_map={
+                (NodeID(fork_gate.node_id), "branch_a"): edge_a.edge_id,
+                (NodeID(fork_gate.node_id), "branch_b"): edge_b.edge_id,
+            },
+            coalesce_executor=coalesce_executor,
+            coalesce_node_ids={CoalesceName("merger"): NodeID(coalesce_node.node_id)},
+            config_gates=[fork_gate_config],
+            config_gate_id_map={GateName("splitter"): NodeID(fork_gate.node_id)},
+            branch_to_coalesce={
+                BranchName("branch_a"): CoalesceName("merger"),
+                BranchName("branch_b"): CoalesceName("merger"),
+            },
+            coalesce_step_map={CoalesceName("merger"): 1},  # After gate
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process a row - this will:
+        # 1. Fork at gate to branch_a and branch_b
+        # 2. Process branch_b first (implementation dependent, but both will try to coalesce)
+        # 3. First arrival triggers merge (policy=first)
+        # 4. But select_branch="branch_a" is not arrived
+        # 5. Failure should record FAILED for arrived token
+        # 6. BUG: RowProcessor ALSO records FAILED → unique constraint violation
+
+        # This should NOT raise an IntegrityError
+        results = processor.process_row(
+            row_index=0,
+            row_data={"text": "test"},
+            transforms=[],
+            ctx=ctx,
+        )
+
+        # Verify we got results (not a crash)
+        assert len(results) > 0
+
+        # Verify at least one FAILED outcome for the coalesce failure
+        failed_results = [r for r in results if r.outcome == RowOutcome.FAILED]
+        assert len(failed_results) >= 1, "Should have at least one FAILED result from coalesce failure"
+
+        # Verify the failure reasons are correct:
+        # - branch_b (first to arrive): fails with "select_branch_not_arrived"
+        # - branch_a (late arrival): fails with "late_arrival_after_merge"
+        failure_messages = {r.error.message for r in failed_results if r.error and r.error.exception_type == "CoalesceFailure"}
+        assert "select_branch_not_arrived" in failure_messages or "late_arrival_after_merge" in failure_messages, (
+            f"Expected coalesce failures, got: {failure_messages}"
+        )
+
+        # Query the database to verify no duplicate outcomes
+        from sqlalchemy import func, select
+
+        from elspeth.core.landscape.schema import token_outcomes_table
+
+        with landscape_db.engine.connect() as conn:
+            # Count outcomes per token_id - should never be > 1
+            stmt = (
+                select(
+                    token_outcomes_table.c.token_id,
+                    func.count().label("count"),
+                )
+                .group_by(token_outcomes_table.c.token_id)
+                .having(func.count() > 1)
+            )
+            duplicates = conn.execute(stmt).fetchall()
+            assert len(duplicates) == 0, (
+                f"Bug 9z8: Found duplicate terminal outcomes for tokens: {duplicates}. "
+                f"CoalesceExecutor and RowProcessor both recorded outcomes for the same token."
+            )

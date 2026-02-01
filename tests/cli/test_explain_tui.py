@@ -1,5 +1,7 @@
 """Tests for explain command TUI integration."""
 
+from sqlalchemy.exc import OperationalError
+
 from elspeth.contracts import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.tui.screens.explain_screen import (
@@ -39,6 +41,16 @@ class TestExplainScreen:
         widgets = screen.get_widget_types()
 
         assert "NodeDetailPanel" in widgets
+
+    def test_detail_panel_property_accessible(self) -> None:
+        """detail_panel property provides public access to NodeDetailPanel."""
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        screen = ExplainScreen()
+        panel = screen.detail_panel
+
+        assert isinstance(panel, NodeDetailPanel)
 
     def test_screen_initializes_with_db(self) -> None:
         """Screen can be initialized with database connection."""
@@ -278,7 +290,7 @@ class TestExplainScreenStateModel:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Simulated database error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Simulated database error")),
         ):
             screen = ExplainScreen(db=db, run_id="test-run-id")
 
@@ -301,7 +313,7 @@ class TestExplainScreenStateModel:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Connection failed"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Connection failed")),
         ):
             screen = ExplainScreen(db=db, run_id="retry-test-run")
 
@@ -352,7 +364,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Network timeout"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Network timeout")),
         ):
             screen.load(db, "test-run-id")
 
@@ -398,7 +410,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Error")),
         ):
             screen = ExplainScreen(db=db, run_id="test-run")
 
@@ -430,7 +442,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Temporary error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Temporary error")),
         ):
             screen = ExplainScreen(db=db, run_id=run.run_id)
 
@@ -455,7 +467,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("First error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("First error")),
         ):
             screen = ExplainScreen(db=db, run_id="test-run")
 
@@ -466,7 +478,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Second error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Second error")),
         ):
             screen.retry()
 
@@ -543,7 +555,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Error")),
         ):
             screen = ExplainScreen(db=db, run_id="test-run")
 
@@ -635,7 +647,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Error"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Error")),
         ):
             screen = ExplainScreen(db=db, run_id=run.run_id)
 
@@ -645,7 +657,7 @@ class TestExplainScreenStateTransitions:
         with patch.object(
             LandscapeRecorder,
             "get_nodes",
-            side_effect=RuntimeError("Still broken"),
+            side_effect=OperationalError("SELECT 1", {}, Exception("Still broken")),
         ):
             screen.retry()
 

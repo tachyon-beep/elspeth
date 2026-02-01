@@ -36,11 +36,13 @@ During RC-1 development, schema validation was discovered to be completely non-f
 
 ## Final Solution
 
-**Active plan:** `2026-01-25-validation-subsystem-extraction.md` (at root level)
+**Architectural Decision:** [ADR 003: Schema Validation Lifecycle](../../../design/adr/003-schema-validation-lifecycle.md)
 
-**Approach:** Extract validation from `__init__()` to a separate pre-instantiation `PluginConfigValidator` subsystem. This eliminates the temporal mismatch entirely by making validation explicit and separate from construction.
+**Implementation Plan:** [Validation Subsystem Extraction](../completed/2026-01-25-validation-subsystem-extraction.md)
 
-**Status as of Jan 25:** Being implemented
+**Approach:** Restructure CLI to instantiate plugins BEFORE graph construction, then build the graph from plugin instances using `ExecutionGraph.from_plugin_instances()`. This eliminates the temporal mismatch by making schemas available when the graph is constructed.
+
+**Status:** Implemented and accepted
 
 ## Git History Evidence
 
@@ -90,13 +92,14 @@ Several related bugs were closed during this process (in `docs/bugs/closed/`):
 ## For Future Reference
 
 If modifying validation or schema handling:
-1. Read the final solution first: `../2026-01-25-validation-subsystem-extraction.md`
-2. Review these attempts to understand **what doesn't work** and why
-3. Check git history for the actual implementation commits
-4. Verify related bugs are still closed after changes
+1. Read the ADR first: [ADR 003: Schema Validation Lifecycle](../../../design/adr/003-schema-validation-lifecycle.md)
+2. Review the implementation plan: [Validation Subsystem Extraction](../completed/2026-01-25-validation-subsystem-extraction.md)
+3. Review these attempts to understand **what doesn't work** and why
+4. Check git history for the actual implementation commits
+5. Verify related bugs are still closed after changes
 
 ---
 
 **Archived:** 2026-01-25
 **Context:** Iterative problem-solving during schema validation crisis (Jan 24-25, 2026)
-**Final Solution:** Validation subsystem extraction (being implemented)
+**Final Solution:** [ADR 003: Schema Validation Lifecycle](../../../design/adr/003-schema-validation-lifecycle.md)

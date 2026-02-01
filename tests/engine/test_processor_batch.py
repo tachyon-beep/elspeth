@@ -53,8 +53,8 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -99,7 +99,10 @@ class TestProcessorBatchTransforms:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 3 rows - should buffer first 2, flush on 3rd
-        results = []
+        # Note: default output_mode is "transform", which means:
+        # - All 3 original rows get CONSUMED_IN_BATCH
+        # - The flush produces a NEW row with the aggregated result
+        all_results = []
         for i in range(3):
             result_list = processor.process_row(
                 row_index=i,
@@ -107,17 +110,16 @@ class TestProcessorBatchTransforms:
                 transforms=[transform],
                 ctx=ctx,
             )
-            # process_row returns list[RowResult] - take first item
-            results.append(result_list[0])
+            all_results.extend(result_list)
 
-        # First two rows consumed into batch
-        assert results[0].outcome == RowOutcome.CONSUMED_IN_BATCH
-        assert results[1].outcome == RowOutcome.CONSUMED_IN_BATCH
+        # In transform mode, all original rows are CONSUMED_IN_BATCH
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        assert len(consumed) == 3, f"Expected 3 consumed rows, got {len(consumed)}"
 
-        # Third row triggers flush - transform receives [1, 2, 3]
-        # Result should have total = 6
-        assert results[2].outcome == RowOutcome.COMPLETED
-        assert results[2].final_data == {"total": 6}
+        # The flush produces a NEW aggregated row that gets COMPLETED
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+        assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
+        assert completed[0].final_data == {"total": 6}
 
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
@@ -144,9 +146,9 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode - sum all values
-                    return TransformResult.success({"value": sum(r["value"] for r in rows)})
+                    return TransformResult.success({"value": sum(r["value"] for r in rows)}, success_reason={"action": "test"})
                 # Single-row mode - double
-                return TransformResult.success({"value": rows["value"] * 2})
+                return TransformResult.success({"value": rows["value"] * 2}, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -221,8 +223,8 @@ class TestProcessorBatchTransforms:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     total = sum(r["value"] for r in rows)
-                    return TransformResult.success({"total": total})
-                return TransformResult.success(rows)
+                    return TransformResult.success({"total": total}, success_reason={"action": "test"})
+                return TransformResult.success(rows, success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -277,6 +279,7 @@ class TestProcessorBatchTransforms:
 
         # Simulate restored checkpoint with 2 rows already buffered
         # Note: _version field required since Bug #12 checkpoint versioning fix
+        # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
         restored_buffer_state = {
             "_version": "1.0",
             sum_node.node_id: {
@@ -295,6 +298,7 @@ class TestProcessorBatchTransforms:
                     },
                 ],
                 "batch_id": old_batch.batch_id,
+                "elapsed_age_seconds": 0.0,  # Bug #6: timeout elapsed time
             },
         }
 
@@ -315,6 +319,9 @@ class TestProcessorBatchTransforms:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process 1 more row - should trigger flush (2 restored + 1 new = 3)
+        # Note: default output_mode is "transform", which means:
+        # - The triggering row gets CONSUMED_IN_BATCH
+        # - The flush produces a NEW row with the aggregated result
         result_list = processor.process_row(
             row_index=2,
             row_data={"value": 3},  # Third value
@@ -322,10 +329,14 @@ class TestProcessorBatchTransforms:
             ctx=ctx,
         )
 
-        # Should trigger and get total of all 3 rows
-        result = result_list[0]
-        assert result.outcome == RowOutcome.COMPLETED
-        assert result.final_data == {"total": 6}  # 1 + 2 + 3
+        # In transform mode: triggering row is CONSUMED_IN_BATCH,
+        # plus a NEW aggregated row that is COMPLETED
+        consumed = [r for r in result_list if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in result_list if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
+        assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
+        assert completed[0].final_data == {"total": 6}  # 1 + 2 + 3
 
 
 class TestProcessorDeaggregation:
@@ -353,7 +364,8 @@ class TestProcessorDeaggregation:
                     [
                         {**row, "copy": 1},
                         {**row, "copy": 2},
-                    ]
+                    ],
+                    success_reason={"action": "test"},
                 )
 
         # Setup real recorder
@@ -408,8 +420,8 @@ class TestProcessorDeaggregation:
         assert len(completed) == 2
 
         # Children should have different token_ids but same row_id
-        assert completed[0].token_id != completed[1].token_id
-        assert completed[0].row_id == completed[1].row_id
+        assert completed[0].token.token_id != completed[1].token.token_id
+        assert completed[0].token.row_id == completed[1].token.row_id
 
         # Children should have the expanded data
         child_copies = {r.final_data["copy"] for r in completed}
@@ -434,7 +446,7 @@ class TestProcessorDeaggregation:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success_multi([row, row])  # But returns multi!
+                return TransformResult.success_multi([row, row], success_reason={"action": "test"})  # But returns multi!
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
@@ -512,7 +524,13 @@ class TestProcessorDeaggregation:
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
                 # This should NOT be masked by defensive {} substitution
-                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                result = TransformResult(
+                    status="success",
+                    row=None,
+                    reason=None,
+                    rows=None,
+                    success_reason={"action": "test"},  # Required, but row=None is still the bug
+                )
                 return result
 
         db = LandscapeDB.in_memory()
@@ -542,7 +560,7 @@ class TestProcessorDeaggregation:
                 name="bad_agg",
                 plugin="bad_transform",
                 trigger=TriggerConfig(count=2),
-                output_mode="single",
+                output_mode="transform",
             ),
         }
 
@@ -609,7 +627,13 @@ class TestProcessorDeaggregation:
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
                 # Bug in plugin: creates TransformResult with row=None (contract violation)
-                result = TransformResult(status="success", row=None, reason=None, rows=None)
+                result = TransformResult(
+                    status="success",
+                    row=None,
+                    reason=None,
+                    rows=None,
+                    success_reason={"action": "test"},  # Required, but row=None is still the bug
+                )
                 return result
 
         db = LandscapeDB.in_memory()

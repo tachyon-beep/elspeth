@@ -12,7 +12,8 @@ This manual covers day-to-day usage of the ELSPETH CLI for running auditable pip
 6. [Explaining Pipeline Results](#explaining-pipeline-results)
 7. [Managing Storage](#managing-storage)
 8. [Resuming Failed Runs](#resuming-failed-runs)
-9. [Examples](#examples)
+9. [Health Checks](#health-checks)
+10. [Examples](#examples)
 
 ---
 
@@ -39,92 +40,9 @@ elspeth --help
 
 ## Environment Configuration
 
-### Automatic .env Loading
+See [Environment Variables Reference](reference/environment-variables.md) for the complete list of supported variables, including LLM provider keys, Azure service credentials, and security settings.
 
-ELSPETH automatically loads environment variables from a `.env` file when you run any command. This eliminates the need to manually `source .env` before running pipelines.
-
-**How it works:**
-
-1. When any `elspeth` command runs, it looks for `.env` in the current directory
-2. If not found, it searches parent directories
-3. Variables from `.env` are loaded into the environment
-4. Existing environment variables are **not** overwritten
-
-### Example .env File
-
-Create a `.env` file in your project root:
-
-```bash
-# .env - ELSPETH environment configuration
-
-# ═══════════════════════════════════════════════════════════════════
-# LLM API Keys
-# ═══════════════════════════════════════════════════════════════════
-
-# OpenRouter (for openrouter_llm transform)
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
-
-# Azure OpenAI (for azure_llm and azure_batch_llm transforms)
-AZURE_OPENAI_API_KEY=your-azure-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-
-# Azure Content Safety (for azure_content_safety transform)
-AZURE_CONTENT_SAFETY_KEY=your-content-safety-key
-AZURE_CONTENT_SAFETY_ENDPOINT=https://your-resource.cognitiveservices.azure.com
-
-# ═══════════════════════════════════════════════════════════════════
-# ELSPETH Security Settings
-# ═══════════════════════════════════════════════════════════════════
-
-# Secret fingerprinting key (REQUIRED for production)
-# Used to hash API keys before storing in audit trail
-ELSPETH_FINGERPRINT_KEY=your-stable-secret-key
-
-# Signing key for audit exports (optional)
-# Enables HMAC signatures on exported audit records
-ELSPETH_SIGNING_KEY=your-signing-key
-
-# ═══════════════════════════════════════════════════════════════════
-# Development Settings (DO NOT USE IN PRODUCTION)
-# ═══════════════════════════════════════════════════════════════════
-
-# Skip secret fingerprinting (development only!)
-# ELSPETH_ALLOW_RAW_SECRETS=true
-```
-
-### Skipping .env Loading
-
-In CI/CD or containerized environments where secrets are injected externally:
-
-```bash
-# Skip .env loading entirely
-elspeth --no-dotenv run -s settings.yaml --execute
-```
-
-### Security Best Practices
-
-1. **Never commit `.env` to version control**
-
-   Add to `.gitignore`:
-   ```gitignore
-   .env
-   .env.local
-   .env.*.local
-   ```
-
-2. **Use different keys per environment**
-
-   ```bash
-   # Production: Real fingerprint key for audit integrity
-   ELSPETH_FINGERPRINT_KEY=prod-key-that-never-changes
-
-   # Development: Can use any value
-   ELSPETH_FINGERPRINT_KEY=dev-key
-   ```
-
-3. **Set `ELSPETH_FINGERPRINT_KEY` in production**
-
-   Without this, ELSPETH will refuse to run if your config contains API keys. This prevents accidental secret leakage to audit databases.
+**Quick start:** Copy `.env.example` to `.env` (or create a new `.env` file) and fill in your API keys. ELSPETH automatically loads `.env` files from the current or parent directories.
 
 ---
 
@@ -138,6 +56,9 @@ elspeth [OPTIONS] COMMAND [ARGS]
 Options:
   --version, -V    Show version and exit
   --no-dotenv      Skip loading .env file
+  --env-file PATH  Path to .env file (skips automatic search)
+  --verbose, -v    Enable verbose/debug logging
+  --json-logs      Output structured JSON logs (for machine processing)
   --help           Show help message
 ```
 
@@ -151,6 +72,7 @@ Options:
 | `plugins list` | List available plugins |
 | `purge` | Delete old payloads to free storage |
 | `resume` | Resume a failed run from checkpoint |
+| `health` | Check system health for deployment verification |
 
 ---
 
@@ -334,174 +256,206 @@ Resume mode:
 
 ---
 
-## Examples
+## Health Checks
 
-### Example 1: Simple CSV Processing
-
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/data.csv
-    schema:
-      fields: dynamic
-
-row_plugins:
-  - plugin: field_mapper
-    options:
-      mapping:
-        full_name: "{{ row.first_name }} {{ row.last_name }}"
-
-sinks:
-  output:
-    plugin: csv
-    options:
-      path: output/processed.csv
-      schema:
-        fields: dynamic
-
-default_sink: output
-
-landscape:
-  url: sqlite:///runs/audit.db
-```
+The `health` command verifies system readiness for deployment:
 
 ```bash
-elspeth run -s settings.yaml --execute
+# Basic health check
+elspeth health
+
+# Verbose output with details
+elspeth health --verbose
+
+# JSON output (for automation)
+elspeth health --json
 ```
 
-### Example 2: LLM Sentiment Analysis
+### Health Check Options
 
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/reviews.csv
-    schema:
-      fields: dynamic
+| Option | Description |
+|--------|-------------|
+| `--verbose, -v` | Include detailed check information |
+| `--json, -j` | Output as JSON |
 
-row_plugins:
-  - plugin: openrouter_llm
-    options:
-      api_key: "${OPENROUTER_API_KEY}"
-      model: "openai/gpt-4o-mini"
-      template: |
-        Analyze sentiment: {{ row.text }}
-        Respond with JSON: {"sentiment": "positive/negative/neutral"}
-      response_field: analysis
+### What Gets Checked
 
-sinks:
-  output:
-    plugin: csv
-    options:
-      path: output/analyzed.csv
-      schema:
-        fields: dynamic
+- **version**: ELSPETH version
+- **commit**: Git commit SHA (if available)
+- **python**: Python version
+- **database**: Database connectivity (if `DATABASE_URL` is set)
+- **plugins**: Plugin availability
 
-default_sink: output
+### Example JSON Output
 
-landscape:
-  url: sqlite:///runs/audit.db
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0",
+  "commit": "abc123f",
+  "checks": {
+    "version": {"status": "ok", "value": "0.1.0"},
+    "python": {"status": "ok", "value": "3.11.9"},
+    "database": {"status": "ok", "value": "connected"},
+    "plugins": {"status": "ok", "value": "4 sources, 11 transforms, 4 sinks"}
+  }
+}
 ```
+
+---
+
+## Examples Walkthrough
+
+ELSPETH includes several example pipelines in `examples/`:
+
+### 1. Boolean Routing
+
+Routes rows based on a true/false field.
 
 ```bash
-# Just run - .env is loaded automatically
-elspeth run -s settings.yaml --execute
+elspeth run -s examples/boolean_routing/settings.yaml --execute
 ```
 
-### Example 3: Content Moderation with Routing
+**Input:** CSV with `approved` column (true/false)
+**Output:** Separate CSVs for approved and rejected rows
 
-```yaml
-# settings.yaml
-datasource:
-  plugin: csv
-  options:
-    path: input/submissions.csv
-
-gates:
-  - name: safety_check
-    condition: "row.get('flagged', False)"
-    routes:
-      "true": review_queue
-      "false": continue
-
-sinks:
-  approved:
-    plugin: csv
-    options:
-      path: output/approved.csv
-  review_queue:
-    plugin: csv
-    options:
-      path: output/needs_review.csv
-
-default_sink: approved
-
-landscape:
-  url: sqlite:///runs/audit.db
+**Verify:**
+```bash
+wc -l examples/boolean_routing/output/*.csv
+#   6 approved.csv   (5 data rows + header)
+#   6 rejected.csv   (5 data rows + header)
 ```
+
+### 2. Threshold Gate
+
+Routes high-value transactions to separate output.
+
+```bash
+elspeth run -s examples/threshold_gate/settings.yaml --execute
+```
+
+**Input:** CSV with `amount` column
+**Output:** High values (>1000) and normal values in separate files
+
+**Verify:**
+```bash
+cat examples/threshold_gate/output/high_values.csv | head -3
+# id,amount,description
+# 2,1500,Large purchase
+# 4,2000,Premium service
+```
+
+### 3. Batch Aggregation
+
+Computes statistics over batches of rows.
+
+```bash
+elspeth run -s examples/batch_aggregation/settings.yaml --execute
+```
+
+**Input:** 15 transactions
+**Output:** 3 batch summaries (one per 5 rows, grouped by category)
+
+**Verify:**
+```bash
+cat examples/batch_aggregation/output/batch_summaries.csv
+# category,count,sum,mean
+# electronics,5,2750,550.0
+# clothing,5,1250,250.0
+# groceries,5,375,75.0
+```
+
+### 4. Deaggregation
+
+Demonstrates N→M row expansion with new tokens.
+
+```bash
+elspeth run -s examples/deaggregation/settings.yaml --execute
+```
+
+**Input:** 6 rows with `copies` field (values: 2,1,3,2,1,2 = 11 total)
+**Output:** 11 rows (each replicated by its copies value)
+
+**Verify:**
+```bash
+wc -l examples/deaggregation/output/replicated.csv
+# 12 (11 data rows + header)
+
+head -4 examples/deaggregation/output/replicated.csv
+# id,name,copies,category,copy_index
+# 1,Alice,2,standard,0
+# 1,Alice,2,standard,1
+# 2,Bob,1,premium,0
+```
+
+### 5. JSON Explode
+
+Expands array fields into individual rows.
+
+```bash
+elspeth run -s examples/json_explode/settings.yaml --execute
+```
+
+**Input:** 3 orders with `items` arrays
+**Output:** 6 rows (one per item)
+
+**Verify:**
+```bash
+cat examples/json_explode/output/order_items.json | head -20
+# Shows individual items with order_id, item details, and item_index
+```
+
+### 6. Audit Export
+
+Exports complete audit trail to JSON for compliance.
+
+```bash
+elspeth run -s examples/audit_export/settings.yaml --execute
+```
+
+**Input:** 8 submissions
+**Output:** Routed results + complete audit trail JSON
+
+**Verify:**
+```bash
+# Check routed outputs
+wc -l examples/audit_export/output/*.csv
+#   5 corporate.csv      (4 data rows + header)
+#   5 non_corporate.csv  (4 data rows + header)
+
+# Check audit trail exists and has content
+ls -la examples/audit_export/output/audit_trail.json
+# Should show non-zero file size
+```
+
+### Additional Examples
+
+For more complex scenarios, see the configuration reference:
+
+- **LLM Sentiment Analysis** - Using `openrouter_llm` plugin with templates
+- **Content Moderation with Routing** - Gates with condition expressions
+- **Fork/Join Patterns** - Parallel processing with coalesce
+
+See [Configuration Reference](reference/configuration.md) for the complete settings documentation.
 
 ---
 
 ## Troubleshooting
 
-### "Secret field found but ELSPETH_FINGERPRINT_KEY is not set"
+For comprehensive troubleshooting, see the [Troubleshooting Guide](guides/troubleshooting.md).
 
-Your configuration contains API keys but the fingerprint key isn't set:
+### Quick Fixes
 
+**"ELSPETH_FINGERPRINT_KEY is not set"** - Set the key or allow raw secrets for development:
 ```bash
-# Option 1: Set fingerprint key (production)
 export ELSPETH_FINGERPRINT_KEY="your-key"
-
-# Option 2: Allow raw secrets (development only)
+# OR for development only:
 export ELSPETH_ALLOW_RAW_SECRETS=true
 ```
 
-Or add to `.env`:
-```bash
-ELSPETH_FINGERPRINT_KEY=your-key
-```
+**"Unknown plugin: xyz"** - Check available plugins with `elspeth plugins list` (names are case-sensitive).
 
-### "Unknown plugin: xyz"
-
-Check available plugins:
-```bash
-elspeth plugins list
-```
-
-Plugin names are case-sensitive and must match exactly.
-
-### API Authentication Errors (401/403)
-
-1. Check your `.env` file has the correct API key
-2. Verify the key is valid and not expired
-3. Ensure `.env` is in the current directory or a parent
-
-```bash
-# Debug: Check if .env is being loaded
-echo $OPENROUTER_API_KEY  # Should be empty before running
-elspeth run -s settings.yaml --execute  # .env loads here
-```
-
-### Pipeline Hangs or Times Out
-
-Check rate limiting and timeout configuration:
-```yaml
-concurrency:
-  max_workers: 4
-  rate_limit:
-    calls_per_minute: 60
-```
-
-For LLM transforms, increase timeout:
-```yaml
-row_plugins:
-  - plugin: azure_llm
-    options:
-      timeout: 120  # seconds
-```
+**Pipeline hangs** - Run with `--verbose` to identify the bottleneck and check your rate limit configuration.
 
 ---
 

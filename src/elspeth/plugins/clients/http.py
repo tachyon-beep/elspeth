@@ -4,18 +4,21 @@
 from __future__ import annotations
 
 import base64
-import logging
 import os
 import time
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
 import httpx
+import structlog
 
 from elspeth.contracts import CallStatus, CallType
-from elspeth.plugins.clients.base import AuditedClientBase
+from elspeth.core.canonical import stable_hash
+from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
+from elspeth.telemetry.events import ExternalCallCompleted
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -30,11 +33,14 @@ class AuditedHTTPClient(AuditedClientBase):
     - Auth header fingerprinting (HMAC fingerprint stored, not raw secrets)
     - Latency measurement
     - Error recording
+    - Telemetry emission after successful audit recording
 
     Example:
         client = AuditedHTTPClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=telemetry_emit,
             base_url="https://api.example.com",
             headers={"Authorization": "Bearer ..."},
         )
@@ -47,6 +53,8 @@ class AuditedHTTPClient(AuditedClientBase):
         self,
         recorder: LandscapeRecorder,
         state_id: str,
+        run_id: str,
+        telemetry_emit: TelemetryEmitCallback,
         *,
         timeout: float = 30.0,
         base_url: str | None = None,
@@ -57,11 +65,13 @@ class AuditedHTTPClient(AuditedClientBase):
         Args:
             recorder: LandscapeRecorder for audit trail storage
             state_id: Node state ID to associate calls with
+            run_id: Pipeline run ID for telemetry correlation
+            telemetry_emit: Callback to emit telemetry events
             timeout: Request timeout in seconds (default: 30.0)
             base_url: Optional base URL to prepend to all requests
             headers: Default headers for all requests
         """
-        super().__init__(recorder, state_id)
+        super().__init__(recorder, state_id, run_id, telemetry_emit)
         self._timeout = timeout
         self._base_url = base_url
         self._default_headers = headers or {}
@@ -164,6 +174,26 @@ class AuditedHTTPClient(AuditedClientBase):
             and "secret" not in k.lower()
             and "token" not in k.lower()
         }
+
+    def _extract_provider(self, url: str) -> str:
+        """Extract provider (host) from URL for telemetry.
+
+        SECURITY: This method MUST NOT leak credentials. URLs may contain
+        embedded userinfo (e.g., https://user:pass@host/). We use hostname
+        only, which strips the userinfo component per RFC 3986.
+
+        Args:
+            url: Full URL
+
+        Returns:
+            Host portion of URL (e.g., "api.example.com"), without credentials
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        # SECURITY: Use hostname (not netloc) to avoid leaking credentials.
+        # netloc = [userinfo@]host[:port], hostname = just the host
+        return parsed.hostname or "unknown"
 
     def post(
         self,
@@ -292,6 +322,35 @@ class AuditedHTTPClient(AuditedClientBase):
                 latency_ms=latency_ms,
             )
 
+            # Telemetry emitted AFTER successful Landscape recording
+            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.HTTP,
+                        provider=self._extract_provider(full_url),
+                        status=call_status,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
+                        request_hash=stable_hash(request_data),
+                        response_hash=stable_hash(response_data),
+                        token_usage=None,  # HTTP calls don't have token usage
+                    )
+                )
+            except Exception as tel_err:
+                # Telemetry failure must not corrupt the successful call
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="http",
+                )
+
             return response
 
         except Exception as e:
@@ -309,4 +368,34 @@ class AuditedHTTPClient(AuditedClientBase):
                 },
                 latency_ms=latency_ms,
             )
+
+            # Telemetry emitted AFTER successful Landscape recording (even for call errors)
+            # Wrapped in try/except to prevent telemetry failures from corrupting error handling
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.HTTP,
+                        provider=self._extract_provider(full_url),
+                        status=CallStatus.ERROR,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
+                        request_hash=stable_hash(request_data),
+                        response_hash=None,  # No response on exception
+                        token_usage=None,
+                    )
+                )
+            except Exception as tel_err:
+                # Telemetry failure must not corrupt the error handling flow
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="http",
+                )
+
             raise

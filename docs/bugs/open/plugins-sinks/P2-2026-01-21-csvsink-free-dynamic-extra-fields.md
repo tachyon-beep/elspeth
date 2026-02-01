@@ -92,6 +92,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `csv.DictWriter` still instantiated without `extrasaction`, so extra fields still raise. (`src/elspeth/plugins/sinks/csv_sink.py:270-288`)
+- Explicit/free schema headers still come from schema fields only, so extras are not included. (`src/elspeth/plugins/sinks/csv_sink.py:299-304`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

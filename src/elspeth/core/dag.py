@@ -457,6 +457,10 @@ class ExecutionGraph:
                 if gate.fork_to is not None:
                     node_config["fork_to"] = list(gate.fork_to)
 
+            # Extract computed output schema config if available (e.g., LLM transforms
+            # compute guaranteed_fields and audit_fields from their configuration)
+            output_schema_config = getattr(transform, "_output_schema_config", None)
+
             graph.add_node(
                 tid,
                 node_type=node_type,
@@ -464,6 +468,7 @@ class ExecutionGraph:
                 config=node_config,
                 input_schema=transform.input_schema,  # TransformProtocol requires this
                 output_schema=transform.output_schema,  # TransformProtocol requires this
+                output_schema_config=output_schema_config,
             )
 
             graph.add_edge(prev_node_id, tid, label="continue", mode=RoutingMode.MOVE)
@@ -514,6 +519,10 @@ class ExecutionGraph:
             aid = node_id("aggregation", agg_name, agg_node_config)
             aggregation_ids[AggregationName(agg_name)] = aid
 
+            # Extract computed output schema config if available (e.g., LLM aggregations
+            # compute guaranteed_fields and audit_fields from their configuration)
+            agg_output_schema_config = getattr(transform, "_output_schema_config", None)
+
             graph.add_node(
                 aid,
                 node_type="aggregation",
@@ -521,6 +530,7 @@ class ExecutionGraph:
                 config=agg_node_config,
                 input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
                 output_schema=transform.output_schema,  # TransformProtocol requires this (aggregations use transforms)
+                output_schema_config=agg_output_schema_config,
             )
 
             graph.add_edge(prev_node_id, aid, label="continue", mode=RoutingMode.MOVE)
@@ -972,8 +982,10 @@ class ExecutionGraph:
 
         # Handle dynamic schemas (no explicit fields + extra='allow')
         # These are created by _create_dynamic_schema and accept anything
-        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
-        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+        # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+        # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config["extra"] == "allow"
+        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config["extra"] == "allow"
         if producer_is_dynamic or consumer_is_dynamic:
             return  # Dynamic schemas bypass static type validation
 
@@ -1074,10 +1086,16 @@ class ExecutionGraph:
     # ===== CONTRACT VALIDATION HELPERS =====
 
     def _get_schema_config_from_node(self, node_id: str) -> SchemaConfig | None:
-        """Extract SchemaConfig from node's config dict.
+        """Extract SchemaConfig from node.
 
-        The config dict contains the raw "schema" key from plugin configuration.
-        This method parses it into a SchemaConfig for contract validation.
+        Priority:
+        1. output_schema_config from NodeInfo (computed by transform)
+        2. schema from config dict (raw config)
+
+        Transforms may compute their schema config dynamically (e.g., LLM transforms
+        determine guaranteed_fields and audit_fields from their configuration). When
+        this computed schema config is available in NodeInfo, it takes precedence
+        over the raw config dict.
 
         Args:
             node_id: Node ID to get schema config from
@@ -1087,11 +1105,12 @@ class ExecutionGraph:
         """
         node_info = self.get_node_info(node_id)
 
-        # First check if we have the parsed schema config in NodeInfo
-        # (output for producers, input for consumers)
-        # These are populated by add_node when available
+        # First check if we have computed schema config in NodeInfo
+        # (populated by from_plugin_instances when transform has _output_schema_config)
+        if node_info.output_schema_config is not None:
+            return node_info.output_schema_config
 
-        # Check raw config dict for schema
+        # Fall back to parsing from raw config dict
         schema_dict = node_info.config.get("schema")
         if schema_dict is None:
             return None
@@ -1159,9 +1178,11 @@ class ExecutionGraph:
 
         # For aggregation nodes, also check inside "options" where transform config is nested
         if node_info.node_type == "aggregation":
-            options = node_info.config.get("options", {})
-            if isinstance(options, dict):
-                required_input = options.get("required_input_fields")
+            options = node_info.config["options"]
+            if not isinstance(options, dict):
+                raise TypeError(f"Aggregation node config 'options' must be dict, got {type(options).__name__}")
+            if "required_input_fields" in options:
+                required_input = options["required_input_fields"]
                 if required_input is not None and len(required_input) > 0:
                     return frozenset(required_input)
 

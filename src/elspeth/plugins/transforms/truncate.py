@@ -82,14 +82,12 @@ class Truncate(BaseTransform):
             if suffix_len >= max_len:
                 raise ValueError(f"Suffix length ({suffix_len}) must be less than max length for field '{field_name}' ({max_len})")
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # Create schema from config
         # CRITICAL: allow_coercion=False - wrong types are source bugs
         schema = create_schema_from_config(
-            self._schema_config,
+            cfg.schema_config,
             "TruncateSchema",
             allow_coercion=False,
         )
@@ -136,7 +134,20 @@ class Truncate(BaseTransform):
                 else:
                     output[field_name] = value[:max_len]
 
-        return TransformResult.success(output)
+        # Track which fields were actually truncated
+        fields_modified = [
+            field_name
+            for field_name, max_len in self._fields.items()
+            if field_name in row and isinstance(row[field_name], str) and len(row[field_name]) > max_len
+        ]
+
+        return TransformResult.success(
+            output,
+            success_reason={
+                "action": "transformed",
+                "fields_modified": fields_modified,
+            },
+        )
 
     def close(self) -> None:
         """No resources to release."""

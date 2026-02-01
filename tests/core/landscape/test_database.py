@@ -386,3 +386,66 @@ class TestSchemaCompatibility:
 
         error_msg = str(exc_info.value)
         assert "foreign key" in error_msg.lower() or "Missing foreign keys" in error_msg
+
+
+class TestLandscapeJournal:
+    """Tests for JSONL change journal."""
+
+    def test_journal_records_committed_writes(self, tmp_path: Path) -> None:
+        import json
+
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db_path = tmp_path / "audit.db"
+        journal_path = tmp_path / "audit.journal.jsonl"
+
+        db = LandscapeDB.from_url(
+            f"sqlite:///{db_path}",
+            dump_to_jsonl=True,
+            dump_to_jsonl_path=str(journal_path),
+        )
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(
+            config={"example": "journal"},
+            canonical_version="sha256-rfc8785-v1",
+        )
+
+        assert journal_path.exists()
+        records = [json.loads(line) for line in journal_path.read_text().splitlines() if line.strip()]
+
+        assert records
+        assert any("INSERT INTO RUNS" in record["statement"].upper() for record in records)
+        assert any(run.run_id in json.dumps(record["parameters"]) for record in records)
+
+    def test_journal_skips_rolled_back_writes(self, tmp_path: Path) -> None:
+        import pytest
+
+        from elspeth.contracts import RunStatus
+        from elspeth.core.landscape._helpers import generate_id, now
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.schema import runs_table
+
+        db_path = tmp_path / "audit.db"
+        journal_path = tmp_path / "audit.journal.jsonl"
+
+        db = LandscapeDB.from_url(
+            f"sqlite:///{db_path}",
+            dump_to_jsonl=True,
+            dump_to_jsonl_path=str(journal_path),
+        )
+
+        with pytest.raises(RuntimeError), db.connection() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=generate_id(),
+                    started_at=now(),
+                    config_hash="0" * 64,
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status=RunStatus.RUNNING.value,
+                )
+            )
+            raise RuntimeError("force rollback")
+
+        assert not journal_path.exists() or journal_path.read_text().strip() == ""

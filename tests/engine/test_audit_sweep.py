@@ -23,9 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import ArtifactDescriptor, SourceRow
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase
@@ -223,7 +222,7 @@ class _PassTransform(BaseTransform):
         super().__init__({"schema": {"fields": "dynamic"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
+        return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
 class _CollectSink(_TestSinkBase):
@@ -261,7 +260,7 @@ class _CollectSink(_TestSinkBase):
 class TestAuditSweepSimplePipeline:
     """Audit sweep tests for simple linear pipelines."""
 
-    def test_linear_pipeline_passes_audit_sweep(self) -> None:
+    def test_linear_pipeline_passes_audit_sweep(self, payload_store) -> None:
         """Simple source -> transform -> sink pipeline passes all sweep queries."""
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from tests.conftest import as_sink, as_source, as_transform
@@ -279,7 +278,7 @@ class TestAuditSweepSimplePipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify rows processed
         assert len(sink.results) == 3
@@ -287,7 +286,7 @@ class TestAuditSweepSimplePipeline:
         # Run audit sweep - should pass
         assert_audit_sweep_clean(db, run.run_id)
 
-    def test_empty_source_passes_audit_sweep(self) -> None:
+    def test_empty_source_passes_audit_sweep(self, payload_store) -> None:
         """Empty source (no rows) still passes audit sweep."""
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from tests.conftest import as_sink, as_source, as_transform
@@ -305,7 +304,7 @@ class TestAuditSweepSimplePipeline:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == 0
         assert_audit_sweep_clean(db, run.run_id)
@@ -314,7 +313,7 @@ class TestAuditSweepSimplePipeline:
 class TestAuditSweepGateRouting:
     """Audit sweep tests for gate routing scenarios."""
 
-    def test_gate_continue_passes_audit_sweep(self) -> None:
+    def test_gate_continue_passes_audit_sweep(self, payload_store) -> None:
         """Gate with continue routing passes audit sweep.
 
         Note: Tokens routed to a named sink by a gate get ROUTED outcome.
@@ -348,7 +347,7 @@ class TestAuditSweepGateRouting:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # All rows should continue to default (COMPLETED outcome)
         assert len(default_sink.results) == 3
@@ -361,7 +360,7 @@ class TestAuditSweepGateRouting:
 class TestAuditSweepErrorHandling:
     """Audit sweep tests for error scenarios."""
 
-    def test_quarantined_rows_pass_audit_sweep(self) -> None:
+    def test_quarantined_rows_pass_audit_sweep(self, payload_store) -> None:
         """Rows routed to quarantine (discard) pass audit sweep."""
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from tests.conftest import as_sink, as_source, as_transform
@@ -382,7 +381,7 @@ class TestAuditSweepErrorHandling:
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 if row["value"] == 2:
                     return TransformResult.error({"reason": "test_error"})
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         source = _ListSource([{"value": 1}, {"value": 2}, {"value": 3}])
         transform = _FailingTransform()
@@ -395,7 +394,7 @@ class TestAuditSweepErrorHandling:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # value=2 should be quarantined, others processed
         assert len(sink.results) == 2
@@ -407,7 +406,7 @@ class TestAuditSweepErrorHandling:
 class TestAuditSweepMetrics:
     """Test audit sweep metrics collection."""
 
-    def test_run_audit_sweep_returns_all_query_results(self) -> None:
+    def test_run_audit_sweep_returns_all_query_results(self, payload_store) -> None:
         """run_audit_sweep returns results for all 7 queries."""
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from tests.conftest import as_sink, as_source, as_transform
@@ -425,7 +424,7 @@ class TestAuditSweepMetrics:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         results = run_audit_sweep(db, run.run_id)
 
@@ -452,7 +451,7 @@ class TestAuditSweepForkCoalesce:
     BUG: P1 fix - merged coalesce tokens were missing terminal outcomes.
     """
 
-    def test_fork_coalesce_merged_token_has_terminal_outcome(self) -> None:
+    def test_fork_coalesce_merged_token_has_terminal_outcome(self, payload_store) -> None:
         """Merged token from coalesce MUST have a terminal outcome.
 
         This is a P1 audit completeness requirement: every token must reach
@@ -521,7 +520,7 @@ class TestAuditSweepForkCoalesce:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify the pipeline ran correctly
         assert run.rows_processed == 1
@@ -533,7 +532,7 @@ class TestAuditSweepForkCoalesce:
         # This will fail if merged token is missing terminal outcome
         assert_audit_sweep_clean(db, run.run_id)
 
-    def test_fork_coalesce_all_tokens_have_correct_outcomes(self) -> None:
+    def test_fork_coalesce_all_tokens_have_correct_outcomes(self, payload_store) -> None:
         """Verify each token type in fork/coalesce has correct outcome.
 
         Expected outcomes:
@@ -600,7 +599,7 @@ class TestAuditSweepForkCoalesce:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Analyze all tokens and their outcomes
         with db.connection() as conn:
@@ -649,7 +648,7 @@ class TestAuditSweepForkCoalesce:
                 f"Token {token_id} has outcome {outcome} but is_terminal={is_terminal}. Expected is_terminal=1 for all final outcomes."
             )
 
-    def test_timeout_triggered_coalesce_records_completed_outcome(self) -> None:
+    def test_timeout_triggered_coalesce_records_completed_outcome(self, payload_store) -> None:
         """Timeout-triggered coalesce merges MUST record COMPLETED for merged token.
 
         BUG P1: When check_timeouts() returns a merged token, the orchestrator
@@ -721,7 +720,7 @@ class TestAuditSweepForkCoalesce:
                 # Since we can't easily check branch name here, we use a workaround:
                 # This transform is ONLY placed on path_b, so all rows through it fail
                 return TransformResult.error(
-                    {"reason": "path_b_intentional_failure"},
+                    {"reason": "intentional_failure", "error": "path_b_intentional_failure"},
                     retryable=False,
                 )
 
@@ -784,7 +783,7 @@ class TestAuditSweepForkCoalesce:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify run completed
         assert run.rows_processed == 2
@@ -795,7 +794,7 @@ class TestAuditSweepForkCoalesce:
         # This will fail if timeout-triggered merges are missing COMPLETED outcome
         assert_audit_sweep_clean(db, run.run_id)
 
-    def test_multiple_gates_fork_coalesce_step_index(self) -> None:
+    def test_multiple_gates_fork_coalesce_step_index(self, payload_store) -> None:
         """Fork through multiple gates then coalesce must not collide step indices.
 
         BUG P1: coalesce_step_map is computed as len(transforms) + len(gates) + i,
@@ -886,7 +885,7 @@ class TestAuditSweepForkCoalesce:
 
         # This will raise IntegrityError if step_index collision happens:
         # sqlite3.IntegrityError: UNIQUE constraint failed: node_states.token_id, node_states.step_index, node_states.attempt
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # If we get here, verify normal operation
         assert run.rows_processed == 1

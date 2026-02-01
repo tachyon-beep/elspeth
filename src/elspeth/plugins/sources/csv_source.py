@@ -15,15 +15,18 @@ from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.plugins.base import BaseSource
-from elspeth.plugins.config_base import SourceDataConfig
+from elspeth.plugins.config_base import TabularSourceDataConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 
 
-class CSVSourceConfig(SourceDataConfig):
+class CSVSourceConfig(TabularSourceDataConfig):
     """Configuration for CSV source plugin.
 
-    Inherits from SourceDataConfig, which requires schema and on_validation_failure.
+    Inherits from TabularSourceDataConfig, which provides:
+    - schema and on_validation_failure (from SourceDataConfig)
+    - columns, normalize_fields, field_mapping (field normalization)
     """
 
     delimiter: str = ","
@@ -40,6 +43,12 @@ class CSVSource(BaseSource):
         delimiter: Field delimiter (default: ",")
         encoding: File encoding (default: "utf-8")
         skip_rows: Number of header rows to skip (default: 0)
+
+    Field normalization options (via TabularSourceDataConfig):
+        normalize_fields: Normalize messy headers to valid identifiers (default: False)
+        field_mapping: Override specific normalized names (requires normalize_fields)
+        columns: Explicit column names for headerless files (mutually exclusive
+                 with normalize_fields)
 
     The schema can be:
         - Dynamic: {"fields": "dynamic"} - accept any fields
@@ -60,9 +69,15 @@ class CSVSource(BaseSource):
         self._encoding = cfg.encoding
         self._skip_rows = cfg.skip_rows
 
-        # Store schema config for audit trail
-        # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
-        assert cfg.schema_config is not None
+        # Store normalization config for use in load()
+        self._columns = cfg.columns
+        self._normalize_fields = cfg.normalize_fields
+        self._field_mapping = cfg.field_mapping
+
+        # Field resolution computed at load() time - includes version for audit
+        self._field_resolution: FieldResolution | None = None
+
+        # Store schema config for audit trail (required by DataPluginConfig)
         self._schema_config = cfg.schema_config
 
         # Store quarantine routing destination
@@ -80,10 +95,15 @@ class CSVSource(BaseSource):
         self.output_schema = self._schema_class
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
-        """Load rows from CSV file.
+        """Load rows from CSV file with optional field normalization.
 
         Uses csv.reader directly on file handle to properly support
         multiline quoted fields (e.g., "field with\nembedded newline").
+
+        Field resolution modes:
+        - Default: Headers read from file, used as-is
+        - normalize_fields=True: Headers normalized to valid Python identifiers
+        - columns=[...]: Headerless file, use explicit column names
 
         Each row is validated against the configured schema:
         - Valid rows are yielded as SourceRow.valid()
@@ -94,6 +114,8 @@ class CSVSource(BaseSource):
 
         Raises:
             FileNotFoundError: If CSV file does not exist.
+            ValueError: If field collision detected after normalization,
+                       or column count mismatch in headerless mode.
         """
         if not self._path.exists():
             raise FileNotFoundError(f"CSV file not found: {self._path}")
@@ -108,11 +130,27 @@ class CSVSource(BaseSource):
             # Create csv.reader on file handle for multiline field support
             reader = csv.reader(f, delimiter=self._delimiter)
 
-            # Read header row
-            try:
-                headers = next(reader)
-            except StopIteration:
-                return  # Empty file after skip_rows
+            # Determine headers based on config
+            if self._columns is not None:
+                # Headerless mode - use explicit columns
+                raw_headers = None
+            else:
+                # Read header row from file
+                try:
+                    raw_headers = next(reader)
+                except StopIteration:
+                    return  # Empty file after skip_rows
+
+            # Resolve field names (normalization + mapping)
+            # This may raise ValueError on collision
+            self._field_resolution = resolve_field_names(
+                raw_headers=raw_headers,
+                normalize_fields=self._normalize_fields,
+                field_mapping=self._field_mapping,
+                columns=self._columns,
+            )
+            headers = self._field_resolution.final_headers
+            expected_count = len(headers)
 
             # Process data rows with manual iteration to catch csv.Error per row
             row_num = 0  # Logical row number (data rows only)
@@ -159,16 +197,15 @@ class CSVSource(BaseSource):
                 # Add skip_rows to get true file position (reader counts from 1 after skipped lines)
                 physical_line = reader.line_num + self._skip_rows
 
-                # Check field count matches header
-                if len(values) != len(headers):
-                    # Malformed row - field count mismatch
-                    # Use physical line number for audit trail
+                # Column count validation - quarantine malformed rows in both header and headerless modes
+                # Per Three-Tier Trust Model: source data is Tier 3 (zero trust), quarantine bad rows
+                if len(values) != expected_count:
                     raw_row = {
                         "__raw_line__": self._delimiter.join(values),
                         "__line_number__": physical_line,
                         "__row_number__": row_num,
                     }
-                    error_msg = f"CSV parse error at line {physical_line}: expected {len(headers)} fields, got {len(values)}"
+                    error_msg = f"CSV parse error at line {physical_line}: expected {expected_count} fields, got {len(values)}"
 
                     ctx.record_validation_error(
                         row=raw_row,
@@ -210,3 +247,22 @@ class CSVSource(BaseSource):
     def close(self) -> None:
         """Release resources (no-op for CSV source)."""
         pass
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping for audit trail.
+
+        Returns the mapping from original CSV headers to final field names,
+        computed during load() when normalize_fields or field_mapping is used.
+
+        Returns:
+            Tuple of (resolution_mapping, normalization_version) if field resolution
+            was computed, or None if load() hasn't been called yet or no normalization
+            was needed.
+        """
+        if self._field_resolution is None:
+            return None
+
+        return (
+            self._field_resolution.resolution_mapping,
+            self._field_resolution.normalization_version,
+        )

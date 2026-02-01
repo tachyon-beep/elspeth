@@ -4,35 +4,18 @@ All dataclasses, enums, TypedDicts, and NamedTuples that cross subsystem
 boundaries MUST be defined here. Internal types are whitelisted in
 config/cicd/contracts-whitelist.yaml.
 
-Import pattern:
+This package is a LEAF MODULE with no outbound dependencies to core/engine.
+To maintain this property, Settings classes (RetrySettings, ElspethSettings, etc.)
+are NOT re-exported here - import them from elspeth.core.config.
+
+Import patterns:
+    # Contracts (lightweight, no heavy dependencies)
     from elspeth.contracts import NodeType, TransformResult, Run
+
+    # Settings classes (from core, pulls in heavy deps)
+    from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
-# isort: skip_file
-# Import order is load-bearing: config imports MUST come last to avoid circular
-# import through core.checkpoint -> core.landscape -> contracts.
-
-from elspeth.contracts.enums import (
-    BatchStatus,
-    CallStatus,
-    CallType,
-    Determinism,
-    ExportStatus,
-    NodeStateStatus,
-    NodeType,
-    RoutingKind,
-    RoutingMode,
-    RowOutcome,
-    RunMode,
-    RunStatus,
-    TriggerType,
-)
-from elspeth.contracts.errors import (
-    BatchPendingError,
-    ExecutionError,
-    RoutingReason,
-    TransformReason,
-)
 from elspeth.contracts.audit import (
     Artifact,
     Batch,
@@ -50,6 +33,7 @@ from elspeth.contracts.audit import (
     NodeStateOpen,
     NodeStatePending,
     NonCanonicalMetadata,
+    Operation,
     RoutingEvent,
     Row,
     RowLineage,
@@ -60,8 +44,105 @@ from elspeth.contracts.audit import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
-from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
+from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+
+# =============================================================================
+# Settings classes are NOT re-exported from contracts
+# =============================================================================
+# To maintain contracts as a leaf module (no core dependencies), Settings classes
+# must be imported directly from elspeth.core.config:
+#     from elspeth.core.config import RetrySettings, ElspethSettings
+#
+# FIX: P2-2026-01-20-contracts-config-reexport-breaks-leaf-boundary
+# =============================================================================
+from elspeth.contracts.config import (
+    # Alignment documentation
+    EXEMPT_SETTINGS,
+    FIELD_MAPPINGS,
+    # Default registries
+    INTERNAL_DEFAULTS,
+    POLICY_DEFAULTS,
+    SETTINGS_TO_RUNTIME,
+    # Runtime config dataclasses
+    ExporterConfig,
+    # Runtime protocols (what engine components expect)
+    RuntimeCheckpointProtocol,
+    RuntimeConcurrencyProtocol,
+    RuntimeRateLimitProtocol,
+    RuntimeRetryProtocol,
+    RuntimeTelemetryConfig,
+    RuntimeTelemetryProtocol,
+)
+from elspeth.contracts.data import (
+    CompatibilityResult,
+    PluginSchema,
+    SchemaValidationError,
+    check_compatibility,
+    validate_row,
+)
+from elspeth.contracts.engine import RetryPolicy
+from elspeth.contracts.enums import (
+    BackpressureMode,
+    BatchStatus,
+    CallStatus,
+    CallType,
+    Determinism,
+    ExportStatus,
+    NodeStateStatus,
+    NodeType,
+    RoutingKind,
+    RoutingMode,
+    RowOutcome,
+    RunMode,
+    RunStatus,
+    TelemetryGranularity,
+    TriggerType,
+)
+from elspeth.contracts.errors import (
+    BatchPendingError,
+    CoalesceFailureReason,
+    ConfigGateReason,
+    ErrorDetail,
+    ExecutionError,
+    FrameworkBugError,
+    PluginGateReason,
+    QueryFailureDetail,
+    RoutingReason,
+    RowErrorEntry,
+    TemplateErrorEntry,
+    TransformActionCategory,
+    TransformErrorCategory,
+    TransformErrorReason,
+    TransformSuccessReason,
+    UsageStats,
+)
+from elspeth.contracts.events import (
+    GateEvaluated,
+    PhaseAction,
+    PhaseCompleted,
+    PhaseError,
+    PhaseStarted,
+    PipelinePhase,
+    RunCompletionStatus,
+    RunSummary,
+    TelemetryEvent,
+    TokenCompleted,
+    TransformCompleted,
+)
+from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.payload_store import IntegrityError, PayloadStore
+from elspeth.contracts.results import (
+    ArtifactDescriptor,
+    ExceptionResult,
+    FailureInfo,
+    GateResult,
+    RowResult,
+    SourceRow,
+    TransformResult,
+)
+from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -70,63 +151,33 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
-from elspeth.contracts.results import (
-    ArtifactDescriptor,
-    FailureInfo,
-    GateResult,
-    RowResult,
-    SourceRow,
-    TransformResult,
-)
-from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
-from elspeth.contracts.data import (
-    CompatibilityResult,
-    PluginSchema,
-    SchemaValidationError,
-    check_compatibility,
-    validate_row,
-)
-from elspeth.contracts.config import (
-    CheckpointSettings,
-    ConcurrencySettings,
-    DatabaseSettings,
-    ElspethSettings,
-    LandscapeExportSettings,
-    LandscapeSettings,
-    PayloadStoreSettings,
-    RateLimitSettings,
-    RetrySettings,
-    SinkSettings,
-    SourceSettings,
-    TransformSettings,
-)
-from elspeth.contracts.events import (
-    PhaseAction,
-    PhaseCompleted,
-    PhaseError,
-    PhaseStarted,
-    PipelinePhase,
-    RunCompleted,
-    RunCompletionStatus,
-)
-from elspeth.contracts.engine import RetryPolicy
-from elspeth.contracts.payload_store import IntegrityError, PayloadStore
-from elspeth.contracts.cli import ExecutionResult, ProgressEvent
 from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
     SanitizedDatabaseUrl,
     SanitizedWebhookUrl,
 )
-from elspeth.contracts.sink import OutputValidationResult
 
 __all__ = [  # Grouped by category for readability
     # audit
     "Artifact",
+    "Operation",
     # errors
     "BatchPendingError",
+    "FrameworkBugError",
+    "CoalesceFailureReason",
+    "ConfigGateReason",
+    "ErrorDetail",
     "ExecutionError",
+    "PluginGateReason",
+    "QueryFailureDetail",
     "RoutingReason",
-    "TransformReason",
+    "RowErrorEntry",
+    "TemplateErrorEntry",
+    "TransformActionCategory",
+    "TransformErrorCategory",
+    "TransformErrorReason",
+    "TransformSuccessReason",
+    "UsageStats",
     "Batch",
     "BatchMember",
     "BatchOutput",
@@ -151,20 +202,26 @@ __all__ = [  # Grouped by category for readability
     "TokenParent",
     "TransformErrorRecord",
     "ValidationErrorRecord",
-    # config
-    "CheckpointSettings",
-    "ConcurrencySettings",
-    "DatabaseSettings",
-    "ElspethSettings",
-    "LandscapeExportSettings",
-    "LandscapeSettings",
-    "PayloadStoreSettings",
-    "RateLimitSettings",
-    "RetrySettings",
-    "SinkSettings",
-    "SourceSettings",
-    "TransformSettings",
+    # config - Runtime protocols (contracts, not core)
+    "RuntimeCheckpointProtocol",
+    "RuntimeConcurrencyProtocol",
+    "RuntimeRateLimitProtocol",
+    "RuntimeRetryProtocol",
+    "RuntimeTelemetryProtocol",
+    # config - Runtime config dataclasses
+    "ExporterConfig",
+    "RuntimeTelemetryConfig",
+    # config - Default registries
+    "INTERNAL_DEFAULTS",
+    "POLICY_DEFAULTS",
+    # config - Alignment documentation
+    "EXEMPT_SETTINGS",
+    "FIELD_MAPPINGS",
+    "SETTINGS_TO_RUNTIME",
+    # NOTE: Settings classes (RetrySettings, ElspethSettings, etc.) are NOT here
+    # Import them from elspeth.core.config to avoid breaking the leaf boundary
     # enums
+    "BackpressureMode",
     "BatchStatus",
     "CallStatus",
     "CallType",
@@ -177,6 +234,7 @@ __all__ = [  # Grouped by category for readability
     "RowOutcome",
     "RunMode",
     "RunStatus",
+    "TelemetryGranularity",
     "TriggerType",
     # identity
     "TokenInfo",
@@ -192,6 +250,7 @@ __all__ = [  # Grouped by category for readability
     "SinkName",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
+    "ExceptionResult",
     "FailureInfo",
     "GateResult",
     "RowResult",
@@ -213,13 +272,17 @@ __all__ = [  # Grouped by category for readability
     "IntegrityError",
     "PayloadStore",
     # events
+    "GateEvaluated",
     "PhaseAction",
     "PhaseCompleted",
     "PhaseError",
     "PhaseStarted",
     "PipelinePhase",
-    "RunCompleted",
     "RunCompletionStatus",
+    "RunSummary",
+    "TelemetryEvent",
+    "TokenCompleted",
+    "TransformCompleted",
     # cli
     "ExecutionResult",
     "ProgressEvent",

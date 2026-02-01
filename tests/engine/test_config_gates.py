@@ -12,10 +12,9 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from elspeth.contracts import GateName, PluginSchema, SourceRow
+from elspeth.contracts import ArtifactDescriptor, GateName, PluginSchema, SourceRow
 from elspeth.core.config import GateSettings
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -200,7 +199,7 @@ def verify_audit_trail(
 class TestConfigGateIntegration:
     """Integration tests for config-driven gates."""
 
-    def test_config_gate_continue(self, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_continue(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gate with 'continue' destination passes rows through.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -227,7 +226,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 2
@@ -243,7 +242,7 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"completed": 2},
         )
 
-    def test_config_gate_routes_to_sink(self, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_routes_to_sink(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gate routes rows to different sinks based on condition.
 
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
@@ -275,7 +274,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -324,7 +323,7 @@ class TestConfigGateIntegration:
             true_events = [e for e in routing_events if e[1] == "true"]
             assert len(true_events) == 1, "Should have exactly 1 'true' routing event"
 
-    def test_config_gate_with_string_result(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_with_string_result(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gate condition can return a string route label.
 
         This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
@@ -400,7 +399,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -418,7 +417,7 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"routed": 3},
         )
 
-    def test_config_gate_integer_route_label(self, plugin_manager, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_integer_route_label(self, plugin_manager, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gate condition can return an integer that maps to route labels.
 
         When an expression returns an integer (e.g., row['priority'] returns 1, 2, 3),
@@ -504,7 +503,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -526,7 +525,7 @@ class TestConfigGateIntegration:
             expected_terminal_outcomes={"routed": 3},
         )
 
-    def test_config_gate_node_registered_in_landscape(self, landscape_db: LandscapeDB) -> None:
+    def test_config_gate_node_registered_in_landscape(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Config gates are registered as nodes in Landscape.
 
         P1 Fix: Added comprehensive audit trail verification beyond node registration.
@@ -552,7 +551,7 @@ class TestConfigGateIntegration:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape for registered nodes
         with db.engine.connect() as conn:
@@ -743,7 +742,7 @@ class TestConfigGateFromSettings:
 class TestMultipleConfigGates:
     """Tests for multiple config gates in sequence."""
 
-    def test_multiple_config_gates_processed_in_order(self, landscape_db: LandscapeDB) -> None:
+    def test_multiple_config_gates_processed_in_order(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Multiple config gates are processed in definition order.
 
         P1 Fix: Added audit trail verification for both gates in sequence.
@@ -781,7 +780,7 @@ class TestMultipleConfigGates:
         )
 
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         # Row passes gate1, routes to mid via gate2

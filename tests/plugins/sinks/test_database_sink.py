@@ -1,4 +1,8 @@
-"""Tests for database sink plugin."""
+"""Tests for database sink plugin.
+
+NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
+are in conftest.py as parametrized tests covering all sink plugins.
+"""
 
 from pathlib import Path
 
@@ -6,7 +10,6 @@ import pytest
 from sqlalchemy import MetaData, Table, create_engine, select
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - DataPluginConfig now requires schema
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
@@ -24,22 +27,6 @@ class TestDatabaseSink:
     def db_url(self, tmp_path: Path) -> str:
         """Create a SQLite database URL."""
         return f"sqlite:///{tmp_path / 'test.db'}"
-
-    def test_implements_protocol(self) -> None:
-        """DatabaseSink implements SinkProtocol."""
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA})
-        assert isinstance(sink, SinkProtocol)
-
-    def test_has_required_attributes(self) -> None:
-        """DatabaseSink has name and input_schema."""
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        assert DatabaseSink.name == "database"
-        # input_schema is now set per-instance based on config
-        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA})
-        assert hasattr(sink, "input_schema")
 
     def test_write_creates_table(self, db_url: str, ctx: PluginContext) -> None:
         """write() creates table and inserts rows."""

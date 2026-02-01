@@ -105,6 +105,13 @@
 - All comparison sites use enum members instead of string literals
 - Existing YAML configs continue to work without modification
 
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `AggregationSettings.output_mode` is still typed as a `Literal` in config. (`src/elspeth/core/config.py:156-159`)
+- Processor still compares `output_mode` using raw strings (e.g., `"passthrough"`/`"transform"`). (`src/elspeth/engine/processor.py:510-512`, `src/elspeth/engine/processor.py:771-776`)
+
 ## Tests
 
 - Suggested tests to run:

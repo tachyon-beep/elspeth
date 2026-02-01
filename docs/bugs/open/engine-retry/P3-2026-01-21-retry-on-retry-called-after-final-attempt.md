@@ -92,6 +92,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `on_retry` is still called solely on `is_retryable(e)` with no check for remaining attempts. (`src/elspeth/engine/retry.py:119-121`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

@@ -198,15 +198,20 @@ class CallRepository:
         self.session = session
 
     def load(self, row: Any) -> Call:
-        """Load Call from database row."""
+        """Load Call from database row.
+
+        Handles both state-parented calls (transform processing) and
+        operation-parented calls (source/sink I/O).
+        """
         return Call(
             call_id=row.call_id,
-            state_id=row.state_id,
             call_index=row.call_index,
             call_type=CallType(row.call_type),  # Convert HERE
             status=CallStatus(row.status),  # Convert HERE
             request_hash=row.request_hash,
             created_at=row.created_at,
+            state_id=row.state_id,  # NULL for operation calls
+            operation_id=row.operation_id,  # NULL for state calls
             request_ref=row.request_ref,
             response_hash=row.response_hash,
             response_ref=row.response_ref,
@@ -352,6 +357,7 @@ class NodeStateRepository:
                 duration_ms=row.duration_ms,
                 context_before_json=row.context_before_json,
                 context_after_json=row.context_after_json,
+                success_reason_json=row.success_reason_json,
             )
 
         elif status == NodeStateStatus.FAILED:
@@ -469,13 +475,22 @@ class TokenOutcomeRepository:
 
         Returns:
             TokenOutcome with outcome converted to RowOutcome enum
+
+        Raises:
+            ValueError: If is_terminal is not 0 or 1 (Tier 1 audit integrity violation)
         """
+        # Tier 1 validation: is_terminal must be exactly 0 or 1
+        # Per Data Manifesto: audit DB is OUR data - crash on any anomaly
+        if row.is_terminal not in (0, 1):
+            raise ValueError(
+                f"TokenOutcome {row.outcome_id} has invalid is_terminal={row.is_terminal!r} (expected 0 or 1) - audit integrity violation"
+            )
         return TokenOutcome(
             outcome_id=row.outcome_id,
             run_id=row.run_id,
             token_id=row.token_id,
             outcome=RowOutcome(row.outcome),  # Convert HERE
-            is_terminal=row.is_terminal == 1,  # DB stores as Integer
+            is_terminal=row.is_terminal == 1,  # DB stores as Integer, now validated
             recorded_at=row.recorded_at,
             sink_name=row.sink_name,
             batch_id=row.batch_id,
@@ -484,6 +499,7 @@ class TokenOutcomeRepository:
             expand_group_id=row.expand_group_id,
             error_hash=row.error_hash,
             context_json=row.context_json,
+            expected_branches_json=row.expected_branches_json,
         )
 
 

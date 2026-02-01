@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
+from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointManager
 from elspeth.core.landscape.database import LandscapeDB
@@ -23,7 +23,6 @@ from elspeth.core.landscape.schema import (
     token_outcomes_table,
     tokens_table,
 )
-from elspeth.core.payload_store import PayloadStore
 
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
@@ -254,37 +253,69 @@ class RecoveryManager:
             return []
 
         with self._db.engine.connect() as conn:
-            # Strategy: Find rows whose tokens do NOT have terminal sink outcomes.
+            # CORRECT SEMANTICS FOR FORK/AGGREGATION/COALESCE RECOVERY:
             #
-            # A token is "complete" if it has a terminal outcome (is_terminal=1)
-            # that indicates it reached a sink (COMPLETED or ROUTED).
+            # A row is "complete" when ALL its "leaf" tokens have terminal outcomes.
+            # "Leaf" tokens = tokens that are NOT delegation markers.
             #
-            # BUG FIX (P1-2026-01-22-recovery-skips-rows-multi-sink):
-            # Previous approach used row_index boundary from checkpoint, which
-            # failed in multi-sink scenarios where rows interleave between sinks.
-            # Example: Row 0→sink_a (done), Row 1→sink_b (failed), Row 2→sink_a (done)
-            # Old code: checkpoint at row 2, return rows > 2, miss row 1
-            # New code: return rows without terminal outcomes, includes row 1
-
-            # Step 1: Get all row_ids for this run
-            all_rows_query = (
-                select(rows_table.c.row_id, rows_table.c.row_index).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
-            )
-            all_rows = conn.execute(all_rows_query).fetchall()
-
-            if not all_rows:
-                return []
-
-            # Step 2: Find tokens with terminal outcomes for this run
-            # Terminal outcomes that should NOT be reprocessed:
-            # - COMPLETED: Row reached output sink successfully
-            # - ROUTED: Row sent to named sink by gate
-            # - QUARANTINED: Row failed validation, stored for investigation (don't auto-retry)
-            # - FAILED: Processing failed, not recoverable (don't auto-retry)
+            # Delegation markers (excluded from completion check):
+            # - FORKED: Fork parent, children carry completion status
+            # - EXPANDED: Deaggregation parent, expanded children carry status
             #
-            # Note: CONSUMED_IN_BATCH is intentionally excluded - batch completion
-            # determines if those tokens need reprocessing, not individual token outcome.
-            tokens_with_terminal_outcomes_query = (
+            # Terminal outcomes (indicate row processing is done):
+            # - COMPLETED: Reached output sink successfully
+            # - ROUTED: Sent to named sink by gate
+            # - QUARANTINED: Failed validation, stored for investigation
+            # - FAILED: Processing failed, not recoverable
+            # - CONSUMED_IN_BATCH: Absorbed into aggregation (batch recovery handles batch)
+            # - COALESCED: Merged in join (merged token carries forward)
+            #
+            # A row is "incomplete" (needs reprocessing) if ANY of:
+            # 1. No tokens at all (never started processing)
+            # 2. Any non-delegation token lacks terminal outcome
+            # 3. Has tokens but NONE have terminal outcomes (delegation marker only)
+            #
+            # BUG FIX (P2-recovery-skips-forked-rows):
+            # Previous approach: "row has ANY terminal token → complete"
+            # Failed: If child A completed but child B crashed, row marked done.
+            # Fix: "ALL non-delegation tokens must have terminal outcomes"
+
+            # Subquery: Tokens that are delegation markers (FORKED or EXPANDED)
+            # These delegate completion to their children, so exclude from completion check
+            delegation_tokens = (
+                select(token_outcomes_table.c.token_id)
+                .where(token_outcomes_table.c.run_id == run_id)
+                .where(
+                    token_outcomes_table.c.outcome.in_(
+                        [
+                            RowOutcome.FORKED.value,
+                            RowOutcome.EXPANDED.value,
+                        ]
+                    )
+                )
+            ).scalar_subquery()
+
+            # Terminal outcomes that indicate row processing is complete
+            # (excludes FORKED and EXPANDED which are delegation markers)
+            terminal_outcome_values = [
+                RowOutcome.COMPLETED.value,
+                RowOutcome.ROUTED.value,
+                RowOutcome.QUARANTINED.value,
+                RowOutcome.FAILED.value,
+                RowOutcome.CONSUMED_IN_BATCH.value,
+                RowOutcome.COALESCED.value,
+            ]
+
+            # Subquery: Tokens with terminal outcomes
+            terminal_tokens = (
+                select(token_outcomes_table.c.token_id)
+                .where(token_outcomes_table.c.run_id == run_id)
+                .where(token_outcomes_table.c.is_terminal == 1)
+                .where(token_outcomes_table.c.outcome.in_(terminal_outcome_values))
+            ).scalar_subquery()
+
+            # Subquery: Rows that have at least one terminal outcome
+            rows_with_terminal = (
                 select(tokens_table.c.row_id)
                 .distinct()
                 .select_from(
@@ -295,25 +326,40 @@ class RecoveryManager:
                 )
                 .where(token_outcomes_table.c.run_id == run_id)
                 .where(token_outcomes_table.c.is_terminal == 1)
-                .where(
-                    token_outcomes_table.c.outcome.in_(
-                        [
-                            RowOutcome.COMPLETED.value,
-                            RowOutcome.ROUTED.value,
-                            RowOutcome.QUARANTINED.value,
-                            RowOutcome.FAILED.value,
-                        ]
-                    )
-                )
-            )
-            completed_row_ids = {row.row_id for row in conn.execute(tokens_with_terminal_outcomes_query).fetchall()}
+                .where(token_outcomes_table.c.outcome.in_(terminal_outcome_values))
+            ).scalar_subquery()
 
-            # Step 3: Return rows that are NOT in the completed set
-            # These are rows that either:
-            # - Never started processing (no token outcome)
-            # - Started but failed before reaching a sink (no terminal outcome)
-            # - Were routed to a sink that failed (no terminal outcome recorded)
-            unprocessed = [row.row_id for row in all_rows if row.row_id not in completed_row_ids]
+            # Main query: Find incomplete rows
+            # Row is incomplete if:
+            # - Case 1: No tokens at all
+            # - Case 2: Has non-delegation token without terminal outcome
+            # - Case 3: Has tokens but none have terminal outcomes (delegation only)
+            #
+            # NOTE: PostgreSQL requires ORDER BY columns to be in SELECT when using DISTINCT.
+            # We select both row_id and row_index, then extract just row_id from results.
+            query = (
+                select(rows_table.c.row_id, rows_table.c.row_index)
+                .select_from(rows_table)
+                .outerjoin(
+                    tokens_table,
+                    rows_table.c.row_id == tokens_table.c.row_id,
+                )
+                .where(rows_table.c.run_id == run_id)
+                .where(
+                    # Case 1: No tokens at all
+                    (tokens_table.c.token_id.is_(None))
+                    |
+                    # Case 2: Non-delegation token without terminal outcome
+                    ((~tokens_table.c.token_id.in_(delegation_tokens)) & (~tokens_table.c.token_id.in_(terminal_tokens)))
+                    |
+                    # Case 3: Has tokens but no terminal outcomes (fork parent only)
+                    (~rows_table.c.row_id.in_(rows_with_terminal))
+                )
+                .order_by(rows_table.c.row_index)
+                .distinct()
+            )
+
+            unprocessed = [row.row_id for row in conn.execute(query).fetchall()]
 
         return unprocessed
 

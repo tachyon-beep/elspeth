@@ -193,7 +193,8 @@ class TestCSVSourceConfigValidation:
         from elspeth.plugins.config_base import PluginConfigError
         from elspeth.plugins.sources.csv_source import CSVSource
 
-        with pytest.raises(PluginConfigError, match=r"require.*schema"):
+        # DataPluginConfig requires schema_config - Pydantic enforces this natively
+        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
             CSVSource({"path": "/tmp/test.csv", "on_validation_failure": QUARANTINE_SINK})
 
     def test_missing_on_validation_failure_raises_error(self) -> None:
@@ -462,3 +463,248 @@ class TestCSVSourceQuarantineYielding:
 
         assert not results[2].is_quarantined
         assert results[2].row == {"id": "3", "name": "carol"}
+
+
+class TestCSVSourceFieldNormalization:
+    """Integration tests for CSV source with field normalization."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_normalize_fields_transforms_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """normalize_fields=True transforms messy headers to identifiers."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "messy.csv"
+        csv_file.write_text("User ID,Amount $,Data.Field\n1,100,foo\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        row = rows[0].row
+        assert row == {"user_id": "1", "amount": "100", "data_field": "foo"}
+
+    def test_normalize_with_mapping_overrides(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """field_mapping overrides normalized names."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "messy.csv"
+        csv_file.write_text("User ID,Amount\n1,100\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+                "field_mapping": {"user_id": "uid"},
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].row == {"uid": "1", "amount": "100"}
+
+    def test_columns_mode_headerless_file(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """columns config works with headerless CSV."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "headerless.csv"
+        csv_file.write_text("1,alice,100\n2,bob,200\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "columns": ["id", "name", "amount"],
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 2
+        assert rows[0].row == {"id": "1", "name": "alice", "amount": "100"}
+        assert rows[1].row == {"id": "2", "name": "bob", "amount": "200"}
+
+    def test_collision_raises_at_load(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Header collision detected at load() start."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "collision.csv"
+        csv_file.write_text("User ID,user-id,data\n1,2,3\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+            }
+        )
+
+        with pytest.raises(ValueError, match="collision"):
+            list(source.load(ctx))
+
+    def test_field_resolution_stored_for_audit(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """field_resolution is stored on source for audit trail."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "messy.csv"
+        csv_file.write_text("User ID,Amount\n1,100\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+                "field_mapping": {"user_id": "uid"},
+            }
+        )
+
+        list(source.load(ctx))
+
+        assert source._field_resolution is not None
+        assert source._field_resolution.resolution_mapping == {
+            "User ID": "uid",
+            "Amount": "amount",
+        }
+        assert source._field_resolution.normalization_version == "1.0.0"
+
+    # P0 Tests - Added per review board requirements
+
+    def test_empty_csv_file_returns_no_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Empty CSV file returns no rows without error."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "empty.csv"
+        csv_file.write_text("")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 0
+
+    def test_header_only_csv_returns_no_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """CSV with only headers returns no rows."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "header_only.csv"
+        csv_file.write_text("User ID,Amount\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 0
+
+    def test_columns_fewer_than_data_quarantines(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Headerless CSV with extra columns quarantines row (Tier-3 trust model)."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "wide.csv"
+        csv_file.write_text("1,alice,100,extra\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "columns": ["id", "name", "amount"],
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_error is not None
+        assert "expected 3 fields, got 4" in rows[0].quarantine_error
+
+    def test_columns_more_than_data_quarantines(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Headerless CSV with fewer columns quarantines row (Tier-3 trust model)."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "narrow.csv"
+        csv_file.write_text("1,alice\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "columns": ["id", "name", "amount"],
+            }
+        )
+
+        rows = list(source.load(ctx))
+        assert len(rows) == 1
+        assert rows[0].is_quarantined
+        assert rows[0].quarantine_error is not None
+        assert "expected 3 fields, got 2" in rows[0].quarantine_error
+
+    def test_default_behavior_no_normalization(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Without normalize_fields, headers pass through unchanged (backward compatibility)."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "messy.csv"
+        csv_file.write_text("User ID,Amount $\n1,100\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                # normalize_fields defaults to False
+            }
+        )
+
+        rows = list(source.load(ctx))
+        # Headers should be unchanged
+        assert rows[0].row == {"User ID": "1", "Amount $": "100"}
+
+    def test_audit_trail_contains_resolution_and_version(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Audit trail includes complete field resolution mapping and version."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "audit.csv"
+        csv_file.write_text("CaSE Study1 !!!! xx!,Amount $\nfoo,100\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "schema": {"fields": "dynamic"},
+                "on_validation_failure": "quarantine",
+                "normalize_fields": True,
+            }
+        )
+
+        list(source.load(ctx))
+
+        assert source._field_resolution is not None
+        assert "CaSE Study1 !!!! xx!" in source._field_resolution.resolution_mapping
+        assert source._field_resolution.resolution_mapping["CaSE Study1 !!!! xx!"] == "case_study1_xx"
+        assert source._field_resolution.resolution_mapping["Amount $"] == "amount"
+        assert source._field_resolution.normalization_version == "1.0.0"

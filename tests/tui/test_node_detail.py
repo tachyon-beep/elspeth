@@ -44,10 +44,11 @@ class TestNodeDetailPanel:
         assert "abc123" in content
         assert "12.5" in content
 
-    def test_display_failed_state(self) -> None:
-        """Display details for a failed node state with error."""
+    def test_display_failed_state_execution_error(self) -> None:
+        """Display details for a failed node state with ExecutionError."""
         from elspeth.tui.widgets.node_detail import NodeDetailPanel
 
+        # ExecutionError schema: type (class name) + exception (message)
         node_state = cast(
             NodeStateInfo,
             {
@@ -62,7 +63,7 @@ class TestNodeDetailPanel:
                 "duration_ms": 5.2,
                 "started_at": "2024-01-01T10:00:00Z",
                 "completed_at": "2024-01-01T10:00:00.005Z",
-                "error_json": '{"type": "ValueError", "message": "Invalid input"}',
+                "error_json": '{"type": "ValueError", "exception": "Invalid input"}',
             },
         )
 
@@ -72,6 +73,36 @@ class TestNodeDetailPanel:
         assert "failed" in content.lower()
         assert "ValueError" in content
         assert "Invalid input" in content
+
+    def test_display_failed_state_transform_error(self) -> None:
+        """Display details for a failed node state with TransformErrorReason."""
+        from elspeth.tui.widgets.node_detail import NodeDetailPanel
+
+        # TransformErrorReason schema: reason (category) + optional error/message
+        node_state = cast(
+            NodeStateInfo,
+            {
+                "state_id": "state-002b",
+                "node_id": "node-001",
+                "token_id": "token-001",
+                "plugin_name": "llm_transform",
+                "node_type": "transform",
+                "status": "failed",
+                "input_hash": "abc123",
+                "output_hash": None,
+                "duration_ms": 5.2,
+                "started_at": "2024-01-01T10:00:00Z",
+                "completed_at": "2024-01-01T10:00:00.005Z",
+                "error_json": '{"reason": "api_error", "error": "Connection refused"}',
+            },
+        )
+
+        panel = NodeDetailPanel(node_state)
+        content = panel.render_content()
+
+        assert "failed" in content.lower()
+        assert "api_error" in content
+        assert "Connection refused" in content
 
     def test_display_source_state(self) -> None:
         """Display details for a source node."""
@@ -186,9 +217,13 @@ class TestNodeDetailPanel:
         content = panel.render_content()
         assert "1.5 KB" in content
 
-    def test_malformed_error_json_logs_warning(self) -> None:
-        """Malformed error_json is logged but still displayed raw."""
-        from unittest.mock import MagicMock, patch
+    def test_malformed_error_json_crashes(self) -> None:
+        """Malformed error_json crashes - Tier 1 audit data must be pristine.
+
+        Per CLAUDE.md: Bad data in the audit trail = crash immediately.
+        Graceful handling of corrupt audit data is forbidden bug-hiding.
+        """
+        import json
 
         from elspeth.tui.widgets.node_detail import NodeDetailPanel
 
@@ -208,18 +243,11 @@ class TestNodeDetailPanel:
             },
         )
 
-        mock_logger = MagicMock()
-        with patch("elspeth.tui.widgets.node_detail.logger", mock_logger):
-            panel = NodeDetailPanel(node_state)
-            content = panel.render_content()
+        panel = NodeDetailPanel(node_state)
 
-        # Raw JSON still displayed (trust boundary fallback)
-        assert malformed_json in content
-
-        # Warning was logged with context
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args
-        assert "Failed to parse error_json" in call_args[0][0]
-        assert call_args[1]["state_id"] == "state-005"
-        assert call_args[1]["error_json_preview"] == malformed_json
-        assert "decode_error" in call_args[1]
+        # Malformed JSON in audit data MUST crash, not be gracefully handled
+        try:
+            panel.render_content()
+            raise AssertionError("Should have raised JSONDecodeError")
+        except json.JSONDecodeError:
+            pass  # Expected - audit integrity violation detected

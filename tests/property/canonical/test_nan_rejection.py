@@ -15,6 +15,7 @@ not silently handled in the canonical layer.
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from typing import Any
 
 import numpy as np
@@ -100,6 +101,11 @@ class TestNaNRejection:
         with pytest.raises(ValueError, match="non-finite"):
             canonical_json(deeply_nested)
 
+    def test_decimal_nan_rejected(self) -> None:
+        """Property: Decimal NaN raises ValueError in canonical_json()."""
+        with pytest.raises(ValueError, match="non-finite Decimal"):
+            canonical_json(Decimal("NaN"))
+
 
 # =============================================================================
 # Infinity Rejection Properties
@@ -158,6 +164,12 @@ class TestInfinityRejection:
         # This test explicitly verifies both directions
         with pytest.raises(ValueError, match="non-finite"):
             canonical_json(inf)
+
+    @pytest.mark.parametrize("value", ["Infinity", "-Infinity"])
+    def test_decimal_infinity_rejected(self, value: str) -> None:
+        """Property: Decimal Infinity raises ValueError in canonical_json()."""
+        with pytest.raises(ValueError, match="non-finite Decimal"):
+            canonical_json(Decimal(value))
 
 
 # =============================================================================

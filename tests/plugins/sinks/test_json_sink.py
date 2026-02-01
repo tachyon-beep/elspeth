@@ -1,4 +1,8 @@
-"""Tests for JSON sink plugin."""
+"""Tests for JSON sink plugin.
+
+NOTE: Protocol compliance tests (test_implements_protocol, test_has_required_attributes)
+are in conftest.py as parametrized tests covering all sink plugins.
+"""
 
 import hashlib
 import json
@@ -7,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - PathConfig now requires schema
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
@@ -20,22 +23,6 @@ class TestJSONSink:
     def ctx(self) -> PluginContext:
         """Create a minimal plugin context."""
         return PluginContext(run_id="test-run", config={})
-
-    def test_implements_protocol(self) -> None:
-        """JSONSink implements SinkProtocol."""
-        from elspeth.plugins.sinks.json_sink import JSONSink
-
-        sink = JSONSink({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA})
-        assert isinstance(sink, SinkProtocol)
-
-    def test_has_required_attributes(self) -> None:
-        """JSONSink has name and input_schema."""
-        from elspeth.plugins.sinks.json_sink import JSONSink
-
-        assert JSONSink.name == "json"
-        # input_schema is now set per-instance based on config
-        sink = JSONSink({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA})
-        assert hasattr(sink, "input_schema")
 
     def test_write_json_array(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Write rows as JSON array."""

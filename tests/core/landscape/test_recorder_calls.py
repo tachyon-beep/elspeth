@@ -222,8 +222,16 @@ class TestRecordCall:
         assert call.request_ref == "sha256:abc123..."
         assert call.response_ref == "sha256:def456..."
 
-    def test_duplicate_call_index_raises_integrity_error(self, recorder: LandscapeRecorder, state_id: str) -> None:
-        """Test that duplicate (state_id, call_index) raises IntegrityError."""
+    def test_duplicate_call_index_rejected_at_db_level(self, recorder: LandscapeRecorder, state_id: str) -> None:
+        """Test that duplicate (state_id, call_index) is rejected at DB level.
+
+        The schema has a partial unique index: UNIQUE(state_id, call_index) WHERE state_id IS NOT NULL.
+        This enforces call ordering uniqueness for audit integrity - call_index must be
+        unambiguous for replay/verification.
+
+        Callers should use allocate_call_index() to get unique indices, but the DB
+        constraint serves as defense-in-depth against bugs that might bypass the allocator.
+        """
         # First call succeeds
         recorder.record_call(
             state_id=state_id,
@@ -234,11 +242,11 @@ class TestRecordCall:
             response_data={"response": "First"},
         )
 
-        # Duplicate call_index fails
+        # Duplicate call_index is rejected by DB constraint
         with pytest.raises(IntegrityError):
             recorder.record_call(
                 state_id=state_id,
-                call_index=0,  # Same index!
+                call_index=0,  # Same index - rejected at DB level
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
                 request_data={"prompt": "Second"},
@@ -435,7 +443,7 @@ class TestCallPayloadPersistence:
         )
         return state.state_id
 
-    def test_auto_persist_response_when_payload_store_configured(self) -> None:
+    def test_auto_persist_response_when_payload_store_configured(self, payload_store) -> None:
         """When payload store exists, response_data is auto-persisted and ref populated."""
         with TemporaryDirectory() as tmpdir:
             payload_store = FilesystemPayloadStore(Path(tmpdir) / "payloads")
@@ -460,7 +468,7 @@ class TestCallPayloadPersistence:
             retrieved = recorder.get_call_response_data(call.call_id)
             assert retrieved == response_data
 
-    def test_auto_persist_request_when_payload_store_configured(self) -> None:
+    def test_auto_persist_request_when_payload_store_configured(self, payload_store) -> None:
         """When payload store exists, request_data is auto-persisted and ref populated."""
         with TemporaryDirectory() as tmpdir:
             payload_store = FilesystemPayloadStore(Path(tmpdir) / "payloads")
@@ -504,7 +512,7 @@ class TestCallPayloadPersistence:
         retrieved = recorder.get_call_response_data(call.call_id)
         assert retrieved is None
 
-    def test_explicit_ref_not_overwritten(self) -> None:
+    def test_explicit_ref_not_overwritten(self, payload_store) -> None:
         """If caller provides explicit ref, it should not be overwritten."""
         with TemporaryDirectory() as tmpdir:
             payload_store = FilesystemPayloadStore(Path(tmpdir) / "payloads")
@@ -526,7 +534,7 @@ class TestCallPayloadPersistence:
             # Should use caller's explicit ref, not auto-generate
             assert call.response_ref == explicit_ref
 
-    def test_error_call_without_response_no_ref(self) -> None:
+    def test_error_call_without_response_no_ref(self, payload_store) -> None:
         """Error calls without response_data should not have response_ref."""
         with TemporaryDirectory() as tmpdir:
             payload_store = FilesystemPayloadStore(Path(tmpdir) / "payloads")

@@ -50,6 +50,9 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+                return None  # No field normalization
+
         source = MySource({"path": "test.csv"})
 
         # IMPORTANT: Verify protocol conformance at runtime
@@ -116,6 +119,9 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+                return None  # No field normalization
+
         source = MetadataSource({})
         assert isinstance(source, SourceProtocol)  # type: ignore[unreachable]
         assert source.determinism == Determinism.IO_READ  # type: ignore[unreachable]
@@ -159,7 +165,8 @@ class TestTransformProtocol:
                     {
                         "value": row["value"],
                         "doubled": row["value"] * 2,
-                    }
+                    },
+                    success_reason={"action": "test"},
                 )
 
             def close(self) -> None:
@@ -207,7 +214,7 @@ class TestTransformBatchSupport:
             plugin_version = "1.0.0"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"processed": row["value"]})
+                return TransformResult.success({"processed": row["value"]}, success_reason={"action": "test"})
 
         transform = SingleTransform({})
         ctx = PluginContext(run_id="test", config={})
@@ -236,9 +243,9 @@ class TestTransformBatchSupport:
                 # When given a list, process as batch
                 if isinstance(row, list):
                     total = sum(r["value"] for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
                 # Single row
-                return TransformResult.success({"value": row["value"]})
+                return TransformResult.success({"value": row["value"]}, success_reason={"action": "test"})
 
         transform = BatchTransform({})
         ctx = PluginContext(run_id="test", config={})
@@ -265,7 +272,7 @@ class TestTransformBatchSupport:
             plugin_version = "1.0.0"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         regular = RegularTransform({})
         assert regular.is_batch_aware is False
@@ -290,8 +297,8 @@ class TestTransformBatchSupport:
 
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 if isinstance(row, list):
-                    return TransformResult.success({"count": len(row)})
-                return TransformResult.success(row)
+                    return TransformResult.success({"count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         batch = BatchAwareTransform({})
         assert batch.is_batch_aware is True
@@ -609,7 +616,7 @@ class TestProtocolMetadata:
             plugin_version = "1.0.0"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         t = MyTransform()
         assert t.determinism == Determinism.DETERMINISTIC
@@ -625,7 +632,7 @@ class TestProtocolMetadata:
             plugin_version = "0.1.0"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         t = LLMTransform()
         assert t.determinism == Determinism.EXTERNAL_CALL

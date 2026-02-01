@@ -19,9 +19,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from elspeth.contracts import TransformResult
+    from elspeth.contracts import ExceptionResult, TransformResult
     from elspeth.contracts.identity import TokenInfo
-    from elspeth.engine.batch_adapter import ExceptionResult
 
 
 @runtime_checkable

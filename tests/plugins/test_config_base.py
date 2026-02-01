@@ -264,7 +264,7 @@ class TestPluginConfigWithSchema:
             path: str
 
         # Should fail without schema - from_dict wraps in PluginConfigError
-        with pytest.raises(PluginConfigError, match=r"require.*schema"):
+        with pytest.raises(PluginConfigError, match=r"schema_config[\s\S]*Field required"):
             SourceConfig.from_dict({"path": "data.csv"})
 
         # Should succeed with schema

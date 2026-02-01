@@ -10,6 +10,9 @@ The shared database contains data from all tests in the module, but each
 test's queries should filter by its own run_id.
 """
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from elspeth.core.landscape.database import LandscapeDB
@@ -37,3 +40,43 @@ def recorder(landscape_db: LandscapeDB) -> LandscapeRecorder:
     Uses the module-scoped landscape_db for actual storage.
     """
     return LandscapeRecorder(landscape_db)
+
+
+# Resume/Checkpoint test fixtures (shared by resume test files)
+
+
+@pytest.fixture
+def resume_test_env(tmp_path: Path) -> dict[str, Any]:
+    """Set up complete test environment for resume/checkpoint tests.
+
+    Provides:
+    - db: LandscapeDB (file-based for resume tests)
+    - payload_store: FilesystemPayloadStore
+    - checkpoint_manager: CheckpointManager
+    - recovery_manager: RecoveryManager
+    - checkpoint_config: RuntimeCheckpointConfig
+    - recorder: LandscapeRecorder
+    - tmp_path: Path
+    """
+    from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+    from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+    from elspeth.core.config import CheckpointSettings
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+    payload_store = FilesystemPayloadStore(tmp_path / "payloads")
+    checkpoint_mgr = CheckpointManager(db)
+    recovery_mgr = RecoveryManager(db, checkpoint_mgr)
+    checkpoint_settings = CheckpointSettings(frequency="every_row")
+    checkpoint_config = RuntimeCheckpointConfig.from_settings(checkpoint_settings)
+    recorder = LandscapeRecorder(db)
+
+    return {
+        "db": db,
+        "payload_store": payload_store,
+        "checkpoint_manager": checkpoint_mgr,
+        "recovery_manager": recovery_mgr,
+        "checkpoint_config": checkpoint_config,
+        "recorder": recorder,
+        "tmp_path": tmp_path,
+    }

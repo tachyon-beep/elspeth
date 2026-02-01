@@ -92,6 +92,12 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- `RuntimeRetryConfig.from_policy()` still casts policy values with `int()`/`float()` without guarding non-numeric types, so malformed values still raise. (`src/elspeth/contracts/config/runtime.py:163-180`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

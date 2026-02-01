@@ -16,15 +16,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-import pytest
 from sqlalchemy import text
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import RowOutcome, SourceRow
+from elspeth.contracts import ArtifactDescriptor, RowOutcome, SourceRow
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase, as_sink, as_source
 
@@ -83,7 +81,7 @@ class CollectSink(_TestSinkBase):
 class TestForkGroupIDConsistency:
     """Verify fork_group_id matches between tokens and token_outcomes tables."""
 
-    def test_fork_children_share_same_fork_group_id_in_tokens_table(self) -> None:
+    def test_fork_children_share_same_fork_group_id_in_tokens_table(self, payload_store) -> None:
         """Fork operation: all children tokens share same fork_group_id in tokens table."""
         # Setup: Source -> Fork (2 branches) -> 2 Sinks
         db = LandscapeDB("sqlite:///:memory:")
@@ -129,7 +127,7 @@ class TestForkGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query tokens table for forked children
         with db.connection() as conn:
@@ -152,7 +150,7 @@ class TestForkGroupIDConsistency:
         canonical_fork_group_id = fork_group_ids[0]
         assert canonical_fork_group_id is not None, "fork_group_id must not be None"
 
-    def test_fork_parent_outcome_uses_canonical_fork_group_id(self) -> None:
+    def test_fork_parent_outcome_uses_canonical_fork_group_id(self, payload_store) -> None:
         """Fork operation: parent token's FORKED outcome uses same fork_group_id as children."""
         # Setup: Source -> Fork (2 branches) -> 2 Sinks
         db = LandscapeDB("sqlite:///:memory:")
@@ -198,7 +196,7 @@ class TestForkGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query tokens table for canonical fork_group_id
         with db.connection() as conn:
@@ -236,7 +234,7 @@ class TestForkGroupIDConsistency:
 class TestJoinGroupIDConsistency:
     """Verify join_group_id matches between tokens and token_outcomes tables."""
 
-    def test_coalesce_creates_merged_token_with_join_group_id(self) -> None:
+    def test_coalesce_creates_merged_token_with_join_group_id(self, payload_store) -> None:
         """Coalesce operation: merged token has join_group_id in tokens table."""
         # Setup: Source -> Fork -> Coalesce -> Sink
         db = LandscapeDB("sqlite:///:memory:")
@@ -287,7 +285,7 @@ class TestJoinGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query tokens table for merged token (created by coalesce)
         with db.connection() as conn:
@@ -304,7 +302,7 @@ class TestJoinGroupIDConsistency:
         _merged_token_id, canonical_join_group_id = merged_token
         assert canonical_join_group_id is not None, "join_group_id must not be None"
 
-    def test_coalesce_consumed_tokens_use_canonical_join_group_id(self) -> None:
+    def test_coalesce_consumed_tokens_use_canonical_join_group_id(self, payload_store) -> None:
         """Coalesce operation: consumed tokens' COALESCED outcomes use same join_group_id as merged token."""
         # Setup: Source -> Fork -> Coalesce -> Sink
         db = LandscapeDB("sqlite:///:memory:")
@@ -355,7 +353,7 @@ class TestJoinGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query tokens table for canonical join_group_id
         with db.connection() as conn:
@@ -391,7 +389,7 @@ class TestJoinGroupIDConsistency:
                 f"must match tokens.join_group_id ({canonical_id})"
             )
 
-    def test_coalesce_merged_token_outcome_uses_canonical_join_group_id(self) -> None:
+    def test_coalesce_merged_token_outcome_uses_canonical_join_group_id(self, payload_store) -> None:
         """Coalesce operation: merged token's COALESCED outcome uses same join_group_id."""
         # Setup: Source -> Fork -> Coalesce -> Sink
         db = LandscapeDB("sqlite:///:memory:")
@@ -442,7 +440,7 @@ class TestJoinGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        _run = orchestrator.run(config, graph=graph, settings=settings)
+        _run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Query tokens table for merged token
         with db.connection() as conn:
@@ -481,7 +479,7 @@ class TestJoinGroupIDConsistency:
 class TestExpandGroupIDConsistency:
     """Verify expand_group_id matches between tokens and token_outcomes tables."""
 
-    def test_expand_creates_consistent_group_id_across_all_children(self) -> None:
+    def test_expand_creates_consistent_group_id_across_all_children(self, payload_store) -> None:
         """Expand operation: all expanded children share same expand_group_id in tokens table."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
@@ -523,7 +521,7 @@ class TestExpandGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         with db.connection() as conn:
             tokens_result = conn.execute(
@@ -544,7 +542,7 @@ class TestExpandGroupIDConsistency:
         assert len(expand_group_ids) == 1, f"Expanded children should share same expand_group_id, got {expand_group_ids}"
         assert None not in expand_group_ids, "expand_group_id must not be None"
 
-    def test_expand_parent_outcome_uses_canonical_expand_group_id(self) -> None:
+    def test_expand_parent_outcome_uses_canonical_expand_group_id(self, payload_store) -> None:
         """Expand operation: parent token's EXPANDED outcome uses same expand_group_id as children."""
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
@@ -586,7 +584,7 @@ class TestExpandGroupIDConsistency:
         )
 
         orchestrator = Orchestrator(db=db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         with db.connection() as conn:
             canonical_row = conn.execute(
@@ -623,8 +621,7 @@ class TestExpandGroupIDConsistency:
 class TestSequentialCoalesces:
     """Verify multiple coalesce operations each get distinct join_group_ids."""
 
-    @pytest.mark.skip(reason="Sequential coalesce pipelines not yet supported in test setup")
-    def test_sequential_coalesces_have_different_join_group_ids(self) -> None:
+    def test_sequential_coalesces_have_different_join_group_ids(self, payload_store) -> None:
         """Pipeline with fork->coalesce->fork->coalesce should have two DIFFERENT join_group_ids."""
         db = LandscapeDB("sqlite:///:memory:")
         _recorder = LandscapeRecorder(db)
@@ -685,7 +682,7 @@ class TestSequentialCoalesces:
         )
 
         orchestrator = Orchestrator(db=db)
-        run = orchestrator.run(config, graph=graph, settings=settings)
+        run = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         with db.connection() as conn:
             rows = conn.execute(

@@ -43,10 +43,11 @@ class TestRoutingAction:
     def test_route(self) -> None:
         from elspeth.plugins.results import RoutingAction
 
-        action = RoutingAction.route("suspicious", reason={"confidence": 0.95})
+        action = RoutingAction.route("suspicious", reason={"rule": "confidence_check", "matched_value": 0.95})
         assert action.kind == "route"
         assert action.destinations == ("suspicious",)  # Tuple - route label, not sink name
-        assert action.reason["confidence"] == 0.95  # Access via mapping
+        assert action.reason is not None
+        assert action.reason["matched_value"] == 0.95  # type: ignore[index,typeddict-item]  # Access via mapping
 
     def test_fork_to_paths(self) -> None:
         from elspeth.plugins.results import RoutingAction
@@ -63,14 +64,19 @@ class TestRoutingAction:
         with pytest.raises(FrozenInstanceError):
             action.kind = "route_to_sink"  # type: ignore[misc,assignment]  # Testing frozen
 
-    def test_reason_is_immutable(self) -> None:
-        """Reason dict should be wrapped as immutable mapping."""
+    def test_reason_mutation_protected_by_deep_copy(self) -> None:
+        """Mutating original dict should not affect stored reason (deep copy)."""
+        from typing import Any
+
         from elspeth.plugins.results import RoutingAction
 
-        action = RoutingAction.route("suspicious", reason={"score": 0.9})
-        # Should not be able to modify reason
-        with pytest.raises(TypeError):
-            action.reason["score"] = 0.5  # type: ignore[index]  # Testing immutability
+        original: dict[str, Any] = {"rule": "score_check", "matched_value": 0.9}
+        action = RoutingAction.route("suspicious", reason=original)  # type: ignore[arg-type]
+
+        # Mutate original - should not affect action.reason (deep copy protection)
+        original["matched_value"] = 0.5
+        assert action.reason is not None
+        assert action.reason["matched_value"] == 0.9  # type: ignore[typeddict-item]
 
 
 class TestTransformResult:
@@ -79,7 +85,7 @@ class TestTransformResult:
     def test_success_result(self) -> None:
         from elspeth.plugins.results import TransformResult
 
-        result = TransformResult.success({"value": 42})
+        result = TransformResult.success({"value": 42}, success_reason={"action": "test"})
         assert result.status == "success"
         assert result.row == {"value": 42}
         assert result.retryable is False
@@ -88,7 +94,7 @@ class TestTransformResult:
         from elspeth.plugins.results import TransformResult
 
         result = TransformResult.error(
-            reason={"error": "validation failed"},
+            reason={"reason": "validation_failed"},
             retryable=True,
         )
         assert result.status == "error"
@@ -99,7 +105,7 @@ class TestTransformResult:
         """Phase 3 integration: audit fields must exist."""
         from elspeth.plugins.results import TransformResult
 
-        result = TransformResult.success({"x": 1})
+        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
         # These fields are set by the engine in Phase 3
         assert hasattr(result, "input_hash")
         assert hasattr(result, "output_hash")
@@ -125,7 +131,7 @@ class TestGateResult:
 
         result = GateResult(
             row={"value": 42, "flagged": True},
-            action=RoutingAction.route("suspicious", reason={"score": 0.9}),
+            action=RoutingAction.route("suspicious", reason={"rule": "score_check", "matched_value": 0.9}),
         )
         assert result.action.kind == "route"
         assert result.action.destinations == ("suspicious",)  # Route label, not sink name
@@ -200,31 +206,37 @@ class TestFreezeDictDefensiveCopy:
 
     def test_original_dict_mutation_not_visible(self) -> None:
         """Mutating original dict doesn't affect frozen result."""
+        from typing import Any
+
         from elspeth.plugins.results import RoutingAction
 
-        reason = {"key": "original"}
-        action = RoutingAction.continue_(reason=reason)
+        reason: dict[str, Any] = {"rule": "original_rule", "matched_value": "original_value"}
+        action = RoutingAction.continue_(reason=reason)  # type: ignore[arg-type]
 
         # Mutate original
-        reason["key"] = "mutated"
+        reason["rule"] = "mutated"
         reason["new_key"] = "added"
 
         # Frozen reason should be unchanged
-        assert action.reason["key"] == "original"
-        assert "new_key" not in action.reason
+        assert action.reason is not None
+        assert action.reason["rule"] == "original_rule"  # type: ignore[index,typeddict-item]
+        assert "new_key" not in action.reason  # type: ignore[operator]
 
     def test_nested_dict_mutation_not_visible(self) -> None:
         """Nested dict mutation doesn't affect frozen result."""
+        from typing import Any
+
         from elspeth.plugins.results import RoutingAction
 
-        reason = {"nested": {"value": 1}}
-        action = RoutingAction.continue_(reason=reason)
+        reason: dict[str, Any] = {"rule": "nested_test", "matched_value": {"value": 1}}
+        action = RoutingAction.continue_(reason=reason)  # type: ignore[arg-type]
 
         # Mutate nested original
-        reason["nested"]["value"] = 999
+        reason["matched_value"]["value"] = 999
 
         # Frozen reason should be unchanged
-        assert action.reason["nested"]["value"] == 1
+        assert action.reason is not None
+        assert action.reason["matched_value"]["value"] == 1  # type: ignore[index,typeddict-item]
 
 
 class TestSourceRow:

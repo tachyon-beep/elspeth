@@ -42,33 +42,14 @@ class TestNormalizeValue:
 
 
 class TestNanInfinityRejection:
-    """NaN and Infinity must be rejected, not silently converted."""
+    """NaN and Infinity must be rejected, not silently converted.
 
-    def test_nan_raises_value_error(self) -> None:
-        from elspeth.core.canonical import _normalize_value
+    NOTE: Basic float NaN/Infinity rejection tests are in test_canonical_mutation_gaps.py
+    (TestNanInfinityOrLogic, TestTypeCheckCoversBothFloatTypes, TestNormalFloatsPassThrough)
+    which have better documentation of mutation testing targets.
 
-        with pytest.raises(ValueError, match="non-finite"):
-            _normalize_value(float("nan"))
-
-    def test_positive_infinity_raises_value_error(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        with pytest.raises(ValueError, match="non-finite"):
-            _normalize_value(float("inf"))
-
-    def test_negative_infinity_raises_value_error(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        with pytest.raises(ValueError, match="non-finite"):
-            _normalize_value(float("-inf"))
-
-    def test_normal_float_allowed(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        # These should NOT raise
-        assert _normalize_value(0.0) == 0.0
-        assert _normalize_value(-0.0) == -0.0
-        assert _normalize_value(1e308) == 1e308
+    This class focuses on numpy ARRAY handling which is not covered there.
+    """
 
     def test_numpy_array_with_nan_rejected(self) -> None:
         """BUG-CANON-01: Multi-dimensional arrays with NaN must be rejected."""
@@ -169,17 +150,8 @@ class TestNumpyTypeConversion:
         assert result == 3.14
         assert type(result) is float
 
-    def test_numpy_float64_nan_raises(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        with pytest.raises(ValueError, match="non-finite"):
-            _normalize_value(np.float64("nan"))
-
-    def test_numpy_float64_inf_raises(self) -> None:
-        from elspeth.core.canonical import _normalize_value
-
-        with pytest.raises(ValueError, match="non-finite"):
-            _normalize_value(np.float64("inf"))
+    # NOTE: numpy float64 NaN/Infinity rejection tests are in test_canonical_mutation_gaps.py
+    # (TestTypeCheckCoversBothFloatTypes) which tests float32, float64, and Python floats
 
     def test_numpy_bool_converts_to_bool(self) -> None:
         from elspeth.core.canonical import _normalize_value

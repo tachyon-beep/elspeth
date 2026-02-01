@@ -50,10 +50,6 @@ class CheckpointCompatibilityValidator:
             ResumeCheck with can_resume=True if compatible,
             or can_resume=False with specific reason if not.
         """
-        # Handle legacy checkpoints (pre-topology validation)
-        if checkpoint.upstream_topology_hash is None:
-            return self._handle_legacy_checkpoint(checkpoint)
-
         # Validation 1: Checkpoint node must exist
         if not current_graph.has_node(checkpoint.node_id):
             return ResumeCheck(
@@ -67,12 +63,11 @@ class CheckpointCompatibilityValidator:
         current_config_hash = stable_hash(current_node_info.config)
 
         if checkpoint.checkpoint_node_config_hash != current_config_hash:
-            orig_hash = checkpoint.checkpoint_node_config_hash or "unknown"
             return ResumeCheck(
                 can_resume=False,
                 reason=f"Checkpoint node '{checkpoint.node_id}' configuration has changed. "
                 "Resuming would process remaining rows differently than original run. "
-                f"(Original config hash: {orig_hash[:8]}..., "
+                f"(Original config hash: {checkpoint.checkpoint_node_config_hash[:8]}..., "
                 f"Current: {current_config_hash[:8]}...)",
             )
 
@@ -87,19 +82,6 @@ class CheckpointCompatibilityValidator:
 
         # All validations passed
         return ResumeCheck(can_resume=True)
-
-    def _handle_legacy_checkpoint(self, checkpoint: Checkpoint) -> ResumeCheck:
-        """Reject legacy checkpoints created before topology validation.
-
-        Per CLAUDE.md No Legacy Code Policy: No backward compatibility modes.
-        Users must re-run from beginning to create topology-aware checkpoints.
-        """
-        return ResumeCheck(
-            can_resume=False,
-            reason="Legacy checkpoint without topology validation data. "
-            "Cannot verify config compatibility. "
-            "Re-run from beginning to create fresh checkpoint.",
-        )
 
     def compute_full_topology_hash(
         self,

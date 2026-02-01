@@ -96,3 +96,9 @@ def _validate_transform_output(self, row_data: dict[str, Any], transform_name: s
 ## Notes
 
 This is an architectural enhancement to surface bugs earlier. The current deepcopy approach is **correct** - this improves the developer experience and enforcement.
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- Transform execution still proceeds from `transform.process()` straight to audit field population without canonical JSON validation. (`src/elspeth/engine/executors.py:245-337`)

@@ -35,6 +35,8 @@ class TestCallIndexThreadSafety:
         client = ConcreteAuditedClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="test-run",
+            telemetry_emit=lambda event: None,
         )
 
         indices: list[int] = []
@@ -73,6 +75,8 @@ class TestCallIndexThreadSafety:
         client = ConcreteAuditedClient(
             recorder=mock_recorder,
             state_id=f"test-state-{iteration}",
+            run_id=f"test-run-{iteration}",
+            telemetry_emit=lambda event: None,
         )
 
         indices: list[int] = []

@@ -72,7 +72,7 @@ class TestLandscapeRecorderRouting:
             state_id=state.state_id,
             edge_id=edge.edge_id,
             mode=RoutingMode.MOVE,
-            reason={"rule": "value > 1000", "result": True},
+            reason={"rule": "value > 1000", "matched_value": True},
         )
 
         assert event.event_id is not None
@@ -150,7 +150,7 @@ class TestLandscapeRecorderRouting:
                 RoutingSpec(edge_id=edge_a.edge_id, mode=RoutingMode.COPY),
                 RoutingSpec(edge_id=edge_b.edge_id, mode=RoutingMode.COPY),
             ],
-            reason={"action": "fork"},
+            reason={"rule": "fork_to_paths", "matched_value": "path_a,path_b"},
         )
 
         assert len(events) == 2

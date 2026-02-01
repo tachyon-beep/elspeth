@@ -118,10 +118,11 @@ class TestLandscapeRecorderTokens:
         parent_token = recorder.create_token(row_id=row.row_id)
 
         # Fork to two branches
-        child_tokens = recorder.fork_token(
+        child_tokens, _fork_group_id = recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             branches=["stats", "classifier"],
+            run_id=run.run_id,
         )
 
         assert len(child_tokens) == 2
@@ -158,10 +159,11 @@ class TestLandscapeRecorderTokens:
         parent_token = recorder.create_token(row_id=row.row_id)
 
         # Fork to two branches
-        child_tokens = recorder.fork_token(
+        child_tokens, _fork_group_id = recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             branches=["stats", "classifier"],
+            run_id=run.run_id,
         )
 
         # P1: Verify token_parents entries for each child
@@ -194,10 +196,11 @@ class TestLandscapeRecorderTokens:
             data={},
         )
         parent = recorder.create_token(row_id=row.row_id)
-        children = recorder.fork_token(
+        children, _fork_group_id = recorder.fork_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             branches=["a", "b"],
+            run_id=run.run_id,
         )
 
         # Coalesce back together
@@ -231,10 +234,11 @@ class TestLandscapeRecorderTokens:
         parent_token = recorder.create_token(row_id=row.row_id)
 
         # Fork with step_in_pipeline
-        child_tokens = recorder.fork_token(
+        child_tokens, _fork_group_id = recorder.fork_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             branches=["stats", "classifier"],
+            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -280,6 +284,7 @@ class TestLandscapeRecorderTokens:
                 parent_token_id=parent_token.token_id,
                 row_id=row.row_id,
                 branches=[],  # Empty!
+                run_id=run.run_id,
             )
 
     def test_coalesce_tokens_with_step_in_pipeline(self) -> None:
@@ -302,10 +307,11 @@ class TestLandscapeRecorderTokens:
             data={},
         )
         parent = recorder.create_token(row_id=row.row_id)
-        children = recorder.fork_token(
+        children, _fork_group_id = recorder.fork_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             branches=["a", "b"],
+            run_id=run.run_id,
             step_in_pipeline=1,
         )
 
@@ -353,10 +359,11 @@ class TestExpandToken:
         parent_token = recorder.create_token(row_id=row.row_id)
 
         # Act: expand parent into 3 children
-        children = recorder.expand_token(
+        children, _expand_group_id = recorder.expand_token(
             parent_token_id=parent_token.token_id,
             row_id=row.row_id,
             count=3,
+            run_id=run.run_id,
             step_in_pipeline=2,
         )
 
@@ -408,6 +415,7 @@ class TestExpandToken:
                 parent_token_id=token.token_id,
                 row_id=row.row_id,
                 count=0,
+                run_id=run.run_id,
                 step_in_pipeline=1,
             )
 
@@ -434,10 +442,11 @@ class TestExpandToken:
         )
         parent = recorder.create_token(row_id=row.row_id)
 
-        children = recorder.expand_token(
+        children, _expand_group_id = recorder.expand_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             count=2,
+            run_id=run.run_id,
             step_in_pipeline=5,
         )
 
@@ -472,15 +481,17 @@ class TestExpandToken:
         )
         parent = recorder.create_token(row_id=row.row_id)
 
-        children = recorder.expand_token(
+        children, expand_group_id = recorder.expand_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             count=1,
+            run_id=run.run_id,
             step_in_pipeline=1,
         )
 
         assert len(children) == 1
         assert children[0].expand_group_id is not None
+        assert children[0].expand_group_id == expand_group_id
 
         parents = recorder.get_token_parents(children[0].token_id)
         assert len(parents) == 1
@@ -510,10 +521,11 @@ class TestExpandToken:
         )
         parent = recorder.create_token(row_id=row.row_id)
 
-        children = recorder.expand_token(
+        children, _expand_group_id = recorder.expand_token(
             parent_token_id=parent.token_id,
             row_id=row.row_id,
             count=2,
+            run_id=run.run_id,
             step_in_pipeline=3,
         )
 
@@ -522,3 +534,220 @@ class TestExpandToken:
             retrieved = recorder.get_token(child.token_id)
             assert retrieved is not None
             assert retrieved.expand_group_id == child.expand_group_id
+
+
+class TestAtomicTokenOperations:
+    """Tests verifying atomic behavior of fork_token and expand_token.
+
+    These operations atomically create children AND record parent outcomes
+    in a single transaction to eliminate crash windows.
+    """
+
+    def test_fork_token_records_parent_forked_outcome(self) -> None:
+        """fork_token atomically records FORKED outcome on parent token.
+
+        This is critical for crash recovery - if children are created but
+        the parent outcome isn't recorded, recovery can't identify the fork.
+        """
+
+        from elspeth.contracts.enums import RowOutcome
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Fork to two branches
+        _children, fork_group_id = recorder.fork_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            branches=["stats", "classifier"],
+            run_id=run.run_id,
+        )
+
+        # Verify parent has FORKED outcome recorded atomically
+        outcome = recorder.get_token_outcome(parent_token.token_id)
+        assert outcome is not None, "Parent token should have FORKED outcome"
+        assert outcome.outcome == RowOutcome.FORKED.value
+        assert outcome.fork_group_id == fork_group_id
+        assert outcome.is_terminal == 1
+
+    def test_fork_token_stores_expected_branches_contract(self) -> None:
+        """fork_token stores branch names in expected_branches_json for contract validation."""
+        import json
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Fork to three branches
+        recorder.fork_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            branches=["alpha", "beta", "gamma"],
+            run_id=run.run_id,
+        )
+
+        # Verify expected_branches_json is stored correctly
+        outcome = recorder.get_token_outcome(parent_token.token_id)
+        assert outcome is not None
+        assert outcome.expected_branches_json is not None
+        expected = json.loads(outcome.expected_branches_json)
+        assert expected == ["alpha", "beta", "gamma"]
+
+    def test_expand_token_records_parent_expanded_outcome(self) -> None:
+        """expand_token atomically records EXPANDED outcome on parent token.
+
+        By default, expand_token records the parent EXPANDED outcome in the
+        same transaction as creating children, eliminating the crash window.
+        """
+
+        from elspeth.contracts.enums import RowOutcome
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="explode",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Expand to 3 children (default: record_parent_outcome=True)
+        _children, expand_group_id = recorder.expand_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            count=3,
+            run_id=run.run_id,
+            step_in_pipeline=2,
+        )
+
+        # Verify parent has EXPANDED outcome recorded atomically
+        outcome = recorder.get_token_outcome(parent_token.token_id)
+        assert outcome is not None, "Parent token should have EXPANDED outcome"
+        assert outcome.outcome == RowOutcome.EXPANDED.value
+        assert outcome.expand_group_id == expand_group_id
+        assert outcome.is_terminal == 1
+
+    def test_expand_token_stores_expected_count_contract(self) -> None:
+        """expand_token stores count in expected_branches_json for contract validation."""
+        import json
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="explode",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Expand to 5 children
+        recorder.expand_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            count=5,
+            run_id=run.run_id,
+            step_in_pipeline=2,
+        )
+
+        # Verify expected_branches_json stores count
+        outcome = recorder.get_token_outcome(parent_token.token_id)
+        assert outcome is not None
+        assert outcome.expected_branches_json is not None
+        expected = json.loads(outcome.expected_branches_json)
+        assert expected == {"count": 5}
+
+    def test_expand_token_skips_parent_outcome_for_batch_aggregation(self) -> None:
+        """expand_token with record_parent_outcome=False skips EXPANDED recording.
+
+        Batch aggregation uses expand_token to create children but records
+        CONSUMED_IN_BATCH separately for the parent (different semantics).
+        """
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="aggregator",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Expand with record_parent_outcome=False (batch aggregation pattern)
+        children, _expand_group_id = recorder.expand_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            count=2,
+            run_id=run.run_id,
+            step_in_pipeline=2,
+            record_parent_outcome=False,  # Don't record EXPANDED
+        )
+
+        # Children should be created
+        assert len(children) == 2
+
+        # But parent should NOT have an outcome yet
+        outcome = recorder.get_token_outcome(parent_token.token_id)
+        assert outcome is None, "Parent should not have outcome when record_parent_outcome=False"

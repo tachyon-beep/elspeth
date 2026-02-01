@@ -27,29 +27,29 @@ Non-terminal state:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import SourceRow
 from elspeth.contracts.enums import RowOutcome
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.results import TransformResult
 from tests.conftest import (
-    _TestSchema,
-    _TestSinkBase,
-    _TestSourceBase,
+    MockPayloadStore,
     as_sink,
     as_source,
     as_transform,
 )
 from tests.engine.orchestrator_test_helpers import build_production_graph
+from tests.property.conftest import (
+    MAX_SAFE_INT,
+    CollectSink,
+    ConditionalErrorTransform,
+    ListSource,
+    PassTransform,
+)
 
 if TYPE_CHECKING:
     pass
@@ -128,101 +128,8 @@ def get_all_token_outcomes(db: LandscapeDB, run_id: str) -> list[tuple[str, str,
 
 
 # =============================================================================
-# Test Fixtures
-# =============================================================================
-
-
-class _PropertyTestSchema(_TestSchema):
-    """Schema for property tests - accepts any dict."""
-
-    pass
-
-
-class _ListSource(_TestSourceBase):
-    """Source that emits rows from a list."""
-
-    name = "property_test_source"
-    output_schema = _PropertyTestSchema
-
-    def __init__(self, data: list[dict[str, Any]]) -> None:
-        self._data = data
-
-    def on_start(self, ctx: Any) -> None:
-        pass
-
-    def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
-
-    def close(self) -> None:
-        pass
-
-
-class _PassTransform(BaseTransform):
-    """Transform that passes rows through unchanged."""
-
-    name = "property_pass_transform"
-    input_schema = _PropertyTestSchema
-    output_schema = _PropertyTestSchema
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        return TransformResult.success(row)
-
-
-class _ConditionalErrorTransform(BaseTransform):
-    """Transform that errors on rows where 'fail' key is truthy."""
-
-    name = "property_conditional_error"
-    input_schema = _PropertyTestSchema
-    output_schema = _PropertyTestSchema
-    _on_error = "discard"  # Route errors to quarantine
-
-    def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
-
-    def process(self, row: Any, ctx: Any) -> TransformResult:
-        if row.get("fail"):
-            return TransformResult.error({"reason": "property_test_error"})
-        return TransformResult.success(row)
-
-
-class _CollectSink(_TestSinkBase):
-    """Sink that collects written rows."""
-
-    name = "property_test_sink"
-
-    def __init__(self, sink_name: str = "default") -> None:
-        self.name = sink_name
-        self.results: list[dict[str, Any]] = []
-
-    def on_start(self, ctx: Any) -> None:
-        self.results = []
-
-    def on_complete(self, ctx: Any) -> None:
-        pass
-
-    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-        self.results.extend(rows)
-        return ArtifactDescriptor.for_file(
-            path=f"memory://{self.name}",
-            size_bytes=len(str(rows)),
-            content_hash="test_hash",
-        )
-
-    def close(self) -> None:
-        pass
-
-
-# =============================================================================
 # Hypothesis Strategies
 # =============================================================================
-
-# RFC 8785 (JCS) uses JavaScript-safe integers: -(2^53-1) to (2^53-1)
-# Values outside this range cause serialization issues
-_MAX_SAFE_INT = 2**53 - 1
 
 # Strategy for row data - simple key-value pairs (RFC 8785 safe)
 row_value = st.one_of(
@@ -234,13 +141,13 @@ row_value = st.one_of(
 
 # Strategy for a single row - dict with string keys (RFC 8785 safe integers)
 single_row = st.fixed_dictionaries(
-    {"id": st.integers(min_value=0, max_value=_MAX_SAFE_INT)},
+    {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT)},
     optional={"value": row_value, "name": st.text(max_size=20), "flag": st.booleans()},
 )
 
 # Strategy for row that might trigger errors (RFC 8785 safe integers)
 row_with_possible_error = st.fixed_dictionaries(
-    {"id": st.integers(min_value=0, max_value=_MAX_SAFE_INT), "fail": st.booleans()},
+    {"id": st.integers(min_value=0, max_value=MAX_SAFE_INT), "fail": st.booleans()},
     optional={"value": row_value},
 )
 
@@ -262,9 +169,10 @@ class TestTerminalStateProperty:
         A token without a terminal outcome means we lost track of data.
         """
         db = LandscapeDB.in_memory()
-        source = _ListSource(rows)
-        transform = _PassTransform()
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource(rows)
+        transform = PassTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -273,7 +181,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # THE INVARIANT: No tokens should be missing terminal outcomes
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -299,9 +207,10 @@ class TestTerminalStateProperty:
         quarantine and recorded with the QUARANTINED outcome.
         """
         db = LandscapeDB.in_memory()
-        source = _ListSource(rows)
-        transform = _ConditionalErrorTransform()
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource(rows)
+        transform = ConditionalErrorTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -310,7 +219,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Count expected outcomes
         expected_errors = sum(1 for r in rows if r.get("fail"))
@@ -333,9 +242,10 @@ class TestTerminalStateProperty:
     def test_terminal_outcomes_have_correct_type(self, rows: list[dict[str, Any]]) -> None:
         """Property: All terminal outcomes are valid RowOutcome enum values."""
         db = LandscapeDB.in_memory()
-        source = _ListSource(rows)
-        transform = _PassTransform()
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource(rows)
+        transform = PassTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -344,7 +254,7 @@ class TestTerminalStateProperty:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Get all outcomes and verify they're valid enum values
         outcomes = get_all_token_outcomes(db, run.run_id)
@@ -368,9 +278,10 @@ class TestTerminalStateEdgeCases:
     def test_empty_source_no_orphan_tokens(self) -> None:
         """Edge case: Empty source should not create any orphan tokens."""
         db = LandscapeDB.in_memory()
-        source = _ListSource([])  # Empty
-        transform = _PassTransform()
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource([])  # Empty
+        transform = PassTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -379,7 +290,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # No rows means no tokens
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -395,9 +306,10 @@ class TestTerminalStateEdgeCases:
         rows = [{"id": i} for i in range(n)]
 
         db = LandscapeDB.in_memory()
-        source = _ListSource(rows)
-        transform = _PassTransform()
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource(rows)
+        transform = PassTransform()
+        sink = CollectSink()
 
         config = PipelineConfig(
             source=as_source(source),
@@ -406,7 +318,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == n
         missing = count_tokens_missing_terminal(db, run.run_id)
@@ -417,8 +329,9 @@ class TestTerminalStateEdgeCases:
     def test_no_transform_pipeline(self, rows: list[dict[str, Any]]) -> None:
         """Property: Pipeline with no transforms still records terminal states."""
         db = LandscapeDB.in_memory()
-        source = _ListSource(rows)
-        sink = _CollectSink()
+        payload_store = MockPayloadStore()
+        source = ListSource(rows)
+        sink = CollectSink()
 
         # No transforms - source direct to sink
         config = PipelineConfig(
@@ -428,7 +341,7 @@ class TestTerminalStateEdgeCases:
         )
 
         orchestrator = Orchestrator(db)
-        run = orchestrator.run(config, graph=build_production_graph(config))
+        run = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert len(sink.results) == len(rows)
         missing = count_tokens_missing_terminal(db, run.run_id)

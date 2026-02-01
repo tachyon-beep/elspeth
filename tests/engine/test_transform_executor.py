@@ -42,7 +42,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"value": row["value"] * 2})
+                return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "double"})
 
         transform = DoubleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -104,7 +104,7 @@ class TestTransformExecutor:
             _on_error = "discard"  # Required for transforms that return errors
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "validation failed"})
+                return TransformResult.error({"reason": "validation_failed", "message": "validation failed"})
 
         transform = FailingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -132,7 +132,7 @@ class TestTransformExecutor:
         )
 
         assert result.status == "error"
-        assert result.reason == {"message": "validation failed"}
+        assert result.reason == {"reason": "validation_failed", "message": "validation failed"}
 
         # Verify audit trail records the error
         states = recorder.get_node_states_for_token(token.token_id)
@@ -237,7 +237,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "enriched": True})
+                return TransformResult.success({**row, "enriched": True}, success_reason={"action": "enrich"})
 
         transform = EnrichTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -296,7 +296,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         transform = IdentityTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -362,7 +362,7 @@ class TestTransformExecutor:
             _on_error = "discard"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "invalid input"})
+                return TransformResult.error({"reason": "invalid_input", "message": "invalid input"})
 
         transform = DiscardingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -433,7 +433,7 @@ class TestTransformExecutor:
             _on_error = "error_sink"  # Routes to named error sink
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"message": "routing to error sink"})
+                return TransformResult.error({"reason": "validation_failed", "message": "routing to error sink"})
 
         transform = ErrorRoutingTransform()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -489,7 +489,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({"result": "ok"})
+                return TransformResult.success({"result": "ok"}, success_reason={"action": "test"})
 
         transform = SuccessfulTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -547,7 +547,7 @@ class TestTransformExecutor:
             node_id = node.node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = SimpleTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -640,7 +640,7 @@ class TestTransformErrorIdRegression:
             _on_error = "error_sink"
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.error({"reason": "invalid phone format"})
+                return TransformResult.error({"reason": "validation_failed", "error": "invalid phone format"})
 
         transform = FailingFieldMapper()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -684,3 +684,92 @@ class TestTransformErrorIdRegression:
         assert recorded_error.transform_id != shared_plugin_name, (
             "Transform error should NOT use plugin name (ambiguous when same plugin used multiple times)"
         )
+
+
+class TestTransformExecutorMaxWorkers:
+    """Tests for max_workers concurrency limiting."""
+
+    def test_max_workers_limits_batch_adapter_max_pending(self) -> None:
+        """max_workers should limit max_pending passed to connect_output.
+
+        When max_workers is configured lower than the transform's _pool_size,
+        the executor should cap max_pending to enforce the concurrency limit.
+        """
+        from unittest.mock import MagicMock
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Executor with max_workers=5 (lower than default pool_size of 30)
+        executor = TransformExecutor(recorder, SpanFactory(), max_workers=5)
+
+        # Mock transform with high pool_size
+        mock_transform = MagicMock()
+        mock_transform._pool_size = 30  # Higher than max_workers
+        mock_transform.connect_output = MagicMock()
+        # Simulate no adapter attached yet
+        del mock_transform._executor_batch_adapter
+
+        # Call _get_batch_adapter to trigger connect_output
+        executor._get_batch_adapter(mock_transform)
+
+        # Verify max_pending was capped to max_workers
+        mock_transform.connect_output.assert_called_once()
+        call_kwargs = mock_transform.connect_output.call_args.kwargs
+        assert call_kwargs["max_pending"] == 5, f"max_pending should be capped to max_workers (5), got {call_kwargs['max_pending']}"
+
+    def test_max_workers_none_uses_transform_pool_size(self) -> None:
+        """Without max_workers, transform's _pool_size is used directly."""
+        from unittest.mock import MagicMock
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Executor with no max_workers limit
+        executor = TransformExecutor(recorder, SpanFactory(), max_workers=None)
+
+        # Mock transform with pool_size
+        mock_transform = MagicMock()
+        mock_transform._pool_size = 30
+        mock_transform.connect_output = MagicMock()
+        del mock_transform._executor_batch_adapter
+
+        executor._get_batch_adapter(mock_transform)
+
+        # Verify transform's pool_size is used
+        call_kwargs = mock_transform.connect_output.call_args.kwargs
+        assert call_kwargs["max_pending"] == 30
+
+    def test_max_workers_higher_than_pool_size_uses_pool_size(self) -> None:
+        """When max_workers > pool_size, use pool_size (no point exceeding it)."""
+        from unittest.mock import MagicMock
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Executor with high max_workers
+        executor = TransformExecutor(recorder, SpanFactory(), max_workers=100)
+
+        # Mock transform with lower pool_size
+        mock_transform = MagicMock()
+        mock_transform._pool_size = 20  # Lower than max_workers
+        mock_transform.connect_output = MagicMock()
+        del mock_transform._executor_batch_adapter
+
+        executor._get_batch_adapter(mock_transform)
+
+        # Verify pool_size is used (not max_workers)
+        call_kwargs = mock_transform.connect_output.call_args.kwargs
+        assert call_kwargs["max_pending"] == 20

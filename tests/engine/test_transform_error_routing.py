@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import TokenInfo, TransformErrorReason
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.context import PluginContext, TransformErrorToken
@@ -65,7 +65,7 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        transform = MockTransform(TransformResult.success({"value": 42}))
+        transform = MockTransform(TransformResult.success({"value": 42}, success_reason={"action": "test"}))
         transform.node_id = node.node_id
 
         ctx = PluginContext(
@@ -120,7 +120,7 @@ class TestTransformErrorRouting:
         )
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Cannot process"}),
+            TransformResult.error({"reason": "validation_failed", "error": "Cannot process"}),
             on_error="error_sink",
         )
         transform.node_id = node.node_id
@@ -184,7 +184,7 @@ class TestTransformErrorRouting:
         )
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Cannot process"}),
+            TransformResult.error({"reason": "validation_failed", "error": "Cannot process"}),
             on_error="discard",
         )
         transform.node_id = node.node_id
@@ -243,7 +243,7 @@ class TestTransformErrorRouting:
         )
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Cannot process"}),
+            TransformResult.error({"reason": "validation_failed", "error": "Cannot process"}),
             on_error=None,  # Not configured
         )
         transform.node_id = node.node_id
@@ -295,7 +295,7 @@ class TestTransformErrorRouting:
         )
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Test error"}),
+            TransformResult.error({"reason": "test_error"}),
             on_error="error_sink",
         )
         transform.node_id = node.node_id
@@ -306,7 +306,7 @@ class TestTransformErrorRouting:
             token_id: str,
             transform_id: str,
             row: dict[str, Any],
-            error_details: dict[str, Any],
+            error_details: TransformErrorReason,
             destination: str,
         ) -> TransformErrorToken:
             recorded.append(
@@ -362,7 +362,7 @@ class TestTransformErrorRouting:
         # See: P2-2026-01-19-transform-errors-ambiguous-transform-id
         assert recorded[0]["transform_id"] == node.node_id
         assert recorded[0]["token_id"] == "tok_123"
-        assert recorded[0]["error_details"] == {"reason": "Test error"}
+        assert recorded[0]["error_details"] == {"reason": "test_error"}
 
     def test_error_event_recorded_for_discard(self, setup_landscape: tuple[Any, Any, Any]) -> None:
         """record_transform_error called even when discarding."""
@@ -381,7 +381,7 @@ class TestTransformErrorRouting:
         )
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Test error"}),
+            TransformResult.error({"reason": "test_error"}),
             on_error="discard",
         )
         transform.node_id = node.node_id
@@ -392,7 +392,7 @@ class TestTransformErrorRouting:
             token_id: str,
             transform_id: str,
             row: dict[str, Any],
-            error_details: dict[str, Any],
+            error_details: TransformErrorReason,
             destination: str,
         ) -> TransformErrorToken:
             recorded.append({"destination": destination})
@@ -517,7 +517,7 @@ class TestTransformErrorRouting:
         original_row = {"field1": "value1", "field2": 42, "nested": {"a": 1}}
 
         transform = MockTransform(
-            TransformResult.error({"reason": "Validation failed"}),
+            TransformResult.error({"reason": "validation_failed"}),
             on_error="quarantine_sink",
         )
         transform.node_id = node.node_id
@@ -575,7 +575,11 @@ class TestTransformErrorRouting:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        error_reason = {"reason": "Division by zero", "field": "divisor", "value": 0}
+        error_reason: TransformErrorReason = {
+            "reason": "validation_failed",
+            "error": "Division by zero",
+            "field": "divisor",
+        }
 
         transform = MockTransform(
             TransformResult.error(error_reason),

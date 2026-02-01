@@ -1,6 +1,7 @@
 # src/elspeth/core/__init__.py
 """Core infrastructure: Landscape, Canonical, Configuration, Checkpoint, DAG, Logging."""
 
+from elspeth.contracts import IntegrityError, PayloadStore
 from elspeth.core.canonical import (
     CANONICAL_VERSION,
     canonical_json,
@@ -43,11 +44,7 @@ from elspeth.core.logging import (
     configure_logging,
     get_logger,
 )
-from elspeth.core.payload_store import (
-    FilesystemPayloadStore,
-    IntegrityError,
-    PayloadStore,
-)
+from elspeth.core.payload_store import FilesystemPayloadStore
 
 __all__ = [
     "CANONICAL_VERSION",

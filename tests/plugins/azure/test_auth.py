@@ -157,6 +157,50 @@ class TestAzureAuthConfigInvalid:
             )
 
 
+class TestAzureAuthConfigWhitespaceConsistency:
+    """Tests for consistent whitespace handling between validator and runtime.
+
+    The validator uses .strip() to treat whitespace-only strings as empty.
+    Runtime methods (auth_method, create_blob_service_client) must match.
+
+    Regression test for P2-2026-01-31-azure-auth-method-selection.
+    """
+
+    def test_whitespace_connection_string_with_managed_identity_uses_managed_identity(self) -> None:
+        """Whitespace connection_string doesn't shadow valid managed identity auth.
+
+        Bug scenario: whitespace-only connection_string passes validator as empty,
+        but runtime if-checks treated it as truthy, shadowing the real auth method.
+        """
+        config = AzureAuthConfig(
+            connection_string="   ",  # whitespace only - validator treats as empty
+            use_managed_identity=True,
+            account_url="https://test.blob.core.windows.net",
+        )
+        # Runtime must match validator: managed_identity is the real auth method
+        assert config.auth_method == "managed_identity"
+
+    def test_whitespace_sas_token_with_managed_identity_uses_managed_identity(self) -> None:
+        """Whitespace sas_token doesn't shadow valid managed identity auth."""
+        config = AzureAuthConfig(
+            sas_token="   ",  # whitespace only - validator treats as empty
+            use_managed_identity=True,
+            account_url="https://test.blob.core.windows.net",
+        )
+        assert config.auth_method == "managed_identity"
+
+    def test_whitespace_connection_string_with_service_principal_uses_service_principal(self) -> None:
+        """Whitespace connection_string doesn't shadow valid service principal auth."""
+        config = AzureAuthConfig(
+            connection_string="   ",  # whitespace only
+            tenant_id="tenant",
+            client_id="client",
+            client_secret="secret",
+            account_url="https://test.blob.core.windows.net",
+        )
+        assert config.auth_method == "service_principal"
+
+
 class TestAzureAuthConfigAuthMethodProperty:
     """Tests for auth_method property."""
 

@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, RunStatus, SourceRow
+from elspeth.contracts import ArtifactDescriptor, PluginSchema, RunStatus, SourceRow
 from elspeth.contracts.events import PhaseError, PipelinePhase
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -35,7 +34,7 @@ if TYPE_CHECKING:
 class TestPhaseErrorEmission:
     """Test that PhaseError events are emitted correctly."""
 
-    def test_process_failure_emits_single_phase_error(self, landscape_db: LandscapeDB) -> None:
+    def test_process_failure_emits_single_phase_error(self, landscape_db: LandscapeDB, payload_store) -> None:
         """PROCESS phase failure should emit exactly ONE PhaseError(PROCESS).
 
         Also verifies audit trail records run as FAILED with error_json.
@@ -125,7 +124,7 @@ class TestPhaseErrorEmission:
 
         # Run should fail
         with pytest.raises(RuntimeError, match="Transform exploded"):
-            orchestrator.run(config=config, graph=graph)
+            orchestrator.run(config=config, graph=graph, payload_store=payload_store)
 
         # Should have exactly ONE PhaseError for PROCESS phase
         assert len(phase_errors) == 1, f"Expected 1 PhaseError, got {len(phase_errors)}"
@@ -140,7 +139,7 @@ class TestPhaseErrorEmission:
         run = runs[0]  # Most recent run (list_runs returns newest first)
         assert run.status == RunStatus.FAILED, f"Run status should be FAILED, got {run.status}"
 
-    def test_source_failure_emits_source_phase_error(self, landscape_db: LandscapeDB) -> None:
+    def test_source_failure_emits_source_phase_error(self, landscape_db: LandscapeDB, payload_store) -> None:
         """SOURCE phase failure should emit PhaseError(SOURCE), not PROCESS.
 
         Also verifies audit trail records run as FAILED.
@@ -213,7 +212,7 @@ class TestPhaseErrorEmission:
 
         # Run should fail
         with pytest.raises(RuntimeError, match="Source load failed"):
-            orchestrator.run(config=config, graph=graph)
+            orchestrator.run(config=config, graph=graph, payload_store=payload_store)
 
         # Should have exactly ONE PhaseError for SOURCE phase (not PROCESS)
         assert len(phase_errors) == 1, f"Expected 1 PhaseError, got {len(phase_errors)}"

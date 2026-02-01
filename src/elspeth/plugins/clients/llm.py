@@ -5,13 +5,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from elspeth.contracts import CallStatus, CallType
-from elspeth.plugins.clients.base import AuditedClientBase
+from elspeth.core.canonical import stable_hash
+from elspeth.plugins.clients.base import AuditedClientBase, TelemetryEmitCallback
+from elspeth.telemetry.events import ExternalCallCompleted
 
 if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -196,11 +203,14 @@ class AuditedLLMClient(AuditedClientBase):
     - Latency measurement
     - Error recording with retry classification
     - Token usage tracking
+    - Telemetry emission after successful audit recording
 
     Example:
         client = AuditedLLMClient(
             recorder=recorder,
             state_id=state_id,
+            run_id=run_id,
+            telemetry_emit=telemetry_emit,
             underlying_client=openai.OpenAI(api_key="..."),
             provider="openai",
         )
@@ -216,6 +226,8 @@ class AuditedLLMClient(AuditedClientBase):
         self,
         recorder: LandscapeRecorder,
         state_id: str,
+        run_id: str,
+        telemetry_emit: TelemetryEmitCallback,
         underlying_client: Any,  # openai.OpenAI or openai.AzureOpenAI
         *,
         provider: str = "openai",
@@ -225,10 +237,12 @@ class AuditedLLMClient(AuditedClientBase):
         Args:
             recorder: LandscapeRecorder for audit trail storage
             state_id: Node state ID to associate calls with
+            run_id: Pipeline run ID for telemetry correlation
+            telemetry_emit: Callback to emit telemetry events
             underlying_client: OpenAI-compatible client instance
             provider: Provider name for audit trail (default: "openai")
         """
-        super().__init__(recorder, state_id)
+        super().__init__(recorder, state_id, run_id, telemetry_emit)
         self._client = underlying_client
         self._provider = provider
 
@@ -300,7 +314,17 @@ class AuditedLLMClient(AuditedClientBase):
 
             # Capture full raw response for audit completeness
             # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
-            raw_response = response.model_dump() if hasattr(response, "model_dump") else None
+            # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
+            raw_response = response.model_dump()
+
+            response_data = {
+                # Summary fields for convenience
+                "content": content,
+                "model": response.model,
+                "usage": usage,
+                # Full response for audit completeness (tool_calls, multiple choices, etc.)
+                "raw_response": raw_response,
+            }
 
             self._recorder.record_call(
                 state_id=self._state_id,
@@ -308,16 +332,39 @@ class AuditedLLMClient(AuditedClientBase):
                 call_type=CallType.LLM,
                 status=CallStatus.SUCCESS,
                 request_data=request_data,
-                response_data={
-                    # Summary fields for convenience
-                    "content": content,
-                    "model": response.model,
-                    "usage": usage,
-                    # Full response for audit completeness (tool_calls, multiple choices, etc.)
-                    "raw_response": raw_response,
-                },
+                response_data=response_data,
                 latency_ms=latency_ms,
             )
+
+            # Telemetry emitted AFTER successful Landscape recording
+            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.LLM,
+                        provider=self._provider,
+                        status=CallStatus.SUCCESS,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
+                        request_hash=stable_hash(request_data),
+                        response_hash=stable_hash(response_data),
+                        token_usage=usage if usage else None,
+                    )
+                )
+            except Exception as tel_err:
+                # Telemetry failure must not corrupt the successful call
+                # Landscape has the record - telemetry is operational visibility only
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="llm",
+                )
 
             return LLMResponse(
                 content=content,
@@ -348,6 +395,35 @@ class AuditedLLMClient(AuditedClientBase):
                 },
                 latency_ms=latency_ms,
             )
+
+            # Telemetry emitted AFTER successful Landscape recording (even for call errors)
+            # Wrapped in try/except to prevent telemetry failures from corrupting audit trail
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.LLM,
+                        provider=self._provider,
+                        status=CallStatus.ERROR,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,  # Transform context
+                        operation_id=None,  # Not in source/sink context
+                        request_hash=stable_hash(request_data),
+                        response_hash=None,  # No response on error
+                        token_usage=None,
+                    )
+                )
+            except Exception as tel_err:
+                # Telemetry failure must not corrupt the error handling flow
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="llm",
+                )
 
             # Raise specific exception type based on error classification
             if "rate" in error_str or "429" in error_str:

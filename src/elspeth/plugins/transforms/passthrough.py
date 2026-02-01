@@ -52,14 +52,12 @@ class PassThrough(BaseTransform):
         self._validate_input = cfg.validate_input
         self._on_error: str | None = cfg.on_error
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # Create schema from config
         # CRITICAL: allow_coercion=False - wrong types are source bugs
         schema = create_schema_from_config(
-            self._schema_config,
+            cfg.schema_config,
             "PassThroughSchema",
             allow_coercion=False,
         )
@@ -84,7 +82,10 @@ class PassThrough(BaseTransform):
         if self._validate_input and not self._schema_config.is_dynamic:
             self.input_schema.model_validate(row)  # Raises on failure
 
-        return TransformResult.success(copy.deepcopy(row))
+        return TransformResult.success(
+            copy.deepcopy(row),
+            success_reason={"action": "passthrough"},
+        )
 
     def close(self) -> None:
         """No resources to release."""

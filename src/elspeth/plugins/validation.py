@@ -226,15 +226,11 @@ class PluginConfigValidator:
                     value=schema_config,
                 )
             ]
-        except Exception as e:
-            # Catch any other unexpected exceptions
-            return [
-                ValidationError(
-                    field="schema",
-                    message=f"Unexpected error validating schema: {e}",
-                    value=schema_config,
-                )
-            ]
+        # NOTE: No catch-all Exception handler here.
+        # SchemaConfig.from_dict() documents it raises ValueError for invalid config.
+        # Any other exception (TypeError, AttributeError, etc.) is a bug in our code
+        # that should crash immediately per CLAUDE.md - not be silently converted
+        # to a "validation error" that hides the real problem.
 
     def _get_transform_config_model(self, transform_type: str) -> type["PluginConfig"]:
         """Get Pydantic config model for transform type.

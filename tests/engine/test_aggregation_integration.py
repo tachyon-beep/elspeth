@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     RunStatus,
     SourceRow,
 )
@@ -29,7 +30,6 @@ from elspeth.core.config import (
     TriggerConfig,
 )
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.clock import MockClock
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
@@ -65,6 +65,7 @@ class TestAggregationTimeoutIntegration:
     def test_aggregation_timeout_flushes_during_processing(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Aggregation should flush on timeout during processing, not wait for end-of-source.
 
@@ -120,10 +121,12 @@ class TestAggregationTimeoutIntegration:
                     # Batch mode - aggregate the rows
                     rows = row
                     total = sum(r.get("value", 0) for r in rows)
-                    return TransformResult.success({"id": rows[0].get("id"), "value": total, "count": len(rows)})
+                    return TransformResult.success(
+                        {"id": rows[0].get("id"), "value": total, "count": len(rows)}, success_reason={"action": "test"}
+                    )
                 else:
                     # Single row mode - passthrough
-                    return TransformResult.success(dict(row))
+                    return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectingSink(_TestSinkBase):
             """Sink that collects rows for verification."""
@@ -184,7 +187,7 @@ class TestAggregationTimeoutIntegration:
                 timeout_seconds=0.1,  # Short timeout - should fire during sleep
                 count=100,  # High count - won't trigger by count
             ),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Now create the config with the correct node_id in aggregation_settings
@@ -210,7 +213,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -256,6 +259,7 @@ class TestAggregationTimeoutIntegration:
     def test_aggregation_timeout_loop_checks_all_nodes(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """The timeout check loop iterates over all aggregation nodes.
 
@@ -311,8 +315,8 @@ class TestAggregationTimeoutIntegration:
                 if isinstance(row, list):
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects all rows."""
@@ -359,7 +363,7 @@ class TestAggregationTimeoutIntegration:
             name="agg_loop",
             plugin="agg_loop",
             trigger=TriggerConfig(timeout_seconds=0.1, count=100),
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -382,7 +386,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -400,6 +404,7 @@ class TestAggregationTimeoutIntegration:
     def test_timeout_fires_before_row_processing(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout is checked BEFORE each row is processed, not after.
 
@@ -467,8 +472,8 @@ class TestAggregationTimeoutIntegration:
                     flush_count += 1
                     batch_sizes.append(len(row))
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class SimpleSink(_TestSinkBase):
             """Simple sink."""
@@ -517,7 +522,7 @@ class TestAggregationTimeoutIntegration:
             name="race_agg",
             plugin="counting_agg",
             trigger=TriggerConfig(timeout_seconds=0.1, count=2),
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -540,7 +545,7 @@ class TestAggregationTimeoutIntegration:
 
         # Inject MockClock into Orchestrator for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -577,6 +582,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_single_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with single output_mode creates one aggregated token.
 
@@ -627,8 +633,8 @@ class TestEndOfSourceFlush:
                 if isinstance(row, list):
                     batch_data.append({"rows": len(row), "total": sum(r.get("value", 0) for r in row)})
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -674,7 +680,7 @@ class TestEndOfSourceFlush:
             name="test_single",
             plugin="single_agg",
             trigger=TriggerConfig(count=100),  # Won't trigger by count - needs END_OF_SOURCE
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -696,7 +702,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -715,6 +721,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_passthrough_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with passthrough output_mode preserves all tokens.
 
@@ -765,8 +772,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: return same number of rows, enriched
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total, "batch_size": len(row)} for r in row]
-                    return TransformResult.success_multi(enriched)
-                return TransformResult.success(dict(row))
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -834,7 +841,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -854,6 +861,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_transform_mode(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with transform output_mode creates new tokens.
 
@@ -906,9 +914,10 @@ class TestEndOfSourceFlush:
                         [
                             {"type": "summary", "total": total},
                             {"type": "count", "count": len(row)},
-                        ]
+                        ],
+                        success_reason={"action": "test"},
                     )
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -976,7 +985,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -996,6 +1005,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_passthrough_with_downstream_transform(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with passthrough routes tokens through downstream transforms.
 
@@ -1041,8 +1051,8 @@ class TestEndOfSourceFlush:
                     # Passthrough: enrich with batch_total
                     batch_total = sum(r.get("value", 0) for r in row)
                     enriched = [{**r, "batch_total": batch_total} for r in row]
-                    return TransformResult.success_multi(enriched)
-                return TransformResult.success(dict(row))
+                    return TransformResult.success_multi(enriched, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1056,7 +1066,7 @@ class TestEndOfSourceFlush:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "processed": True})
+                return TransformResult.success({**row, "processed": True}, success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1126,7 +1136,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -1142,6 +1152,7 @@ class TestEndOfSourceFlush:
     def test_end_of_source_single_with_downstream_transform(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE flush with single mode routes result through downstream transforms.
 
@@ -1185,8 +1196,8 @@ class TestEndOfSourceFlush:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class DownstreamTransform(BaseTransform):
             """Second transform: adds 'processed' field."""
@@ -1200,7 +1211,9 @@ class TestEndOfSourceFlush:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success({**row, "processed": True, "doubled_total": row.get("total", 0) * 2})
+                return TransformResult.success(
+                    {**row, "processed": True, "doubled_total": row.get("total", 0) * 2}, success_reason={"action": "test"}
+                )
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -1248,7 +1261,7 @@ class TestEndOfSourceFlush:
             name="test_single_ds",
             plugin="single_agg_ds",
             trigger=TriggerConfig(count=100),
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -1270,7 +1283,7 @@ class TestEndOfSourceFlush:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
 
@@ -1297,6 +1310,7 @@ class TestTimeoutFlushErrorHandling:
     def test_timeout_flush_error_single_mode_no_duplicate_outcomes(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout flush errors in single mode must not record duplicate terminal outcomes.
 
@@ -1334,7 +1348,7 @@ class TestTimeoutFlushErrorHandling:
                     flush_calls.append("flush_failed")
                     return TransformResult.error({"reason": "deliberate_failure"})
                 # Single row passthrough (shouldn't happen in batch mode)
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1401,7 +1415,7 @@ class TestTimeoutFlushErrorHandling:
                 timeout_seconds=0.1,  # Short timeout
                 count=100,  # High count - won't trigger by count
             ),
-            output_mode="single",  # Tokens get CONSUMED_IN_BATCH when buffered
+            output_mode="transform",  # Tokens get CONSUMED_IN_BATCH when buffered
         )
 
         config = PipelineConfig(
@@ -1428,7 +1442,7 @@ class TestTimeoutFlushErrorHandling:
         # BUG: This should NOT crash with IntegrityError
         # The fix should handle the fact that tokens in single mode already
         # have CONSUMED_IN_BATCH recorded when the flush fails.
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify the flush was attempted and failed
         assert len(flush_calls) >= 1, "Batch flush should have been called"
@@ -1446,6 +1460,7 @@ class TestTimeoutFlushErrorHandling:
     def test_timeout_flush_downstream_routed_counts_tracked(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Downstream ROUTED outcomes from timeout flush must be tracked in stats.
 
@@ -1480,8 +1495,8 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch mode - combine rows
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         # Create mock clock for deterministic timeout testing
         clock = MockClock(start=0.0)
@@ -1578,7 +1593,7 @@ class TestTimeoutFlushErrorHandling:
                 timeout_seconds=0.1,
                 count=100,  # Won't trigger by count
             ),
-            output_mode="single",
+            output_mode="transform",
         )
 
         # Rebuild config with aggregation settings
@@ -1605,7 +1620,7 @@ class TestTimeoutFlushErrorHandling:
 
         # Inject MockClock for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -1626,6 +1641,7 @@ class TestTimeoutFlushErrorHandling:
     def test_passthrough_flush_failure_marks_all_buffered_tokens_failed(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Passthrough flush failure must mark ALL buffered tokens as FAILED.
 
@@ -1666,8 +1682,8 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_passthrough_failure"})
-                return TransformResult.success(dict(row))
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_passthrough_failure"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -1762,7 +1778,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -1802,6 +1818,7 @@ class TestTimeoutFlushErrorHandling:
     def test_passthrough_end_of_source_flush_failure_marks_all_failed(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """END_OF_SOURCE passthrough flush failure must mark ALL buffered tokens FAILED.
 
@@ -1834,8 +1851,8 @@ class TestTimeoutFlushErrorHandling:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "eos_failure"})
-                return TransformResult.success(dict(row))
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "eos_failure"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class ShortSource(_TestSourceBase):
             """Source that emits 2 rows (won't trigger count=10)."""
@@ -1927,7 +1944,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify END_OF_SOURCE flush was triggered and failed
         assert len(flush_calls) == 1, f"Expected 1 END_OF_SOURCE flush, got {len(flush_calls)}"
@@ -1960,6 +1977,7 @@ class TestTimeoutFlushErrorHandling:
     def test_single_mode_count_flush_failure_triggering_token_has_outcome(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Count-triggered flush failure in single mode must record CONSUMED_IN_BATCH for triggering token.
 
@@ -2007,8 +2025,8 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL with error result
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_single_mode_failure"})
-                return TransformResult.success(dict(row))
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_single_mode_failure"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2082,7 +2100,7 @@ class TestTimeoutFlushErrorHandling:
             trigger=TriggerConfig(
                 count=3,  # Flush after 3 rows
             ),
-            output_mode="single",  # Tokens get CONSUMED_IN_BATCH when buffered
+            output_mode="transform",  # Tokens get CONSUMED_IN_BATCH when buffered
         )
 
         config = PipelineConfig(
@@ -2104,7 +2122,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -2136,6 +2154,7 @@ class TestTimeoutFlushErrorHandling:
     def test_transform_mode_count_flush_failure_triggering_token_has_outcome(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Count-triggered flush failure in transform mode must record CONSUMED_IN_BATCH for triggering token.
 
@@ -2166,8 +2185,8 @@ class TestTimeoutFlushErrorHandling:
                 if isinstance(row, list):
                     # Batch flush - FAIL
                     flush_calls.append("flush_failed")
-                    return TransformResult.error({"reason": "deliberate_transform_mode_failure"})
-                return TransformResult.success(dict(row))
+                    return TransformResult.error({"reason": "deliberate_failure", "error": "deliberate_transform_mode_failure"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CountTriggerSource(_TestSourceBase):
             """Source that emits exactly 3 rows to trigger count-based flush."""
@@ -2259,7 +2278,7 @@ class TestTimeoutFlushErrorHandling:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify flush was called and failed
         assert len(flush_calls) == 1, f"Expected 1 flush call, got {len(flush_calls)}"
@@ -2300,6 +2319,7 @@ class TestTimeoutFlushStepIndexing:
     def test_timeout_flush_records_1_indexed_step(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Timeout flush at first transform should record step_index=1, not 0.
 
@@ -2344,8 +2364,8 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2391,7 +2411,7 @@ class TestTimeoutFlushStepIndexing:
             name="test_step",
             plugin="batch_agg_step_test",
             trigger=TriggerConfig(count=100, timeout_seconds=0.5),  # Timeout trigger (0.5s with CI margin)
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -2414,7 +2434,7 @@ class TestTimeoutFlushStepIndexing:
 
         # Inject MockClock for deterministic timeout testing
         orchestrator = Orchestrator(db=landscape_db, clock=clock)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -2441,6 +2461,7 @@ class TestTimeoutFlushStepIndexing:
     def test_end_of_source_flush_records_1_indexed_step(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """End-of-source flush at first transform should record step_index=1, not 0.
 
@@ -2489,8 +2510,8 @@ class TestTimeoutFlushStepIndexing:
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):
                     total = sum(r.get("value", 0) for r in row)
-                    return TransformResult.success({"total": total, "count": len(row)})
-                return TransformResult.success(dict(row))
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class CollectorSink(_TestSinkBase):
             """Sink that collects output."""
@@ -2536,7 +2557,7 @@ class TestTimeoutFlushStepIndexing:
             name="test_eos_step",
             plugin="batch_agg_eos_step_test",
             trigger=TriggerConfig(count=100),  # High count, no timeout - forces END_OF_SOURCE
-            output_mode="single",
+            output_mode="transform",
         )
 
         config = PipelineConfig(
@@ -2558,7 +2579,7 @@ class TestTimeoutFlushStepIndexing:
         )
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"
 
@@ -2578,3 +2599,522 @@ class TestTimeoutFlushStepIndexing:
                 f"Bug: _find_aggregation_transform returns 0-indexed position which "
                 f"flows directly to audit recording without +1 conversion."
             )
+
+
+class TestExpectedOutputCountEnforcement:
+    """Test runtime enforcement of expected_output_count for aggregations.
+
+    When expected_output_count is configured, the processor must validate
+    that the aggregation produces exactly that many output rows. This is
+    a plugin contract violation (hard error) if mismatched.
+
+    Covers:
+    - _process_batch_aggregation_node() path (count trigger flush)
+    - handle_timeout_flush() path (timeout/end-of-source flush)
+    """
+
+    def test_expected_output_count_matches_passes(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """Aggregation with matching expected_output_count completes successfully."""
+
+        class FastSource(_TestSourceBase):
+            """Source that emits rows for aggregation."""
+
+            name = "fast_source_count_match"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class SingleRowAgg(BaseTransform):
+            """Aggregation that produces exactly 1 output row."""
+
+            name = "single_row_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"total": total, "count": len(row)}, success_reason={"action": "test"})
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
+
+        class SimpleSink(_TestSinkBase):
+            """Simple sink."""
+
+            name = "simple_sink_count_match"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(SingleRowAgg())
+        sink = as_sink(SimpleSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        # expected_output_count=1 matches what SingleRowAgg produces
+        agg_settings = AggregationSettings(
+            name="test_count_match",
+            plugin="single_row_agg",
+            trigger=TriggerConfig(count=3),  # Flush after 3 rows
+            output_mode="transform",
+            expected_output_count=1,  # Expect exactly 1 output row
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_count_match", options={}),
+            sinks={"output": SinkSettings(plugin="simple_sink_count_match", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        # Should complete successfully since output count matches
+        assert result.status == RunStatus.COMPLETED, f"Run should complete when output count matches: {result}"
+        assert len(sink.rows) == 1, f"Should have exactly 1 output row, got {len(sink.rows)}"
+
+    def test_expected_output_count_mismatch_raises_runtime_error(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """Aggregation with mismatched expected_output_count raises RuntimeError.
+
+        This tests the _process_batch_aggregation_node() path where a count
+        trigger causes the flush.
+        """
+
+        class FastSource(_TestSourceBase):
+            """Source that emits rows for aggregation."""
+
+            name = "fast_source_count_mismatch"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class MultiRowAgg(BaseTransform):
+            """Aggregation that produces multiple output rows (violates expected_output_count=1)."""
+
+            name = "multi_row_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Return 2 rows instead of 1 - this violates expected_output_count=1
+                    return TransformResult.success_multi(
+                        [{"part": 1, "total": sum(r.get("value", 0) for r in row)}, {"part": 2, "count": len(row)}],
+                        success_reason={"action": "test"},
+                    )
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
+
+        class SimpleSink(_TestSinkBase):
+            """Simple sink."""
+
+            name = "simple_sink_count_mismatch"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(MultiRowAgg())
+        sink = as_sink(SimpleSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        # expected_output_count=1 but MultiRowAgg produces 2 rows
+        agg_settings = AggregationSettings(
+            name="test_count_mismatch",
+            plugin="multi_row_agg",
+            trigger=TriggerConfig(count=3),  # Flush after 3 rows
+            output_mode="transform",
+            expected_output_count=1,  # Expect 1, but plugin produces 2
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_count_mismatch", options={}),
+            sinks={"output": SinkSettings(plugin="simple_sink_count_mismatch", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+
+        # Should raise RuntimeError due to output count mismatch
+        with pytest.raises(RuntimeError) as exc_info:
+            orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        error_msg = str(exc_info.value)
+        assert "test_count_mismatch" in error_msg, f"Error should mention aggregation name: {error_msg}"
+        assert "2" in error_msg, f"Error should mention actual count (2): {error_msg}"
+        assert "expected_output_count=1" in error_msg, f"Error should mention expected count: {error_msg}"
+        assert "plugin contract violation" in error_msg.lower(), f"Error should mention contract violation: {error_msg}"
+
+    def test_expected_output_count_timeout_flush_path(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """Test expected_output_count enforcement in handle_timeout_flush path.
+
+        Uses MockClock to trigger timeout-based flush, which exercises
+        handle_timeout_flush() rather than _process_batch_aggregation_node().
+        """
+        clock = MockClock(start=0.0)
+
+        def advance_after_first_row(row_idx: int) -> None:
+            if row_idx == 0:
+                clock.advance(0.5)  # Advance past timeout
+
+        callback_source = CallbackSource(
+            rows=[
+                {"id": 1, "value": 100},  # Buffered, then timeout triggers
+                {"id": 2, "value": 200},  # This row triggers timeout check
+            ],
+            output_schema=_TestSchema,
+            after_yield_callback=advance_after_first_row,
+            source_name="timeout_count_source",
+        )
+
+        class MultiRowAgg(BaseTransform):
+            """Aggregation that produces 2 output rows (violates expected_output_count=1)."""
+
+            name = "timeout_multi_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Return 2 rows - violates expected_output_count=1
+                    return TransformResult.success_multi(
+                        [{"part": 1}, {"part": 2}],
+                        success_reason={"action": "test"},
+                    )
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
+
+        class SimpleSink(_TestSinkBase):
+            """Simple sink."""
+
+            name = "timeout_sink"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(callback_source)
+        transform = as_transform(MultiRowAgg())
+        sink = as_sink(SimpleSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        # Timeout triggers flush, which will produce 2 rows vs expected 1
+        agg_settings = AggregationSettings(
+            name="timeout_test",
+            plugin="timeout_multi_agg",
+            trigger=TriggerConfig(timeout_seconds=0.1, count=100),  # Timeout will fire
+            output_mode="transform",
+            expected_output_count=1,  # Plugin produces 2, should fail
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="timeout_count_source", options={}),
+            sinks={"output": SinkSettings(plugin="timeout_sink", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db, clock=clock)
+
+        # Should raise RuntimeError due to output count mismatch on timeout flush
+        with pytest.raises(RuntimeError) as exc_info:
+            orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        error_msg = str(exc_info.value)
+        assert "timeout_test" in error_msg, f"Error should mention aggregation name: {error_msg}"
+        assert "expected_output_count=1" in error_msg, f"Error should mention expected count: {error_msg}"
+
+    def test_expected_output_count_none_skips_validation(
+        self,
+        landscape_db: LandscapeDB,
+        payload_store,
+    ) -> None:
+        """When expected_output_count is None, no validation is performed.
+
+        This is the default behavior - aggregations can produce any number
+        of output rows.
+        """
+
+        class FastSource(_TestSourceBase):
+            """Source that emits rows."""
+
+            name = "fast_source_no_count"
+            output_schema = _TestSchema
+
+            def __init__(self) -> None:
+                pass
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"id": 1, "value": 100})
+                yield SourceRow.valid({"id": 2, "value": 200})
+                yield SourceRow.valid({"id": 3, "value": 300})
+
+            def close(self) -> None:
+                pass
+
+        class VariableOutputAgg(BaseTransform):
+            """Aggregation that produces variable number of rows."""
+
+            name = "variable_agg"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
+                if isinstance(row, list):
+                    # Return N rows where N = len(input) - could be any number
+                    return TransformResult.success_multi(
+                        [{"idx": i, "value": r.get("value", 0)} for i, r in enumerate(row)],
+                        success_reason={"action": "test"},
+                    )
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
+
+        class SimpleSink(_TestSinkBase):
+            """Simple sink."""
+
+            name = "simple_sink_no_count"
+
+            def __init__(self) -> None:
+                self.rows: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                for row in rows:
+                    self.rows.append(row)
+                return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+            def close(self) -> None:
+                pass
+
+        source = as_source(FastSource())
+        transform = as_transform(VariableOutputAgg())
+        sink = as_sink(SimpleSink())
+
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        node_id = graph.get_transform_id_map()[0]
+
+        # No expected_output_count - any output count is acceptable
+        agg_settings = AggregationSettings(
+            name="test_no_count",
+            plugin="variable_agg",
+            trigger=TriggerConfig(count=3),
+            output_mode="transform",
+            # expected_output_count not set (None)
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            gates=[],
+            aggregation_settings={node_id: agg_settings},
+            coalesce_settings={},
+        )
+
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="fast_source_no_count", options={}),
+            sinks={"output": SinkSettings(plugin="simple_sink_no_count", options={})},
+            default_sink="output",
+            transforms=[],
+            gates=[],
+            aggregation={},
+        )
+
+        orchestrator = Orchestrator(db=landscape_db)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        # Should complete successfully without validation
+        assert result.status == RunStatus.COMPLETED, f"Run should complete when expected_output_count is None: {result}"
+        # Variable output agg produces 3 rows (one per input)
+        assert len(sink.rows) == 3, f"Should have 3 output rows, got {len(sink.rows)}"

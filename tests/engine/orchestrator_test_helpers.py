@@ -84,7 +84,7 @@ def build_production_graph(
             def process(self, row: dict[str, Any], ctx: Any) -> Any:
                 from elspeth.plugins.results import TransformResult
 
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         aggregations[agg_name] = (_AggTransform(), agg_settings)
 

@@ -322,3 +322,84 @@ class TestSchemaConfigSerialization:
         assert roundtrip.fields[0].field_type == "int"
         assert roundtrip.fields[1].name == "name"
         assert roundtrip.fields[1].field_type == "str"
+
+
+class TestAuditFields:
+    """Tests for audit_fields schema attribute.
+
+    BUG-AZURE-03: LLM transforms emit metadata fields that aren't declared
+    in their output schema. The audit_fields attribute distinguishes between:
+    - guaranteed_fields: Stable API contract fields (downstream can depend on)
+    - audit_fields: Provenance metadata that exists but isn't stability-contracted
+    """
+
+    def test_audit_fields_parsing(self) -> None:
+        """Verify audit_fields is parsed from config dict."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = {
+            "fields": "dynamic",
+            "guaranteed_fields": ["response", "response_usage"],
+            "audit_fields": ["response_template_hash", "response_lookup_source"],
+        }
+        schema = SchemaConfig.from_dict(config)
+
+        assert schema.audit_fields == ("response_template_hash", "response_lookup_source")
+        assert schema.guaranteed_fields == ("response", "response_usage")
+
+    def test_audit_fields_not_in_effective_guaranteed(self) -> None:
+        """Verify audit_fields are excluded from effective guaranteed fields."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig(
+            mode=None,
+            fields=None,
+            is_dynamic=True,
+            guaranteed_fields=("response", "response_usage"),
+            audit_fields=("response_template_hash",),
+        )
+
+        effective = schema.get_effective_guaranteed_fields()
+        assert "response" in effective
+        assert "response_usage" in effective
+        assert "response_template_hash" not in effective
+
+    def test_audit_fields_serialization_roundtrip(self) -> None:
+        """Verify audit_fields survive to_dict/from_dict round-trip."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig(
+            mode=None,
+            fields=None,
+            is_dynamic=True,
+            guaranteed_fields=("response",),
+            audit_fields=("response_template_hash", "response_lookup_source"),
+        )
+
+        serialized = schema.to_dict()
+        assert "audit_fields" in serialized
+        assert serialized["audit_fields"] == ["response_template_hash", "response_lookup_source"]
+
+        roundtrip = SchemaConfig.from_dict(serialized)
+        assert roundtrip.audit_fields == ("response_template_hash", "response_lookup_source")
+
+    def test_audit_fields_rejects_non_list(self) -> None:
+        """audit_fields must be a list."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="must be a list"):
+            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": "not_a_list"})
+
+    def test_audit_fields_rejects_duplicates(self) -> None:
+        """audit_fields must not contain duplicates."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="Duplicate field names"):
+            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": ["hash", "hash"]})
+
+    def test_audit_fields_rejects_invalid_identifiers(self) -> None:
+        """audit_fields must be valid Python identifiers."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match="valid Python identifier"):
+            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": ["valid", "invalid-field"]})

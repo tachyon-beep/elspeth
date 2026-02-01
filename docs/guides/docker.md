@@ -63,7 +63,7 @@ docker run --rm \
 
 ## Environment Variables
 
-Pass secrets and configuration via environment variables:
+Pass secrets and configuration via environment variables. See the [Environment Variables Reference](../reference/environment-variables.md) for the complete list.
 
 ```bash
 docker run --rm \
@@ -78,24 +78,19 @@ docker run --rm \
   run --settings /app/config/pipeline.yaml --execute
 ```
 
-### Required Variables
+**Key variables for Docker:**
 
-| Variable | Purpose | Required When |
-|----------|---------|---------------|
-| `ELSPETH_FINGERPRINT_KEY` | Secret fingerprinting | Config contains API keys or passwords |
-| `OPENROUTER_API_KEY` | LLM provider | Using LLM plugins |
-| `DATABASE_URL` | Audit database | Using PostgreSQL (default: SQLite) |
-
-### Optional Variables
-
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `ELSPETH_SIGNING_KEY` | Signed audit exports | None (unsigned) |
-| `ELSPETH_ALLOW_RAW_SECRETS` | Dev mode (redact secrets) | false |
+| Variable | Purpose |
+|----------|---------|
+| `ELSPETH_FINGERPRINT_KEY` | Secret fingerprinting (required if config contains API keys) |
+| `OPENROUTER_API_KEY` | LLM provider API key |
+| `DATABASE_URL` | Audit database (default: SQLite) |
 
 ---
 
 ## Common Commands
+
+For complete CLI reference including all options and flags, see [User Manual - CLI Commands](../USER_MANUAL.md#cli-commands).
 
 ### Run a Pipeline
 
@@ -367,28 +362,12 @@ FROM python:3.11-slim AS runtime
 
 ## Troubleshooting
 
-### "File not found" errors
+For general ELSPETH troubleshooting (API errors, configuration issues, etc.), see the [Troubleshooting Guide](troubleshooting.md). Below are Docker-specific issues.
 
-**Symptom:** `FileNotFoundError: /app/input/data.csv`
+### Common Docker Errors
 
-**Cause:** Volume not mounted or wrong path in config.
-
-**Fix:**
-1. Verify volume mount: `docker run --rm -v $(pwd)/input:/app/input:ro elspeth:local ls /app/input`
-2. Check pipeline config uses container paths (`/app/input/...`)
-
-### Permission denied on output
-
-**Symptom:** `PermissionError: [Errno 13] Permission denied: '/app/output/results.csv'`
-
-**Cause:** Output directory doesn't exist or wrong permissions.
-
-**Fix:**
-```bash
-# Create output directory with correct permissions
-mkdir -p ./output
-chmod 777 ./output  # Or use appropriate UID/GID
-```
+- **"File not found"** - See [File Not Found Errors](troubleshooting.md#file-not-found-errors) (verify volume mounts and container paths)
+- **"Permission denied"** - See [Permission Denied on Output](troubleshooting.md#permission-denied-on-output) (create output dir with `mkdir -p ./output && chmod 777 ./output`)
 
 ### Database connection refused
 

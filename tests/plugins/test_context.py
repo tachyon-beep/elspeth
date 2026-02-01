@@ -386,7 +386,7 @@ class TestTransformErrorRecording:
             token_id="tok_123",
             transform_id="field_mapper",
             row={"id": 1, "data": "test"},
-            error_details={"reason": "Cannot process"},
+            error_details={"reason": "validation_failed", "error": "Cannot process"},
             destination="error_sink",
         )
 
@@ -408,7 +408,7 @@ class TestTransformErrorRecording:
                 token_id="tok_123",
                 transform_id="field_mapper",
                 row={"id": 1, "data": "test"},
-                error_details={"reason": "Cannot process"},
+                error_details={"reason": "validation_failed", "error": "Cannot process"},
                 destination="error_sink",
             )
 
@@ -436,7 +436,7 @@ class TestTransformErrorRecording:
             token_id="tok_456",
             transform_id="field_mapper",
             row={"id": 42, "value": "bad"},
-            error_details={"reason": "Division by zero"},
+            error_details={"reason": "validation_failed", "error": "Division by zero"},
             destination="failed_rows",
         )
 
@@ -447,7 +447,7 @@ class TestTransformErrorRecording:
         assert call_kwargs["token_id"] == "tok_456"
         assert call_kwargs["transform_id"] == "field_mapper"
         assert call_kwargs["row_data"] == {"id": 42, "value": "bad"}
-        assert call_kwargs["error_details"] == {"reason": "Division by zero"}
+        assert call_kwargs["error_details"] == {"reason": "validation_failed", "error": "Division by zero"}
         assert call_kwargs["destination"] == "failed_rows"
 
         # Token should have error_id from landscape
@@ -507,3 +507,167 @@ class TestTokenField:
 
         assert ctx.token is token
         assert ctx.token.row_id == "row-99"
+
+
+class TestRecordCallTelemetryResponseHash:
+    """Tests for response hash handling in record_call telemetry.
+
+    Regression test for P3 issue: empty-but-valid responses should still get
+    hashed for telemetry/audit correlation.
+    """
+
+    def test_empty_dict_response_gets_hashed(self) -> None:
+        """Empty dict {} response should emit response_hash in telemetry.
+
+        Bug: Using truthiness check (if response_data) causes empty responses
+        to emit response_hash=None, breaking telemetry/audit correlation.
+        """
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.plugins.context import PluginContext
+
+        # Set up telemetry callback to capture emitted events
+        emitted_events: list = []
+
+        def capture_telemetry(event):
+            emitted_events.append(event)
+
+        # Mock landscape to avoid DB setup - we only care about telemetry
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",  # Required for call recording
+            telemetry_emit=capture_telemetry,
+        )
+
+        # Call with empty dict response (valid but falsy)
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"endpoint": "/empty"},
+            response_data={},  # Empty dict - valid response
+            latency_ms=50.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        # Verify telemetry was emitted with response_hash
+        assert len(emitted_events) == 1
+        event = emitted_events[0]
+        # response_hash should NOT be None for empty dict
+        assert event.response_hash is not None, (
+            "Empty dict response should still get hashed. Got response_hash=None which breaks telemetry/audit correlation."
+        )
+
+    def test_empty_list_response_gets_hashed(self) -> None:
+        """Empty list [] response should emit response_hash in telemetry."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.plugins.context import PluginContext
+
+        emitted_events: list = []
+
+        def capture_telemetry(event):
+            emitted_events.append(event)
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=capture_telemetry,
+        )
+
+        # Empty list response
+        ctx.record_call(
+            call_type=CallType.SQL,
+            provider="database",
+            request_data={"query": "SELECT * FROM empty_table"},
+            response_data=[],  # Empty list - no results
+            latency_ms=10.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        assert emitted_events[0].response_hash is not None
+
+    def test_empty_string_response_gets_hashed(self) -> None:
+        """Empty string '' response should emit response_hash in telemetry."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.plugins.context import PluginContext
+
+        emitted_events: list = []
+
+        def capture_telemetry(event):
+            emitted_events.append(event)
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=capture_telemetry,
+        )
+
+        # Empty string response (e.g., HTTP 204 No Content)
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "DELETE"},
+            response_data="",  # Empty string - valid 204 response
+            latency_ms=25.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        assert emitted_events[0].response_hash is not None
+
+    def test_none_response_does_not_get_hashed(self) -> None:
+        """None response should emit response_hash=None (no response data)."""
+        from unittest.mock import MagicMock
+
+        from elspeth.contracts.enums import CallStatus, CallType
+        from elspeth.plugins.context import PluginContext
+
+        emitted_events: list = []
+
+        def capture_telemetry(event):
+            emitted_events.append(event)
+
+        mock_landscape = MagicMock()
+        mock_landscape.record_call.return_value = MagicMock(call_id="call-001")
+
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_landscape,
+            state_id="state-001",
+            telemetry_emit=capture_telemetry,
+        )
+
+        # None response - truly no data
+        ctx.record_call(
+            call_type=CallType.HTTP,
+            provider="api.example.com",
+            request_data={"method": "HEAD"},
+            response_data=None,  # No response data at all
+            latency_ms=15.0,
+            status=CallStatus.SUCCESS,
+        )
+
+        assert len(emitted_events) == 1
+        # None is correct for truly missing response
+        assert emitted_events[0].response_hash is None

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from elspeth.core.rate_limit.limiter import RateLimiter
 
 if TYPE_CHECKING:
-    from elspeth.core.config import RateLimitSettings
+    from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
 
 
 class NoOpLimiter:
@@ -51,8 +51,10 @@ class RateLimitRegistry:
     Thread-safe for concurrent access.
 
     Example:
-        settings = RateLimitSettings(...)
-        registry = RateLimitRegistry(settings)
+        from elspeth.contracts.config.runtime import RuntimeRateLimitConfig
+
+        config = RuntimeRateLimitConfig.from_settings(settings.rate_limit)
+        registry = RateLimitRegistry(config)
 
         # In external call code:
         limiter = registry.get_limiter("openai")
@@ -63,13 +65,13 @@ class RateLimitRegistry:
         registry.close()
     """
 
-    def __init__(self, settings: RateLimitSettings) -> None:
-        """Initialize registry with rate limit settings.
+    def __init__(self, config: RuntimeRateLimitConfig) -> None:
+        """Initialize registry with rate limit configuration.
 
         Args:
-            settings: Rate limit configuration
+            config: Runtime rate limit configuration (from RuntimeRateLimitConfig.from_settings())
         """
-        self._settings = settings
+        self._config = config
         self._limiters: dict[str, RateLimiter] = {}
         self._lock = threading.Lock()
         self._noop_limiter = NoOpLimiter()
@@ -85,17 +87,16 @@ class RateLimitRegistry:
         Returns:
             RateLimiter (or NoOpLimiter if disabled)
         """
-        if not self._settings.enabled:
+        if not self._config.enabled:
             return self._noop_limiter
 
         with self._lock:
             if service_name not in self._limiters:
-                config = self._settings.get_service_config(service_name)
+                service_config = self._config.get_service_config(service_name)
                 self._limiters[service_name] = RateLimiter(
                     name=service_name,
-                    requests_per_second=config.requests_per_second,
-                    requests_per_minute=config.requests_per_minute,
-                    persistence_path=self._settings.persistence_path,
+                    requests_per_minute=service_config.requests_per_minute,
+                    persistence_path=self._config.persistence_path,
                 )
 
             return self._limiters[service_name]

@@ -15,7 +15,7 @@ class TestRoutingAction:
             kind=RoutingKind.ROUTE,
             destinations=("sink_a",),
             mode=RoutingMode.MOVE,
-            reason={},
+            reason={"rule": "test", "matched_value": None},
         )
         assert action.mode is RoutingMode.MOVE
 
@@ -32,8 +32,9 @@ class TestRoutingAction:
         """continue_ can include audit reason."""
         from elspeth.contracts import RoutingAction
 
-        action = RoutingAction.continue_(reason={"rule": "passed"})
-        assert dict(action.reason) == {"rule": "passed"}
+        action = RoutingAction.continue_(reason={"rule": "passed", "matched_value": True})
+        assert action.reason is not None
+        assert action.reason["rule"] == "passed"  # type: ignore[typeddict-item]
 
     def test_route_default_move(self) -> None:
         """route defaults to MOVE mode."""
@@ -66,8 +67,15 @@ class TestRoutingAction:
         """route can include audit reason."""
         from elspeth.contracts import RoutingAction
 
-        action = RoutingAction.route("below", reason={"value": 500})
-        assert dict(action.reason) == {"value": 500}
+        action = RoutingAction.route(
+            "below",
+            reason={
+                "rule": "value below threshold",
+                "matched_value": 500,
+            },
+        )
+        assert action.reason is not None
+        assert action.reason["matched_value"] == 500  # type: ignore[typeddict-item]
 
     def test_fork_always_copy(self) -> None:
         """fork_to_paths always uses COPY mode."""
@@ -82,33 +90,46 @@ class TestRoutingAction:
         """fork_to_paths can include audit reason."""
         from elspeth.contracts import RoutingAction
 
-        action = RoutingAction.fork_to_paths(["a", "b"], reason={"strategy": "parallel"})
-        assert dict(action.reason) == {"strategy": "parallel"}
+        action = RoutingAction.fork_to_paths(
+            ["a", "b"],
+            reason={
+                "rule": "parallel_strategy",
+                "matched_value": "split",
+            },
+        )
+        assert action.reason is not None
+        assert action.reason["rule"] == "parallel_strategy"  # type: ignore[typeddict-item]
 
-    def test_reason_is_immutable(self) -> None:
-        """reason field should be immutable MappingProxyType."""
-        from types import MappingProxyType
+    def test_reason_mutation_prevented_by_deep_copy(self) -> None:
+        """Mutating original dict should not affect stored reason (deep copy)."""
+        from typing import Any
 
         from elspeth.contracts import RoutingAction
 
-        action = RoutingAction.continue_(reason={"key": "value"})
-        assert isinstance(action.reason, MappingProxyType)
+        original: dict[str, Any] = {"rule": "test", "matched_value": 42}
+        action = RoutingAction.continue_(reason=original)  # type: ignore[arg-type]
 
-        with pytest.raises(TypeError):
-            action.reason["new_key"] = "new_value"  # type: ignore[index]
+        # Mutate original - should not affect action.reason
+        original["rule"] = "mutated"
+        assert action.reason is not None
+        assert action.reason["rule"] == "test"  # type: ignore[typeddict-item]
 
     def test_reason_deep_copied(self) -> None:
-        """Mutating original dict should not affect frozen reason."""
+        """Mutating original nested dict should not affect frozen reason."""
+        from typing import Any
+
         from elspeth.contracts import RoutingAction
 
-        original = {"nested": {"key": "value"}}
-        action = RoutingAction.continue_(reason=original)
+        # Use nested dict in matched_value (which accepts Any)
+        original: dict[str, Any] = {"rule": "test", "matched_value": {"nested": "value"}}
+        action = RoutingAction.continue_(reason=original)  # type: ignore[arg-type]
 
-        # Mutate original
-        original["nested"]["key"] = "modified"
+        # Mutate original nested structure
+        original["matched_value"]["nested"] = "modified"
 
         # Frozen reason should be unchanged
-        assert action.reason["nested"]["key"] == "value"
+        assert action.reason is not None
+        assert action.reason["matched_value"]["nested"] == "value"  # type: ignore[typeddict-item]
 
     def test_frozen(self) -> None:
         """RoutingAction should be immutable."""

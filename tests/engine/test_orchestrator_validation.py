@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 class TestTransformErrorSinkValidation:
     """Tests for transform on_error sink validation at startup."""
 
-    def test_invalid_on_error_sink_fails_at_startup(self, landscape_db: LandscapeDB) -> None:
+    def test_invalid_on_error_sink_fails_at_startup(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Transform with on_error pointing to non-existent sink fails before processing."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -76,7 +76,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -111,14 +111,14 @@ class TestTransformErrorSinkValidation:
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):
-            orchestrator.run(config, graph=build_production_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify source.load was NOT called (validation happens before processing)
         assert not source.load_called
 
-    def test_error_message_includes_transform_name_and_sinks(self, landscape_db: LandscapeDB) -> None:
+    def test_error_message_includes_transform_name_and_sinks(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Error message includes transform name and available sinks."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -151,7 +151,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -188,7 +188,7 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator.run(config, graph=build_production_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         error_msg = str(exc_info.value)
         # Error should mention the transform name
@@ -199,9 +199,9 @@ class TestTransformErrorSinkValidation:
         assert "default" in error_msg
         assert "error_archive" in error_msg
 
-    def test_on_error_discard_passes_validation(self, landscape_db: LandscapeDB) -> None:
+    def test_on_error_discard_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: 'discard' passes validation (special value, not a sink)."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -230,7 +230,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -264,12 +264,12 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "discard" is valid
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         assert result.status == "completed"
 
-    def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB) -> None:
+    def test_on_error_none_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_error: null (not set) passes validation."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -298,7 +298,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -332,12 +332,12 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - None is valid (no error routing configured)
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         assert result.status == "completed"
 
-    def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB) -> None:
+    def test_valid_on_error_sink_passes_validation(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Valid on_error sink name passes validation."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class InputSchema(PluginSchema):
@@ -366,7 +366,7 @@ class TestTransformErrorSinkValidation:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -404,12 +404,12 @@ class TestTransformErrorSinkValidation:
         orchestrator = Orchestrator(landscape_db)
 
         # Should NOT raise - "error_sink" exists
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
         assert result.status == "completed"
 
-    def test_validation_occurs_before_row_processing(self, landscape_db: LandscapeDB) -> None:
+    def test_validation_occurs_before_row_processing(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Error occurs BEFORE any rows are processed (source.load should not be called)."""
-        from elspeth.engine.artifacts import ArtifactDescriptor
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.engine.orchestrator import (
             Orchestrator,
             PipelineConfig,
@@ -452,7 +452,7 @@ class TestTransformErrorSinkValidation:
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 call_tracking["transform_process_called"] = True
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         class TrackingSink(_TestSinkBase):
             """Sink that tracks write() calls."""
@@ -490,7 +490,7 @@ class TestTransformErrorSinkValidation:
 
         # Must raise RouteValidationError at startup
         with pytest.raises(RouteValidationError):
-            orchestrator.run(config, graph=build_production_graph(config))
+            orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Verify NOTHING was processed - validation caught error before processing started
         assert not call_tracking["source_load_called"], "source.load() should NOT be called"

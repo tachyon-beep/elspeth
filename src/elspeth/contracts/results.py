@@ -9,6 +9,8 @@ IMPORTANT:
 - FailureInfo provides type-safe error details for RowResult
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -17,8 +19,28 @@ if TYPE_CHECKING:
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.errors import TransformErrorReason, TransformSuccessReason
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.routing import RoutingAction
+
+
+@dataclass
+class ExceptionResult:
+    """Wrapper for exceptions that should propagate through async pattern.
+
+    When a worker thread encounters an uncaught exception (plugin bug),
+    it wraps the exception in this container. The waiter then re-raises
+    the original exception in the orchestrator thread, ensuring plugin
+    bugs crash the pipeline as intended.
+
+    Used by:
+    - engine/batch_adapter.py: Wraps exceptions in worker threads
+    - plugins/batching/mixin.py: Creates ExceptionResult on worker failure
+    - plugins/batching/ports.py: Type hint in BatchOutputPort protocol
+    """
+
+    exception: BaseException
+    traceback: str
 
 
 @dataclass
@@ -41,7 +63,7 @@ class FailureInfo:
     last_error: str | None = None
 
     @classmethod
-    def from_max_retries_exceeded(cls, e: "MaxRetriesExceeded") -> "FailureInfo":
+    def from_max_retries_exceeded(cls, e: MaxRetriesExceeded) -> FailureInfo:
         """Create FailureInfo from MaxRetriesExceeded exception.
 
         Args:
@@ -76,14 +98,27 @@ class TransformResult:
 
     status: Literal["success", "error"]
     row: dict[str, Any] | None
-    reason: dict[str, Any] | None
+    reason: TransformErrorReason | None
     retryable: bool = False
     rows: list[dict[str, Any]] | None = None
+
+    # Success metadata - REQUIRED for success results, None for error results
+    # Invariant: status="success" implies success_reason is not None
+    success_reason: TransformSuccessReason | None = None
 
     # Audit fields - set by executor, not by plugin
     input_hash: str | None = field(default=None, repr=False)
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Validate invariants - success results MUST have success_reason."""
+        if self.status == "success" and self.success_reason is None:
+            raise ValueError(
+                "TransformResult with status='success' MUST provide success_reason. "
+                "Use TransformResult.success(row, success_reason={'action': '...'}) "
+                "to create success results. Missing success_reason is a plugin bug."
+            )
 
     @property
     def is_multi_row(self) -> bool:
@@ -96,35 +131,92 @@ class TransformResult:
         return self.row is not None or self.rows is not None
 
     @classmethod
-    def success(cls, row: dict[str, Any]) -> "TransformResult":
-        """Create successful result with single output row."""
-        return cls(status="success", row=row, reason=None, rows=None)
+    def success(
+        cls,
+        row: dict[str, Any],
+        *,
+        success_reason: TransformSuccessReason,
+    ) -> TransformResult:
+        """Create successful result with single output row.
+
+        Args:
+            row: The transformed row data
+            success_reason: REQUIRED metadata about what the transform did.
+                           Must include at least 'action' field.
+                           See TransformSuccessReason for available fields.
+
+        Returns:
+            TransformResult with status="success" and the provided row.
+
+        Example:
+            return TransformResult.success(
+                row,
+                success_reason={"action": "processed", "fields_modified": ["amount"]}
+            )
+        """
+        return cls(
+            status="success",
+            row=row,
+            reason=None,
+            rows=None,
+            success_reason=success_reason,
+        )
 
     @classmethod
-    def success_multi(cls, rows: list[dict[str, Any]]) -> "TransformResult":
+    def success_multi(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        success_reason: TransformSuccessReason,
+    ) -> TransformResult:
         """Create successful result with multiple output rows.
 
         Args:
             rows: List of output rows (must not be empty)
+            success_reason: REQUIRED metadata about what the transform did.
+                           Must include at least 'action' field.
+                           See TransformSuccessReason for available fields.
 
         Returns:
             TransformResult with status="success", row=None, rows=rows
 
         Raises:
             ValueError: If rows is empty
+
+        Example:
+            return TransformResult.success_multi(
+                rows,
+                success_reason={"action": "split", "fields_added": ["row_index"]}
+            )
         """
         if not rows:
             raise ValueError("success_multi requires at least one row")
-        return cls(status="success", row=None, reason=None, rows=rows)
+        return cls(
+            status="success",
+            row=None,
+            reason=None,
+            rows=rows,
+            success_reason=success_reason,
+        )
 
     @classmethod
     def error(
         cls,
-        reason: dict[str, Any],
+        reason: TransformErrorReason,
         *,
         retryable: bool = False,
-    ) -> "TransformResult":
-        """Create error result with reason."""
+    ) -> TransformResult:
+        """Create error result with structured reason.
+
+        Args:
+            reason: Error details with required 'reason' field from
+                    TransformErrorCategory (compile-time validated).
+                    See TransformErrorReason for all available context fields.
+            retryable: Whether the error is transient and should be retried.
+
+        Returns:
+            TransformResult with status="error" and the provided reason.
+        """
         return cls(
             status="error",
             row=None,
@@ -177,16 +269,6 @@ class RowResult:
     sink_name: str | None = None
     error: FailureInfo | None = None
 
-    @property
-    def token_id(self) -> str:
-        """Token ID for backwards compatibility."""
-        return self.token.token_id
-
-    @property
-    def row_id(self) -> str:
-        """Row ID for backwards compatibility."""
-        return self.token.row_id
-
 
 @dataclass(frozen=True)
 class ArtifactDescriptor:
@@ -212,7 +294,7 @@ class ArtifactDescriptor:
         path: str,
         content_hash: str,
         size_bytes: int,
-    ) -> "ArtifactDescriptor":
+    ) -> ArtifactDescriptor:
         """Create descriptor for file-based artifacts."""
         return cls(
             artifact_type="file",
@@ -224,12 +306,12 @@ class ArtifactDescriptor:
     @classmethod
     def for_database(
         cls,
-        url: "SanitizedDatabaseUrl",
+        url: SanitizedDatabaseUrl,
         table: str,
         content_hash: str,
         payload_size: int,
         row_count: int,
-    ) -> "ArtifactDescriptor":
+    ) -> ArtifactDescriptor:
         """Create descriptor for database artifacts.
 
         URL must be pre-sanitized using SanitizedDatabaseUrl.from_raw_url().
@@ -256,11 +338,11 @@ class ArtifactDescriptor:
     @classmethod
     def for_webhook(
         cls,
-        url: "SanitizedWebhookUrl",
+        url: SanitizedWebhookUrl,
         content_hash: str,
         request_size: int,
         response_code: int,
-    ) -> "ArtifactDescriptor":
+    ) -> ArtifactDescriptor:
         """Create descriptor for webhook artifacts.
 
         URL must be pre-sanitized using SanitizedWebhookUrl.from_raw_url().
@@ -322,7 +404,7 @@ class SourceRow:
     quarantine_destination: str | None = None
 
     @classmethod
-    def valid(cls, row: dict[str, Any]) -> "SourceRow":
+    def valid(cls, row: dict[str, Any]) -> SourceRow:
         """Create a valid row result.
 
         Args:
@@ -336,7 +418,7 @@ class SourceRow:
         row: Any,
         error: str,
         destination: str,
-    ) -> "SourceRow":
+    ) -> SourceRow:
         """Create a quarantined row result.
 
         Args:

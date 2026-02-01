@@ -802,6 +802,7 @@ NaN → ValueError                - Deterministic number format
 | SDA Engine | `subsystems/03-sda-engine.md` | 📝 To write |
 | Configuration | `subsystems/04-configuration.md` | 📝 To write |
 | Payload Store | `subsystems/05-payload-store.md` | 📝 To write |
+| Token Lifecycle | `subsystems/06-token-lifecycle.md` | ✅ Complete |
 | Canonical | `architecture.md` | ✅ Complete |
 | CLI | `subsystems/07-cli.md` | 📝 To write (low priority) |
 

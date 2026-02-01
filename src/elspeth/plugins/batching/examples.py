@@ -76,7 +76,10 @@ Before (synchronous):
         def process(self, row: dict, ctx: PluginContext) -> TransformResult:
             # Called once per row, blocks until complete
             response = self._call_llm(row)
-            return TransformResult.success({"response": response})
+            return TransformResult.success(
+                {"response": response},
+                success_reason={"action": "processed"},
+            )
 
 
 After (batched with FIFO ordering):
@@ -97,7 +100,10 @@ After (batched with FIFO ordering):
         def _do_processing(self, row: dict, ctx: PluginContext) -> TransformResult:
             # Runs in worker thread, can take as long as needed
             response = self._call_llm(row)
-            return TransformResult.success({"response": response})
+            return TransformResult.success(
+                {"response": response},
+                success_reason={"action": "processed"},
+            )
 
         def close(self) -> None:
             self.shutdown_batch_processing()

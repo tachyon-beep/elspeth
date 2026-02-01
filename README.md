@@ -20,6 +20,7 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
   - [Running Pipelines](#running-pipelines)
   - [Explaining Decisions](#explaining-decisions)
   - [Audit Trail Export](#audit-trail-export)
+- [ChaosLLM Testing](#chaosllm-testing)
 - [Configuration](#configuration)
 - [Docker](#docker)
 - [Architecture](#architecture)
@@ -39,6 +40,7 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 - **Resilient Execution** - Checkpointing for crash recovery, retry logic with backoff, rate limiting, payload retention policies
 - **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification with manifest hash chains
 - **LLM Integration** - Azure OpenAI and OpenRouter support with pooled execution, batch processing, and multi-query
+- **ChaosLLM Testing** - Fake LLM server for load/stress testing with error injection, latency simulation, and MCP analysis tools
 
 ---
 
@@ -161,6 +163,53 @@ Signed exports include:
 - Every record with HMAC-SHA256 signature
 - Manifest with total count and running hash
 - Timestamp for chain-of-custody verification
+
+### JSONL Change Journal (Optional)
+
+Enable a redundant JSONL change journal to record committed database writes as
+an emergency backup. **Disabled by default.** This is not the canonical audit
+record—use only when you need a text-based, append-only backup stream.
+
+```yaml
+landscape:
+  dump_to_jsonl: true
+  dump_to_jsonl_path: ./runs/audit.journal.jsonl
+  # Include request/response payloads for LLM/HTTP calls
+  dump_to_jsonl_include_payloads: true
+```
+
+---
+
+## ChaosLLM Testing
+
+ChaosLLM is a fake LLM server for load and stress testing pipelines without real API calls.
+
+**Features:**
+- OpenAI + Azure OpenAI compatible chat completion endpoints
+- Error injection: rate limits (429), server errors (5xx), timeouts, disconnects, malformed JSON
+- Latency simulation and burst patterns for AIMD testing
+- Response modes: random, template (Jinja2), echo, preset bank (JSONL)
+- SQLite metrics with MCP analysis tools
+
+**Quick start:**
+
+```bash
+# Start server with stress testing preset
+chaosllm serve --preset=stress_aimd
+
+# Run on custom port with 20% rate limit errors
+chaosllm serve --port=9000 --rate-limit-pct=20
+
+# Generate structured JSON with templates
+chaosllm serve --response-mode=template
+
+# Analyze metrics
+chaosllm-mcp --database ./chaosllm-metrics.db
+```
+
+> **Note:** All `chaosllm` commands also work as `elspeth chaosllm`.
+
+See `docs/testing/chaosllm.md` for complete configuration and usage.
 
 ---
 
@@ -396,7 +445,10 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,azure]"
+
+# Azure Blob integration tests (Azurite emulator)
+npm install
 
 # Run tests
 .venv/bin/python -m pytest tests/ -v

@@ -1,7 +1,14 @@
 # tests/contracts/transform_contracts/test_azure_multi_query_contract.py
+"""Contract tests for Azure Multi-Query LLM transform.
+
+Note: Row-based contract tests (TransformContractPropertyTestBase) were removed because
+AzureMultiQueryLLMTransform uses BatchTransformMixin and doesn't support process(). The
+attribute tests (name, schema, determinism) are now included in BatchTransformContractTestBase.
+"""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -11,10 +18,6 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
 from .test_batch_transform_protocol import BatchTransformContractTestBase
-from .test_transform_protocol import TransformContractPropertyTestBase
-
-if TYPE_CHECKING:
-    from elspeth.plugins.protocols import TransformProtocol
 
 
 def _make_mock_response(content: str = '{"score": 85, "rationale": "test"}') -> Mock:
@@ -43,44 +46,6 @@ def mock_azure_openai():
         mock_client.chat.completions.create.return_value = _make_mock_response()
         mock_azure_class.return_value = mock_client
         yield mock_client
-
-
-class TestAzureMultiQueryLLMContract(TransformContractPropertyTestBase):
-    @pytest.fixture
-    def transform(self) -> TransformProtocol:
-        t = AzureMultiQueryLLMTransform(
-            {
-                "deployment_name": "gpt-4o",
-                "endpoint": "https://test.openai.azure.com",
-                "api_key": "test-key",
-                "template": "{{ row.input_1 }} {{ row.criterion.name }}",
-                "case_studies": [
-                    {"name": "cs1", "input_fields": ["cs1_a", "cs1_b"]},
-                ],
-                "criteria": [
-                    {"name": "test_criterion", "code": "TEST"},
-                ],
-                "response_format": "standard",
-                "output_mapping": {
-                    "score": {"suffix": "score", "type": "integer"},
-                    "rationale": {"suffix": "rationale", "type": "string"},
-                },
-                "schema": {"fields": "dynamic"},
-                "on_error": "quarantine_sink",
-                "required_input_fields": [],
-            }
-        )
-        mock_ctx = _make_mock_context()
-        t.on_start(mock_ctx)
-        return t
-
-    @pytest.fixture
-    def valid_input(self) -> dict[str, Any]:
-        return {"cs1_a": "value_a", "cs1_b": "value_b"}
-
-    @pytest.fixture
-    def ctx(self) -> Mock:
-        return _make_mock_context()
 
 
 class TestAzureMultiQueryLLMSpecific:

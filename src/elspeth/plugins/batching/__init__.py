@@ -24,7 +24,7 @@ Example:
 
         def _do_llm_processing(self, row: dict, ctx: PluginContext) -> TransformResult:
             # Actual LLM work here
-            return TransformResult.success(row)
+            return TransformResult.success(row, success_reason={"action": "processed"})
 """
 
 from elspeth.plugins.batching.mixin import BatchTransformMixin

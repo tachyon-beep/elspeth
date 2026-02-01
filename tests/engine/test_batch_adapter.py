@@ -41,15 +41,25 @@ class TestSharedBatchAdapter:
         # Register waiter with (token_id, state_id) key for retry safety
         waiter = adapter.register("token-1", "state-1")
 
-        # Emit result in background thread
-        def emit_later() -> None:
-            time.sleep(0.05)
+        # Use Event for deterministic synchronization instead of sleep
+        registration_complete = threading.Event()
+        emit_allowed = threading.Event()
+
+        def emit_when_signaled() -> None:
+            registration_complete.wait()  # Wait for test setup to complete
+            emit_allowed.wait()  # Wait for explicit signal
             token = MockTokenInfo(token_id="token-1", row_id=1)
-            result = TransformResult.success({"output": "done"})
+            result = TransformResult.success({"output": "done"}, success_reason={"action": "test"})
             adapter.emit(token, result, "state-1")  # type: ignore[arg-type]
 
-        thread = threading.Thread(target=emit_later)
+        thread = threading.Thread(target=emit_when_signaled)
         thread.start()
+
+        # Signal that registration is complete
+        registration_complete.set()
+
+        # Signal emit is allowed (test is ready to receive)
+        emit_allowed.set()
 
         # Wait for result
         result = waiter.wait(timeout=5.0)
@@ -68,32 +78,49 @@ class TestSharedBatchAdapter:
         waiter2 = adapter.register("token-2", "state-2")
         waiter3 = adapter.register("token-3", "state-3")
 
-        # Emit results out of order
+        # Use Events for deterministic out-of-order completion
+        setup_complete = threading.Event()
+        emit_events = {
+            "token-2": threading.Event(),  # Will be signaled first
+            "token-1": threading.Event(),  # Will be signaled second
+            "token-3": threading.Event(),  # Will be signaled third
+        }
+
         def emit_results() -> None:
-            time.sleep(0.02)
-            # Emit token-2 first (out of order)
+            setup_complete.wait()  # Wait for test setup
+
+            # Emit in controlled order: token-2, token-1, token-3
+            emit_events["token-2"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-2", row_id=2),  # type: ignore[arg-type]
-                TransformResult.success({"value": 2}),
+                TransformResult.success({"value": 2}, success_reason={"action": "test"}),
                 "state-2",
             )
-            time.sleep(0.02)
-            # Then token-1
+
+            emit_events["token-1"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-1", row_id=1),  # type: ignore[arg-type]
-                TransformResult.success({"value": 1}),
+                TransformResult.success({"value": 1}, success_reason={"action": "test"}),
                 "state-1",
             )
-            time.sleep(0.02)
-            # Then token-3
+
+            emit_events["token-3"].wait()
             adapter.emit(
                 MockTokenInfo(token_id="token-3", row_id=3),  # type: ignore[arg-type]
-                TransformResult.success({"value": 3}),
+                TransformResult.success({"value": 3}, success_reason={"action": "test"}),
                 "state-3",
             )
 
         thread = threading.Thread(target=emit_results)
         thread.start()
+
+        # Setup complete
+        setup_complete.set()
+
+        # Signal emits in out-of-order sequence
+        emit_events["token-2"].set()  # First
+        emit_events["token-1"].set()  # Second
+        emit_events["token-3"].set()  # Third
 
         # Wait for results (each waiter gets correct result regardless of emit order)
         result1 = waiter1.wait(timeout=5.0)
@@ -118,7 +145,7 @@ class TestSharedBatchAdapter:
 
         # Emit result IMMEDIATELY (before wait is called)
         token = MockTokenInfo(token_id="token-fast", row_id=1)
-        result = TransformResult.success({"fast": True})
+        result = TransformResult.success({"fast": True}, success_reason={"action": "test"})
         adapter.emit(token, result, "state-fast")  # type: ignore[arg-type]
 
         # Now wait - should return immediately since event is already set
@@ -180,7 +207,7 @@ class TestSharedBatchAdapter:
         # Late result arrives after timeout
         adapter.emit(
             MockTokenInfo(token_id="token-late", row_id=1),  # type: ignore[arg-type]
-            TransformResult.success({"late": "result"}),
+            TransformResult.success({"late": "result"}, success_reason={"action": "test"}),
             "state-late",
         )
 
@@ -195,23 +222,25 @@ class TestSharedBatchAdapter:
 
         # Emit error result
         token = MockTokenInfo(token_id="token-error", row_id=1)
-        result = TransformResult.error({"reason": "llm_failed", "details": "API down"})
+        result = TransformResult.error({"reason": "llm_call_failed", "error": "API down"})
         adapter.emit(token, result, "state-error")  # type: ignore[arg-type]
 
         got_result = waiter.wait(timeout=1.0)
 
         assert got_result.status == "error"
-        assert got_result.reason == {"reason": "llm_failed", "details": "API down"}
+        assert got_result.reason == {"reason": "llm_call_failed", "error": "API down"}
 
     def test_concurrent_waiters_in_parallel_threads(self) -> None:
         """Test multiple threads waiting concurrently."""
         adapter = SharedBatchAdapter()
         results: dict[str, TransformResult] = {}
         errors: list[Exception] = []
+        all_registered = threading.Barrier(6)  # 5 waiters + 1 emitter thread
 
         def wait_for_token(token_id: str, state_id: str) -> None:
             try:
                 waiter = adapter.register(token_id, state_id)
+                all_registered.wait()  # Synchronize: all threads registered
                 result = waiter.wait(timeout=5.0)
                 results[token_id] = result
             except Exception as e:
@@ -224,20 +253,23 @@ class TestSharedBatchAdapter:
             threads.append(t)
             t.start()
 
-        # Give threads time to register
-        time.sleep(0.05)
+        def emit_all() -> None:
+            all_registered.wait()  # Wait for all waiters to register
+            # Emit all results
+            for i in range(5):
+                adapter.emit(
+                    MockTokenInfo(token_id=f"token-{i}", row_id=i),  # type: ignore[arg-type]
+                    TransformResult.success({"index": i}, success_reason={"action": "test"}),
+                    f"state-{i}",
+                )
 
-        # Emit all results
-        for i in range(5):
-            adapter.emit(
-                MockTokenInfo(token_id=f"token-{i}", row_id=i),  # type: ignore[arg-type]
-                TransformResult.success({"index": i}),
-                f"state-{i}",
-            )
+        emit_thread = threading.Thread(target=emit_all)
+        emit_thread.start()
 
         # Wait for all threads
         for t in threads:
             t.join(timeout=5.0)
+        emit_thread.join(timeout=5.0)
 
         # Verify all succeeded
         assert len(errors) == 0, f"Errors occurred: {errors}"
@@ -256,7 +288,7 @@ class TestSharedBatchAdapter:
         # Emit a result that won't be consumed (orphaned due to no matching waiter key)
         adapter.emit(
             MockTokenInfo(token_id="token-orphan", row_id=99),  # type: ignore[arg-type]
-            TransformResult.success({"orphan": True}),
+            TransformResult.success({"orphan": True}, success_reason={"action": "test"}),
             "state-orphan",
         )
 
@@ -291,14 +323,14 @@ class TestSharedBatchAdapter:
         # First worker finishes late (after timeout), emits with old state_id
         adapter.emit(
             MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
-            TransformResult.success({"result": "stale"}),
+            TransformResult.success({"result": "stale"}, success_reason={"action": "test"}),
             "attempt-1",
         )
 
         # Retry worker finishes, emits with retry state_id
         adapter.emit(
             MockTokenInfo(token_id="token-42", row_id=42),  # type: ignore[arg-type]
-            TransformResult.success({"result": "fresh"}),
+            TransformResult.success({"result": "fresh"}, success_reason={"action": "test"}),
             "attempt-2",
         )
 
@@ -347,7 +379,7 @@ class TestSharedBatchAdapter:
         # This is what happens when emit() executes between event.wait() timeout
         # and wait()'s lock acquisition
         with adapter._lock:
-            adapter._results[key] = TransformResult.success({"race": "leaked"})
+            adapter._results[key] = TransformResult.success({"race": "leaked"}, success_reason={"action": "test"})
             adapter._waiters[key].set()  # Signal (even though we're about to timeout)
             del adapter._waiters[key]  # emit() removes waiter entry
 

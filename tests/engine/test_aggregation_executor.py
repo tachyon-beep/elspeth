@@ -775,6 +775,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": "batch-123",
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 
@@ -852,6 +853,7 @@ class TestAggregationExecutorCheckpoint:
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 
@@ -1008,6 +1010,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": batch.batch_id,
+                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
             },
         }
 
@@ -1036,7 +1039,7 @@ class TestAggregationExecutorCheckpoint:
 
             def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 total = sum(r["value"] for r in rows)
-                return TransformResult.success({"sum": total})
+                return TransformResult.success({"sum": total}, success_reason={"action": "sum_batch"})
 
         transform = MockBatchTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -1155,6 +1158,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create large row_data to exceed 1MB when serialized
         # A single row with ~1KB of data, repeated 1500 times = ~1.5MB checkpoint
@@ -1228,6 +1232,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create very large row_data to exceed 10MB when serialized
         # A single row with ~2KB of data, repeated 6000 times = ~12MB checkpoint
@@ -1285,6 +1290,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint > 10MB
         very_large_row_data = {"data": "x" * 2000}
@@ -1344,6 +1350,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint just under 1MB
         # Target: ~900KB (safely under 1MB to account for JSON overhead)
@@ -1415,6 +1422,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint ~5MB (between 1MB and 10MB thresholds)
         # 2500 rows x 2KB data each = ~5MB
@@ -1493,8 +1501,60 @@ class TestAggregationExecutorCheckpoint:
         assert node_id in executor._buffer_tokens
         assert len(executor._buffer_tokens[node_id]) == 0
 
-    def test_restore_from_checkpoint_crashes_on_missing_tokens_key(self, real_landscape_db) -> None:
-        """Restore crashes with clear error when checkpoint missing 'tokens' key."""
+    @pytest.mark.parametrize(
+        ("test_id", "checkpoint_node_data", "error_pattern"),
+        [
+            pytest.param(
+                "missing_tokens_key",
+                {
+                    "rows": [{"value": 10}],  # Old format - missing 'tokens' key
+                    "token_ids": ["token-1"],  # Old format
+                    "batch_id": None,
+                },
+                "missing 'tokens' key",
+                id="missing_tokens_key",
+            ),
+            pytest.param(
+                "invalid_tokens_type",
+                {
+                    "tokens": "not-a-list",  # Wrong type
+                    "batch_id": None,
+                },
+                "'tokens' must be a list",
+                id="invalid_tokens_type",
+            ),
+            pytest.param(
+                "missing_token_fields",
+                {
+                    "tokens": [
+                        {
+                            "token_id": 101,
+                            "row_id": 1,
+                            # "row_data" is MISSING
+                            "branch_name": None,
+                        }
+                    ],
+                    "batch_id": None,
+                },
+                r"missing required fields.*row_data",
+                id="missing_token_fields",
+            ),
+        ],
+    )
+    def test_restore_from_checkpoint_crashes_on_invalid_checkpoint(
+        self,
+        real_landscape_db,
+        test_id: str,
+        checkpoint_node_data: dict,
+        error_pattern: str,
+    ) -> None:
+        """Restore crashes with clear error on invalid checkpoint formats.
+
+        Covers:
+        - missing_tokens_key: Old checkpoint format missing 'tokens' key
+        - invalid_tokens_type: 'tokens' is not a list
+        - missing_token_fields: Token missing required fields like row_data
+        """
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
@@ -1505,7 +1565,7 @@ class TestAggregationExecutorCheckpoint:
         run = recorder.begin_run(config={}, canonical_version="v1")
         agg_node = recorder.register_node(
             run_id=run.run_id,
-            plugin_name="missing_tokens_test",
+            plugin_name=f"{test_id}_test",
             node_type=NodeType.AGGREGATION,
             plugin_version="1.0",
             config={},
@@ -1526,115 +1586,12 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={node_id: settings},
         )
 
-        # Old checkpoint format (missing 'tokens' key)
+        # Build invalid checkpoint with the parameterized node data
         invalid_checkpoint = {
             "_version": "1.0",
-            node_id: {
-                "rows": [{"value": 10}],  # Old format
-                "token_ids": ["token-1"],  # Old format
-                "batch_id": None,
-            },
+            node_id: checkpoint_node_data,
         }
 
         # VERIFY: Crashes with clear ValueError
-        with pytest.raises(ValueError, match="missing 'tokens' key"):
-            executor.restore_from_checkpoint(invalid_checkpoint)
-
-    def test_restore_from_checkpoint_crashes_on_invalid_tokens_type(self, real_landscape_db) -> None:
-        """Restore crashes when 'tokens' is not a list."""
-        from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeRecorder
-        from elspeth.engine.executors import AggregationExecutor
-        from elspeth.engine.spans import SpanFactory
-
-        # Setup
-        recorder = LandscapeRecorder(real_landscape_db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        agg_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="invalid_tokens_type_test",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        node_id = NodeID(agg_node.node_id)
-
-        settings = AggregationSettings(
-            name="test_agg",
-            plugin="test",
-            trigger=TriggerConfig(count=2),
-        )
-
-        executor = AggregationExecutor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            aggregation_settings={node_id: settings},
-        )
-
-        # Invalid checkpoint (tokens is not a list)
-        invalid_checkpoint = {
-            "_version": "1.0",
-            node_id: {
-                "tokens": "not-a-list",  # Wrong type
-                "batch_id": None,
-            },
-        }
-
-        # VERIFY: Crashes with clear ValueError
-        with pytest.raises(ValueError, match="'tokens' must be a list"):
-            executor.restore_from_checkpoint(invalid_checkpoint)
-
-    def test_restore_from_checkpoint_crashes_on_missing_token_fields(self, real_landscape_db) -> None:
-        """Restore crashes when token missing required fields."""
-        from elspeth.core.config import AggregationSettings, TriggerConfig
-        from elspeth.core.landscape import LandscapeRecorder
-        from elspeth.engine.executors import AggregationExecutor
-        from elspeth.engine.spans import SpanFactory
-
-        # Setup
-        recorder = LandscapeRecorder(real_landscape_db)
-        run = recorder.begin_run(config={}, canonical_version="v1")
-        agg_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="missing_token_fields_test",
-            node_type=NodeType.AGGREGATION,
-            plugin_version="1.0",
-            config={},
-            schema_config=DYNAMIC_SCHEMA,
-        )
-        node_id = NodeID(agg_node.node_id)
-
-        settings = AggregationSettings(
-            name="test_agg",
-            plugin="test",
-            trigger=TriggerConfig(count=2),
-        )
-
-        executor = AggregationExecutor(
-            recorder=recorder,
-            span_factory=SpanFactory(),
-            run_id=run.run_id,
-            aggregation_settings={node_id: settings},
-        )
-
-        # Invalid checkpoint (token missing row_data field)
-        invalid_checkpoint = {
-            "_version": "1.0",
-            node_id: {
-                "tokens": [
-                    {
-                        "token_id": 101,
-                        "row_id": 1,
-                        # "row_data" is MISSING
-                        "branch_name": None,
-                    }
-                ],
-                "batch_id": None,
-            },
-        }
-
-        # VERIFY: Crashes with clear ValueError mentioning missing field
-        with pytest.raises(ValueError, match=r"missing required fields.*row_data"):
+        with pytest.raises(ValueError, match=error_pattern):
             executor.restore_from_checkpoint(invalid_checkpoint)

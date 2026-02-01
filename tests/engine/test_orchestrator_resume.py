@@ -389,7 +389,9 @@ class TestOrchestratorResumeRowProcessing:
         config, _output_path = self._create_test_config(tmp_path)
 
         # Act & Assert: Should raise without payload_store
-        with pytest.raises(ValueError, match=r"payload_store.*required"):
+        # Python's type system enforces this as a required keyword-only argument,
+        # so we get TypeError before any runtime validation
+        with pytest.raises(TypeError, match=r"payload_store"):
             orchestrator.resume(resume_point, config, fixture_graph)
 
     def test_resume_returns_run_result_with_status(
@@ -558,7 +560,7 @@ class TestOrchestratorResumeCleanup:
                 self.on_complete_called = False
 
             def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -760,7 +762,7 @@ class TestOrchestratorResumeCleanup:
                 self.on_complete_called = False
 
             def process(self, row: dict, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 self.on_complete_called = True
@@ -912,13 +914,14 @@ class TestOrchestratorResumeCleanup:
             sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
         )
 
-        # Resume should complete (on_complete exception is suppressed)
-        orchestrator.resume(
-            resume_point,
-            config,
-            graph,
-            payload_store=payload_store,
-        )
+        # Resume should raise because on_complete failed (cleanup errors are fatal)
+        with pytest.raises(RuntimeError, match="Plugin cleanup failed"):
+            orchestrator.resume(
+                resume_point,
+                config,
+                graph,
+                payload_store=payload_store,
+            )
 
         # Assert: on_complete was called (and raised), but close() was STILL called
         assert failing_transform.on_complete_called, "on_complete() was not called"

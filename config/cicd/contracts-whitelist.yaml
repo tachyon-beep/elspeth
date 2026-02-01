@@ -5,6 +5,8 @@ allowed_external_types:
   - "tui/types:TokenDisplayInfo"
   # Plugin execution context - framework infrastructure, not a data contract
   - "plugins/context:PluginContext"
+  # Telemetry event types - internal telemetry infrastructure, not a data contract
+  - "telemetry/events:ExternalCallCompleted"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -175,7 +177,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/context.py:PluginContext.record_call:response_data"
   - "src/elspeth/plugins/context.py:PluginContext.record_call:error"
   - "src/elspeth/plugins/context.py:PluginContext.record_transform_error:row"
-  - "src/elspeth/plugins/context.py:PluginContext.record_transform_error:error_details"
   - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:row"
   - "src/elspeth/plugins/context.py:PluginContext.route_to_sink:metadata"
 
@@ -189,17 +190,21 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:input_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_node_state:context_before"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:output_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:error"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_node_state:context_after"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_routing_event:reason"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_routing_events:reason"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:request_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:response_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:error"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:error_details"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
+
+  # Operations tracking - source/sink I/O audit trail
+  - "src/elspeth/core/operations.py:track_operation:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.begin_operation:input_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.complete_operation:output_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:request_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:response_data"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_operation_call:error"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FORMATTERS - Record formatting for export
@@ -239,17 +244,11 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:CaseStudyConfig.to_template_data:return"
   - "src/elspeth/plugins/llm/multi_query.py:CriterionConfig.to_template_data:return"
 
-  # LLM batch errors
-  - "src/elspeth/plugins/llm/batch_errors.py:BatchPendingError.__init__:checkpoint"
-
-  # Azure LLM
+  # Azure LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.__init__:config"
+  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.accept:row"
+  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.process:row"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_single_with_state:row"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_batch:rows (list)"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_batch_sequential:rows (list)"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_sequential:row"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._assemble_batch_results:rows (list)"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.azure_config:return"
 
   # Azure batch LLM
@@ -266,24 +265,21 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform._download_results:rows (list)"
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.azure_config:return"
 
-  # Azure multi-query LLM
+  # Azure multi-query LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_query:row"
+  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform.accept:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform.process:row"
+  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_row:row"
+  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_query:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_row_internal:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_row:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_parallel:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_sequential:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_batch:rows (list)"
 
-  # OpenRouter LLM
+  # OpenRouter LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.__init__:config"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_batch:rows (list)"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_batch_sequential:rows (list)"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_sequential:row"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._assemble_batch_results:rows (list)"
+  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.accept:row"
+  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.process:row"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_single_with_state:row"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
@@ -298,24 +294,20 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink.write:rows (list)"
 
-  # Azure content safety
+  # Azure content safety (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.__init__:config"
+  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.accept:row"
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.process:row"
-  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._process_single:row"
-  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._process_batch:rows (list)"
-  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._process_batch_sequential:rows (list)"
+  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._process_row:row"
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._process_single_with_state:row"
-  - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._assemble_batch_results:rows (list)"
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety._get_fields_to_scan:row"
 
-  # Azure prompt shield
+  # Azure prompt shield (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.__init__:config"
+  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.accept:row"
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield.process:row"
-  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._process_single:row"
-  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._process_batch:rows (list)"
-  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._process_batch_sequential:rows (list)"
+  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._process_row:row"
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._process_single_with_state:row"
-  - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._assemble_batch_results:rows (list)"
   - "src/elspeth/plugins/transforms/azure/prompt_shield.py:AzurePromptShield._get_fields_to_scan:row"
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -332,3 +324,147 @@ allowed_dict_patterns:
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree.get_tree_nodes:return (list)"
   - "src/elspeth/tui/widgets/lineage_tree.py:LineageTree._flatten_tree:result (list)"
+
+  # Node detail panel - validation of JSON-parsed audit data (Tier 1 trust boundary)
+  # These functions receive raw dicts from json.loads() and validate them into TypedDicts.
+  # The input must be dict[str, Any] because it's the unvalidated type before validation.
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_execution_error:data"
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_transform_error:data"
+  - "src/elspeth/tui/widgets/node_detail.py:_validate_artifact:data"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # LANDSCAPE JOURNAL - Emergency backup JSONL stream
+  # Journal records SQL statements with dynamically-structured parameters.
+  # The record shape varies depending on the SQL being executed.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._append_records:records (list)"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._serialize_record:record"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._enrich_with_payloads:record"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._payloads_for_params:return"
+  - "src/elspeth/core/landscape/journal.py:LandscapeJournal._columns_to_values:return"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TELEMETRY EXPORTERS - External observability trust boundary
+  # Exporter config comes from YAML and is validated internally. The configure()
+  # method receives raw config before type validation.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/telemetry/protocols.py:ExporterProtocol.configure:config"
+  - "src/elspeth/telemetry/manager.py:TelemetryManager.health_metrics:return"
+  - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter.configure:config"
+  - "src/elspeth/telemetry/exporters/azure_monitor.py:AzureMonitorExporter._serialize_event_attributes:return"
+  - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter.configure:config"
+  - "src/elspeth/telemetry/exporters/otlp.py:OTLPExporter._serialize_event_attributes:return"
+  - "src/elspeth/telemetry/exporters/otlp.py:_SyntheticReadableSpan.__init__:attributes"
+  - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter.configure:config"
+  - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
+  - "src/elspeth/telemetry/exporters/datadog.py:DatadogExporter.configure:config"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MCP SERVER - External tooling trust boundary
+  # MCP server methods return dynamic dicts for AI tooling consumption.
+  # The MCP protocol requires dict returns; typed responses would break clients.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_runs:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run_summary:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_rows:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_nodes:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_tokens:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.explain_token:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_errors:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_node_states:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_calls:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:params"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.query:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_dag_structure:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_performance_report:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_error_analysis:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_llm_usage_report:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.describe_schema:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_outcome_analysis:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.diagnose:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_failure_context:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_recent_activity:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_operations:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_operation_calls:return (list)"
+  - "src/elspeth/mcp/server.py:call_tool:arguments"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TESTING UTILITIES - Test infrastructure (not production code)
+  # ChaosLLM is a fault-injection test server for LLM reliability testing.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.get_stats:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.update_config:updates"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._get_current_config:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_success_response:body"
+  - "src/elspeth/testing/chaosllm/config.py:load_preset:return"
+  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:base"
+  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:override"
+  - "src/elspeth/testing/chaosllm/config.py:_deep_merge:return"
+  - "src/elspeth/testing/chaosllm/config.py:load_config:cli_overrides"
+  - "src/elspeth/testing/chaosllm/response_generator.py:OpenAIResponse.to_dict:return"
+  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_template_response:request"
+  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._generate_echo_response:request"
+  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator._extract_prompt_text:request"
+  - "src/elspeth/testing/chaosllm/response_generator.py:ResponseGenerator.generate:request"
+  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_stats:return"
+  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_requests:return (list)"
+  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.get_timeseries:return (list)"
+  - "src/elspeth/testing/chaosllm/metrics.py:MetricsRecorder.export_data:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer.export_metrics:return"
+  - "src/elspeth/testing/chaosllm/server.py:ChaosLLMServer._handle_slow_response:body"
+
+  # ChaosLLM MCP server (test tooling)
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.diagnose:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_aimd_behavior:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_errors:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.analyze_latency:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.find_anomalies:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_burst_events:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_error_samples:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.get_time_window:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.query:return (list)"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer.describe_schema:return"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:call_tool:arguments"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_success:b_list (list)"
+  - "src/elspeth/testing/chaosllm_mcp/server.py:ChaosLLMAnalyzer._avg_latency:b_list (list)"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # BATCHING INFRASTRUCTURE - Row buffering for batch operations
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/batching/row_reorder_buffer.py:RowReorderBuffer.get_metrics:return"
+  - "src/elspeth/plugins/batching/mixin.py:BatchTransformMixin.accept_row:row"
+  - "src/elspeth/plugins/batching/mixin.py:BatchTransformMixin._process_and_complete:row"
+  - "src/elspeth/plugins/batching/mixin.py:BatchTransformMixin.get_batch_metrics:return"
+
+  # Azure blob sink - row serialization
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_fieldnames_from_schema_or_row:row"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # OPENROUTER MULTI-QUERY - External API trust boundary
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.__init__:config"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.process:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_single_row_internal:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_single_query:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_parallel:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_sequential:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_row:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.accept:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.parse_output_mapping:return"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_json_schema:return"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_response_format:return"
+
+  # Multi-query config base (JSON schema building for LLM structured output)
+  - "src/elspeth/plugins/llm/multi_query.py:OutputFieldConfig.to_json_schema:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.parse_output_mapping:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.build_json_schema:return"
+  - "src/elspeth/plugins/llm/multi_query.py:MultiQueryConfig.build_response_format:return"
+
+  # OpenRouter batch LLM (async batch API)
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.__init__:config"
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform.process:row"
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single:row"
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_batch:rows (list)"
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:row"
+  - "src/elspeth/plugins/llm/openrouter_batch.py:OpenRouterBatchLLMTransform._process_single_row:return"

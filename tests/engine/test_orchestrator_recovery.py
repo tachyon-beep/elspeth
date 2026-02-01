@@ -56,8 +56,14 @@ class TestOrchestratorResume:
         """Create a minimal mock graph for recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
+        agg_config = {
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {"schema": {"fields": "dynamic"}},
+            "schema": {"fields": "dynamic"},
+        }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=schema_config)
+        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=agg_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "agg_node", label="continue")
         graph.add_edge("agg_node", "sink", label="continue")
@@ -268,10 +274,16 @@ class TestOrchestratorResume:
 
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
+        agg_config = {
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {"schema": {"fields": "dynamic"}},
+            "schema": {"fields": "dynamic"},
+        }
 
         # Must match the node IDs registered in failed_run_with_batch
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
-        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=schema_config)
+        graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=agg_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "agg_node", label="continue")
         graph.add_edge("agg_node", "sink", label="continue")

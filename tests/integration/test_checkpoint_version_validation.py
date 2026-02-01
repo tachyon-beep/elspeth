@@ -134,8 +134,16 @@ class TestCheckpointVersionValidation:
         valid_state = {
             "_version": "1.0",  # Matching version
             "test_node": {
-                "tokens": [],
-                "batch_id": None,
+                "tokens": [
+                    {
+                        "token_id": "tok-001",
+                        "row_id": "row-001",
+                        "row_data": {"value": 1},
+                        "branch_name": None,
+                    }
+                ],
+                "batch_id": "batch-001",
+                "elapsed_age_seconds": 0.0,
             },
         }
 
@@ -143,4 +151,4 @@ class TestCheckpointVersionValidation:
         executor.restore_from_checkpoint(valid_state)
 
         # Verify executor state was updated
-        assert executor.get_buffer_count(NodeID("test_node")) == 0  # Empty buffer restored
+        assert executor.get_buffer_count(NodeID("test_node")) == 1  # Restored single buffered token

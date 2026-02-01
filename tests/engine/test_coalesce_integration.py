@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import (
+    ArtifactDescriptor,
     NodeStateStatus,
     NodeType,
     RunStatus,
@@ -37,7 +38,6 @@ from elspeth.core.config import (
     TriggerConfig,
 )
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
@@ -121,6 +121,7 @@ class TestForkCoalescePipeline:
     def test_fork_coalesce_pipeline_produces_merged_output(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Complete fork/join pipeline should produce merged output."""
         settings = ElspethSettings(
@@ -166,7 +167,7 @@ class TestForkCoalescePipeline:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Should have processed rows
         assert result.rows_processed == 1
@@ -184,6 +185,7 @@ class TestForkCoalescePipeline:
     def test_partial_branch_coverage_non_coalesced_branches_reach_sink(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Branches not in coalesce can route to explicit sinks.
 
@@ -239,7 +241,7 @@ class TestForkCoalescePipeline:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Should have:
         # - 1 row processed (1 source row)
@@ -257,6 +259,7 @@ class TestForkCoalescePipeline:
     def test_fork_coalesce_with_transform(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Fork/coalesce with a transform before the fork gate."""
         from elspeth.plugins.results import TransformResult
@@ -279,7 +282,8 @@ class TestForkCoalescePipeline:
                     {
                         **row,
                         "enriched": True,
-                    }
+                    },
+                    success_reason={"action": "enrich"},
                 )
 
         settings = ElspethSettings(
@@ -326,7 +330,7 @@ class TestForkCoalescePipeline:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify processing worked
         assert result.rows_processed == 1
@@ -343,6 +347,7 @@ class TestForkCoalescePipeline:
     def test_multiple_source_rows_fork_coalesce(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Multiple source rows each fork and coalesce independently."""
         settings = ElspethSettings(
@@ -389,7 +394,7 @@ class TestForkCoalescePipeline:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Each source row forks and coalesces
         assert result.rows_processed == 3
@@ -414,6 +419,7 @@ class TestCoalesceSuccessMetrics:
     def test_coalesce_increments_rows_succeeded_for_end_of_pipeline(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Coalesce at end of pipeline should increment rows_succeeded.
 
@@ -463,7 +469,7 @@ class TestCoalesceSuccessMetrics:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Core assertion: merged token should be counted as succeeded
         # Before fix: rows_succeeded was 0 because coalesce didn't increment it
@@ -483,6 +489,7 @@ class TestCoalesceSuccessMetrics:
     def test_coalesce_with_downstream_transform_increments_rows_succeeded(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Mid-pipeline coalesce with downstream processing should count successes.
 
@@ -506,7 +513,7 @@ class TestCoalesceSuccessMetrics:
             def process(self, row: dict, ctx: Any) -> TransformResult:
                 self.processed_count += 1
                 row["post_processed"] = True
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "post_coalesce"})
 
         settings = ElspethSettings(
             source=SourceSettings(
@@ -556,7 +563,7 @@ class TestCoalesceSuccessMetrics:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Core assertion: continuation after coalesce should count as succeeded
         # Before fix: rows_succeeded was 0 because coalesce continuation
@@ -584,6 +591,7 @@ class TestCoalesceAuditTrail:
     def test_coalesce_records_node_states(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Coalesce should record node states for consumed tokens."""
         settings = ElspethSettings(
@@ -629,7 +637,7 @@ class TestCoalesceAuditTrail:
         graph = build_production_graph(config, default_sink=settings.default_sink)
 
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # Verify run completed
         assert result.status == RunStatus.COMPLETED
@@ -762,6 +770,7 @@ class TestCoalesceTimeoutIntegration:
     def test_best_effort_timeout_merges_during_processing(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Best-effort coalesce should merge on timeout, not wait for end-of-source.
 
@@ -826,10 +835,10 @@ class TestCoalesceTimeoutIntegration:
                 # Row 2's path_a will arrive at coalesce, but path_b won't
                 if row.get("id") == 2:
                     return TransformResult.error(
-                        {"reason": "intentional_failure_for_timeout_test"},
+                        {"reason": "intentional_failure", "error": "intentional_failure_for_timeout_test"},
                         retryable=False,
                     )
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "test"})
 
         class TimingSink(_TestSinkBase):
             """Sink that tracks when rows arrive."""
@@ -927,7 +936,7 @@ class TestCoalesceTimeoutIntegration:
 
         orchestrator = Orchestrator(db=landscape_db)
         start_time = time.monotonic()
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
         end_time = time.monotonic()
 
         # Basic sanity checks - all rows should complete
@@ -976,6 +985,7 @@ class TestForkAggregationCoalesce:
     def test_aggregation_then_fork_coalesce(
         self,
         landscape_db: LandscapeDB,
+        payload_store,
     ) -> None:
         """Aggregation output should correctly fork and reach coalesce.
 
@@ -1049,10 +1059,11 @@ class TestForkAggregationCoalesce:
                             "aggregated": True,
                             "sum": total,
                             "source_ids": ids,
-                        }
+                        },
+                        success_reason={"action": "sum_aggregation"},
                     )
                 # Single row mode (shouldn't happen with count trigger)
-                return TransformResult.success(dict(row))
+                return TransformResult.success(dict(row), success_reason={"action": "passthrough"})
 
         # === Collect sink ===
         sink = CollectSink()
@@ -1098,7 +1109,7 @@ class TestForkAggregationCoalesce:
             name="sum_agg",
             plugin="sum_agg",
             trigger=TriggerConfig(count=2),  # Trigger after 2 rows
-            output_mode="single",  # Emit one aggregated result per batch
+            output_mode="transform",  # Emit one aggregated result per batch
         )
 
         # === Settings for coalesce computation ===
@@ -1138,7 +1149,7 @@ class TestForkAggregationCoalesce:
 
         # === Run pipeline ===
         orchestrator = Orchestrator(db=landscape_db)
-        result = orchestrator.run(config, graph=graph, settings=settings)
+        result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
 
         # === Assertions ===
         assert result.status == RunStatus.COMPLETED, f"Run failed: {result}"

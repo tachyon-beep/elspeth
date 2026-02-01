@@ -64,7 +64,7 @@ class TriggerConfig(BaseModel):
           condition: "batch_count >= 100 and batch_age_seconds < 30"  # Or batch metrics
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     count: int | None = Field(
         default=None,
@@ -132,7 +132,6 @@ class AggregationSettings(BaseModel):
     The engine evaluates trigger conditions - plugins only accept/reject rows.
 
     Output modes:
-    - single: Batch produces one aggregated result row
     - passthrough: Batch releases all accepted rows unchanged
     - transform: Batch applies a transform function to produce results
 
@@ -142,7 +141,8 @@ class AggregationSettings(BaseModel):
             plugin: stats_aggregation
             trigger:
               count: 100
-            output_mode: single
+            output_mode: transform
+            expected_output_count: 1  # Optional: validate N->1 aggregation
             options:
               fields: ["value"]
               compute_mean: true
@@ -153,14 +153,30 @@ class AggregationSettings(BaseModel):
     name: str = Field(description="Aggregation identifier (unique within pipeline)")
     plugin: str = Field(description="Plugin name to instantiate")
     trigger: TriggerConfig = Field(description="When to flush the batch")
-    output_mode: Literal["single", "passthrough", "transform"] = Field(
-        default="single",
+    output_mode: Literal["passthrough", "transform"] = Field(
+        default="transform",
         description="How batch produces output rows",
+    )
+    expected_output_count: int | None = Field(
+        default=None,
+        description="Optional: validate aggregation produces exactly this many output rows.",
     )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Plugin-specific configuration options",
     )
+
+    @field_validator("output_mode", mode="before")
+    @classmethod
+    def reject_single_mode(cls, v: Any) -> Any:
+        """Reject deprecated 'single' mode with helpful migration message."""
+        if v == "single":
+            raise ValueError(
+                "output_mode='single' has been removed (bug elspeth-rapid-nd3). "
+                "Use output_mode='transform' instead. For N->1 aggregations, add "
+                "expected_output_count=1 to validate cardinality."
+            )
+        return v
 
 
 class GateSettings(BaseModel):
@@ -483,6 +499,26 @@ class LandscapeSettings(BaseModel):
         default_factory=LandscapeExportSettings,
         description="Post-run audit export configuration",
     )
+    dump_to_jsonl: bool = Field(
+        default=False,
+        description="Write an append-only JSONL change journal for emergency backup",
+    )
+    dump_to_jsonl_path: str | None = Field(
+        default=None,
+        description="Optional path for JSONL change journal (default: derived from landscape.url)",
+    )
+    dump_to_jsonl_fail_on_error: bool = Field(
+        default=False,
+        description="Fail the run if the JSONL journal cannot be written",
+    )
+    dump_to_jsonl_include_payloads: bool = Field(
+        default=False,
+        description="Inline payload store contents in the JSONL journal (request/response bodies)",
+    )
+    dump_to_jsonl_payload_base_path: str | None = Field(
+        default=None,
+        description="Optional payload store base path for inlining payloads (default: payload_store.base_path)",
+    )
 
     @field_validator("url")
     @classmethod
@@ -532,8 +568,7 @@ class ServiceRateLimit(BaseModel):
 
     model_config = {"frozen": True}
 
-    requests_per_second: int = Field(gt=0, description="Maximum requests per second")
-    requests_per_minute: int | None = Field(default=None, gt=0, description="Maximum requests per minute")
+    requests_per_minute: int = Field(default=60, gt=0, description="Maximum requests per minute")
 
 
 class RateLimitSettings(BaseModel):
@@ -542,21 +577,19 @@ class RateLimitSettings(BaseModel):
     Example YAML:
         rate_limit:
           enabled: true
-          default_requests_per_second: 10
+          default_requests_per_minute: 60
           persistence_path: ./rate_limits.db
           services:
             openai:
-              requests_per_second: 5
               requests_per_minute: 100
             weather_api:
-              requests_per_second: 20
+              requests_per_minute: 120
     """
 
     model_config = {"frozen": True}
 
     enabled: bool = Field(default=True, description="Enable rate limiting for external calls")
-    default_requests_per_second: int = Field(default=10, gt=0, description="Default rate limit for unconfigured services")
-    default_requests_per_minute: int | None = Field(default=None, gt=0, description="Optional per-minute rate limit")
+    default_requests_per_minute: int = Field(default=60, gt=0, description="Default per-minute rate limit for unconfigured services")
     persistence_path: str | None = Field(default=None, description="SQLite path for cross-process limits")
     services: dict[str, ServiceRateLimit] = Field(default_factory=dict, description="Per-service rate limit configurations")
 
@@ -565,7 +598,6 @@ class RateLimitSettings(BaseModel):
         if service_name in self.services:
             return self.services[service_name]
         return ServiceRateLimit(
-            requests_per_second=self.default_requests_per_second,
             requests_per_minute=self.default_requests_per_minute,
         )
 
@@ -615,6 +647,100 @@ class PayloadStoreSettings(BaseModel):
         description="Base path for filesystem backend",
     )
     retention_days: int = Field(default=90, gt=0, description="Payload retention in days")
+
+
+class ExporterSettings(BaseModel):
+    """Configuration for a single telemetry exporter.
+
+    Example YAML:
+        telemetry:
+          exporters:
+            - name: console
+              options:
+                pretty: true
+            - name: otlp
+              options:
+                endpoint: https://otel.example.com
+    """
+
+    model_config = {"frozen": True}
+
+    name: str = Field(description="Exporter name (console, otlp, azure_monitor, datadog)")
+    options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Exporter-specific configuration options",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_not_empty(cls, v: str) -> str:
+        """Exporter name cannot be empty."""
+        if not v.strip():
+            raise ValueError("exporter name cannot be empty")
+        return v
+
+
+class TelemetrySettings(BaseModel):
+    """Configuration for pipeline telemetry emission.
+
+    Telemetry emits structured events about pipeline execution for monitoring,
+    observability, and debugging. Events flow to configured exporters.
+
+    Example YAML:
+        telemetry:
+          enabled: true
+          granularity: rows
+          backpressure_mode: drop
+          fail_on_total_exporter_failure: false
+          exporters:
+            - name: console
+              options:
+                pretty: true
+            - name: otlp
+              options:
+                endpoint: https://otel.example.com
+
+    Granularity levels (from least to most verbose):
+        - lifecycle: Only run start/complete/failed events
+        - rows: Lifecycle + row-level events
+        - full: Rows + external call events (LLM, HTTP, etc.)
+
+    Backpressure modes:
+        - block: Block pipeline when exporters can't keep up (safest)
+        - drop: Drop events when buffer is full (lossy, no pipeline impact)
+        - slow: Adaptive rate limiting (not yet implemented)
+    """
+
+    model_config = {"frozen": True}
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable telemetry emission",
+    )
+    granularity: Literal["lifecycle", "rows", "full"] = Field(
+        default="lifecycle",
+        description="Event granularity: lifecycle (minimal), rows, or full (verbose)",
+    )
+    backpressure_mode: Literal["block", "drop", "slow"] = Field(
+        default="block",
+        description="How to handle backpressure when exporters can't keep up",
+    )
+    fail_on_total_exporter_failure: bool = Field(
+        default=True,
+        description="Fail the run if all exporters fail (when enabled)",
+    )
+    exporters: list[ExporterSettings] = Field(
+        default_factory=list,
+        description="List of telemetry exporters to send events to",
+    )
+
+    @model_validator(mode="after")
+    def validate_exporters_when_enabled(self) -> "TelemetrySettings":
+        """Warn if telemetry is enabled but no exporters are configured."""
+        # Note: This is a warning case, not an error. Telemetry with no exporters
+        # just means events are produced but not exported anywhere - useful for
+        # testing or when exporters are added dynamically.
+        return self
 
 
 class ElspethSettings(BaseModel):
@@ -695,6 +821,10 @@ class ElspethSettings(BaseModel):
     rate_limit: RateLimitSettings = Field(
         default_factory=RateLimitSettings,
         description="Rate limiting configuration",
+    )
+    telemetry: TelemetrySettings = Field(
+        default_factory=TelemetrySettings,
+        description="Telemetry and observability configuration",
     )
 
     @model_validator(mode="after")
@@ -811,16 +941,29 @@ def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:
     return {k: _expand_value(v) for k, v in config.items()}
 
 
-# Secret field names that should be fingerprinted (exact matches)
-_SECRET_FIELD_NAMES = frozenset({"api_key", "token", "password", "secret", "credential"})
+# Secret field names that should be fingerprinted (exact matches, case-insensitive)
+_SECRET_FIELD_NAMES = frozenset(
+    {
+        "api_key",
+        "api-key",
+        "authorization",
+        "connection_string",
+        "credential",
+        "password",
+        "secret",
+        "token",
+        "x-api-key",
+    }
+)
 
-# Secret field suffixes that should be fingerprinted
-_SECRET_FIELD_SUFFIXES = ("_secret", "_key", "_token", "_password", "_credential")
+# Secret field suffixes that should be fingerprinted (case-insensitive)
+_SECRET_FIELD_SUFFIXES = ("_secret", "_key", "_token", "_password", "_credential", "_connection_string")
 
 
 def _is_secret_field(field_name: str) -> bool:
     """Check if a field name represents a secret that should be fingerprinted."""
-    return field_name in _SECRET_FIELD_NAMES or field_name.endswith(_SECRET_FIELD_SUFFIXES)
+    normalized = field_name.lower()
+    return normalized in _SECRET_FIELD_NAMES or normalized.endswith(_SECRET_FIELD_SUFFIXES)
 
 
 def _fingerprint_secrets(
@@ -1094,6 +1237,15 @@ def _fingerprint_config_for_audit(
         for agg in config["aggregations"]:
             if isinstance(agg, dict) and "options" in agg and isinstance(agg["options"], dict):
                 agg["options"] = _fingerprint_secrets(agg["options"], fail_if_no_key=fail_if_no_key)
+
+    # === Telemetry exporter options ===
+    if "telemetry" in config and isinstance(config["telemetry"], dict):
+        telemetry = config["telemetry"]
+        exporters = telemetry.get("exporters")
+        if isinstance(exporters, list):
+            for exporter in exporters:
+                if isinstance(exporter, dict) and "options" in exporter and isinstance(exporter["options"], dict):
+                    exporter["options"] = _fingerprint_secrets(exporter["options"], fail_if_no_key=fail_if_no_key)
 
     return config
 

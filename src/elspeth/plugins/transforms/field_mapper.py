@@ -58,14 +58,12 @@ class FieldMapper(BaseTransform):
         self._validate_input: bool = cfg.validate_input
         self._on_error: str | None = cfg.on_error
 
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # Create input schema from config
         # CRITICAL: allow_coercion=False - wrong types are source bugs
         self.input_schema = create_schema_from_config(
-            self._schema_config,
+            cfg.schema_config,
             "FieldMapperInputSchema",
             allow_coercion=False,
         )
@@ -111,7 +109,9 @@ class FieldMapper(BaseTransform):
 
             if value is MISSING:
                 if self._strict:
-                    return TransformResult.error({"message": f"Required field '{source}' not found in row"})
+                    return TransformResult.error(
+                        {"reason": "missing_field", "field": source, "message": f"Required field '{source}' not found in row"}
+                    )
                 continue  # Skip missing fields in non-strict mode
 
             # Remove old key if it exists (for rename within same dict)
@@ -120,7 +120,24 @@ class FieldMapper(BaseTransform):
 
             output[target] = value
 
-        return TransformResult.success(output)
+        # Track field changes
+        fields_modified: list[str] = []
+        fields_added: list[str] = []
+        for source, target in self._mapping.items():
+            if get_nested_field(row, source) is not MISSING:
+                if target in row:
+                    fields_modified.append(target)
+                else:
+                    fields_added.append(target)
+
+        return TransformResult.success(
+            output,
+            success_reason={
+                "action": "mapped",
+                "fields_modified": fields_modified,
+                "fields_added": fields_added,
+            },
+        )
 
     def close(self) -> None:
         """No resources to release."""

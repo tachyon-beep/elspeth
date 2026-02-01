@@ -6,7 +6,14 @@ by CLI formatters for human-readable or structured output.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+
+from elspeth.contracts.enums import (
+    NodeStateStatus,
+    RoutingMode,
+    RowOutcome,
+)
 
 
 class PipelinePhase(str, Enum):
@@ -40,7 +47,7 @@ class PhaseAction(str, Enum):
 
 
 class RunCompletionStatus(str, Enum):
-    """Final status for RunCompleted events."""
+    """Final status for RunSummary events."""
 
     COMPLETED = "completed"
     FAILED = "failed"
@@ -100,10 +107,11 @@ class PhaseError:
 
 
 @dataclass(frozen=True, slots=True)
-class RunCompleted:
-    """Emitted when pipeline run finishes (success or failure).
+class RunSummary:
+    """Summary emitted when pipeline run finishes (success or failure).
 
-    Provides final summary for CI integration.
+    Provides final metrics for CI integration: exit codes, row counts,
+    routing breakdown.
 
     Routing breakdown:
     - routed: Total rows routed to non-default sinks (gates or error routing)
@@ -120,3 +128,62 @@ class RunCompleted:
     exit_code: int  # 0=success, 1=partial failure, 2=total failure
     routed: int = 0  # Rows routed to non-default sinks
     routed_destinations: tuple[tuple[str, int], ...] = ()  # (sink_name, count) pairs
+
+
+# =============================================================================
+# Telemetry Events (Row-Level Observability)
+# =============================================================================
+# These events are emitted by the engine and consumed by telemetry exporters.
+# They provide operational visibility alongside the Landscape audit trail.
+
+
+@dataclass(frozen=True, slots=True)
+class TelemetryEvent:
+    """Base class for all telemetry events.
+
+    All events include:
+    - timestamp: When the event occurred (UTC)
+    - run_id: Pipeline run this event belongs to
+
+    Events are immutable (frozen) for thread-safety and to prevent
+    accidental modification during export.
+    """
+
+    timestamp: datetime
+    run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TransformCompleted(TelemetryEvent):
+    """Emitted when a transform finishes processing a row."""
+
+    row_id: str
+    token_id: str
+    node_id: str
+    plugin_name: str
+    status: NodeStateStatus
+    duration_ms: float
+    input_hash: str
+    output_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class GateEvaluated(TelemetryEvent):
+    """Emitted when a gate makes a routing decision."""
+
+    row_id: str
+    token_id: str
+    node_id: str
+    plugin_name: str
+    routing_mode: RoutingMode
+    destinations: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TokenCompleted(TelemetryEvent):
+    """Emitted when a token reaches its terminal state."""
+
+    row_id: str
+    token_id: str
+    outcome: RowOutcome
+    sink_name: str | None

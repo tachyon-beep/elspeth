@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 import structlog
+from sqlalchemy.exc import DatabaseError, OperationalError
 
 from elspeth.contracts import NodeType
 from elspeth.core.landscape import LandscapeDB
@@ -17,6 +18,11 @@ from elspeth.tui.widgets.lineage_tree import LineageTree
 from elspeth.tui.widgets.node_detail import NodeDetailPanel
 
 logger = structlog.get_logger(__name__)
+
+
+# Database errors that indicate connection/availability issues (recoverable)
+# Other exceptions indicate bugs in our code and should crash
+_RECOVERABLE_DB_ERRORS = (DatabaseError, OperationalError)
 
 
 class InvalidStateTransitionError(Exception):
@@ -135,6 +141,15 @@ class ExplainScreen:
         """Current screen state for pattern matching."""
         return self._state
 
+    @property
+    def detail_panel(self) -> NodeDetailPanel:
+        """Get the detail panel for composition.
+
+        This is a public interface for ExplainApp to access the detail panel
+        without directly accessing the private _detail_panel attribute.
+        """
+        return self._detail_panel
+
     def _load_pipeline_structure(self, db: LandscapeDB, run_id: str) -> LoadedState | LoadingFailedState:
         """Load pipeline structure from database.
 
@@ -173,13 +188,14 @@ class ExplainScreen:
                 lineage_data=lineage_data,
                 tree=tree,
             )
-        except Exception as e:
-            # Log the actual error - silent failures hide bugs
-            logger.error(
-                "Failed to load lineage data",
+        except _RECOVERABLE_DB_ERRORS as e:
+            # Database connection/availability errors are recoverable via retry
+            # Other exceptions (bugs in our code) should crash - don't hide them
+            logger.warning(
+                "Database error loading lineage data - recoverable via retry",
                 run_id=run_id,
                 error=str(e),
-                exc_info=True,
+                error_type=type(e).__name__,
             )
             return LoadingFailedState(db=db, run_id=run_id, error=str(e))
 
@@ -274,13 +290,15 @@ class ExplainScreen:
             # the user selects a specific token-node combination.
 
             return result
-        except Exception as e:
-            logger.error(
-                "Failed to load node state",
+        except _RECOVERABLE_DB_ERRORS as e:
+            # Database connection/availability errors - return None to show "not found"
+            # Other exceptions (bugs in our code) should crash - don't hide them
+            logger.warning(
+                "Database error loading node state",
                 run_id=run_id,
                 node_id=node_id,
                 error=str(e),
-                exc_info=True,
+                error_type=type(e).__name__,
             )
             return None
 

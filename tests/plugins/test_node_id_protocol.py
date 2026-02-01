@@ -72,7 +72,7 @@ class TestNodeIdProtocol:
             output_schema = TestSchema
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         transform = TestTransform({})
         assert transform.node_id is None

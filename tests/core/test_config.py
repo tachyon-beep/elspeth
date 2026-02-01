@@ -743,7 +743,7 @@ class TestRateLimitSettings:
         settings = RateLimitSettings()
 
         assert settings.enabled is True
-        assert settings.default_requests_per_second == 10
+        assert settings.default_requests_per_minute == 60
         assert settings.persistence_path is None
 
     def test_rate_limit_per_service(self) -> None:
@@ -752,36 +752,34 @@ class TestRateLimitSettings:
         settings = RateLimitSettings(
             services={
                 "openai": ServiceRateLimit(
-                    requests_per_second=5,
                     requests_per_minute=100,
                 ),
                 "weather_api": ServiceRateLimit(
-                    requests_per_second=20,
+                    requests_per_minute=120,
                 ),
             }
         )
 
-        assert settings.services["openai"].requests_per_second == 5
         assert settings.services["openai"].requests_per_minute == 100
-        assert settings.services["weather_api"].requests_per_second == 20
+        assert settings.services["weather_api"].requests_per_minute == 120
 
     def test_rate_limit_get_service_config(self) -> None:
         from elspeth.core.config import RateLimitSettings, ServiceRateLimit
 
         settings = RateLimitSettings(
-            default_requests_per_second=10,
+            default_requests_per_minute=60,
             services={
-                "openai": ServiceRateLimit(requests_per_second=5),
+                "openai": ServiceRateLimit(requests_per_minute=100),
             },
         )
 
         # Configured service
         openai_config = settings.get_service_config("openai")
-        assert openai_config.requests_per_second == 5
+        assert openai_config.requests_per_minute == 100
 
         # Unconfigured service falls back to default
         other_config = settings.get_service_config("other_api")
-        assert other_config.requests_per_second == 10
+        assert other_config.requests_per_minute == 60
 
     def test_rate_limit_settings_frozen(self) -> None:
         """RateLimitSettings is immutable."""
@@ -795,47 +793,31 @@ class TestRateLimitSettings:
         """ServiceRateLimit is immutable."""
         from elspeth.core.config import ServiceRateLimit
 
-        limit = ServiceRateLimit(requests_per_second=10)
+        limit = ServiceRateLimit(requests_per_minute=60)
         with pytest.raises(ValidationError):
-            limit.requests_per_second = 20  # type: ignore[misc]
-
-    def test_service_rate_limit_requests_per_second_must_be_positive(self) -> None:
-        """requests_per_second must be > 0."""
-        from elspeth.core.config import ServiceRateLimit
-
-        with pytest.raises(ValidationError):
-            ServiceRateLimit(requests_per_second=0)
-
-        with pytest.raises(ValidationError):
-            ServiceRateLimit(requests_per_second=-1)
+            limit.requests_per_minute = 120  # type: ignore[misc]
 
     def test_service_rate_limit_requests_per_minute_must_be_positive(self) -> None:
-        """requests_per_minute must be > 0 when provided."""
+        """requests_per_minute must be > 0."""
         from elspeth.core.config import ServiceRateLimit
 
         with pytest.raises(ValidationError):
-            ServiceRateLimit(requests_per_second=10, requests_per_minute=0)
+            ServiceRateLimit(requests_per_minute=0)
 
         with pytest.raises(ValidationError):
-            ServiceRateLimit(requests_per_second=10, requests_per_minute=-1)
-
-    def test_rate_limit_settings_default_requests_per_second_must_be_positive(
-        self,
-    ) -> None:
-        """default_requests_per_second must be > 0."""
-        from elspeth.core.config import RateLimitSettings
-
-        with pytest.raises(ValidationError):
-            RateLimitSettings(default_requests_per_second=0)
-
-        with pytest.raises(ValidationError):
-            RateLimitSettings(default_requests_per_second=-1)
+            ServiceRateLimit(requests_per_minute=-1)
 
     def test_rate_limit_settings_default_requests_per_minute_must_be_positive(
         self,
     ) -> None:
-        """default_requests_per_minute must be > 0 when provided."""
+        """default_requests_per_minute must be > 0."""
         from elspeth.core.config import RateLimitSettings
+
+        with pytest.raises(ValidationError):
+            RateLimitSettings(default_requests_per_minute=0)
+
+        with pytest.raises(ValidationError):
+            RateLimitSettings(default_requests_per_minute=-1)
 
         with pytest.raises(ValidationError):
             RateLimitSettings(default_requests_per_minute=0)
@@ -2045,6 +2027,54 @@ transforms:
         # Non-secret field preserved
         assert audit_config["transforms"][0]["options"]["model"] == "gpt-4"
 
+    def test_telemetry_exporter_options_are_fingerprinted_in_resolve_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Telemetry exporter secrets should be fingerprinted in audit copy."""
+        from elspeth.core.config import load_settings, resolve_config
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv_source
+sinks:
+  output:
+    plugin: csv_sink
+default_sink: output
+telemetry:
+  enabled: true
+  exporters:
+    - name: otlp
+      options:
+        endpoint: http://localhost:4317
+        headers:
+          Authorization: "Bearer secret-token"
+    - name: azure_monitor
+      options:
+        connection_string: "InstrumentationKey=secret-value"
+    - name: datadog
+      options:
+        api_key: "dd-secret"
+""")
+
+        settings = load_settings(config_file)
+        audit_config = resolve_config(settings)
+
+        exporters = audit_config["telemetry"]["exporters"]
+        otlp_options = exporters[0]["options"]
+        azure_options = exporters[1]["options"]
+        dd_options = exporters[2]["options"]
+
+        assert otlp_options["endpoint"] == "http://localhost:4317"
+        assert "Authorization" not in otlp_options["headers"]
+        assert "Authorization_fingerprint" in otlp_options["headers"]
+
+        assert "connection_string" not in azure_options
+        assert "connection_string_fingerprint" in azure_options
+
+        assert "api_key" not in dd_options
+        assert "api_key_fingerprint" in dd_options
+
     # === Tests for recursive/nested fingerprinting ===
 
     def test_nested_secrets_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2072,6 +2102,30 @@ transforms:
         assert "api_key_fingerprint" in result["auth"]
         assert "token" not in result["auth"]["nested"]
         assert "token_fingerprint" in result["auth"]["nested"]
+
+    def test_connection_string_and_authorization_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Connection strings and Authorization headers should be fingerprinted."""
+        from elspeth.core.config import _fingerprint_secrets
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+
+        options = {
+            "connection_string": "InstrumentationKey=secret-value",
+            "headers": {
+                "Authorization": "Bearer secret-token",
+                "User-Agent": "elspeth-tests",
+            },
+        }
+
+        result = _fingerprint_secrets(options)
+
+        assert "connection_string" not in result
+        assert "connection_string_fingerprint" in result
+
+        headers = result["headers"]
+        assert "Authorization" not in headers
+        assert "Authorization_fingerprint" in headers
+        assert headers["User-Agent"] == "elspeth-tests"
 
     def test_secrets_in_lists_are_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secrets inside list elements should be fingerprinted."""

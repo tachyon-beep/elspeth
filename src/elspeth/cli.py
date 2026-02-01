@@ -21,14 +21,19 @@ from elspeth.contracts.events import (
     PhaseCompleted,
     PhaseError,
     PhaseStarted,
-    RunCompleted,
+    RunSummary,
 )
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.testing.chaosllm.cli import app as chaosllm_app
+from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 __all__ = [
     "app",
@@ -61,6 +66,9 @@ app = typer.Typer(
     help="ELSPETH: Auditable Sense/Decide/Act pipelines.",
     no_args_is_help=True,
 )
+
+app.add_typer(chaosllm_app, name="chaosllm", help="ChaosLLM server commands.")
+app.add_typer(chaosllm_mcp_app, name="chaosllm-mcp", help="ChaosLLM MCP analysis tools.")
 
 
 def version_callback(value: bool) -> None:
@@ -306,13 +314,30 @@ def explain(
     row: str | None = typer.Option(
         None,
         "--row",
-        help="Row ID or index to explain.",
+        help="Row ID to explain.",
     ),
     token: str | None = typer.Option(
         None,
         "--token",
         "-t",
         help="Token ID for precise lineage.",
+    ),
+    database: str | None = typer.Option(
+        None,
+        "--database",
+        "-d",
+        help="Path to Landscape database file (SQLite).",
+    ),
+    settings: str | None = typer.Option(
+        None,
+        "--settings",
+        "-s",
+        help="Path to settings YAML file.",
+    ),
+    sink: str | None = typer.Option(
+        None,
+        "--sink",
+        help="Sink name to disambiguate when row has multiple terminal tokens.",
     ),
     no_tui: bool = typer.Option(
         False,
@@ -330,46 +355,119 @@ def explain(
     Use --no-tui for text output or --json for JSON output.
     Without these flags, launches an interactive TUI.
 
-    NOTE: This command is not yet implemented. JSON and text output modes
-    will return proper lineage data in a future release.
+    Examples:
+
+        # JSON output for a specific token
+        elspeth explain --run latest --token tok-abc --json --database ./audit.db
+
+        # Text output for a row
+        elspeth explain --run run-123 --row row-456 --no-tui --database ./audit.db
+
+        # Interactive TUI
+        elspeth explain --run latest --database ./audit.db
     """
     import json as json_module
 
-    from elspeth.tui.explain_app import ExplainApp
-
-    # Explain command is not yet fully implemented (Phase 4+ work)
-    # See: docs/bugs/open/P1-2026-01-20-cli-explain-is-placeholder.md
-
-    if json_output:
-        # JSON output mode - not implemented yet
-        result = {
-            "run_id": run_id,
-            "row": row,
-            "token": token,
-            "status": "not_implemented",
-            "message": "The explain --json command is not yet implemented. "
-            "Lineage query support is planned for Phase 4. "
-            "Use the TUI mode (without --json or --no-tui) for a preview.",
-        }
-        typer.echo(json_module.dumps(result, indent=2))
-        raise typer.Exit(2)  # Exit code 2 = not implemented (distinct from error)
-
-    if no_tui:
-        # Text output mode - not implemented yet
-        typer.echo("Note: The explain --no-tui command is not yet implemented.", err=True)
-        typer.echo("", err=True)
-        typer.echo("Lineage query support is planned for Phase 4.", err=True)
-        typer.echo("Use the TUI mode (without --no-tui) for a preview.", err=True)
-        raise typer.Exit(2)  # Exit code 2 = not implemented
-
-    # TUI mode - launches placeholder app
-    typer.echo("Note: TUI explain is a preview. Full lineage queries are planned for Phase 4.")
-    tui_app = ExplainApp(
-        run_id=run_id if run_id != "latest" else None,
-        token_id=token,
-        row_id=row,
+    from elspeth.cli_helpers import resolve_database_url, resolve_run_id
+    from elspeth.core.landscape import (
+        LandscapeDB,
+        LandscapeRecorder,
+        LineageTextFormatter,
+        dataclass_to_dict,
     )
-    tui_app.run()
+    from elspeth.core.landscape import explain as explain_lineage
+
+    # Resolve database URL
+    settings_path = Path(settings) if settings else None
+    try:
+        db_url, _ = resolve_database_url(database, settings_path)
+    except ValueError as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": str(e)}))
+        else:
+            typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Connect to database
+    # Initialize db = None for proper cleanup in finally block
+    db: LandscapeDB | None = None
+    try:
+        db = LandscapeDB.from_url(db_url, create_tables=False)
+    except Exception as e:
+        if json_output:
+            typer.echo(json_module.dumps({"error": f"Database connection failed: {e}"}))
+        else:
+            typer.echo(f"Error connecting to database: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    try:
+        recorder = LandscapeRecorder(db)
+
+        # Resolve 'latest' run_id
+        resolved_run_id = resolve_run_id(run_id, recorder)
+        if resolved_run_id is None:
+            if json_output:
+                typer.echo(json_module.dumps({"error": "No runs found in database"}))
+            else:
+                typer.echo("Error: No runs found in database", err=True)
+            raise typer.Exit(1) from None
+
+        # Must provide either token or row for JSON/no-tui modes
+        if (json_output or no_tui) and token is None and row is None:
+            if json_output:
+                typer.echo(json_module.dumps({"error": "Must provide either --token or --row"}))
+            else:
+                typer.echo("Error: Must provide either --token or --row", err=True)
+            raise typer.Exit(1) from None
+
+        # Query lineage (only for JSON/no-tui modes)
+        if json_output or no_tui:
+            try:
+                lineage_result = explain_lineage(
+                    recorder,
+                    run_id=resolved_run_id,
+                    token_id=token,
+                    row_id=row,
+                    sink=sink,
+                )
+            except ValueError as e:
+                # Ambiguous row (multiple tokens) or invalid args
+                if json_output:
+                    typer.echo(json_module.dumps({"error": str(e)}))
+                else:
+                    typer.echo(f"Error: {e}", err=True)
+                raise typer.Exit(1) from None
+
+            if lineage_result is None:
+                if json_output:
+                    typer.echo(json_module.dumps({"error": "Token or row not found, or no terminal tokens exist yet"}))
+                else:
+                    typer.echo("Token or row not found, or no terminal tokens exist yet.", err=True)
+                raise typer.Exit(1) from None
+
+            # Output based on mode
+            if json_output:
+                typer.echo(json_module.dumps(dataclass_to_dict(lineage_result), indent=2))
+                raise typer.Exit(0)
+
+            if no_tui:
+                formatter = LineageTextFormatter()
+                typer.echo(formatter.format(lineage_result))
+                raise typer.Exit(0)
+
+        # TUI mode
+        from elspeth.tui.explain_app import ExplainApp
+
+        tui_app = ExplainApp(
+            run_id=resolved_run_id,
+            token_id=token,
+            row_id=row,
+        )
+        tui_app.run()
+
+    finally:
+        if db is not None:
+            db.close()
 
 
 def _execute_pipeline(
@@ -379,6 +477,9 @@ def _execute_pipeline(
     output_format: Literal["console", "json"] = "console",
 ) -> ExecutionResult:
     """Execute a pipeline from configuration.
+
+    NOTE: This function is deprecated in favor of _execute_pipeline_with_instances.
+    Telemetry wiring added for P3-2026-02-01 fix.
 
     Args:
         config: Validated ElspethSettings instance.
@@ -391,7 +492,6 @@ def _execute_pipeline(
     """
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseSink, BaseTransform
 
     # Get plugin manager for dynamic plugin lookup
     manager = _get_plugin_manager()
@@ -401,30 +501,56 @@ def _execute_pipeline(
     source_options = dict(config.source.options)
 
     source_cls = manager.get_source_by_name(source_plugin)
-    source = source_cls(source_options)
+    source: SourceProtocol = source_cls(source_options)
 
     # Instantiate sinks via PluginManager
-    sinks: dict[str, BaseSink] = {}
+    sinks: dict[str, SinkProtocol] = {}
     for sink_name, sink_settings in config.sinks.items():
         sink_plugin = sink_settings.plugin
         sink_options = dict(sink_settings.options)
 
         sink_cls = manager.get_sink_by_name(sink_plugin)
-        sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
+        sinks[sink_name] = sink_cls(sink_options)
 
     # Get database URL from settings
     db_url = config.landscape.url
-    db = LandscapeDB.from_url(db_url)
+    db = LandscapeDB.from_url(
+        db_url,
+        dump_to_jsonl=config.landscape.dump_to_jsonl,
+        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
+        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
+        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
+        dump_to_jsonl_payload_base_path=(
+            str(config.payload_store.base_path)
+            if config.landscape.dump_to_jsonl_payload_base_path is None
+            else config.landscape.dump_to_jsonl_payload_base_path
+        ),
+    )
+
+    # Create payload store for audit compliance
+    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    if config.payload_store.backend != "filesystem":
+        typer.echo(
+            f"Error: Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
+
+    # Initialize rate_limit_registry to None so it's defined in finally block
+    rate_limit_registry = None
 
     try:
         # Instantiate transforms from transforms via PluginManager
-        transforms: list[BaseTransform] = []
+        transforms: list[RowPlugin] = []
         for plugin_config in config.transforms:
             plugin_name = plugin_config.plugin
             plugin_options = dict(plugin_config.options)
 
             transform_cls = manager.get_transform_by_name(plugin_name)
-            transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
+            transforms.append(transform_cls(plugin_options))
 
         # Use the validated graph passed from run() command
         # NOTE: Graph is already validated - do not rebuild it here
@@ -450,17 +576,13 @@ def _execute_pipeline(
             transform.node_id = node_id
 
             # Add to transforms list (after row_plugins transforms)
-            transforms.append(transform)  # type: ignore[arg-type]
+            transforms.append(transform)
 
         # Build PipelineConfig with resolved configuration for audit
-        # NOTE: Type ignores needed because:
-        # - Source plugins implement SourceProtocol structurally but mypy doesn't recognize it
-        # - list is invariant so list[BaseTransform] != list[TransformLike]
-        # - Sinks implement SinkProtocol structurally but mypy doesn't recognize it
         pipeline_config = PipelineConfig(
-            source=source,  # type: ignore[arg-type]
-            transforms=transforms,  # type: ignore[arg-type]
-            sinks=sinks,  # type: ignore[arg-type]
+            source=source,
+            transforms=transforms,
+            sinks=sinks,
             config=resolve_config(config),
             gates=list(config.gates),  # Config-driven gates
             aggregation_settings=aggregation_settings,  # Aggregation configurations
@@ -515,7 +637,7 @@ def _execute_pipeline(
                     err=True,
                 )
 
-            def _format_run_completed_json(event: RunCompleted) -> None:
+            def _format_run_summary_json(event: RunSummary) -> None:
                 typer.echo(
                     json.dumps(
                         {
@@ -552,7 +674,7 @@ def _execute_pipeline(
             event_bus.subscribe(PhaseStarted, _format_phase_started_json)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
             event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(RunSummary, _format_run_summary_json)
             event_bus.subscribe(ProgressEvent, _format_progress_json)
 
         else:  # console format (default)
@@ -569,13 +691,13 @@ def _execute_pipeline(
                 target_info = f" ({event.target})" if event.target else ""
                 typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-            def _format_run_completed(event: RunCompleted) -> None:
+            def _format_run_summary(event: RunSummary) -> None:
                 status_symbols = {
                     "completed": "✓",
                     "partial": "⚠",
                     "failed": "✗",
                 }
-                symbol = status_symbols.get(event.status.value, "?")
+                symbol = status_symbols[event.status.value]
                 # Build routed summary with destination breakdown
                 routed_summary = ""
                 if event.routed > 0:
@@ -606,15 +728,45 @@ def _execute_pipeline(
             event_bus.subscribe(PhaseStarted, _format_phase_started)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed)
             event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(RunSummary, _format_run_summary)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
+        # Create runtime configs for external calls and checkpointing
+        from elspeth.contracts.config.runtime import (
+            RuntimeCheckpointConfig,
+            RuntimeConcurrencyConfig,
+            RuntimeRateLimitConfig,
+            RuntimeTelemetryConfig,
+        )
+        from elspeth.core.checkpoint import CheckpointManager
+        from elspeth.core.rate_limit import RateLimitRegistry
+        from elspeth.telemetry import create_telemetry_manager
+
+        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
+
+        # Create checkpoint manager if checkpointing is enabled
+        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
+
         # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
+        )
         result = orchestrator.run(
             pipeline_config,
             graph=graph,
             settings=config,
+            payload_store=payload_store,
         )
 
         return {
@@ -623,6 +775,10 @@ def _execute_pipeline(
             "rows_processed": result.rows_processed,
         }
     finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
         db.close()
 
 
@@ -651,14 +807,13 @@ def _execute_pipeline_with_instances(
     from elspeth.core.config import AggregationSettings
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseTransform
 
-    # Use pre-instantiated plugins
-    source = plugins["source"]
-    sinks = plugins["sinks"]
+    # Use pre-instantiated plugins with explicit protocol types
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[BaseTransform] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = list(plugins["transforms"])
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -670,18 +825,44 @@ def _execute_pipeline_with_instances(
 
         # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
-        transforms.append(transform)  # type: ignore[arg-type]
+        transforms.append(transform)
 
     # Get database
     db_url = config.landscape.url
-    db = LandscapeDB.from_url(db_url)
+    db = LandscapeDB.from_url(
+        db_url,
+        dump_to_jsonl=config.landscape.dump_to_jsonl,
+        dump_to_jsonl_path=config.landscape.dump_to_jsonl_path,
+        dump_to_jsonl_fail_on_error=config.landscape.dump_to_jsonl_fail_on_error,
+        dump_to_jsonl_include_payloads=config.landscape.dump_to_jsonl_include_payloads,
+        dump_to_jsonl_payload_base_path=(
+            str(config.payload_store.base_path)
+            if config.landscape.dump_to_jsonl_payload_base_path is None
+            else config.landscape.dump_to_jsonl_payload_base_path
+        ),
+    )
+
+    # Create payload store for audit compliance
+    # (CLAUDE.md: "Source entry - Raw data stored before any processing")
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    if config.payload_store.backend != "filesystem":
+        typer.echo(
+            f"Error: Unsupported payload store backend '{config.payload_store.backend}'. Only 'filesystem' is currently supported.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    payload_store = FilesystemPayloadStore(config.payload_store.base_path)
+
+    # Initialize rate_limit_registry to None so it's defined in finally block
+    rate_limit_registry = None
 
     try:
         # Build PipelineConfig with pre-instantiated plugins
         pipeline_config = PipelineConfig(
-            source=source,  # type: ignore[arg-type]
-            transforms=transforms,  # type: ignore[arg-type]
-            sinks=sinks,  # type: ignore[arg-type]
+            source=source,
+            transforms=transforms,
+            sinks=sinks,
             config=resolve_config(config),
             gates=list(config.gates),
             aggregation_settings=aggregation_settings,
@@ -736,7 +917,7 @@ def _execute_pipeline_with_instances(
                     err=True,
                 )
 
-            def _format_run_completed_json(event: RunCompleted) -> None:
+            def _format_run_summary_json(event: RunSummary) -> None:
                 typer.echo(
                     json.dumps(
                         {
@@ -773,7 +954,7 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(PhaseStarted, _format_phase_started_json)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
             event_bus.subscribe(PhaseError, _format_phase_error_json)
-            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(RunSummary, _format_run_summary_json)
             event_bus.subscribe(ProgressEvent, _format_progress_json)
 
         else:  # console format (default)
@@ -790,13 +971,13 @@ def _execute_pipeline_with_instances(
                 target_info = f" ({event.target})" if event.target else ""
                 typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-            def _format_run_completed(event: RunCompleted) -> None:
+            def _format_run_summary(event: RunSummary) -> None:
                 status_symbols = {
                     "completed": "✓",
                     "partial": "⚠",
                     "failed": "✗",
                 }
-                symbol = status_symbols.get(event.status.value, "?")
+                symbol = status_symbols[event.status.value]
                 # Build routed summary with destination breakdown
                 routed_summary = ""
                 if event.routed > 0:
@@ -827,15 +1008,45 @@ def _execute_pipeline_with_instances(
             event_bus.subscribe(PhaseStarted, _format_phase_started)
             event_bus.subscribe(PhaseCompleted, _format_phase_completed)
             event_bus.subscribe(PhaseError, _format_phase_error)
-            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(RunSummary, _format_run_summary)
             event_bus.subscribe(ProgressEvent, _format_progress)
 
+        # Create runtime configs for external calls and checkpointing
+        from elspeth.contracts.config.runtime import (
+            RuntimeCheckpointConfig,
+            RuntimeConcurrencyConfig,
+            RuntimeRateLimitConfig,
+            RuntimeTelemetryConfig,
+        )
+        from elspeth.core.checkpoint import CheckpointManager
+        from elspeth.core.rate_limit import RateLimitRegistry
+        from elspeth.telemetry import create_telemetry_manager
+
+        rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+        rate_limit_registry = RateLimitRegistry(rate_limit_config)
+        concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+        telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+        telemetry_manager = create_telemetry_manager(telemetry_config)
+
+        # Create checkpoint manager if checkpointing is enabled
+        checkpoint_manager = CheckpointManager(db) if checkpoint_config.enabled else None
+
         # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(db, event_bus=event_bus)
+        orchestrator = Orchestrator(
+            db,
+            event_bus=event_bus,
+            rate_limit_registry=rate_limit_registry,
+            concurrency_config=concurrency_config,
+            checkpoint_manager=checkpoint_manager,
+            checkpoint_config=checkpoint_config,
+            telemetry_manager=telemetry_manager,
+        )
         result = orchestrator.run(
             pipeline_config,
             graph=graph,
             settings=config,
+            payload_store=payload_store,
         )
 
         return {
@@ -844,6 +1055,10 @@ def _execute_pipeline_with_instances(
             "rows_processed": result.rows_processed,
         }
     finally:
+        if rate_limit_registry is not None:
+            rate_limit_registry.close()
+        if telemetry_manager is not None:
+            telemetry_manager.close()
         db.close()
 
 
@@ -1059,8 +1274,13 @@ def purge(
             typer.echo(f"Warning: Could not load settings.yaml: {e}", err=True)
 
     if database:
-        db_path = Path(database).expanduser()
-        db_url = f"sqlite:///{db_path.resolve()}"
+        db_path = Path(database).expanduser().resolve()
+        # Fail fast with clear error if file doesn't exist
+        # (prevents silent creation of empty DB on typoed paths)
+        if not db_path.exists():
+            typer.echo(f"Error: Database file not found: {db_path}", err=True)
+            raise typer.Exit(1) from None
+        db_url = f"sqlite:///{db_path}"
     elif config:
         db_url = config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
@@ -1100,6 +1320,7 @@ def purge(
     # else: use the fallback default of 90
 
     # Initialize database and payload store
+    # Note: purge is read-only for audit data, no JSONL journaling needed
     try:
         db = LandscapeDB.from_url(db_url)
     except Exception as e:
@@ -1153,7 +1374,7 @@ def _execute_resume_with_instances(
     graph: ExecutionGraph,
     plugins: dict[str, Any],
     resume_point: Any,
-    payload_store: Any,
+    payload_store: PayloadStore | None,
     db: LandscapeDB,
 ) -> Any:  # Returns RunResult from orchestrator.resume()
     """Execute resume using pre-instantiated plugins.
@@ -1174,14 +1395,13 @@ def _execute_resume_with_instances(
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import AggregationSettings
     from elspeth.engine import Orchestrator, PipelineConfig
-    from elspeth.plugins.base import BaseTransform
 
-    # Use pre-instantiated plugins
-    source = plugins["source"]
-    sinks = plugins["sinks"]
+    # Use pre-instantiated plugins with explicit protocol types
+    source: SourceProtocol = plugins["source"]
+    sinks: dict[str, SinkProtocol] = plugins["sinks"]
 
     # Build transforms list: row_plugins + aggregations (with node_id)
-    transforms: list[BaseTransform] = list(plugins["transforms"])
+    transforms: list[RowPlugin] = list(plugins["transforms"])
 
     # Add aggregation transforms with node_id attached
     agg_id_map = graph.get_aggregation_id_map()
@@ -1193,13 +1413,13 @@ def _execute_resume_with_instances(
 
         # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
-        transforms.append(transform)  # type: ignore[arg-type]
+        transforms.append(transform)
 
     # Build PipelineConfig with pre-instantiated plugins
     pipeline_config = PipelineConfig(
-        source=source,  # type: ignore[arg-type]
-        transforms=transforms,  # type: ignore[arg-type]
-        sinks=sinks,  # type: ignore[arg-type]
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
         config=resolve_config(config),
         gates=list(config.gates),
         aggregation_settings=aggregation_settings,
@@ -1210,7 +1430,7 @@ def _execute_resume_with_instances(
         PhaseCompleted,
         PhaseError,
         PhaseStarted,
-        RunCompleted,
+        RunSummary,
     )
     from elspeth.core import EventBus
 
@@ -1229,13 +1449,13 @@ def _execute_resume_with_instances(
         target_info = f" ({event.target})" if event.target else ""
         typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-    def _format_run_completed(event: RunCompleted) -> None:
+    def _format_run_summary(event: RunSummary) -> None:
         status_symbols = {
             "completed": "✓",
             "partial": "⚠",
             "failed": "✗",
         }
-        symbol = status_symbols.get(event.status.value, "?")
+        symbol = status_symbols[event.status.value]
         # Build routed summary with destination breakdown
         routed_summary = ""
         if event.routed > 0:
@@ -1266,14 +1486,41 @@ def _execute_resume_with_instances(
     event_bus.subscribe(PhaseStarted, _format_phase_started)
     event_bus.subscribe(PhaseCompleted, _format_phase_completed)
     event_bus.subscribe(PhaseError, _format_phase_error)
-    event_bus.subscribe(RunCompleted, _format_run_completed)
+    event_bus.subscribe(RunSummary, _format_run_summary)
     event_bus.subscribe(ProgressEvent, _format_progress)
+
+    # Create runtime configs for external calls and checkpointing
+    from elspeth.contracts.config.runtime import (
+        RuntimeCheckpointConfig,
+        RuntimeConcurrencyConfig,
+        RuntimeRateLimitConfig,
+        RuntimeTelemetryConfig,
+    )
+    from elspeth.core.rate_limit import RateLimitRegistry
+    from elspeth.telemetry import create_telemetry_manager
+
+    rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
+    rate_limit_registry = RateLimitRegistry(rate_limit_config)
+    concurrency_config = RuntimeConcurrencyConfig.from_settings(config.concurrency)
+    checkpoint_config = RuntimeCheckpointConfig.from_settings(config.checkpoint)
+    telemetry_config = RuntimeTelemetryConfig.from_settings(config.telemetry)
+    telemetry_manager = create_telemetry_manager(telemetry_config)
 
     # Create checkpoint manager and orchestrator for resume
     checkpoint_manager = CheckpointManager(db)
-    orchestrator = Orchestrator(db, event_bus=event_bus, checkpoint_manager=checkpoint_manager)
+    orchestrator = Orchestrator(
+        db,
+        event_bus=event_bus,
+        checkpoint_manager=checkpoint_manager,
+        checkpoint_config=checkpoint_config,
+        rate_limit_registry=rate_limit_registry,
+        concurrency_config=concurrency_config,
+        telemetry_manager=telemetry_manager,
+    )
 
-    # Execute resume
+    # Execute resume (payload_store is required for resume)
+    if payload_store is None:
+        raise ValueError("payload_store is required for resume operations")
     result = orchestrator.resume(
         resume_point=resume_point,
         config=pipeline_config,
@@ -1281,6 +1528,11 @@ def _execute_resume_with_instances(
         payload_store=payload_store,
         settings=config,
     )
+
+    # Clean up rate limit registry and telemetry
+    rate_limit_registry.close()
+    if telemetry_manager is not None:
+        telemetry_manager.close()
 
     return result
 
@@ -1405,8 +1657,13 @@ def resume(
 
     # Resolve database URL
     if database:
-        db_path = Path(database).expanduser()
-        db_url = f"sqlite:///{db_path.resolve()}"
+        db_path = Path(database).expanduser().resolve()
+        # Fail fast with clear error if file doesn't exist
+        # (prevents silent creation of empty DB on typoed paths)
+        if not db_path.exists():
+            typer.echo(f"Error: Database file not found: {db_path}", err=True)
+            raise typer.Exit(1) from None
+        db_url = f"sqlite:///{db_path}"
     else:
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")

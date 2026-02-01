@@ -89,6 +89,13 @@
 - Related issues/PRs: N/A
 - Related design docs: docs/design/subsystems/00-overview.md
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- RowProcessor still wraps the entire work queue in a single `row_span` created with the initial token. (`src/elspeth/engine/processor.py:383-405`)
+- `row_span()` still sets `token.id` at span creation and never updates it for child tokens. (`src/elspeth/engine/spans.py:116-137`)
+
 ---
 
 ## VERIFICATION: 2026-01-25

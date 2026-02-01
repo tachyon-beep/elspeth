@@ -158,3 +158,9 @@ evaluator.record_accept()
 The bug report correctly identifies that a test is needed for: "timeout elapses before count threshold; assert trigger_type is TIMEOUT"
 
 This test does NOT currently exist in the test suite.
+
+## Verification (2026-02-01)
+
+**Status: STILL VALID**
+
+- `TriggerEvaluator.should_trigger()` still checks count then timeout then condition with fixed ordering, so it reports the first match instead of earliest trigger. (`src/elspeth/engine/triggers.py:115-136`)

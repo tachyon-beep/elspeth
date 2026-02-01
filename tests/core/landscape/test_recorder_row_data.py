@@ -18,7 +18,7 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 class TestGetRowDataExplicitStates:
     """Tests for get_row_data() returning RowDataResult."""
 
-    def test_row_not_found(self, tmp_path: Path) -> None:
+    def test_row_not_found(self, tmp_path: Path, payload_store) -> None:
         """Returns ROW_NOT_FOUND when row doesn't exist."""
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -63,7 +63,7 @@ class TestGetRowDataExplicitStates:
         assert result.state == RowDataState.NEVER_STORED
         assert result.data is None
 
-    def test_store_not_configured(self, tmp_path: Path) -> None:
+    def test_store_not_configured(self, tmp_path: Path, payload_store) -> None:
         """Returns STORE_NOT_CONFIGURED when payload_store is None."""
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -99,7 +99,7 @@ class TestGetRowDataExplicitStates:
         assert result.state == RowDataState.STORE_NOT_CONFIGURED
         assert result.data is None
 
-    def test_purged(self, tmp_path: Path) -> None:
+    def test_purged(self, tmp_path: Path, payload_store) -> None:
         """Returns PURGED when payload_store raises KeyError."""
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -134,7 +134,7 @@ class TestGetRowDataExplicitStates:
         assert result.state == RowDataState.PURGED
         assert result.data is None
 
-    def test_available(self, tmp_path: Path) -> None:
+    def test_available(self, tmp_path: Path, payload_store) -> None:
         """Returns AVAILABLE with data when payload exists."""
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -174,7 +174,7 @@ class TestGetRowDataTier1Corruption:
     immediately - no silent recovery, no coercion, no defaults.
     """
 
-    def test_integrity_error_propagates(self, tmp_path: Path) -> None:
+    def test_integrity_error_propagates(self, tmp_path: Path, payload_store) -> None:
         """IntegrityError from corrupted payload must propagate (not be swallowed).
 
         When payload bytes have been tampered with (hash mismatch),
@@ -182,7 +182,7 @@ class TestGetRowDataTier1Corruption:
         This must propagate to the caller - Tier 1 data corruption
         is a crash-worthy event.
         """
-        from elspeth.core.payload_store import IntegrityError
+        from elspeth.contracts.payload_store import IntegrityError
 
         db = LandscapeDB.in_memory()
         payload_store = FilesystemPayloadStore(tmp_path / "payloads")
@@ -220,7 +220,7 @@ class TestGetRowDataTier1Corruption:
         with pytest.raises(IntegrityError):
             recorder.get_row_data(row.row_id)
 
-    def test_invalid_json_propagates(self, tmp_path: Path) -> None:
+    def test_invalid_json_propagates(self, tmp_path: Path, payload_store) -> None:
         """Invalid JSON in payload must propagate JSONDecodeError.
 
         When payload bytes are valid (hash matches) but contain non-JSON,

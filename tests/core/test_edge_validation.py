@@ -238,7 +238,22 @@ def test_aggregation_dual_schema_both_edges_validated() -> None:
 
     graph = ExecutionGraph()
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
-    graph.add_node("agg", node_type=NodeType.AGGREGATION, plugin_name="stats", input_schema=AggInput, output_schema=AggOutput)
+    graph.add_node(
+        "agg",
+        node_type=NodeType.AGGREGATION,
+        plugin_name="batch_stats",
+        input_schema=AggInput,
+        output_schema=AggOutput,
+        config={
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {
+                "schema": {"mode": "strict", "fields": ["value: float", "label: str"]},
+                "value_field": "value",
+            },
+            "schema": {"mode": "strict", "fields": ["value: float", "label: str"]},
+        },
+    )
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
 
     graph.add_edge("source", "agg", label="continue")

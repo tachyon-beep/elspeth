@@ -10,15 +10,17 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformErrorCategory, TransformErrorReason, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.multi_query import (
     MultiQueryConfig,
     OutputFieldConfig,
@@ -27,6 +29,7 @@ from elspeth.plugins.llm.multi_query import (
     ResponseFormat,
 )
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.validation import ValidationSuccess, validate_json_object_response
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -149,10 +152,29 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Pre-expand query specs (case_studies x criteria)
         self._query_specs: list[QuerySpec] = cfg.expand_queries()
 
-        # Schema from config
-        assert cfg.schema_config is not None
+        # Build output schema config with field categorization
+        # Multi-query: collect fields from all query specs
+        # TransformDataConfig guarantees schema_config is not None
+        schema_config = cfg.schema_config
+        all_guaranteed = {field for spec in self._query_specs for field in get_llm_guaranteed_fields(spec.output_prefix)}
+        all_audit = {field for spec in self._query_specs for field in get_llm_audit_fields(spec.output_prefix)}
+
+        # Merge with base schema
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
+            audit_fields=tuple(set(base_audit) | all_audit),
+            required_fields=schema_config.required_fields,
+        )
+
+        # Create schema from config
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,
         )
@@ -167,6 +189,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Client caching (same pattern as AzureLLMTransform)
         self._recorder: LandscapeRecorder | None = None
+        self._run_id: str = ""
+        self._telemetry_emit: Callable[[Any], None] = lambda event: None
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
@@ -204,8 +228,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution."""
+        """Capture recorder and telemetry context for pooled execution."""
         self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""
@@ -228,6 +254,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 self._llm_clients[state_id] = AuditedLLMClient(
                     recorder=self._recorder,
                     state_id=state_id,
+                    run_id=self._run_id,
+                    telemetry_emit=self._telemetry_emit,
                     underlying_client=self._get_underlying_client(),
                     provider="azure",
                 )
@@ -368,24 +396,25 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         # 6. Check for response truncation BEFORE parsing
         # If completion_tokens equals max_tokens, the response was likely truncated
-        # usage dict is created by AuditedLLMClient - keys are always present (OUR data)
-        completion_tokens = response.usage["completion_tokens"]
-        if effective_max_tokens is not None and completion_tokens >= effective_max_tokens:
-            return TransformResult.error(
-                {
-                    "reason": "response_truncated",
-                    "error": (
-                        f"LLM response was truncated at {completion_tokens} tokens "
-                        f"(max_tokens={effective_max_tokens}). "
-                        f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
-                    ),
-                    "query": spec.output_prefix,
-                    "max_tokens": effective_max_tokens,
-                    "completion_tokens": completion_tokens,
-                    "prompt_tokens": response.usage["prompt_tokens"],
-                    "raw_response_preview": response.content[:500] if response.content else None,
-                }
-            )
+        # Note: usage dict may be empty if provider omits usage (streaming, certain configs)
+        # See AuditedLLMClient.chat_completion() lines 292-299 for details.
+        completion_tokens = response.usage.get("completion_tokens", 0)
+        if effective_max_tokens is not None and completion_tokens > 0 and completion_tokens >= effective_max_tokens:
+            truncation_error: TransformErrorReason = {
+                "reason": "response_truncated",
+                "error": (
+                    f"LLM response was truncated at {completion_tokens} tokens "
+                    f"(max_tokens={effective_max_tokens}). "
+                    f"Increase max_tokens for query '{spec.output_prefix}' or shorten your prompt."
+                ),
+                "query": spec.output_prefix,
+                "max_tokens": effective_max_tokens,
+                "completion_tokens": completion_tokens,
+                "prompt_tokens": response.usage.get("prompt_tokens", 0),
+            }
+            if response.content:
+                truncation_error["raw_response_preview"] = response.content[:500]
+            return TransformResult.error(truncation_error)
 
         # 7. Parse JSON response (THEIR DATA - wrap)
         content = response.content.strip()
@@ -400,31 +429,29 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             if content.endswith("```"):
                 content = content[:-3].strip()
 
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as e:
-            return TransformResult.error(
-                {
-                    "reason": "json_parse_failed",
-                    "error": str(e),
-                    "query": spec.output_prefix,
-                    "raw_response": response.content,
-                    "content_after_fence_strip": content,
-                    "usage": response.usage,
-                }
-            )
+        # Validate JSON response (EXTERNAL DATA - Tier 3 validation)
+        validation_result = validate_json_object_response(content)
+        if not isinstance(validation_result, ValidationSuccess):
+            # Map validation error to TransformResult with context
+            # validation_result.reason is one of: "invalid_json", "invalid_json_type"
+            # which are valid TransformErrorCategory values
+            error_info: TransformErrorReason = {
+                "reason": cast(TransformErrorCategory, validation_result.reason),
+                "query": spec.output_prefix,
+            }
+            if response.content:
+                error_info["raw_response"] = response.content[:500]
+            if validation_result.detail:
+                error_info["error"] = validation_result.detail
+                error_info["content_after_fence_strip"] = content
+                error_info["usage"] = response.usage
+            if validation_result.expected:
+                error_info["expected"] = validation_result.expected
+            if validation_result.actual:
+                error_info["actual"] = validation_result.actual
+            return TransformResult.error(error_info)
 
-        # Validate JSON type is object (EXTERNAL DATA - validate structure)
-        if not isinstance(parsed, dict):
-            return TransformResult.error(
-                {
-                    "reason": "invalid_json_type",
-                    "expected": "object",
-                    "actual": type(parsed).__name__,
-                    "query": spec.output_prefix,
-                    "raw_response": response.content[:500],
-                }
-            )
+        parsed = validation_result.data
 
         # 8. Map and validate output fields
         output: dict[str, Any] = {}
@@ -458,7 +485,16 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             output[output_key] = value
 
         # 9. Add metadata for audit trail
-        output[f"{spec.output_prefix}_usage"] = response.usage
+        # Usage may be empty dict {} if provider omits usage data.
+        # Store consistent structure with defaults to prevent downstream KeyErrors.
+        output[f"{spec.output_prefix}_usage"] = (
+            response.usage
+            if response.usage
+            else {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+            }
+        )
         output[f"{spec.output_prefix}_model"] = response.model
         # Template metadata for reproducibility
         output[f"{spec.output_prefix}_template_hash"] = rendered.template_hash
@@ -468,7 +504,12 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         output[f"{spec.output_prefix}_lookup_source"] = rendered.lookup_source
         output[f"{spec.output_prefix}_system_prompt_source"] = self._system_prompt_source
 
-        return TransformResult.success(output)
+        # Build fields_added from output_mapping suffixes for this query
+        fields_added = [f"{spec.output_prefix}_{field_config.suffix}" for field_config in self._output_mapping.values()]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": fields_added},
+        )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -568,7 +609,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             return TransformResult.error(
                 {
                     "reason": "query_failed",
-                    "failed_queries": [{"query": spec.output_prefix, "error": r.reason} for spec, r in failed],
+                    "failed_queries": [
+                        {
+                            "query": spec.output_prefix,
+                            "error": r.reason.get("error", str(r.reason)) if isinstance(r.reason, dict) else str(r.reason),
+                        }
+                        for spec, r in failed
+                    ],
                     "succeeded_count": len(results) - len(failed),
                     "total_count": len(results),
                 }
@@ -583,7 +630,14 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             if result.row is not None:
                 output.update(result.row)
 
-        return TransformResult.success(output)
+        # Collect all fields added across all queries
+        all_fields_added = [
+            f"{spec.output_prefix}_{field_config.suffix}" for spec in self._query_specs for field_config in self._output_mapping.values()
+        ]
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": all_fields_added},
+        )
 
     def _execute_queries_parallel(
         self,
@@ -607,7 +661,8 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         from elspeth.plugins.pooling.executor import RowContext
 
         # Type narrowing - caller ensures executor is not None
-        assert self._executor is not None
+        if self._executor is None:
+            raise RuntimeError("LLM executor not initialized - call initialize() first")
 
         # Build RowContext for each query
         # All queries share the same state_id (FK constraint)

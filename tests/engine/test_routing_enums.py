@@ -177,7 +177,7 @@ class TestGateExecutorRoutingBehavior:
             row_data=token.row_data,
             branch_name="branch_b",
         )
-        token_manager.fork_token.return_value = [child_token_1, child_token_2]
+        token_manager.fork_token.return_value = ([child_token_1, child_token_2], "fork_group_1")
 
         # Mock gate that forks to two paths
         gate = MagicMock()

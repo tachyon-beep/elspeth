@@ -82,7 +82,6 @@ class KeywordFilter(BaseTransform):
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         # Create schema
-        assert cfg.schema_config is not None
         schema = create_schema_from_config(
             cfg.schema_config,
             "KeywordFilterSchema",
@@ -129,12 +128,15 @@ class KeywordFilter(BaseTransform):
                             "field": field_name,
                             "matched_pattern": pattern_str,
                             "match_context": context,
-                            "retryable": False,
-                        }
+                        },
+                        retryable=False,
                     )
 
         # No matches - pass through unchanged
-        return TransformResult.success(row)
+        return TransformResult.success(
+            row,
+            success_reason={"action": "filtered"},
+        )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
         """Determine which fields to scan based on config."""

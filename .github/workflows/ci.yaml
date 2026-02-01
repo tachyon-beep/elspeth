@@ -4,6 +4,7 @@
 #   - Linting (ruff, mypy) - ~30 seconds
 #   - Testing (pytest with coverage) - ~3-5 minutes
 #   - Bug-hiding pattern detection
+#   - Contract enforcement (Settings→Runtime alignment, type boundaries)
 #
 # All checks must pass before merging to main.
 
@@ -21,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.13"
   UV_VERSION: "0.5"
 
 jobs:
@@ -67,10 +68,10 @@ jobs:
           mypy src/
 
   # ===========================================================================
-  # Stage 2: Bug-Hiding Check
+  # Stage 2a: Tier Model Enforcement
   # ===========================================================================
-  no-bug-hiding:
-    name: No Bug-Hiding Patterns
+  enforce-tier-model:
+    name: Enforce Tier Model
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -84,13 +85,44 @@ jobs:
       - name: Install dependencies
         run: pip install pyyaml
 
-      - name: Run no-bug-hiding check
+      - name: Run tier model enforcement
         run: |
-          python scripts/cicd/no_bug_hiding.py check \
+          python scripts/cicd/enforce_tier_model.py check \
             --root src/elspeth \
-            --allowlist config/cicd/no_bug_hiding.yaml \
+            --allowlist config/cicd/enforce_tier_model.yaml \
             --exclude "**/__pycache__/*" \
             --format text
+
+  # ===========================================================================
+  # Stage 2b: Contract Enforcement (Settings→Runtime alignment)
+  # ===========================================================================
+  contract-enforcement:
+    name: Contract Enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e ".[all]"
+
+      - name: Enforce contract alignment
+        run: |
+          source .venv/bin/activate
+          python scripts/check_contracts.py
 
   # ===========================================================================
   # Stage 3: Test (Quality gate - ~3-5 minutes)
@@ -98,7 +130,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: [lint, no-bug-hiding]
+    needs: [lint, enforce-tier-model, contract-enforcement]
     strategy:
       fail-fast: false
       matrix:
@@ -139,6 +171,7 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=80 \
             -v \
+            -m "not slow and not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Run tests without coverage
@@ -147,6 +180,7 @@ jobs:
           source .venv/bin/activate
           pytest tests/ \
             -v \
+            -m "not slow and not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Upload coverage report
@@ -158,7 +192,41 @@ jobs:
           retention-days: 7
 
   # ===========================================================================
-  # Stage 4: Integration Tests (Optional - requires secrets)
+  # Stage 4: Stress Tests (ChaosLLM HTTP server - ~5-10 minutes)
+  # ===========================================================================
+  stress-tests:
+    name: Stress Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e ".[all]"
+          uv pip install uvicorn
+
+      - name: Run stress tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/stress/ -m stress --timeout=300 -v
+        timeout-minutes: 15
+
+  # ===========================================================================
+  # Stage 5: Integration Tests (Optional - requires secrets)
   # ===========================================================================
   integration:
     name: Integration Tests
@@ -198,7 +266,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, no-bug-hiding, test]
+    needs: [lint, enforce-tier-model, contract-enforcement, test]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -207,8 +275,12 @@ jobs:
             echo "Lint job failed"
             exit 1
           fi
-          if [[ "${{ needs.no-bug-hiding.result }}" != "success" ]]; then
-            echo "No-bug-hiding job failed"
+          if [[ "${{ needs.enforce-tier-model.result }}" != "success" ]]; then
+            echo "Tier model enforcement job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.contract-enforcement.result }}" != "success" ]]; then
+            echo "Contract enforcement job failed"
             exit 1
           fi
           if [[ "${{ needs.test.result }}" != "success" ]]; then

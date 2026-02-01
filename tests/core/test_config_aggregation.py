@@ -144,12 +144,12 @@ class TestAggregationSettings:
             name="batch_stats",
             plugin="stats_aggregation",
             trigger=TriggerConfig(count=100),
-            output_mode="single",
+            output_mode="transform",
         )
         assert settings.name == "batch_stats"
         assert settings.plugin == "stats_aggregation"
         assert settings.trigger.count == 100
-        assert settings.output_mode == "single"
+        assert settings.output_mode == "transform"
 
     def test_aggregation_settings_combined_triggers(self) -> None:
         """Aggregation with combined triggers (per plugin-protocol.md)."""
@@ -159,13 +159,13 @@ class TestAggregationSettings:
             name="batch_stats",
             plugin="stats_aggregation",
             trigger=TriggerConfig(count=1000, timeout_seconds=3600.0),
-            output_mode="single",
+            output_mode="transform",
         )
         assert settings.trigger.count == 1000
         assert settings.trigger.timeout_seconds == 3600.0
 
     def test_aggregation_settings_default_output_mode(self) -> None:
-        """Output mode defaults to 'single'."""
+        """Output mode defaults to 'transform'."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
 
         settings = AggregationSettings(
@@ -173,7 +173,7 @@ class TestAggregationSettings:
             plugin="stats_aggregation",
             trigger=TriggerConfig(count=100),
         )
-        assert settings.output_mode == "single"
+        assert settings.output_mode == "transform"
 
     def test_aggregation_settings_passthrough_mode(self) -> None:
         """Passthrough output mode is valid."""

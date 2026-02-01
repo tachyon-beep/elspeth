@@ -54,30 +54,33 @@ class TestOrchestratorCheckpointing:
         )
         assert orchestrator._checkpoint_manager is checkpoint_mgr
 
-    def test_orchestrator_accepts_checkpoint_settings(self, checkpoint_db: LandscapeDB) -> None:
-        """Orchestrator can be initialized with CheckpointSettings."""
+    def test_orchestrator_accepts_checkpoint_config(self, checkpoint_db: LandscapeDB) -> None:
+        """Orchestrator can be initialized with RuntimeCheckpointConfig."""
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
         from elspeth.engine.orchestrator import Orchestrator
 
         settings = CheckpointSettings(frequency="every_n", checkpoint_interval=10)
+        config = RuntimeCheckpointConfig.from_settings(settings)
         orchestrator = Orchestrator(
             db=checkpoint_db,
-            checkpoint_settings=settings,
+            checkpoint_config=config,
         )
-        assert orchestrator._checkpoint_settings == settings
+        assert orchestrator._checkpoint_config == config
 
-    def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB) -> None:
+    def test_maybe_checkpoint_creates_on_every_row(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint creates checkpoint when frequency=every_row."""
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(checkpoint_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         # P2 Fix: Track checkpoint creation calls
         checkpoint_calls: list[dict[str, Any]] = []
@@ -118,7 +121,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -152,9 +155,9 @@ class TestOrchestratorCheckpointing:
         orchestrator = Orchestrator(
             db=checkpoint_db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 3
@@ -163,18 +166,19 @@ class TestOrchestratorCheckpointing:
         # With frequency=every_row and 3 rows, we expect 3 checkpoint calls
         assert len(checkpoint_calls) == 3, f"Expected 3 checkpoint calls (one per row), got {len(checkpoint_calls)}"
 
-    def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB) -> None:
+    def test_maybe_checkpoint_respects_interval(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """_maybe_checkpoint only creates checkpoint every N rows."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(checkpoint_db)
         # Checkpoint every 3 rows
         settings = CheckpointSettings(enabled=True, frequency="every_n", checkpoint_interval=3)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         # P2 Fix: Track checkpoint creation calls
         checkpoint_calls: list[dict[str, Any]] = []
@@ -215,7 +219,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -250,9 +254,9 @@ class TestOrchestratorCheckpointing:
         orchestrator = Orchestrator(
             db=checkpoint_db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 7
@@ -262,17 +266,18 @@ class TestOrchestratorCheckpointing:
         # (rows 1, 2 don't checkpoint; row 3 checkpoints; rows 4, 5 don't; row 6 checkpoints; row 7 doesn't)
         assert len(checkpoint_calls) == 2, f"Expected 2 checkpoint calls (at rows 3 and 6), got {len(checkpoint_calls)}"
 
-    def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_deleted_on_successful_completion(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are deleted when run completes successfully."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(checkpoint_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         class ValueSchema(PluginSchema):
             value: int
@@ -303,7 +308,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -337,9 +342,9 @@ class TestOrchestratorCheckpointing:
         orchestrator = Orchestrator(
             db=checkpoint_db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
 
@@ -347,7 +352,7 @@ class TestOrchestratorCheckpointing:
         remaining_checkpoints = checkpoint_mgr.get_checkpoints(result.run_id)
         assert len(remaining_checkpoints) == 0
 
-    def test_checkpoint_preserved_on_failure(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_preserved_on_failure(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Checkpoints are preserved when run fails for recovery.
 
         IMPORTANT: Checkpoints are created AFTER sink writes, not during transform
@@ -361,16 +366,17 @@ class TestOrchestratorCheckpointing:
         - Checkpoints are created after each sink.write() returns successfully
         - If a later sink fails, checkpoints from earlier sinks are preserved
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings, GateSettings
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(checkpoint_db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         class ValueSchema(PluginSchema):
             value: int
@@ -401,7 +407,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
 
         class GoodSink(_TestSinkBase):
             """Sink that succeeds."""
@@ -495,13 +501,13 @@ class TestOrchestratorCheckpointing:
         orchestrator = Orchestrator(
             db=checkpoint_db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
 
         # The bad sink will fail, but good sink should have already written
         # Note: Sink iteration order in dict may vary, so we check checkpoints exist
         with pytest.raises(RuntimeError, match="Bad sink failure"):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query for the failed run (most recent)
         from elspeth.core.landscape import LandscapeRecorder
@@ -529,17 +535,18 @@ class TestOrchestratorCheckpointing:
             )
         # If good sink didn't write (bad sink failed first), that's also valid behavior
 
-    def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB) -> None:
+    def test_checkpoint_disabled_skips_checkpoint_creation(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """No checkpoints created when checkpointing is disabled."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         checkpoint_mgr = CheckpointManager(checkpoint_db)
         settings = CheckpointSettings(enabled=False)
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         # P2 Fix: Track checkpoint creation calls to verify none are made
         checkpoint_calls: list[dict[str, Any]] = []
@@ -580,7 +587,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -614,24 +621,25 @@ class TestOrchestratorCheckpointing:
         orchestrator = Orchestrator(
             db=checkpoint_db,
             checkpoint_manager=checkpoint_mgr,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
 
         # P2 Fix: Verify no checkpoint calls were made when disabled
         assert len(checkpoint_calls) == 0, f"Expected 0 checkpoint calls when disabled, got {len(checkpoint_calls)}"
 
-    def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB) -> None:
+    def test_no_checkpoint_manager_skips_checkpointing(self, checkpoint_db: LandscapeDB, payload_store) -> None:
         """Orchestrator works fine without checkpoint manager."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
         from elspeth.core.config import CheckpointSettings
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
         settings = CheckpointSettings(enabled=True, frequency="every_row")
+        checkpoint_config = RuntimeCheckpointConfig.from_settings(settings)
 
         class ValueSchema(PluginSchema):
             value: int
@@ -662,7 +670,7 @@ class TestOrchestratorCheckpointing:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "collect"
@@ -696,9 +704,9 @@ class TestOrchestratorCheckpointing:
         # No checkpoint_manager passed - should work without checkpointing
         orchestrator = Orchestrator(
             db=checkpoint_db,
-            checkpoint_settings=settings,
+            checkpoint_config=checkpoint_config,
         )
-        result = orchestrator.run(config, graph=build_production_graph(config))
+        result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         assert result.status == "completed"
         assert result.rows_processed == 1

@@ -16,10 +16,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.pooling import PoolConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -218,16 +220,32 @@ class BaseLLMTransform(BaseTransform):
         self._response_field = cfg.response_field
         self._on_error = cfg.on_error
 
-        # Schema from config
-        # TransformDataConfig validates schema_config is not None
-        assert cfg.schema_config is not None
+        # Schema from config (TransformDataConfig guarantees schema_config is not None)
+        schema_config = cfg.schema_config
         schema = create_schema_from_config(
-            cfg.schema_config,
+            schema_config,
             f"{self.name}Schema",
             allow_coercion=False,  # Transforms do NOT coerce
         )
         self.input_schema = schema
         self.output_schema = schema
+
+        # Build output schema config with field categorization
+        guaranteed = get_llm_guaranteed_fields(self._response_field)
+        audit = get_llm_audit_fields(self._response_field)
+
+        # Merge with any existing fields from base schema
+        base_guaranteed = schema_config.guaranteed_fields or ()
+        base_audit = schema_config.audit_fields or ()
+
+        self._output_schema_config = SchemaConfig(
+            mode=schema_config.mode,
+            fields=schema_config.fields,
+            is_dynamic=schema_config.is_dynamic,
+            guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
+            audit_fields=tuple(set(base_audit) | set(audit)),
+            required_fields=schema_config.required_fields,
+        )
 
     @abstractmethod
     def _get_llm_client(self, ctx: PluginContext) -> AuditedLLMClient:
@@ -321,7 +339,10 @@ class BaseLLMTransform(BaseTransform):
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
 
-        return TransformResult.success(output)
+        return TransformResult.success(
+            output,
+            success_reason={"action": "enriched", "fields_added": [self._response_field]},
+        )
 
     def close(self) -> None:
         """Release resources."""

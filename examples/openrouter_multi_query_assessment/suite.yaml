@@ -65,6 +65,9 @@ transforms:
 
       lookup_file: criteria_lookup.yaml
 
+      # Multi-query plugin generates input_1/2/3 and criterion from case_studies × criteria
+      required_input_fields: []  # Opt-out: fields are generated dynamically by plugin
+
       case_studies:
         - name: cs1
           input_fields: [cs1_background, cs1_symptoms, cs1_history]
@@ -108,10 +111,14 @@ transforms:
             - Clear monitoring parameters
             - Escalation criteria defined
 
-      response_format: json
+      response_format: standard
       output_mapping:
-        score: score
-        rationale: rationale
+        score:
+          suffix: score
+          type: integer
+        rationale:
+          suffix: rationale
+          type: string
 
       pool_size: 10
       temperature: 0.0

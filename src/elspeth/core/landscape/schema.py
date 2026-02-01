@@ -6,6 +6,7 @@ and compatibility with multiple database backends.
 """
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -40,6 +41,9 @@ runs_table = Table(
     # Stores serialized PluginSchema class info to enable proper type coercion
     # when resuming from payloads (datetime/Decimal string -> typed values)
     Column("source_schema_json", Text),  # Nullable for backward compatibility
+    # Field resolution mapping from source.load() - captures original→final header mapping
+    # when normalize_fields or field_mapping is used. Stored at run level since one source per run.
+    Column("source_field_resolution_json", Text),  # Nullable for backward compatibility
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures
     # don't mask successful pipeline completion
@@ -146,6 +150,8 @@ token_outcomes_table = Table(
     Column("error_hash", String(64)),
     # Optional extended context
     Column("context_json", Text),
+    # Branch contract for FORKED/EXPANDED outcomes (enables recovery validation)
+    Column("expected_branches_json", Text),
 )
 
 # Partial unique index: exactly one terminal outcome per token
@@ -192,6 +198,7 @@ node_states_table = Table(
     Column("context_after_json", Text),
     Column("duration_ms", Float),
     Column("error_json", Text),
+    Column("success_reason_json", Text),  # TransformSuccessReason for successful transforms
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
     UniqueConstraint("token_id", "node_id", "attempt"),
@@ -200,13 +207,40 @@ node_states_table = Table(
     ForeignKeyConstraint(["node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
 
+# === Operations (Source/Sink I/O) ===
+# Operations are the source/sink equivalent of node_states - they provide
+# a parent context for external calls made during source.load() or sink.write().
+# Unlike node_states (which require a token_id), operations exist at the
+# run/node level because sources CREATE tokens rather than processing them.
+
+operations_table = Table(
+    "operations",
+    metadata,
+    Column("operation_id", String(64), primary_key=True),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
+    Column("node_id", String(64), nullable=False),
+    Column("operation_type", String(32), nullable=False),  # 'source_load' | 'sink_write'
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("completed_at", DateTime(timezone=True)),
+    Column("status", String(16), nullable=False),  # 'open' | 'completed' | 'failed' | 'pending'
+    Column("input_data_ref", String(256)),  # Payload store reference for operation input
+    Column("output_data_ref", String(256)),  # Payload store reference for operation output
+    Column("error_message", Text),  # Error details if failed
+    Column("duration_ms", Float),
+    # Composite FK to nodes (node_id, run_id)
+    ForeignKeyConstraint(["node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
+)
+
 # === External Calls ===
+# Calls can be parented by either a node_state (transform processing) or an
+# operation (source/sink I/O). Exactly one parent must be set (XOR constraint).
 
 calls_table = Table(
     "calls",
     metadata,
     Column("call_id", String(64), primary_key=True),
-    Column("state_id", String(64), ForeignKey("node_states.state_id"), nullable=False),
+    Column("state_id", String(64), ForeignKey("node_states.state_id"), nullable=True),  # NULL for operation calls
+    Column("operation_id", String(64), ForeignKey("operations.operation_id"), nullable=True),  # NULL for state calls
     Column("call_index", Integer, nullable=False),
     Column("call_type", String(32), nullable=False),
     Column("status", String(32), nullable=False),
@@ -217,7 +251,34 @@ calls_table = Table(
     Column("error_json", Text),
     Column("latency_ms", Float),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    UniqueConstraint("state_id", "call_index"),
+    # XOR constraint: exactly one parent (state OR operation)
+    CheckConstraint(
+        "(state_id IS NOT NULL AND operation_id IS NULL) OR (state_id IS NULL AND operation_id IS NOT NULL)",
+        name="calls_has_parent",
+    ),
+)
+
+# Partial unique indexes for call_index uniqueness within each parent type.
+# Since calls can be parented by EITHER state_id OR operation_id (XOR),
+# we need separate uniqueness constraints for each parent type.
+# This preserves the original UNIQUE(state_id, call_index) semantics while
+# also enforcing UNIQUE(operation_id, call_index) for operation calls.
+Index(
+    "ix_calls_state_call_index_unique",
+    calls_table.c.state_id,
+    calls_table.c.call_index,
+    unique=True,
+    sqlite_where=(calls_table.c.state_id.isnot(None)),
+    postgresql_where=(calls_table.c.state_id.isnot(None)),
+)
+
+Index(
+    "ix_calls_operation_call_index_unique",
+    calls_table.c.operation_id,
+    calls_table.c.call_index,
+    unique=True,
+    sqlite_where=(calls_table.c.operation_id.isnot(None)),
+    postgresql_where=(calls_table.c.operation_id.isnot(None)),
 )
 
 # === Artifacts ===
@@ -317,6 +378,8 @@ Index("ix_token_parents_parent", token_parents_table.c.parent_token_id)
 Index("ix_node_states_token", node_states_table.c.token_id)
 Index("ix_node_states_node", node_states_table.c.node_id)
 Index("ix_calls_state", calls_table.c.state_id)
+Index("ix_calls_operation", calls_table.c.operation_id)  # For operation call lookups
+Index("ix_operations_node_run", operations_table.c.node_id, operations_table.c.run_id)
 Index("ix_artifacts_run", artifacts_table.c.run_id)
 
 # === Validation Errors (WP-11.99: Config-Driven Plugin Schemas) ===

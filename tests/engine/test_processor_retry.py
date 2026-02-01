@@ -159,7 +159,7 @@ class TestRowProcessorWorkQueue:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success({**row, "processed": True})
+                return TransformResult.success({**row, "processed": True}, success_reason={"action": "processed"})
 
         # Config-driven fork gate
         splitter_gate = GateSettings(
@@ -218,10 +218,11 @@ class TestRowProcessorRetry:
         """RowProcessor can be constructed with RetryManager."""
         from unittest.mock import Mock
 
+        from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.engine.retry import RetryManager
 
-        retry_manager = RetryManager(RetryConfig(max_attempts=3))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=1.0, max_delay=60.0, jitter=1.0, exponential_base=2.0))
 
         # Should not raise
         processor = RowProcessor(
@@ -239,8 +240,9 @@ class TestRowProcessorRetry:
         from unittest.mock import Mock
 
         from elspeth.contracts import TransformResult
+        from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.engine.retry import RetryManager
 
         # Track call count
         call_count = 0
@@ -252,7 +254,7 @@ class TestRowProcessorRetry:
                 raise ConnectionError("Transient network error")
             # Return success on 3rd attempt
             return (
-                TransformResult.success({"result": "ok"}),
+                TransformResult.success({"result": "ok"}, success_reason={"action": "test"}),
                 Mock(
                     token_id="t1",
                     row_id="r1",
@@ -268,7 +270,9 @@ class TestRowProcessorRetry:
             span_factory=Mock(),
             run_id="test-run",
             source_node_id=NodeID("source"),
-            retry_manager=RetryManager(RetryConfig(max_attempts=3, base_delay=0.01)),
+            retry_manager=RetryManager(
+                RuntimeRetryConfig(max_attempts=3, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0)
+            ),
         )
 
         # Mock the transform executor
@@ -337,6 +341,7 @@ class TestRowProcessorRetry:
         # Error result returned instead of exception propagated
         assert result.status == "error"
         assert result.retryable is True
+        assert result.reason is not None
         assert "network fail" in result.reason["error"]
         assert result.reason["reason"] == "transient_error_no_retry"
 
@@ -384,6 +389,7 @@ class TestRowProcessorRetry:
         # Error result with LLM-specific reason
         assert result.status == "error"
         assert result.retryable is True
+        assert result.reason is not None
         assert result.reason["reason"] == "llm_retryable_error_no_retry"
         assert "Rate limit exceeded" in result.reason["error"]
         assert error_sink == "quarantine"
@@ -425,10 +431,11 @@ class TestRowProcessorRetry:
         """When all retries exhausted, process_row returns FAILED outcome."""
 
         from elspeth.contracts import RowOutcome
+        from elspeth.contracts.config import RuntimeRetryConfig
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.landscape import LandscapeRecorder
         from elspeth.engine.processor import RowProcessor
-        from elspeth.engine.retry import RetryConfig, RetryManager
+        from elspeth.engine.retry import RetryManager
         from elspeth.engine.spans import SpanFactory
 
         # Set up real Landscape
@@ -472,7 +479,9 @@ class TestRowProcessorRetry:
             span_factory=SpanFactory(),
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
-            retry_manager=RetryManager(RetryConfig(max_attempts=2, base_delay=0.01)),
+            retry_manager=RetryManager(
+                RuntimeRetryConfig(max_attempts=2, base_delay=0.01, max_delay=60.0, jitter=0.0, exponential_base=2.0)
+            ),
         )
 
         ctx = PluginContext(run_id=run.run_id, config={})

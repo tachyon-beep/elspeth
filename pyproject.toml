@@ -72,6 +72,7 @@ dev = [
     "pytest-cov>=4.1,<6",  # Coverage plugin
     "pytest-asyncio>=1.0,<2",  # Async test support
     "pytest-dotenv>=0.5,<1",  # Load .env for integration tests
+    "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
     "ruff>=0.14,<1",  # Linting and formatting
@@ -97,15 +98,48 @@ azure = [
     "azure-storage-blob>=12.28,<13",  # Azure Blob Storage
     "azure-identity>=1.25,<2",  # Azure authentication
     "azure-keyvault-secrets>=4.10,<5",  # Key Vault for fingerprint key
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error  # Azure Monitor / App Insights telemetry
     "jinja2>=3.1,<4",  # Template engine for path templating
 ]
 
+mcp = [
+    # MCP server for Landscape analysis
+    "mcp>=1.0,<2",  # Model Context Protocol SDK
+]
+
 all = [
-    "elspeth[dev,llm,azure]",
+    # dev dependencies
+    "pytest>=9.0,<10",
+    "pytest-cov>=4.1,<6",
+    "pytest-asyncio>=1.0,<2",
+    "pytest-dotenv>=0.5,<1",
+    "pytest-timeout>=2.3,<3",
+    "hypothesis>=6.98,<7",
+    "mypy>=1.19,<2",
+    "ruff>=0.14,<1",
+    "pre-commit>=3.6,<4",
+    "pandas-stubs>=2.2,<3",
+    "types-networkx>=3.2,<4",
+    "types-PyYAML>=6.0,<7",
+    "mutmut>=2.4,<3",
+    # llm dependencies
+    "jinja2>=3.1,<4",
+    "openai>=2.15,<3",
+    "litellm>=1.81,<2",
+    # azure dependencies
+    "azure-storage-blob>=12.28,<13",
+    "azure-identity>=1.25,<2",
+    "azure-keyvault-secrets>=4.10,<5",
+    "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error
+    # mcp dependencies
+    "mcp>=1.0,<2",
 ]
 
 [project.scripts]
 elspeth = "elspeth.cli:app"
+elspeth-mcp = "elspeth.mcp:main"
+chaosllm = "elspeth.testing.chaosllm.cli:main"
+chaosllm-mcp = "elspeth.testing.chaosllm.cli:mcp_main_entry"
 check-contracts = "scripts.check_contracts:main"
 
 [project.urls]
@@ -122,7 +156,7 @@ packages = ["src/elspeth"]
 
 # === Ruff Configuration ===
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 140
 src = ["src", "tests"]
 
@@ -143,6 +177,7 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "SIM108", # ternary operator - prefer explicit if/else for readability with comments
+    "UP043",  # unnecessary default type args - keep explicit for Python 3.12 compatibility
 ]
 
 [tool.ruff.lint.isort]
@@ -163,7 +198,7 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 
 # === Mypy Configuration ===
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -186,6 +221,8 @@ module = [
     "opentelemetry.*",
     "hypothesis.*",
     "azure.*",
+    "mcp.*",
+    "ddtrace.*",
 ]
 ignore_missing_imports = true
 
@@ -225,12 +262,15 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
+    "-m", "not slow and not stress",  # Skip slow/stress tests by default
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring external services",
     "asyncio: marks tests as async (handled by pytest-asyncio)",
     "performance: marks tests as performance benchmarks",
+    "stress: marks tests as stress tests requiring ChaosLLM HTTP server (deselect with '-m \"not stress\"')",
+    "chaosllm: Configure ChaosLLM server for the test (preset=None, **kwargs)",
 ]
 # Load .env file for integration tests (API keys)
 env_files = [".env"]

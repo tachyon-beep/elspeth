@@ -4,25 +4,29 @@ These types answer: "Where does data go next?"
 """
 
 import copy
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any
+from dataclasses import dataclass
 
 from elspeth.contracts.enums import RoutingKind, RoutingMode
+from elspeth.contracts.errors import RoutingReason
 
 
-def _freeze_dict(d: dict[str, Any] | None) -> Mapping[str, Any]:
-    """Create immutable view of dict with defensive deep copy.
+def _copy_reason(reason: RoutingReason | None) -> RoutingReason | None:
+    """Create defensive deep copy of routing reason.
 
-    MappingProxyType only prevents mutation through the proxy.
-    We deep copy to prevent mutation via retained references to
-    the original dict or nested objects.
+    Deep copy prevents mutation via retained references to
+    the original dict or nested objects. The frozen dataclass
+    ensures the reference itself cannot be reassigned.
+
+    Args:
+        reason: RoutingReason dict or None
+
+    Returns:
+        Deep copy of reason, or None if input is None
     """
-    if d is None:
-        return MappingProxyType({})
+    if reason is None:
+        return None
     # Deep copy to prevent mutation of original or nested dicts
-    return MappingProxyType(copy.deepcopy(d))
+    return copy.deepcopy(reason)
 
 
 @dataclass(frozen=True)
@@ -54,7 +58,7 @@ class RoutingAction:
     kind: RoutingKind
     destinations: tuple[str, ...]
     mode: RoutingMode
-    reason: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
+    reason: RoutingReason | None = None
 
     def __post_init__(self) -> None:
         """Validate invariants between kind, mode, and destinations."""
@@ -76,13 +80,13 @@ class RoutingAction:
             )
 
     @classmethod
-    def continue_(cls, *, reason: dict[str, Any] | None = None) -> "RoutingAction":
+    def continue_(cls, *, reason: RoutingReason | None = None) -> "RoutingAction":
         """Continue to next node in pipeline."""
         return cls(
             kind=RoutingKind.CONTINUE,
             destinations=(),
             mode=RoutingMode.MOVE,  # Default for continue
-            reason=_freeze_dict(reason),
+            reason=_copy_reason(reason),
         )
 
     @classmethod
@@ -91,7 +95,7 @@ class RoutingAction:
         label: str,
         *,
         mode: RoutingMode = RoutingMode.MOVE,
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
     ) -> "RoutingAction":
         """Route to a specific labeled destination.
 
@@ -111,7 +115,7 @@ class RoutingAction:
             kind=RoutingKind.ROUTE,
             destinations=(label,),
             mode=mode,
-            reason=_freeze_dict(reason),
+            reason=_copy_reason(reason),
         )
 
     @classmethod
@@ -119,7 +123,7 @@ class RoutingAction:
         cls,
         paths: list[str],
         *,
-        reason: dict[str, Any] | None = None,
+        reason: RoutingReason | None = None,
     ) -> "RoutingAction":
         """Fork token to multiple parallel paths (always copy mode).
 
@@ -135,7 +139,7 @@ class RoutingAction:
             kind=RoutingKind.FORK_TO_PATHS,
             destinations=tuple(paths),
             mode=RoutingMode.COPY,  # Fork always copies
-            reason=_freeze_dict(reason),
+            reason=_copy_reason(reason),
         )
 
 

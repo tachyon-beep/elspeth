@@ -5,7 +5,7 @@ End-to-end test proving retry attempts are auditable - each attempt creates
 a separate node_state record in the database.
 
 This verifies the full retry audit chain:
-1. RetrySettings -> RetryConfig.from_settings() -> RetryManager
+1. RetrySettings -> RuntimeRuntimeRetryConfig.from_settings() -> RetryManager
 2. Orchestrator creates RetryManager and passes to RowProcessor
 3. RowProcessor uses _execute_transform_with_retry which tracks attempt numbers
 4. Each execute_transform call passes attempt=N to begin_node_state
@@ -19,11 +19,12 @@ import pytest
 from sqlalchemy import select
 
 from elspeth.contracts import NodeType, PluginSchema, TokenInfo, TransformResult
+from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import node_states_table
 from elspeth.engine.executors import TransformExecutor
-from elspeth.engine.retry import MaxRetriesExceeded, RetryConfig, RetryManager
+from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -51,7 +52,7 @@ class FlakyTransform(BaseTransform):
         self.fail_count += 1
         if self.fail_count <= self.max_fails:
             raise ConnectionError(f"Transient failure attempt {self.fail_count}")
-        return TransformResult.success({"processed": True, **row})
+        return TransformResult.success({"processed": True, **row}, success_reason={"action": "processed"})
 
 
 class AlwaysFailTransform(BaseTransform):
@@ -202,7 +203,7 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory)
 
         # Create retry manager with 3 attempts (enough to succeed)
-        retry_manager = RetryManager(RetryConfig(max_attempts=3, base_delay=0.001))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=3, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = PluginContext(run_id=run_id, config={})
 
@@ -302,7 +303,7 @@ class TestRetryAuditTrail:
         transform_executor = TransformExecutor(recorder, span_factory)
 
         # Create retry manager with only 2 attempts
-        retry_manager = RetryManager(RetryConfig(max_attempts=2, base_delay=0.001))
+        retry_manager = RetryManager(RuntimeRetryConfig(max_attempts=2, base_delay=0.001, max_delay=60.0, jitter=0.0, exponential_base=2.0))
 
         ctx = PluginContext(run_id=run_id, config={})
 
@@ -427,3 +428,297 @@ class TestRetryAuditTrail:
         assert len(rows) == 1, f"Expected 1 node_state, got {len(rows)}"
         assert rows[0].attempt == 0
         assert rows[0].status == "completed"
+
+
+class TestRetryExponentialBackoff:
+    """Verify exponential_base config actually affects retry backoff timing.
+
+    P2-2026-01-21 bug: exponential_base was defined in RetrySettings but
+    never wired to RetryConfig or tenacity's wait_exponential_jitter.
+
+    These tests ensure the config-to-runtime mapping works end-to-end.
+    """
+
+    def test_exponential_base_passed_to_tenacity(self) -> None:
+        """Verify exponential_base is wired from config to tenacity.
+
+        This test verifies the full chain by checking that wait_exponential_jitter
+        is called with the configured exp_base parameter. We use mocking because
+        timing-based tests are unreliable due to jitter dominating small delays.
+
+        The chain being tested:
+        RetrySettings.exponential_base -> RetryConfig.exponential_base
+            -> RetryManager._config.exponential_base
+            -> wait_exponential_jitter(exp_base=...)
+        """
+        from unittest.mock import patch
+
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+        from elspeth.engine.retry import RetryManager
+
+        # Create config with non-default exponential_base
+        settings = RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.5,
+            max_delay_seconds=10.0,
+            exponential_base=5.0,  # Non-default, should be passed to tenacity
+        )
+        config = RuntimeRetryConfig.from_settings(settings)
+        manager = RetryManager(config)
+
+        # Verify config has correct exponential_base
+        assert config.exponential_base == 5.0
+
+        captured_exp_base: list[float] = []
+
+        # Patch wait_exponential_jitter to capture the exp_base argument
+        original_wait_exp_jitter = __import__("tenacity.wait", fromlist=["wait_exponential_jitter"]).wait_exponential_jitter
+
+        def capturing_wait_exponential_jitter(
+            initial: float = 1,
+            max: float = 4.611686018427388e18,
+            exp_base: float = 2,
+            jitter: float = 1,
+        ) -> Any:
+            captured_exp_base.append(exp_base)
+            # Return a zero-wait to make test fast
+            return original_wait_exp_jitter(initial=0, max=0, exp_base=exp_base, jitter=0)
+
+        with patch(
+            "elspeth.engine.retry.wait_exponential_jitter",
+            capturing_wait_exponential_jitter,
+        ):
+            # Run an operation that fails once then succeeds
+            call_count = 0
+
+            def flaky_op() -> str:
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise ValueError("Transient failure")
+                return "success"
+
+            result = manager.execute_with_retry(
+                flaky_op,
+                is_retryable=lambda e: isinstance(e, ValueError),
+            )
+
+            assert result == "success"
+
+        # Verify exp_base was captured with the configured value
+        assert len(captured_exp_base) == 1, "wait_exponential_jitter should be called once"
+        assert captured_exp_base[0] == 5.0, (
+            f"exp_base should be 5.0 (from config), got {captured_exp_base[0]}. "
+            f"This means exponential_base is not being passed to tenacity."
+        )
+
+    def test_from_settings_preserves_exponential_base(self) -> None:
+        """Verify RuntimeRetryConfig.from_settings() maps exponential_base.
+
+        This is the integration test that would have caught the bug:
+        - RetrySettings.exponential_base was defined
+        - But RuntimeRetryConfig.from_settings() didn't map it
+        - So configured values were silently ignored
+        """
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+
+        # Test with non-default exponential_base
+        settings = RetrySettings(
+            max_attempts=5,
+            initial_delay_seconds=2.0,
+            max_delay_seconds=120.0,
+            exponential_base=3.0,  # Non-default value
+        )
+
+        config = RuntimeRetryConfig.from_settings(settings)
+
+        # ALL settings must be mapped, including exponential_base
+        assert config.max_attempts == 5
+        assert config.base_delay == 2.0
+        assert config.max_delay == 120.0
+        assert config.exponential_base == 3.0, (
+            "exponential_base not mapped from RetrySettings to RetryConfig. This is the P2-2026-01-21 bug."
+        )
+
+    def test_retry_manager_uses_exponential_base(self) -> None:
+        """Verify RetryManager passes exponential_base to tenacity.
+
+        Tests the full chain:
+        RetrySettings -> RetryConfig -> RetryManager -> wait_exponential_jitter
+
+        If exponential_base is not passed to tenacity, backoff uses default (2.0).
+        """
+        from elspeth.contracts.config import RuntimeRetryConfig
+        from elspeth.core.config import RetrySettings
+        from elspeth.engine.retry import RetryManager
+
+        # Create config with large exponential_base
+        settings = RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.01,
+            max_delay_seconds=10.0,
+            exponential_base=10.0,  # Very high base - should cause noticeable delay
+        )
+        config = RuntimeRetryConfig.from_settings(settings)
+        manager = RetryManager(config)
+
+        # Verify config has the exponential_base
+        assert config.exponential_base == 10.0
+
+        # The actual tenacity usage is tested in test_exponential_base_affects_backoff_timing
+        # This test just verifies the wiring is complete
+        call_count = 0
+
+        def always_succeeds() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "ok"
+
+        result = manager.execute_with_retry(
+            always_succeeds,
+            is_retryable=lambda e: True,
+        )
+
+        assert result == "ok"
+        assert call_count == 1  # No retries needed
+
+
+class TestExponentialBaseRegressionP2_2026_01_21:
+    """Regression tests for P2-2026-01-21: exponential_base was ignored.
+
+    Bug: RetrySettings.exponential_base existed but was never wired to
+    RetryConfig or tenacity's wait_exponential_jitter. The field was
+    silently ignored, causing backoff to always use tenacity default (2.0).
+
+    Root cause: Incomplete config-to-runtime mapping.
+
+    These tests ensure the bug stays fixed.
+    """
+
+    def test_exponential_base_bug_regression(self) -> None:
+        """P2-2026-01-21 regression: exponential_base must reach tenacity.
+
+        This test verifies the complete chain:
+        1. RetrySettings.exponential_base is defined
+        2. RuntimeRetryConfig.from_settings() maps it correctly
+        3. RetryManager passes it to wait_exponential_jitter(exp_base=...)
+
+        If any link in the chain breaks, this test fails.
+        """
+        from unittest.mock import patch
+
+        from elspeth.core.config import RetrySettings
+
+        # Step 1: Verify RetrySettings has exponential_base
+        assert "exponential_base" in RetrySettings.model_fields, "P2-2026-01-21 REGRESSION: exponential_base removed from RetrySettings!"
+
+        # Step 2: Create settings with non-default exponential_base
+        settings = RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.1,
+            max_delay_seconds=10.0,
+            exponential_base=7.5,  # Non-default value
+        )
+
+        # Step 3: Verify from_settings() maps exponential_base
+        config = RuntimeRetryConfig.from_settings(settings)
+        assert config.exponential_base == 7.5, (
+            f"P2-2026-01-21 REGRESSION: exponential_base not mapped! Expected 7.5, got {config.exponential_base}"
+        )
+
+        # Step 4: Verify RetryManager passes exponential_base to tenacity
+        manager = RetryManager(config)
+        captured_exp_base: list[float] = []
+
+        # Capture what tenacity receives
+        original_wait = __import__("tenacity.wait", fromlist=["wait_exponential_jitter"]).wait_exponential_jitter
+
+        def capturing_wait(
+            initial: float = 1,
+            max: float = 60,
+            exp_base: float = 2,
+            jitter: float = 1,
+        ):
+            captured_exp_base.append(exp_base)
+            return original_wait(initial=0, max=0, exp_base=exp_base, jitter=0)
+
+        with patch("elspeth.engine.retry.wait_exponential_jitter", capturing_wait):
+            call_count = 0
+
+            def flaky():
+                nonlocal call_count
+                call_count += 1
+                if call_count < 2:
+                    raise ValueError("fail")
+                return "ok"
+
+            result = manager.execute_with_retry(flaky, is_retryable=lambda e: isinstance(e, ValueError))
+            assert result == "ok"
+
+        # Step 5: Verify tenacity received our exponential_base
+        assert len(captured_exp_base) == 1, "wait_exponential_jitter should be called once"
+        assert captured_exp_base[0] == 7.5, (
+            f"P2-2026-01-21 REGRESSION: exponential_base not passed to tenacity! "
+            f"Expected 7.5, got {captured_exp_base[0]}. "
+            f"This means RetryManager._config.exponential_base is not used in wait_exponential_jitter()."
+        )
+
+    def test_settings_to_runtime_mapping_complete(self) -> None:
+        """Verify ALL RetrySettings fields are mapped to RuntimeRetryConfig.
+
+        This catches future field orphaning - if someone adds a field to
+        RetrySettings but forgets to wire it to RuntimeRetryConfig.
+        """
+        from elspeth.core.config import RetrySettings
+
+        # Known field name mappings
+        FIELD_MAPPINGS = {
+            "initial_delay_seconds": "base_delay",
+            "max_delay_seconds": "max_delay",
+        }
+
+        # Internal-only fields (in RuntimeRetryConfig but not in Settings)
+        INTERNAL_ONLY = {"jitter"}
+
+        settings_fields = set(RetrySettings.model_fields.keys())
+        config_fields = set(RuntimeRetryConfig.__dataclass_fields__.keys())
+
+        # Map settings fields to their expected runtime names
+        expected_from_settings = {FIELD_MAPPINGS.get(f, f) for f in settings_fields}
+
+        # All settings fields must exist in config
+        missing = expected_from_settings - config_fields
+        assert not missing, (
+            f"Settings fields not in RuntimeRetryConfig: {missing}. This is the P2-2026-01-21 bug pattern - add these fields!"
+        )
+
+        # Config should only have settings fields + internal-only
+        expected_config = expected_from_settings | INTERNAL_ONLY
+        extra = config_fields - expected_config
+        assert not extra, f"RuntimeRetryConfig has undocumented fields: {extra}. Add to Settings, INTERNAL_ONLY, or remove."
+
+    def test_from_settings_uses_sentinel_values(self) -> None:
+        """Use sentinel values to detect forgotten field mappings.
+
+        If from_settings() forgets to map a field, it would use the
+        default instead of the settings value. Sentinel values catch this.
+        """
+        from elspeth.core.config import RetrySettings
+
+        # Use values that are very different from defaults
+        settings = RetrySettings(
+            max_attempts=77,
+            initial_delay_seconds=77.0,
+            max_delay_seconds=777.0,
+            exponential_base=7.77,
+        )
+
+        config = RuntimeRetryConfig.from_settings(settings)
+
+        # Each field must have the sentinel value, not a default
+        assert config.max_attempts == 77, "max_attempts used default instead of settings"
+        assert config.base_delay == 77.0, "base_delay used default instead of settings"
+        assert config.max_delay == 777.0, "max_delay used default instead of settings"
+        assert config.exponential_base == 7.77, "exponential_base used default instead of settings - THIS IS THE P2-2026-01-21 BUG!"

@@ -137,6 +137,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -160,6 +162,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -183,6 +187,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -206,6 +212,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -229,6 +237,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -252,6 +262,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 
@@ -276,6 +288,8 @@ class TestLLMClientExceptionTypes:
         client = AuditedLLMClient(
             recorder=mock_recorder,
             state_id="test-state",
+            run_id="run_abc",
+            telemetry_emit=lambda event: None,
             underlying_client=mock_openai_client,
         )
 

@@ -82,7 +82,7 @@ class RateLimiter:
     SQLite persistence for cross-process rate limiting.
 
     Example:
-        limiter = RateLimiter("openai", requests_per_second=10)
+        limiter = RateLimiter("openai", requests_per_minute=60)
 
         # Blocking acquire (waits if needed)
         limiter.acquire()
@@ -95,7 +95,7 @@ class RateLimiter:
             handle_rate_limit()
 
         # Context manager usage
-        with RateLimiter("api", requests_per_second=10) as limiter:
+        with RateLimiter("api", requests_per_minute=60) as limiter:
             limiter.acquire()
             call_api()
     """
@@ -103,9 +103,9 @@ class RateLimiter:
     def __init__(
         self,
         name: str,
-        requests_per_second: int,
-        requests_per_minute: int | None = None,
+        requests_per_minute: int,
         persistence_path: str | None = None,
+        window_ms: int | Duration | None = None,
     ) -> None:
         """Initialize rate limiter.
 
@@ -113,14 +113,14 @@ class RateLimiter:
             name: Identifier for this rate limiter (used as bucket key).
                 Must start with a letter and contain only alphanumeric
                 characters and underscores.
-            requests_per_second: Maximum requests allowed per second.
-                Must be greater than 0.
-            requests_per_minute: Optional maximum requests per minute.
-                Must be greater than 0 if provided.
+            requests_per_minute: Maximum requests allowed per window.
+                Defaults to per-minute behavior. Must be greater than 0.
             persistence_path: Optional SQLite database path for persistence
+            window_ms: Optional window override in milliseconds.
+                Defaults to Duration.MINUTE.
 
         Raises:
-            ValueError: If name is invalid or rate limits are not positive.
+            ValueError: If name is invalid or rate limit is not positive.
         """
         # Validate name - used in SQL table names, so must be safe
         if not _VALID_NAME_PATTERN.match(name):
@@ -131,69 +131,47 @@ class RateLimiter:
             )
             raise ValueError(msg)
 
-        # Validate rate limits
-        if requests_per_second <= 0:
-            msg = f"requests_per_second must be positive, got {requests_per_second}"
-            raise ValueError(msg)
-
-        if requests_per_minute is not None and requests_per_minute <= 0:
+        # Validate rate limit
+        if requests_per_minute <= 0:
             msg = f"requests_per_minute must be positive, got {requests_per_minute}"
             raise ValueError(msg)
 
         self.name = name
-        self._requests_per_second = requests_per_second
         self._requests_per_minute = requests_per_minute
         self._persistence_path = persistence_path
+        self._window_ms = int(Duration.MINUTE if window_ms is None else window_ms)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
-        # Due to pyrate-limiter's internal optimization that can skip checking
-        # longer-interval rates when under shorter-interval limits, we use
-        # separate limiters for per-second and per-minute rates.
-        self._limiters: list[Limiter] = []
-        self._buckets: list[InMemoryBucket | SQLiteBucket] = []
+        # Single rate - sliding window
+        if self._window_ms <= 0:
+            msg = f"window_ms must be positive, got {self._window_ms}"
+            raise ValueError(msg)
 
-        # Per-second rate limiter
-        second_rates = [Rate(requests_per_second, Duration.SECOND)]
+        rates: list[Rate] = [Rate(requests_per_minute, self._window_ms)]
+
+        # Create bucket (persistent or in-memory)
         if persistence_path:
             self._conn = sqlite3.connect(persistence_path, check_same_thread=False)
-            table_name = f"ratelimit_{name}_second"
+            table_name = f"ratelimit_{name}"
             self._conn.execute(SQLiteQueries.CREATE_BUCKET_TABLE.format(table=table_name))
             self._conn.commit()
-            second_bucket: InMemoryBucket | SQLiteBucket = SQLiteBucket(
-                rates=second_rates,
+            self._bucket: InMemoryBucket | SQLiteBucket = SQLiteBucket(
+                rates=rates,
                 conn=self._conn,
                 table=table_name,
             )
         else:
-            second_bucket = InMemoryBucket(rates=second_rates)
+            self._bucket = InMemoryBucket(rates=rates)
 
-        self._buckets.append(second_bucket)
-        self._limiters.append(Limiter(second_bucket, max_delay=Duration.MINUTE, raise_when_fail=True))
-
-        # Per-minute rate limiter (if specified)
-        if requests_per_minute is not None:
-            minute_rates = [Rate(requests_per_minute, Duration.MINUTE)]
-            if persistence_path and self._conn is not None:
-                table_name = f"ratelimit_{name}_minute"
-                self._conn.execute(SQLiteQueries.CREATE_BUCKET_TABLE.format(table=table_name))
-                self._conn.commit()
-                minute_bucket: InMemoryBucket | SQLiteBucket = SQLiteBucket(
-                    rates=minute_rates,
-                    conn=self._conn,
-                    table=table_name,
-                )
-            else:
-                minute_bucket = InMemoryBucket(rates=minute_rates)
-
-            self._buckets.append(minute_bucket)
-            self._limiters.append(Limiter(minute_bucket, max_delay=Duration.MINUTE, raise_when_fail=True))
+        # Single limiter with per-minute rate
+        self._limiter = Limiter(self._bucket, max_delay=self._window_ms, raise_when_fail=True)
 
     def acquire(self, weight: int = 1, timeout: float | None = None) -> None:
         """Acquire rate limit tokens, blocking if necessary.
 
-        Thread-safe and atomic across all rate limiters (per-second and per-minute).
-        Blocks by polling try_acquire() until successful or timeout expires.
+        Thread-safe. Blocks by polling try_acquire() until successful or
+        timeout expires.
 
         Args:
             weight: Number of tokens to acquire (default 1)
@@ -205,7 +183,6 @@ class RateLimiter:
         deadline = None if timeout is None else (time.monotonic() + timeout)
 
         while True:
-            # try_acquire() is already thread-safe and atomic across all limiters
             if self.try_acquire(weight):
                 return
 
@@ -220,25 +197,6 @@ class RateLimiter:
                 # No timeout - sleep 10ms and retry
                 time.sleep(0.01)
 
-    def _would_all_buckets_accept(self, weight: int) -> bool:
-        """Check if all buckets would accept without consuming tokens.
-
-        This performs a peek-style check by examining bucket count and rate limits
-        without actually putting items into the buckets.
-
-        Args:
-            weight: Number of tokens to check
-
-        Returns:
-            True if all buckets would accept, False otherwise
-        """
-        for bucket in self._buckets:
-            current_count = bucket.count()
-            for rate in bucket.rates:
-                if current_count + weight > rate.limit:
-                    return False
-        return True
-
     def try_acquire(self, weight: int = 1) -> bool:
         """Try to acquire tokens without blocking.
 
@@ -249,58 +207,45 @@ class RateLimiter:
             True if acquired, False if rate limited
         """
         with self._lock:
-            # First check if ALL buckets would accept (peek without consuming)
-            if not self._would_all_buckets_accept(weight):
+            # Temporarily disable max_delay to get immediate response
+            original_max_delay = self._limiter.max_delay
+            self._limiter.max_delay = None
+            try:
+                self._limiter.try_acquire(self.name, weight=weight)
+                return True
+            except BucketFullException:
                 return False
-
-            # All buckets would accept, now actually acquire from all limiters
-            # Since we checked capacity, these should all succeed
-            for limiter in self._limiters:
-                original_max_delay = limiter.max_delay
-                limiter.max_delay = None
-                try:
-                    limiter.try_acquire(self.name, weight=weight)
-                except BucketFullException:
-                    # This should not happen since we pre-checked capacity
-                    # but if it does due to a race, restore and return failure
-                    limiter.max_delay = original_max_delay
-                    return False
-                finally:
-                    limiter.max_delay = original_max_delay
-
-            return True
+            finally:
+                self._limiter.max_delay = original_max_delay
 
     def close(self) -> None:
         """Close the rate limiter and release resources."""
-        # Get references to the leaker threads before disposing.
-        # Each limiter's bucket_factory has a _leaker attribute.
-        # We capture (thread, ident) pairs because ident may become None after thread exits.
-        leakers_with_idents: list[tuple[threading.Thread, int]] = []
-        for limiter in self._limiters:
-            leaker = limiter.bucket_factory._leaker
-            if leaker is not None and leaker.is_alive() and leaker.ident is not None:
-                leaker_ident = leaker.ident  # Capture before it can become None
-                leakers_with_idents.append((leaker, leaker_ident))
-                # Register thread ident for exception suppression.
-                # pyrate-limiter has a race condition that causes AssertionError
-                # during cleanup - this is benign but noisy. We register by
-                # ident (not name) to avoid accidentally suppressing unrelated
-                # threads that share a name.
-                with _suppressed_lock:
-                    _suppressed_thread_idents.add(leaker_ident)
+        # Get reference to the leaker thread before disposing.
+        # The limiter's bucket_factory has a _leaker attribute.
+        # We capture (thread, ident) pair because ident may become None after thread exits.
+        leaker = self._limiter.bucket_factory._leaker
+        leaker_ident: int | None = None
+        if leaker is not None and leaker.is_alive() and leaker.ident is not None:
+            leaker_ident = leaker.ident  # Capture before it can become None
+            # Register thread ident for exception suppression.
+            # pyrate-limiter has a race condition that causes AssertionError
+            # during cleanup - this is benign but noisy. We register by
+            # ident (not name) to avoid accidentally suppressing unrelated
+            # threads that share a name.
+            with _suppressed_lock:
+                _suppressed_thread_idents.add(leaker_ident)
 
-        # Dispose all buckets from their limiters
-        # This deregisters them from the leaker thread
-        for limiter, bucket in zip(self._limiters, self._buckets, strict=True):
-            limiter.dispose(bucket)
+        # Dispose bucket from limiter
+        # This deregisters it from the leaker thread
+        self._limiter.dispose(self._bucket)
 
-        # Wait for leaker threads to exit
+        # Wait for leaker thread to exit
         # The pyrate-limiter Leaker thread has a race condition where it can fail
         # with an assertion error if we close too quickly. We suppress that
         # exception via the custom excepthook above.
-        for leaker_thread, leaker_ident in leakers_with_idents:
+        if leaker is not None and leaker_ident is not None:
             # Wait up to 50ms for thread to exit
-            leaker_thread.join(timeout=0.05)
+            leaker.join(timeout=0.05)
             # Clean up suppression registration after join completes.
             # If the thread raised AssertionError, the hook already removed it (discard is safe).
             # If the thread exited cleanly, we remove it here to prevent stale idents.

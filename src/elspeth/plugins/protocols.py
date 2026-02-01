@@ -108,6 +108,20 @@ class SourceProtocol(Protocol):
         """Called after load() completes. Override for cleanup before close()."""
         ...
 
+    # === Audit Trail Metadata ===
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping computed during load().
+
+        Sources that perform field normalization should override this to return
+        the mapping from original header names to final field names.
+
+        Returns:
+            Tuple of (resolution_mapping, normalization_version) or None if no
+            normalization occurred.
+        """
+        ...
+
 
 @runtime_checkable
 class TransformProtocol(Protocol):
@@ -144,7 +158,10 @@ class TransformProtocol(Protocol):
 
             def process(self, row: dict, ctx: PluginContext) -> TransformResult:
                 enriched = {**row, "timestamp": datetime.now().isoformat()}
-                return TransformResult.success(enriched)
+                return TransformResult.success(
+                    enriched,
+                    success_reason={"action": "enriched", "fields_added": ["timestamp"]},
+                )
     """
 
     name: str

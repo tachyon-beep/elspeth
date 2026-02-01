@@ -372,6 +372,88 @@ class TestMultiQueryConfig:
         assert "cs2_diagnosis" in prefixes
         assert "cs2_treatment" in prefixes
 
+    def test_duplicate_case_study_criterion_pairs_rejected(self) -> None:
+        """Duplicate (case_study.name, criterion.name) pairs are rejected.
+
+        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
+        """
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            MultiQueryConfig.from_dict(
+                {
+                    "deployment_name": "gpt-4o",
+                    "endpoint": "https://test.openai.azure.com",
+                    "api_key": "key",
+                    "template": "{{ row.input_1 }}",
+                    "case_studies": [
+                        {"name": "cs1", "input_fields": ["a"]},
+                        {"name": "cs1", "input_fields": ["b"]},  # Duplicate name!
+                    ],
+                    "criteria": [{"name": "diagnosis"}],
+                    "response_format": "standard",
+                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],
+                }
+            )
+        assert "duplicate" in str(exc_info.value).lower()
+
+    def test_duplicate_criterion_names_rejected(self) -> None:
+        """Duplicate criterion names are rejected.
+
+        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
+        """
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            MultiQueryConfig.from_dict(
+                {
+                    "deployment_name": "gpt-4o",
+                    "endpoint": "https://test.openai.azure.com",
+                    "api_key": "key",
+                    "template": "{{ row.input_1 }}",
+                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                    "criteria": [
+                        {"name": "diagnosis"},
+                        {"name": "diagnosis"},  # Duplicate name!
+                    ],
+                    "response_format": "standard",
+                    "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],
+                }
+            )
+        assert "duplicate" in str(exc_info.value).lower()
+
+    def test_output_suffix_collision_with_reserved_suffix_rejected(self) -> None:
+        """Output mapping suffix that collides with reserved suffixes is rejected.
+
+        Reserved suffixes include _usage, _model, _template_hash, etc.
+        Regression test for P1-2026-01-31-multi-query-output-key-collisions.
+        """
+        from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            MultiQueryConfig.from_dict(
+                {
+                    "deployment_name": "gpt-4o",
+                    "endpoint": "https://test.openai.azure.com",
+                    "api_key": "key",
+                    "template": "{{ row.input_1 }}",
+                    "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
+                    "criteria": [{"name": "diagnosis"}],
+                    "response_format": "standard",
+                    "output_mapping": {
+                        "score": {"suffix": "score", "type": "integer"},
+                        "usage": {"suffix": "usage", "type": "string"},  # Collides with _usage!
+                    },
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": [],
+                }
+            )
+        assert "reserved" in str(exc_info.value).lower() or "usage" in str(exc_info.value).lower()
+
 
 class TestOutputFieldConfig:
     """Tests for OutputFieldConfig and JSON schema generation."""

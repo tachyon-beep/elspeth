@@ -91,6 +91,13 @@
 
 ---
 
+## VERIFICATION: 2026-02-01
+
+**Status:** STILL VALID
+
+- Aggregation flush still uses `transform_span()` instead of `aggregation_span()`. (`src/elspeth/engine/executors.py:1120-1122`)
+- `aggregation_span()` still exists with `batch_id` support, but remains unused. (`src/elspeth/engine/spans.py:193-218`)
+
 ## VERIFICATION: 2026-01-25
 
 **Status:** STILL VALID

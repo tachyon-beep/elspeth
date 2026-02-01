@@ -34,8 +34,9 @@ Exception Propagation:
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from elspeth.contracts import ExceptionResult
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
@@ -43,20 +44,6 @@ if TYPE_CHECKING:
 
 # Type alias for waiter keys: (token_id, state_id)
 WaiterKey = tuple[str, str]
-
-
-@dataclass
-class ExceptionResult:
-    """Wrapper for exceptions that should propagate through async pattern.
-
-    When a worker thread encounters an uncaught exception (plugin bug),
-    it wraps the exception in this container. The waiter then re-raises
-    the original exception in the orchestrator thread, ensuring plugin
-    bugs crash the pipeline as intended.
-    """
-
-    exception: BaseException
-    traceback: str
 
 
 class RowWaiter:

@@ -91,6 +91,7 @@ TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
     "azure_multi_query_llm": None,
     "openrouter_llm": None,
     "openrouter_multi_query_llm": None,
+    "openrouter_batch_llm": None,
 }
 
 

@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
@@ -290,8 +288,6 @@ ELSPETH uses `pluggy` for clean architecture (hooks, extensibility), NOT to acce
 - Plugin bugs are system bugs - they get fixed in the codebase
 - Users configure which plugins to use, they don't write their own
 
-If a future version supports user-authored plugins, those would be sandboxed and treated as untrusted - but that's not the current architecture.
-
 ## Core Architecture
 
 ### The SDA Model
@@ -314,6 +310,81 @@ SENSE (Sources) → DECIDE (Transforms/Gates) → ACT (Sinks)
 | **Canonical** | Two-phase deterministic JSON canonicalization for hashing |
 | **Payload Store** | Separates large blobs from audit tables with retention policies |
 | **Configuration** | Dynaconf + Pydantic with multi-source precedence |
+| **Config Contracts** | Settings→Runtime protocol enforcement (see below) |
+
+### Settings→Runtime Configuration Pattern
+
+Configuration uses a two-layer pattern to prevent field orphaning:
+
+```text
+USER YAML → Settings (Pydantic) → Runtime*Config (dataclass) → Engine Components
+             validation            conversion                    runtime behavior
+```
+
+**Why two layers?**
+
+1. **Settings classes** (e.g., `RetrySettings`): Pydantic models for YAML validation
+2. **Runtime*Config classes** (e.g., `RuntimeRetryConfig`): Frozen dataclasses for engine use
+
+The P2-2026-01-21 bug showed the problem: `exponential_base` was added to `RetrySettings` but never mapped to the engine. Users configured it, Pydantic validated it, but it was silently ignored at runtime.
+
+### The solution: Protocol-based verification
+
+```python
+# contracts/config/protocols.py
+@runtime_checkable
+class RuntimeRetryProtocol(Protocol):
+    """What RetryManager EXPECTS from retry config."""
+    @property
+    def max_attempts(self) -> int: ...
+    @property
+    def exponential_base(self) -> float: ...  # mypy catches if missing!
+
+# contracts/config/runtime.py
+@dataclass(frozen=True, slots=True)
+class RuntimeRetryConfig:
+    """Implements RuntimeRetryProtocol."""
+    max_attempts: int
+    exponential_base: float
+    # ... other fields
+
+    @classmethod
+    def from_settings(cls, settings: "RetrySettings") -> "RuntimeRetryConfig":
+        return cls(
+            max_attempts=settings.max_attempts,
+            exponential_base=settings.exponential_base,  # Explicit mapping!
+        )
+
+# engine/retry.py
+class RetryManager:
+    def __init__(self, config: RuntimeRetryProtocol):  # Accepts protocol
+        self._config = config
+```
+
+**Enforcement layers:**
+
+1. **mypy (structural typing)**: Verifies `RuntimeRetryConfig` satisfies `RuntimeRetryProtocol`
+2. **AST checker**: Verifies `from_settings()` uses all Settings fields (run: `.venv/bin/python -m scripts.check_contracts`)
+3. **Alignment tests**: Verifies field mappings are correct and complete
+
+**Key files:**
+
+| File | Purpose |
+| ---- | ------- |
+| `contracts/config/protocols.py` | Protocol definitions (what engine expects) |
+| `contracts/config/runtime.py` | Runtime*Config dataclasses with `from_settings()` |
+| `contracts/config/alignment.py` | Field mapping documentation (`FIELD_MAPPINGS`) |
+| `contracts/config/defaults.py` | Default values (`POLICY_DEFAULTS`, `INTERNAL_DEFAULTS`) |
+| `tests/core/test_config_alignment.py` | Comprehensive alignment verification |
+
+**Adding a new Settings field (checklist):**
+
+1. Add to Settings class in `core/config.py` (Pydantic model)
+2. Add to Runtime*Config in `contracts/config/runtime.py` (dataclass field)
+3. Map in `from_settings()` method (explicit assignment)
+4. If renamed: document in `FIELD_MAPPINGS` in `alignment.py`
+5. If internal-only: document in `INTERNAL_DEFAULTS` in `defaults.py`
+6. Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`
 
 ### Composite Primary Key Pattern: nodes Table
 
@@ -392,10 +463,12 @@ The DAG validates that upstream `guaranteed_fields` satisfy downstream `required
 #### Aggregation Timeout Behavior
 
 Aggregation triggers fire in two ways:
+
 - **Count trigger**: Fires immediately when row count threshold is reached
 - **Timeout trigger**: Checked **before** each row is processed
 
 **Known Limitation (True Idle):** Timeout triggers fire when the next row arrives, not during completely idle periods. If no rows arrive, buffered data won't flush until either:
+
 1. A new row arrives (triggering the timeout check)
 2. The source completes (triggering end-of-source flush)
 
@@ -423,13 +496,6 @@ uv pip freeze                   # Show installed packages
 .venv/bin/python -m ruff check src/
 ```
 
-**Why uv:**
-
-- 10-100x faster than pip
-- Deterministic resolution
-- Better conflict detection
-- Drop-in pip replacement
-
 ## Development Commands
 
 ```bash
@@ -455,6 +521,28 @@ elspeth purge --run <run_id>                          # Purge payload data
 # TUI-based commands (RC-1: limited functionality)
 elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 ```
+
+## Landscape MCP Analysis Server
+
+**For debugging and investigation**, there's an MCP server that provides read-only access to the audit database. This is especially useful for Claude Code sessions investigating pipeline failures.
+
+```bash
+# Run the MCP server (auto-discovers databases in current directory)
+elspeth-mcp
+
+# Or specify a database explicitly
+elspeth-mcp --database sqlite:///./examples/my_pipeline/runs/audit.db
+```
+
+The server automatically finds `.db` files, prioritizing `audit.db` in `runs/` directories (pipeline outputs) and sorting by most recently modified.
+
+**Key tools for emergencies:**
+
+- `diagnose()` - First tool when something is broken. Finds failed runs, stuck runs, high error rates
+- `get_failure_context(run_id)` - Deep dive on a specific failure
+- `explain_token(run_id, token_id)` - Complete lineage for a specific row
+
+**Full documentation:** See `docs/guides/landscape-mcp-analysis.md` for the complete tool reference, common workflows, and database schema guide.
 
 ## Technology Stack
 
@@ -489,6 +577,61 @@ elspeth explain --run <run_id> --row <row_id>         # Lineage explorer (TUI)
 | LLM | LiteLLM | 100+ LLM providers unified |
 | ML | scikit-learn, ONNX | Traditional ML inference |
 | Azure | azure-storage-blob | Azure cloud integration |
+| Telemetry | OpenTelemetry, ddtrace | Observability platform integration |
+
+## Telemetry (Operational Visibility)
+
+Telemetry provides **real-time operational visibility** alongside the Landscape audit trail.
+
+**Key distinction:**
+
+- **Landscape**: Legal record, complete lineage, persisted forever, source of truth
+- **Telemetry**: Operational visibility, real-time streaming, ephemeral, for dashboards/alerting
+
+**No Silent Failures (Critical Principle):**
+
+Any time an object is polled or has an opportunity to emit telemetry, it MUST either:
+
+1. **Send what it has** - emit the telemetry event normally, OR
+2. **Explicitly acknowledge "I have nothing"** - log that telemetry was requested but unavailable
+
+If an exception occurs during emission, the acknowledgment must include the failure reason:
+
+- "Telemetry emission failed: [exception details]"
+- Never silently swallow events or exceptions
+
+This applies to:
+
+- `telemetry_emit` callbacks in audited clients (HTTP, LLM)
+- `TelemetryManager.emit()` calls
+- Exporter failures
+- Disabled telemetry states (log once at startup that telemetry is disabled)
+
+**Available exporters:** Console (debugging), OTLP (Jaeger/Tempo/Honeycomb), Azure Monitor, Datadog
+
+**Basic configuration:**
+
+```yaml
+telemetry:
+  enabled: true
+  granularity: rows  # lifecycle | rows | full
+  backpressure_mode: block  # block (complete) | drop (fast)
+  exporters:
+    - name: console
+      format: pretty
+    - name: otlp
+      endpoint: ${OTEL_ENDPOINT}
+```
+
+**Granularity levels:**
+
+- `lifecycle`: Run start/complete, phase transitions (~10-20 events/run)
+- `rows`: Above + row creation, transform completion, gate routing (N x M events)
+- `full`: Above + external call details (LLM, HTTP, SQL)
+
+**Correlation workflow:** Telemetry events include `run_id` and `token_id`. When an alert fires in Datadog/Grafana, use the `run_id` to investigate with `elspeth explain` or the Landscape MCP server.
+
+**Full documentation:** See `docs/guides/telemetry.md` for exporter configuration, troubleshooting, and operational guidance.
 
 ## Critical Implementation Patterns
 
@@ -527,6 +670,29 @@ Every row reaches exactly one terminal state - no silent drops:
 - `(run_id, row_id, transform_seq, attempt)` is unique
 - Each attempt recorded separately
 - Backoff metadata captured
+
+### Settings→Runtime Field Mapping
+
+**P2-2026-01-21 lesson:** Settings fields can be orphaned (validated but never used at runtime).
+
+```python
+# WRONG - Field exists in Settings but not wired to engine
+class RetrySettings(BaseModel):
+    exponential_base: float = 2.0  # Validated but ignored!
+
+# CORRECT - Explicit from_settings() mapping
+@dataclass
+class RuntimeRetryConfig:
+    exponential_base: float
+
+    @classmethod
+    def from_settings(cls, s: RetrySettings) -> "RuntimeRetryConfig":
+        return cls(exponential_base=s.exponential_base)  # Explicit!
+```
+
+**Verification:** Run `.venv/bin/python -m scripts.check_contracts` and `pytest tests/core/test_config_alignment.py`.
+
+See "Settings→Runtime Configuration Pattern" in Core Architecture for full documentation.
 
 ### Secret Handling
 
@@ -684,16 +850,6 @@ The following are **strictly prohibited** under all circumstances:
 - Don't add compatibility layers - change all call sites
 - Don't create abstractions to hide breaking changes - make the breaking change
 
-### Rationale
-
-Legacy code and backwards compatibility create:
-
-- **Complexity:** Multiple code paths doing the same thing
-- **Confusion:** Unclear which version is "correct"
-- **Technical Debt:** Old code that never gets removed
-- **Testing Burden:** Must test all combinations
-- **Maintenance Cost:** Changes must update both paths
-
 **Default stance:** If old code needs to be removed, delete it completely. If call sites need updating, update them all in the same commit.
 
 ### Enforcement
@@ -782,5 +938,7 @@ Ask yourself:
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
 
 ## FINAL COMMENT
+
+If you are thinking to yourself 'we can't break the schema because it will disrupt users' or 'we need to support old data formats', STOP. This codebase has a NO LEGACY CODE POLICY. We do not support backwards compatibility, legacy shims, or compatibility layers. When something is removed or changed, DELETE THE OLD CODE COMPLETELY. Fix all call sites in the same commit. Do not create adapters or compatibility modes. If you need to change a schema, change it fully and update all code that uses it. WE HAVE NO USERS. WE WILL HAVE USERS IN THE FUTURE, DEFERRING BREAKING CHANGES UNTIL WE HAVE USERS IS THE OPPOSITE OF WHAT WE WANT.
 
 If you are proposing or implementing a fix and it involves 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW. Saying 'I didn't cause this' is not an excuse for disregarding lint, failing tests or CICD. They all must be resolved to merge code, no exceptions. Refusing to do the work now is false economy.

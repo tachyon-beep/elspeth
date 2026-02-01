@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import (
     Artifact,
     BatchPendingError,
+    ConfigGateReason,
     ExecutionError,
     NodeStateOpen,
     RoutingAction,
@@ -31,10 +32,12 @@ from elspeth.contracts.enums import (
     RoutingMode,
     TriggerType,
 )
+from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
+from elspeth.core.operations import track_operation
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
@@ -128,15 +131,18 @@ class TransformExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
+        max_workers: int | None = None,
     ) -> None:
         """Initialize executor.
 
         Args:
             recorder: Landscape recorder for audit trail
             span_factory: Span factory for tracing
+            max_workers: Maximum concurrent workers (None = no limit)
         """
         self._recorder = recorder
         self._spans = span_factory
+        self._max_workers = max_workers
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for transform.
@@ -159,7 +165,10 @@ class TransformExecutor:
 
             # Connect output (one-time setup)
             # Use _pool_size stored by LLM transforms, default to 30
+            # Cap to max_workers if configured (enforces global concurrency limit)
             max_pending = getattr(transform, "_pool_size", 30)
+            if self._max_workers is not None:
+                max_pending = min(max_pending, self._max_workers)
             transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
             transform._batch_initialized = True  # type: ignore[attr-defined]
 
@@ -209,7 +218,8 @@ class TransformExecutor:
             Exception: Re-raised from transform.process() after recording failure
             RuntimeError: Transform returned error but has no on_error configured
         """
-        assert transform.node_id is not None, "node_id must be set by orchestrator"
+        if transform.node_id is None:
+            raise OrchestrationInvariantError(f"Transform '{transform.name}' executed without node_id - orchestrator bug")
         input_hash = stable_hash(token.row_data)
 
         # Begin node state
@@ -301,18 +311,16 @@ class TransformExecutor:
                 # 3. Retry attempt gets new sequence number and can proceed
                 # 4. Original worker may still complete, but result is discarded
                 if isinstance(e, TimeoutError) and has_accept:
-                    evict_fn = getattr(transform, "evict_submission", None)
-                    if evict_fn is not None:
-                        try:
-                            evict_fn(token.token_id, state.state_id)
-                        except Exception as evict_err:
-                            # Eviction failure is logged but doesn't change the
-                            # original exception - timeout is still the root cause
-                            logger.warning(
-                                "Failed to evict timed-out submission for token %s: %s",
-                                token.token_id,
-                                evict_err,
-                            )
+                    # has_accept guarantees transform has evict_submission (batch protocol)
+                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]
+                    if not callable(evict_fn):
+                        raise TypeError(
+                            f"Transform '{transform.name}' evict_submission must be callable, got {type(evict_fn).__name__}"
+                        ) from None
+                    try:
+                        evict_fn(token.token_id, state.state_id)
+                    except Exception as evict_err:
+                        raise RuntimeError(f"Failed to evict timed-out submission for token {token.token_id}") from evict_err
 
                 raise
 
@@ -332,7 +340,8 @@ class TransformExecutor:
         # Complete node state
         if result.status == "success":
             # TransformResult.success() or success_multi() always sets output data
-            assert result.has_output_data, "success status requires row or rows data"
+            if not result.has_output_data:
+                raise RuntimeError(f"Transform '{transform.name}' returned success but has no output data")
 
             # For single-row: output_data is the row
             # For multi-row: output_data is the rows list (engine handles expansion)
@@ -340,14 +349,15 @@ class TransformExecutor:
             if result.row is not None:
                 output_data = result.row
             else:
-                assert result.rows is not None  # guaranteed by has_output_data
-                output_data = result.rows
+                # result.rows is guaranteed non-None by has_output_data check above
+                output_data = result.rows  # type: ignore[assignment]
 
             self._recorder.complete_node_state(
                 state_id=state.state_id,
                 status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
+                success_reason=result.success_reason,
             )
             # Update token with new row data
             # For multi-row results, keep original row_data (engine will expand tokens later)
@@ -383,11 +393,18 @@ class TransformExecutor:
             # Record error event (always, even for discard - audit completeness)
             # Use node_id (unique DAG identifier), not name (plugin type)
             # Bug fix: P2-2026-01-19-transform-errors-ambiguous-transform-id
+            #
+            # result.reason MUST be set for error results - TransformResult.error() requires it.
+            # If None, that's a bug in the transform (constructed error result without reason).
+            assert result.reason is not None, (
+                f"Transform '{transform.name}' returned error but reason is None. "
+                'Use TransformResult.error({{"reason": "...", ...}}) to create error results.'
+            )
             ctx.record_transform_error(
                 token_id=token.token_id,
                 transform_id=transform.node_id,
                 row=token.row_data,
-                error_details=result.reason or {},
+                error_details=result.reason,
                 destination=on_error,
             )
 
@@ -464,7 +481,7 @@ class GateExecutor:
         Args:
             gate: Gate plugin to execute
             token: Current token with row data
-            ctx: Plugin context
+            ctx: Plugin context (includes run_id for atomic fork outcome recording)
             step_in_pipeline: Current position in DAG (Orchestrator is authority)
             token_manager: TokenManager for fork operations (required for fork_to_paths)
 
@@ -475,7 +492,8 @@ class GateExecutor:
             MissingEdgeError: If routing refers to an unregistered edge
             Exception: Re-raised from gate.evaluate() after recording failure
         """
-        assert gate.node_id is not None, "node_id must be set by orchestrator"
+        if gate.node_id is None:
+            raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
         input_hash = stable_hash(token.row_data)
 
         # Begin node state
@@ -530,7 +548,7 @@ class GateExecutor:
             self._record_routing(
                 state_id=state.state_id,
                 node_id=gate.node_id,
-                action=RoutingAction.route("continue", mode=action.mode, reason=dict(action.reason)),
+                action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
             )
 
         elif action.kind == RoutingKind.ROUTE:
@@ -559,7 +577,7 @@ class GateExecutor:
                 self._record_routing(
                     state_id=state.state_id,
                     node_id=gate.node_id,
-                    action=RoutingAction.route("continue", mode=action.mode, reason=dict(action.reason)),
+                    action=RoutingAction.route("continue", mode=action.mode, reason=action.reason),
                 )
             else:
                 # Route label resolves to a sink name
@@ -594,11 +612,12 @@ class GateExecutor:
                 node_id=gate.node_id,
                 action=action,
             )
-            # Create child tokens
-            child_tokens = token_manager.fork_token(
+            # Create child tokens (ATOMIC: also records parent FORKED outcome)
+            child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
                 branches=list(action.destinations),
                 step_in_pipeline=step_in_pipeline,
+                run_id=ctx.run_id,
                 row_data=result.row,
             )
 
@@ -727,7 +746,7 @@ class GateExecutor:
         # Build routing action and process based on destination
         child_tokens: list[TokenInfo] = []
         sink_name: str | None = None
-        reason = {"condition": gate_config.condition, "result": route_label}
+        reason: ConfigGateReason = {"condition": gate_config.condition, "result": route_label}
 
         if destination == "continue":
             # Continue to next node - record routing event (AUD-002)
@@ -741,7 +760,9 @@ class GateExecutor:
 
         elif destination == "fork":
             # Fork to multiple paths - fork_to guaranteed by GateSettings.validate_fork_consistency()
-            assert gate_config.fork_to is not None  # Pydantic validation guarantees this
+            # (Pydantic validation ensures fork_to is not None when routes include "fork")
+            # Local binding for type narrowing (mypy can't see Pydantic validation)
+            fork_branches: list[str] = gate_config.fork_to  # type: ignore[assignment]
 
             if token_manager is None:
                 error = {
@@ -759,7 +780,7 @@ class GateExecutor:
                     "Cannot create child tokens - audit integrity would be compromised."
                 )
 
-            action = RoutingAction.fork_to_paths(gate_config.fork_to, reason=reason)
+            action = RoutingAction.fork_to_paths(fork_branches, reason=reason)
 
             # Record routing events for all paths
             self._record_routing(
@@ -768,11 +789,12 @@ class GateExecutor:
                 action=action,
             )
 
-            # Create child tokens
-            child_tokens = token_manager.fork_token(
+            # Create child tokens (ATOMIC: also records parent FORKED outcome)
+            child_tokens, _fork_group_id = token_manager.fork_token(
                 parent_token=token,
-                branches=gate_config.fork_to,
+                branches=fork_branches,
                 step_in_pipeline=step_in_pipeline,
+                run_id=ctx.run_id,
                 row_data=token.row_data,
             )
 
@@ -843,7 +865,7 @@ class GateExecutor:
                 state_id=state_id,
                 edge_id=edge_id,
                 mode=action.mode,
-                reason=dict(action.reason) if action.reason else None,
+                reason=action.reason,
             )
         else:
             # Multiple destinations (fork)
@@ -857,7 +879,7 @@ class GateExecutor:
             self._recorder.record_routing_events(
                 state_id=state_id,
                 routes=routes,
-                reason=dict(action.reason) if action.reason else None,
+                reason=action.reason,
             )
 
 
@@ -1182,6 +1204,7 @@ class AggregationExecutor:
                 status=NodeStateStatus.COMPLETED,
                 output_data=output_data,
                 duration_ms=duration_ms,
+                success_reason=result.success_reason,
             )
 
             # Transition batch to completed
@@ -1292,6 +1315,14 @@ class AggregationExecutor:
             evaluator = self._trigger_evaluators.get(node_id)
             elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
 
+            if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
+                raise RuntimeError(
+                    f"AggregationExecutor checkpoint missing batch_id for node {node_id}. "
+                    "Buffered tokens exist without an active batch_id - internal state corruption."
+                )
+
+            batch_id = self._batch_ids[node_id]
+
             # Store full TokenInfo as dicts (not just IDs)
             state[node_id] = {
                 "tokens": [
@@ -1303,7 +1334,7 @@ class AggregationExecutor:
                     }
                     for t in tokens
                 ],
-                "batch_id": self._batch_ids.get(node_id),
+                "batch_id": batch_id,
                 "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
             }
 
@@ -1342,7 +1373,7 @@ class AggregationExecutor:
                     "_version": "1.0",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
-                        "batch_id": str | None
+                        "batch_id": str
                     }
                 }
 
@@ -1408,15 +1439,24 @@ class AggregationExecutor:
             self._buffer_tokens[node_id] = reconstructed_tokens
             self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
 
-            # Restore batch tracking (batch_id is optional)
-            batch_id = node_state.get("batch_id")
-            if batch_id is not None:
-                self._batch_ids[node_id] = batch_id
-                self._member_counts[batch_id] = len(reconstructed_tokens)
+            if "batch_id" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. "
+                    f"Found keys: {list(node_state.keys())}. "
+                    "Checkpoint entries with tokens must include batch_id."
+                )
+            batch_id = node_state["batch_id"]
+            if batch_id is None:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
+                    "Checkpoint entries with tokens must include a batch_id."
+                )
+            self._batch_ids[node_id] = batch_id
+            self._member_counts[batch_id] = len(reconstructed_tokens)
 
             # Restore trigger evaluator count and timeout age (Bug #6 fix)
-            evaluator = self._trigger_evaluators.get(node_id)
-            if evaluator is not None:
+            if node_id in self._trigger_evaluators:
+                evaluator = self._trigger_evaluators[node_id]
                 # Record each restored row as "accepted" to advance the count
                 for _ in reconstructed_tokens:
                     evaluator.record_accept()
@@ -1425,7 +1465,9 @@ class AggregationExecutor:
                 # The checkpoint stores how much time had elapsed before the crash.
                 # We adjust _first_accept_time backwards so batch_age_seconds
                 # reflects the true elapsed time (not reset to zero).
-                elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
+                # NOTE: elapsed_age_seconds is REQUIRED in checkpoint format v1.0
+                # No migration needed - all v1.0 checkpoints have this field.
+                elapsed_seconds = node_state["elapsed_age_seconds"]
                 if elapsed_seconds > 0.0:
                     # Adjust timer: make it think first accept was N seconds ago
                     evaluator._first_accept_time = self._clock.monotonic() - elapsed_seconds
@@ -1635,7 +1677,8 @@ class SinkExecutor:
 
         # Create node_state for EACH token - this is how we derive COMPLETED terminal state
         # Sink must have node_id assigned by orchestrator before execution
-        assert sink.node_id is not None, "Sink node_id must be set before execution"
+        if sink.node_id is None:
+            raise OrchestrationInvariantError(f"Sink '{sink.name}' executed without node_id - orchestrator bug")
         sink_node_id: str = sink.node_id
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []
@@ -1649,38 +1692,74 @@ class SinkExecutor:
             )
             states.append((token, state))
 
-        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
-        # Sinks may make external calls (e.g., HTTP POST, database INSERT)
-        # Use first token's state_id since sink operations are typically bulk operations
-        ctx.state_id = states[0][1].state_id
-        ctx.node_id = sink_node_id
-        ctx._call_index = 0  # Reset call index for this sink operation
+        # CRITICAL: Clear state_id before entering operation context.
+        # The ctx.state_id may still be set from the last transform that processed
+        # these tokens. Sinks use operation_id for call attribution, and having both
+        # state_id AND operation_id set would trigger the XOR constraint violation.
+        ctx.state_id = None
+        ctx._call_index = 0  # Reset call index for operation calls
 
-        # Execute sink write with timing and span
-        with self._spans.sink_span(sink.name):
-            start = time.perf_counter()
+        # Wrap sink I/O in operation for external call tracking
+        # External calls during sink.write() are attributed to the operation (not token states)
+        # The track_operation context manager sets ctx.operation_id automatically
+        with track_operation(
+            recorder=self._recorder,
+            run_id=self._run_id,
+            node_id=sink_node_id,
+            operation_type="sink_write",
+            ctx=ctx,
+            input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
+        ) as handle:
+            # Execute sink write with timing and span
+            with self._spans.sink_span(sink.name):
+                start = time.perf_counter()
+                try:
+                    artifact_info = sink.write(rows, ctx)
+                    duration_ms = (time.perf_counter() - start) * 1000
+                except Exception as e:
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    # Mark all token states as failed
+                    error: ExecutionError = {
+                        "exception": str(e),
+                        "type": type(e).__name__,
+                    }
+                    for _, state in states:
+                        self._recorder.complete_node_state(
+                            state_id=state.state_id,
+                            status=NodeStateStatus.FAILED,
+                            duration_ms=duration_ms,
+                            error=error,
+                        )
+                    raise
+
+            # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
+            # If this fails, we want to crash - can't checkpoint non-durable data
+            # But first we must complete node_states as FAILED to maintain audit integrity
             try:
-                artifact_info = sink.write(rows, ctx)
-                duration_ms = (time.perf_counter() - start) * 1000
+                sink.flush()
             except Exception as e:
-                duration_ms = (time.perf_counter() - start) * 1000
-                # Mark all token states as failed
-                error: ExecutionError = {
+                # Flush failed - complete all node_states as FAILED before crashing
+                # Without this, states remain OPEN permanently (audit integrity violation)
+                flush_error: ExecutionError = {
                     "exception": str(e),
                     "type": type(e).__name__,
+                    "phase": "flush",
                 }
+                flush_duration_ms = (time.perf_counter() - start) * 1000
                 for _, state in states:
                     self._recorder.complete_node_state(
                         state_id=state.state_id,
                         status=NodeStateStatus.FAILED,
-                        duration_ms=duration_ms,
-                        error=error,
+                        duration_ms=flush_duration_ms,
+                        error=flush_error,
                     )
                 raise
 
-        # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
-        # If this fails, we want to crash - can't checkpoint non-durable data
-        sink.flush()
+            # Set output data on operation handle for audit trail
+            handle.output_data = {
+                "artifact_path": artifact_info.path_or_uri,
+                "content_hash": artifact_info.content_hash,
+            }
 
         # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference

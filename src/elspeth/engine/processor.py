@@ -9,6 +9,8 @@ Coordinates:
 - Final outcome recording
 """
 
+from __future__ import annotations
+
 import hashlib
 from collections import deque
 from dataclasses import dataclass
@@ -18,10 +20,16 @@ from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
+    from elspeth.contracts.enums import RoutingMode
+    from elspeth.contracts.events import TelemetryEvent
+    from elspeth.contracts.payload_store import PayloadStore
     from elspeth.engine.clock import Clock
     from elspeth.engine.coalesce_executor import CoalesceExecutor
+    from elspeth.engine.executors import GateOutcome
+    from elspeth.telemetry import TelemetryManager
 
 from elspeth.contracts.enums import RoutingKind, TriggerType
+from elspeth.contracts.errors import OrchestrationInvariantError, TransformErrorReason
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -95,13 +103,15 @@ class RowProcessor:
         config_gate_id_map: dict[GateName, NodeID] | None = None,
         aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
         retry_manager: RetryManager | None = None,
-        coalesce_executor: "CoalesceExecutor | None" = None,
+        coalesce_executor: CoalesceExecutor | None = None,
         coalesce_node_ids: dict[CoalesceName, NodeID] | None = None,
         branch_to_coalesce: dict[BranchName, CoalesceName] | None = None,
         coalesce_step_map: dict[CoalesceName, int] | None = None,
         restored_aggregation_state: dict[NodeID, dict[str, Any]] | None = None,
-        payload_store: Any = None,
-        clock: "Clock | None" = None,
+        payload_store: PayloadStore | None = None,
+        clock: Clock | None = None,
+        max_workers: int | None = None,
+        telemetry_manager: TelemetryManager | None = None,
     ) -> None:
         """Initialize processor.
 
@@ -124,6 +134,9 @@ class RowProcessor:
             payload_store: Optional PayloadStore for persisting source row payloads
             clock: Optional clock for time access. Defaults to system clock.
                    Inject MockClock for deterministic testing.
+            max_workers: Maximum concurrent workers for transform execution (None = no limit)
+            telemetry_manager: Optional TelemetryManager for emitting telemetry events.
+                               If None, telemetry emission is disabled.
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -140,11 +153,12 @@ class RowProcessor:
         self._clock = clock if clock is not None else DEFAULT_CLOCK
 
         self._token_manager = TokenManager(recorder, payload_store=payload_store)
-        self._transform_executor = TransformExecutor(recorder, span_factory)
+        self._transform_executor = TransformExecutor(recorder, span_factory, max_workers=max_workers)
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(
             recorder, span_factory, run_id, aggregation_settings=aggregation_settings, clock=self._clock
         )
+        self._telemetry_manager = telemetry_manager
 
         # Restore aggregation state if provided (crash recovery)
         if restored_aggregation_state:
@@ -155,6 +169,148 @@ class RowProcessor:
     def token_manager(self) -> TokenManager:
         """Expose token manager for orchestrator to create tokens for quarantined rows."""
         return self._token_manager
+
+    def _emit_telemetry(self, event: TelemetryEvent) -> None:
+        """Emit telemetry event if manager is configured.
+
+        Telemetry is emitted AFTER Landscape recording succeeds. Landscape is
+        the legal record; telemetry is operational visibility.
+
+        Args:
+            event: The telemetry event to emit
+        """
+        if self._telemetry_manager is not None:
+            self._telemetry_manager.handle_event(event)
+
+    def _emit_transform_completed(
+        self,
+        token: TokenInfo,
+        transform: TransformProtocol,
+        transform_result: TransformResult,
+    ) -> None:
+        """Emit TransformCompleted telemetry event.
+
+        Called AFTER Landscape recording succeeds in TransformExecutor.
+
+        Args:
+            token: Token that was processed
+            transform: Transform that was executed
+            transform_result: Result from the transform execution
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.contracts import TransformCompleted
+        from elspeth.contracts.enums import NodeStateStatus
+
+        status = NodeStateStatus.COMPLETED if transform_result.status == "success" else NodeStateStatus.FAILED
+
+        self._emit_telemetry(
+            TransformCompleted(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                node_id=transform.node_id,  # type: ignore[arg-type]
+                plugin_name=transform.name,
+                status=status,
+                duration_ms=transform_result.duration_ms or 0.0,
+                input_hash=transform_result.input_hash or "",
+                output_hash=transform_result.output_hash or "",
+            )
+        )
+
+    def _emit_gate_evaluated(
+        self,
+        token: TokenInfo,
+        gate_name: str,
+        gate_node_id: str,
+        routing_mode: RoutingMode,
+        destinations: tuple[str, ...],
+    ) -> None:
+        """Emit GateEvaluated telemetry event.
+
+        Called AFTER Landscape recording succeeds in GateExecutor.
+
+        Args:
+            token: Token that was routed
+            gate_name: Name of the gate plugin
+            gate_node_id: Node ID of the gate
+            routing_mode: How routing was performed (move, copy)
+            destinations: Destination node/sink names
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.contracts import GateEvaluated
+
+        self._emit_telemetry(
+            GateEvaluated(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                node_id=gate_node_id,
+                plugin_name=gate_name,
+                routing_mode=routing_mode,
+                destinations=destinations,
+            )
+        )
+
+    def _emit_token_completed(
+        self,
+        token: TokenInfo,
+        outcome: RowOutcome,
+        sink_name: str | None = None,
+    ) -> None:
+        """Emit TokenCompleted telemetry event.
+
+        Called AFTER Landscape recording succeeds (record_token_outcome).
+
+        Args:
+            token: Token that reached terminal state
+            outcome: Terminal outcome (completed, routed, failed, etc.)
+            sink_name: Destination sink if applicable
+        """
+        if self._telemetry_manager is None:
+            return
+
+        from datetime import UTC, datetime
+
+        from elspeth.contracts import TokenCompleted
+
+        self._emit_telemetry(
+            TokenCompleted(
+                timestamp=datetime.now(UTC),
+                run_id=self._run_id,
+                row_id=token.row_id,
+                token_id=token.token_id,
+                outcome=outcome,
+                sink_name=sink_name,
+            )
+        )
+
+    def _get_gate_destinations(self, outcome: GateOutcome) -> tuple[str, ...]:
+        """Extract destination names from gate outcome for telemetry.
+
+        Args:
+            outcome: The gate outcome containing routing information
+
+        Returns:
+            Tuple of destination names (sink names or path names for forks)
+        """
+        if outcome.sink_name is not None:
+            return (outcome.sink_name,)
+        elif outcome.result.action.kind == RoutingKind.FORK_TO_PATHS:
+            # For forks, return the branch names of child tokens
+            return tuple(child.branch_name for child in outcome.child_tokens if child.branch_name)
+        else:
+            # Continue routing - destination is "continue"
+            return ("continue",)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public facade for aggregation timeout checking
@@ -290,7 +446,7 @@ class RowProcessor:
         step: int,
         total_steps: int,
         trigger_type: TriggerType,
-    ) -> tuple[list[RowResult], list["_WorkItem"]]:
+    ) -> tuple[list[RowResult], list[_WorkItem]]:
         """Handle an aggregation flush with proper output_mode semantics.
 
         This method mirrors the flush handling in _process_batch_aggregation_node but
@@ -299,9 +455,8 @@ class RowProcessor:
         - END_OF_SOURCE: Triggered at end of source to flush remaining buffers
 
         Handles all output_modes correctly:
-        - single: Creates one output token from first buffered token
         - passthrough: Routes all buffered tokens through remaining transforms
-        - transform: Creates new tokens via expand_token
+        - transform: Creates new tokens via expand_token (N→M output)
 
         Args:
             node_id: The aggregation node ID
@@ -343,9 +498,9 @@ class RowProcessor:
             #
             # CRITICAL: Token outcome recording depends on output_mode:
             # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-            # - single/transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+            # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
             #
-            # For single/transform modes, the batch failure is already recorded in the
+            # For transform mode, the batch failure is already recorded in the
             # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
             # semantically correct (tokens were consumed into a batch that failed).
             # Recording FAILED would violate the unique terminal outcome constraint.
@@ -362,6 +517,8 @@ class RowProcessor:
                         outcome=RowOutcome.FAILED,
                         error_hash=error_hash,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(token, RowOutcome.FAILED)
                     results.append(
                         RowResult(
                             token=token,
@@ -409,55 +566,7 @@ class RowProcessor:
                 # bug in graph construction that must crash immediately (Tier 1 data).
                 coalesce_at_step = self._coalesce_step_map[coalesce_name]
 
-        if output_mode == "single":
-            # Single output: one aggregated result row
-            # Contract: batch-aware transforms in single mode MUST return a row
-            if result.row is None:
-                raise RuntimeError(
-                    f"Aggregation transform '{transform.name}' returned None for result.row "
-                    f"in 'single' mode. Batch-aware transforms must return a row via "
-                    f"TransformResult.success(row). This is a plugin bug."
-                )
-            final_data = result.row
-
-            # Use first buffered token as parent for audit trail
-            # Create NEW token via expand_token (buffered tokens are CONSUMED_IN_BATCH)
-            if buffered_tokens:
-                expanded = self._token_manager.expand_token(
-                    parent_token=buffered_tokens[0],
-                    expanded_rows=[final_data],
-                    step_in_pipeline=audit_step,
-                )
-                output_token = expanded[0]
-
-                # Check if token needs to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and output_token.branch_name is not None
-
-                if more_transforms or needs_coalesce:
-                    # Queue for remaining transforms with coalesce metadata
-                    # NOTE: start_step is set to current 0-indexed position.
-                    # Orchestrator adds +1 when calling process_token_from_step.
-                    # If there's a coalesce point, orchestrator should skip directly there.
-                    child_items.append(
-                        _WorkItem(
-                            token=output_token,
-                            start_step=step,  # 0-indexed current position
-                            coalesce_at_step=coalesce_at_step,
-                            coalesce_name=coalesce_name,
-                        )
-                    )
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    results.append(
-                        RowResult(
-                            token=output_token,
-                            final_data=final_data,
-                            outcome=RowOutcome.COMPLETED,
-                        )
-                    )
-
-        elif output_mode == "passthrough":
+        if output_mode == "passthrough":
             # Passthrough: original tokens continue with enriched data
             if not result.is_multi_row:
                 raise ValueError(
@@ -466,7 +575,8 @@ class RowProcessor:
                     f"Use TransformResult.success_multi() for passthrough."
                 )
 
-            assert result.rows is not None
+            if result.rows is None:
+                raise RuntimeError("Multi-row result has rows=None")
             if len(result.rows) != len(buffered_tokens):
                 raise ValueError(
                     f"Passthrough mode requires same number of output rows "
@@ -513,7 +623,8 @@ class RowProcessor:
             # Transform mode: N input rows -> M output rows with NEW tokens
             # Get output rows
             if result.is_multi_row:
-                assert result.rows is not None
+                if result.rows is None:
+                    raise RuntimeError("Multi-row result has rows=None")
                 output_rows = result.rows
             else:
                 # Contract: batch-aware transforms in transform mode MUST return output data
@@ -526,12 +637,25 @@ class RowProcessor:
                     )
                 output_rows = [result.row]
 
+            # Enforce expected_output_count if configured (plugin contract validation)
+            if settings.expected_output_count is not None:
+                actual_count = len(output_rows)
+                if actual_count != settings.expected_output_count:
+                    raise RuntimeError(
+                        f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
+                        f"but expected_output_count={settings.expected_output_count}. "
+                        f"This is a plugin contract violation."
+                    )
+
             # Create new tokens via expand_token using first buffered token as parent
+            # NOTE: Don't record EXPANDED - batch parents get CONSUMED_IN_BATCH separately
             if buffered_tokens:
-                expanded_tokens = self._token_manager.expand_token(
+                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=buffered_tokens[0],
                     expanded_rows=output_rows,
                     step_in_pipeline=audit_step,
+                    run_id=self._run_id,
+                    record_parent_outcome=False,
                 )
 
                 # Check if expanded tokens need to go to a coalesce point
@@ -597,11 +721,12 @@ class RowProcessor:
 
         Returns:
             (RowResult or list[RowResult], child_items) tuple
-            - Single RowResult for single/transform modes
+            - Single RowResult for transform mode (or list if N→M output)
             - List of RowResults for passthrough mode (one per buffered token)
         """
         raw_node_id = transform.node_id
-        assert raw_node_id is not None
+        if raw_node_id is None:
+            raise OrchestrationInvariantError("Node ID is None during edge resolution")
         node_id = NodeID(raw_node_id)
 
         # Get output_mode from aggregation settings
@@ -633,9 +758,9 @@ class RowProcessor:
                 #
                 # CRITICAL: Token outcome recording depends on output_mode:
                 # - passthrough: tokens have BUFFERED (non-terminal) → record FAILED
-                # - single/transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
+                # - transform: tokens have CONSUMED_IN_BATCH (terminal) → cannot record FAILED
                 #
-                # For single/transform modes, the batch failure is already recorded in the
+                # For transform mode, the batch failure is already recorded in the
                 # batches table by execute_flush(). The CONSUMED_IN_BATCH outcome remains
                 # semantically correct (tokens were consumed into a batch that failed).
                 # Recording FAILED would violate the unique terminal outcome constraint.
@@ -653,6 +778,8 @@ class RowProcessor:
                             outcome=RowOutcome.FAILED,
                             error_hash=error_hash,
                         )
+                        # Emit TokenCompleted telemetry AFTER Landscape recording
+                        self._emit_token_completed(token, RowOutcome.FAILED)
                         results.append(
                             RowResult(
                                 token=token,
@@ -681,6 +808,8 @@ class RowProcessor:
                         outcome=RowOutcome.CONSUMED_IN_BATCH,
                         batch_id=batch_id,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
                     for token in buffered_tokens:
                         results.append(
                             RowResult(
@@ -696,61 +825,7 @@ class RowProcessor:
                 return (results, child_items)
 
             # Handle output modes
-            if output_mode == "single":
-                # Single output: one aggregated result row
-                # The triggering token continues with aggregated data
-                # Contract: batch-aware transforms in single mode MUST return a row
-                if result.row is None:
-                    raise RuntimeError(
-                        f"Aggregation transform '{transform.name}' returned None for result.row "
-                        f"in 'single' mode. Batch-aware transforms must return a row via "
-                        f"TransformResult.success(row). This is a plugin bug."
-                    )
-                final_data = result.row
-                updated_token = TokenInfo(
-                    row_id=current_token.row_id,
-                    token_id=current_token.token_id,
-                    row_data=final_data,
-                    branch_name=current_token.branch_name,
-                )
-
-                # Check if there are more transforms after this one
-                more_transforms = step < total_steps
-
-                # Check if token needs to go to a coalesce point
-                # This must happen EVEN if no more transforms - coalesce may be last step
-                needs_coalesce = coalesce_at_step is not None and coalesce_name is not None and updated_token.branch_name is not None
-
-                if more_transforms or needs_coalesce:
-                    # Queue aggregated token as work item for remaining transforms
-                    # NOTE: `step` is 1-indexed (for audit) but happens to equal the
-                    # 0-indexed position of the NEXT transform (since step = p + 1 where
-                    # p is current 0-indexed position). So transforms[step:] gives remaining.
-                    # If there's a coalesce point, skip directly there (matches fork behavior).
-                    continuation_start = coalesce_at_step if coalesce_at_step is not None else step
-                    child_items.append(
-                        _WorkItem(
-                            token=updated_token,
-                            start_step=continuation_start,
-                            coalesce_at_step=coalesce_at_step,
-                            coalesce_name=coalesce_name,
-                        )
-                    )
-                    # Return empty list - result will come from child item
-                    return ([], child_items)
-                else:
-                    # No more transforms and no coalesce - return COMPLETED
-                    # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
-                    return (
-                        RowResult(
-                            token=updated_token,
-                            final_data=final_data,
-                            outcome=RowOutcome.COMPLETED,
-                        ),
-                        child_items,
-                    )
-
-            elif output_mode == "passthrough":
+            if output_mode == "passthrough":
                 # Passthrough: original tokens continue with enriched data
                 # Validate result is multi-row
                 if not result.is_multi_row:
@@ -761,7 +836,8 @@ class RowProcessor:
                     )
 
                 # Validate row count matches
-                assert result.rows is not None  # Guaranteed by is_multi_row
+                if result.rows is None:
+                    raise RuntimeError("Multi-row result has rows=None")
                 if len(result.rows) != len(buffered_tokens):
                     raise ValueError(
                         f"Passthrough mode requires same number of output rows "
@@ -832,7 +908,8 @@ class RowProcessor:
 
                 # Get output rows - can be single or multi
                 if result.is_multi_row:
-                    assert result.rows is not None  # Guaranteed by is_multi_row
+                    if result.rows is None:
+                        raise RuntimeError("Multi-row result has rows=None")
                     output_rows = result.rows
                 else:
                     # Contract: batch-aware transforms in transform mode MUST return output data
@@ -845,12 +922,25 @@ class RowProcessor:
                         )
                     output_rows = [result.row]
 
+                # Enforce expected_output_count if configured (plugin contract validation)
+                if settings.expected_output_count is not None:
+                    actual_count = len(output_rows)
+                    if actual_count != settings.expected_output_count:
+                        raise RuntimeError(
+                            f"Aggregation '{settings.name}' produced {actual_count} output row(s), "
+                            f"but expected_output_count={settings.expected_output_count}. "
+                            f"This is a plugin contract violation."
+                        )
+
                 # Create new tokens via expand_token using triggering token as parent
                 # This establishes audit trail linkage
-                expanded_tokens = self._token_manager.expand_token(
+                # NOTE: Don't record EXPANDED - triggering token gets CONSUMED_IN_BATCH below
+                expanded_tokens, _expand_group_id = self._token_manager.expand_token(
                     parent_token=current_token,
                     expanded_rows=output_rows,
                     step_in_pipeline=step,
+                    run_id=self._run_id,
+                    record_parent_outcome=False,
                 )
 
                 # The triggering token becomes CONSUMED_IN_BATCH
@@ -861,6 +951,8 @@ class RowProcessor:
                     outcome=RowOutcome.CONSUMED_IN_BATCH,
                     batch_id=batch_id,
                 )
+                # Emit TokenCompleted telemetry AFTER Landscape recording
+                self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
                 triggering_result = RowResult(
                     token=current_token,
                     final_data=current_token.row_data,
@@ -914,7 +1006,7 @@ class RowProcessor:
 
         # Not flushing yet - row is buffered
         # In passthrough mode: BUFFERED (non-terminal, will reappear)
-        # In single/transform modes: CONSUMED_IN_BATCH (terminal)
+        # In transform mode: CONSUMED_IN_BATCH (terminal)
         if output_mode == "passthrough":
             buf_batch_id = self._aggregation_executor.get_batch_id(node_id)
             self._recorder.record_token_outcome(
@@ -939,6 +1031,9 @@ class RowProcessor:
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
                 batch_id=nf_batch_id,
             )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            # (CONSUMED_IN_BATCH is terminal - token won't reappear)
+            self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
             return (
                 RowResult(
                     token=current_token,
@@ -1002,7 +1097,7 @@ class RowProcessor:
                             f"Error: {e}"
                         ) from e
 
-                    error_details = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
+                    error_details: TransformErrorReason = {"reason": "llm_retryable_error_no_retry", "error": str(e)}
                     ctx.record_transform_error(
                         token_id=token.token_id,
                         transform_id=transform.node_id,
@@ -1031,17 +1126,17 @@ class RowProcessor:
                         f"Error: {e}"
                     ) from e
 
-                error_details = {"reason": "transient_error_no_retry", "error": str(e)}
+                transient_error: TransformErrorReason = {"reason": "transient_error_no_retry", "error": str(e)}
                 ctx.record_transform_error(
                     token_id=token.token_id,
                     transform_id=transform.node_id,
                     row=token.row_data,
-                    error_details=error_details,
+                    error_details=transient_error,
                     destination=on_error,
                 )
 
                 return (
-                    TransformResult.error(error_details, retryable=True),
+                    TransformResult.error(transient_error, retryable=True),
                     token,
                     on_error,
                 )
@@ -1330,12 +1425,16 @@ class RowProcessor:
             error_msg = coalesce_outcome.failure_reason
             error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
-            self._recorder.record_token_outcome(
-                run_id=self._run_id,
-                token_id=current_token.token_id,
-                outcome=RowOutcome.FAILED,
-                error_hash=error_hash,
-            )
+            # Bug 9z8 fix: Only record if CoalesceExecutor didn't already record
+            if not coalesce_outcome.outcomes_recorded:
+                self._recorder.record_token_outcome(
+                    run_id=self._run_id,
+                    token_id=current_token.token_id,
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
+            # Emit TokenCompleted telemetry AFTER Landscape recording
+            self._emit_token_completed(current_token, RowOutcome.FAILED)
 
             return (
                 True,
@@ -1409,6 +1508,16 @@ class RowProcessor:
                 )
                 current_token = outcome.updated_token
 
+                # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+                # (Landscape recording happens inside execute_gate)
+                self._emit_gate_evaluated(
+                    token=current_token,
+                    gate_name=transform.name,
+                    gate_node_id=transform.node_id,  # type: ignore[arg-type]
+                    routing_mode=outcome.result.action.mode,
+                    destinations=self._get_gate_destinations(outcome),
+                )
+
                 # Check if gate routed to a sink (sink_name set by executor)
                 if outcome.sink_name is not None:
                     # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
@@ -1447,14 +1556,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Use canonical fork_group_id from recorder (all children share same ID)
-                    fork_group_id = outcome.child_tokens[0].fork_group_id
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.FORKED,
-                        fork_group_id=fork_group_id,
-                    )
+                    # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+                    # to eliminate crash window between child creation and outcome recording.
                     return (
                         RowResult(
                             token=current_token,
@@ -1503,6 +1606,13 @@ class RowProcessor:
                         ctx=ctx,
                         step=step,
                     )
+                    # Emit TransformCompleted telemetry AFTER Landscape recording succeeds
+                    # (Landscape recording happens inside _execute_transform_with_retry)
+                    self._emit_transform_completed(
+                        token=current_token,
+                        transform=transform,
+                        transform_result=transform_result,
+                    )
                 except MaxRetriesExceeded as e:
                     # All retries exhausted - return FAILED outcome
                     error_hash = hashlib.sha256(str(e).encode()).hexdigest()[:16]
@@ -1512,6 +1622,8 @@ class RowProcessor:
                         outcome=RowOutcome.FAILED,
                         error_hash=error_hash,
                     )
+                    # Emit TokenCompleted telemetry AFTER Landscape recording
+                    self._emit_token_completed(current_token, RowOutcome.FAILED)
                     return (
                         RowResult(
                             token=current_token,
@@ -1534,6 +1646,8 @@ class RowProcessor:
                             outcome=RowOutcome.QUARANTINED,
                             error_hash=quarantine_error_hash,
                         )
+                        # Emit TokenCompleted telemetry AFTER Landscape recording
+                        self._emit_token_completed(current_token, RowOutcome.QUARANTINED)
                         return (
                             RowResult(
                                 token=current_token,
@@ -1571,10 +1685,12 @@ class RowProcessor:
 
                     # Deaggregation: create child tokens for each output row
                     # transform_result.rows is guaranteed non-None when is_multi_row is True
-                    child_tokens = self._token_manager.expand_token(
+                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+                    child_tokens, _expand_group_id = self._token_manager.expand_token(
                         parent_token=current_token,
                         expanded_rows=transform_result.rows,  # type: ignore[arg-type]
                         step_in_pipeline=step,
+                        run_id=self._run_id,
                     )
 
                     # Queue each child for continued processing
@@ -1590,14 +1706,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Parent token is EXPANDED (terminal for parent) - use canonical expand_group_id
-                    expand_group_id = child_tokens[0].expand_group_id
-                    self._recorder.record_token_outcome(
-                        run_id=self._run_id,
-                        token_id=current_token.token_id,
-                        outcome=RowOutcome.EXPANDED,
-                        expand_group_id=expand_group_id,
-                    )
+                    # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
+                    # to eliminate crash window between child creation and outcome recording.
                     return (
                         RowResult(
                             token=current_token,
@@ -1647,6 +1757,16 @@ class RowProcessor:
             )
             current_token = outcome.updated_token
 
+            # Emit GateEvaluated telemetry AFTER Landscape recording succeeds
+            # (Landscape recording happens inside execute_config_gate)
+            self._emit_gate_evaluated(
+                token=current_token,
+                gate_name=gate_config.name,
+                gate_node_id=node_id,
+                routing_mode=outcome.result.action.mode,
+                destinations=self._get_gate_destinations(outcome),
+            )
+
             # Check if gate routed to a sink
             if outcome.sink_name is not None:
                 # NOTE: Do NOT record ROUTED outcome here - the token hasn't been written yet.
@@ -1683,14 +1803,8 @@ class RowProcessor:
                         )
                     )
 
-                # Use canonical fork_group_id from recorder (all children share same ID)
-                cfg_fork_group_id = outcome.child_tokens[0].fork_group_id
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=current_token.token_id,
-                    outcome=RowOutcome.FORKED,
-                    fork_group_id=cfg_fork_group_id,
-                )
+                # NOTE: Parent FORKED outcome is now recorded atomically in fork_token()
+                # to eliminate crash window between child creation and outcome recording.
                 return (
                     RowResult(
                         token=current_token,

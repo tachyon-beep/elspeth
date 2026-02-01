@@ -69,15 +69,27 @@ Both paths are correct for their context. The test base classes in this module
 support the direct instantiation pattern by providing Protocol-compliant defaults.
 """
 
+import contextlib
+import hashlib
+import hmac
 import os
+import shutil
+import socket
+import subprocess
+import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
+from uuid import uuid4
 
 import pytest
 from hypothesis import Phase, Verbosity, settings
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
+from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.plugins.manager import PluginManager
+from tests.fixtures.chaosllm import ChaosLLMFixture, chaosllm_server
+from tests.fixtures.chaosllm import pytest_configure as _chaosllm_pytest_configure
 
 if TYPE_CHECKING:
     from elspeth.contracts import TransformResult
@@ -90,8 +102,280 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# TelemetryManager Cleanup Fixture (Thread Leak Prevention)
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _auto_close_telemetry_managers():
+    """Automatically close all TelemetryManager instances created during tests.
+
+    TelemetryManager starts a non-daemon background thread for async export.
+    If tests create TelemetryManager instances without calling close(), the
+    thread keeps running and blocks pytest from exiting.
+
+    This fixture tracks all TelemetryManager instances created during each test
+    and closes them in teardown, preventing thread leaks.
+
+    Special handling for tests that replace manager._queue:
+        Some tests replace the internal queue to test backpressure. This can
+        cause the export thread to be blocked on the OLD queue while close()
+        sends the sentinel to the NEW queue. We handle this by also sending
+        sentinels to any old queues we detect.
+
+    Thread Safety:
+        Uses module-level list tracking. Each test gets isolated via fixture
+        setup/teardown. The list is cleared at fixture start, populated during
+        the test, and drained at fixture end.
+    """
+    import queue as queue_module
+
+    from elspeth.telemetry.manager import TelemetryManager
+
+    # Track managers AND their original queues
+    created_managers: list[tuple[TelemetryManager, queue_module.Queue]] = []
+    original_init = TelemetryManager.__init__
+
+    def tracking_init(self: TelemetryManager, *args, **kwargs) -> None:
+        original_init(self, *args, **kwargs)
+        # Store manager AND its original queue (in case tests replace _queue)
+        created_managers.append((self, self._queue))
+
+    # Monkey-patch for tracking
+    TelemetryManager.__init__ = tracking_init  # type: ignore[method-assign]
+
+    try:
+        yield
+    finally:
+        # Restore original __init__
+        TelemetryManager.__init__ = original_init  # type: ignore[method-assign]
+
+        # Close all managers created during this test
+        for manager, original_queue in created_managers:
+            try:
+                # First, unblock any SlowExporter-style waiters
+                # by setting shutdown event
+                manager._shutdown_event.set()
+
+                # If queue was replaced, send sentinel to BOTH queues
+                current_queue = manager._queue
+                if current_queue is not original_queue:
+                    # Test replaced the queue - thread may be blocked on old one
+                    try:
+                        original_queue.put_nowait(None)  # Sentinel to old queue
+                    except queue_module.Full:
+                        # Queue full - drain and retry
+                        try:
+                            original_queue.get_nowait()
+                            original_queue.put_nowait(None)
+                        except (queue_module.Full, queue_module.Empty):
+                            pass
+
+                # Only close if not already closed (check if thread is alive)
+                if manager._export_thread.is_alive():
+                    manager.close()
+
+                # Final safety: if thread still alive, give it time then force-join
+                if manager._export_thread.is_alive():
+                    manager._export_thread.join(timeout=1.0)
+            except Exception:
+                # Best effort - don't fail test teardown
+                pass
+
+
+# =============================================================================
+# Test Infrastructure
+# =============================================================================
+
+
+class MockPayloadStore:
+    """In-memory PayloadStore for testing.
+
+    Implements PayloadStore protocol using a dictionary.
+    Each test gets a fresh instance for isolation.
+    """
+
+    def __init__(self) -> None:
+        self._storage: dict[str, bytes] = {}
+
+    def store(self, content: bytes) -> str:
+        content_hash = hashlib.sha256(content).hexdigest()
+        if content_hash not in self._storage:
+            self._storage[content_hash] = content
+        return content_hash
+
+    def retrieve(self, content_hash: str) -> bytes:
+        if content_hash not in self._storage:
+            raise KeyError(f"Payload not found: {content_hash}")
+        content = self._storage[content_hash]
+        # Integrity verification matching production FilesystemPayloadStore
+        actual_hash = hashlib.sha256(content).hexdigest()
+        if not hmac.compare_digest(actual_hash, content_hash):
+            raise IntegrityError(f"Payload integrity check failed: expected {content_hash}, got {actual_hash}")
+        return content
+
+    def exists(self, content_hash: str) -> bool:
+        return content_hash in self._storage
+
+    def delete(self, content_hash: str) -> bool:
+        if content_hash not in self._storage:
+            return False
+        del self._storage[content_hash]
+        return True
+
+
+# =============================================================================
 # Pytest Fixtures
 # =============================================================================
+
+
+@pytest.fixture
+def payload_store() -> PayloadStore:
+    """PayloadStore fixture for tests that call orchestrator.run().
+
+    Returns a fresh MockPayloadStore for each test. Required for audit
+    compliance - all pipeline runs must have a payload store.
+    """
+    return MockPayloadStore()
+
+
+# =============================================================================
+# Azurite (Azure Blob Emulator) Fixtures
+# =============================================================================
+
+
+def _find_azurite_bin() -> str | None:
+    """Locate the Azurite CLI binary.
+
+    Prefers repo-local install (node_modules/.bin/azurite). Falls back to PATH.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    local_bin = repo_root / "node_modules" / ".bin" / "azurite"
+    if local_bin.exists():
+        return str(local_bin)
+    return shutil.which("azurite")
+
+
+def _get_free_port() -> int:
+    """Get an available local TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_port(host: str, port: int, timeout_seconds: float = 5.0) -> bool:
+    """Wait until a TCP port is accepting connections."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return True
+        except OSError:
+            time.sleep(0.05)
+    return False
+
+
+def _build_azurite_connection_string(host: str, port: int) -> str:
+    """Build Azure Storage connection string for Azurite (blob only)."""
+    account_name = "devstoreaccount1"
+    # Standard Azurite account key (public default, not a secret)
+    account_key = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+    return (
+        "DefaultEndpointsProtocol=http;"
+        f"AccountName={account_name};"
+        f"AccountKey={account_key};"
+        f"BlobEndpoint=http://{host}:{port}/{account_name};"
+    )
+
+
+@pytest.fixture(scope="session")
+def azurite_blob_service(tmp_path_factory):
+    """Start Azurite (blob-only) and provide connection details."""
+    pytest.importorskip("azure.storage.blob")
+
+    azurite_bin = _find_azurite_bin()
+    if azurite_bin is None:
+        pytest.skip("Azurite CLI not found. Run 'npm install' to install dev dependencies.")
+
+    host = "127.0.0.1"
+    port = _get_free_port()
+    data_dir = tmp_path_factory.mktemp("azurite")
+
+    cmd = [
+        azurite_bin,
+        "--silent",
+        "--skipApiVersionCheck",
+        "--disableProductStyleUrl",
+        "--location",
+        str(data_dir),
+        "--blobHost",
+        host,
+        "--blobPort",
+        str(port),
+    ]
+
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        cwd=str(Path(__file__).resolve().parents[1]),
+    )
+
+    if not _wait_for_port(host, port):
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        pytest.skip("Azurite failed to start (blob endpoint not reachable).")
+
+    connection_string = _build_azurite_connection_string(host, port)
+    previous = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    os.environ["AZURE_STORAGE_CONNECTION_STRING"] = connection_string
+
+    try:
+        yield {
+            "connection_string": connection_string,
+            "host": host,
+            "port": port,
+            "process": process,
+        }
+    finally:
+        if previous is None:
+            os.environ.pop("AZURE_STORAGE_CONNECTION_STRING", None)
+        else:
+            os.environ["AZURE_STORAGE_CONNECTION_STRING"] = previous
+
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+@pytest.fixture
+def azurite_blob_container(azurite_blob_service):
+    """Create a temporary container in Azurite for blob tests."""
+    from azure.storage.blob import BlobServiceClient
+
+    connection_string = azurite_blob_service["connection_string"]
+    container_name = f"test-{uuid4().hex}"
+
+    try:
+        service_client = BlobServiceClient.from_connection_string(connection_string)
+        service_client.create_container(container_name)
+    except Exception as exc:
+        pytest.skip(f"Azurite connection failed: {exc}")
+
+    try:
+        yield {
+            "connection_string": connection_string,
+            "container": container_name,
+        }
+    finally:
+        with contextlib.suppress(Exception):
+            # Best-effort cleanup for emulator containers
+            service_client.delete_container(container_name)
 
 
 @pytest.fixture
@@ -242,6 +526,13 @@ class _TestSourceBase:
     def close(self) -> None:
         """Cleanup - no-op for tests."""
         pass
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping for audit trail.
+
+        Test sources don't do field normalization, so return None.
+        """
+        return None
 
 
 class CallbackSource(_TestSourceBase):
@@ -409,7 +700,7 @@ class _TestTransformBase:
             name = "my_transform"
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
     """
 
     # Required by TransformProtocol - child classes must override
@@ -575,9 +866,22 @@ def real_landscape_recorder_with_payload_store(real_landscape_db, tmp_path):
     return LandscapeRecorder(real_landscape_db, payload_store=payload_store)
 
 
+# =============================================================================
+# ChaosLLM Fixtures
+# =============================================================================
+# chaosllm_server fixture and ChaosLLMFixture are imported at top of file
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register custom markers."""
+    # Register ChaosLLM marker
+    _chaosllm_pytest_configure(config)
+
+
 # Re-export for convenient import
 __all__ = [
     "CallbackSource",
+    "ChaosLLMFixture",
     "_TestSchema",
     "_TestSinkBase",
     "_TestSourceBase",
@@ -587,6 +891,7 @@ __all__ = [
     "as_source",
     "as_transform",
     "as_transform_result",
+    "chaosllm_server",
     "plugin_manager",
     "real_landscape_db",
     "real_landscape_recorder",

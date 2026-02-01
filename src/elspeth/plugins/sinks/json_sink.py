@@ -179,7 +179,6 @@ class JSONSink(BaseSink):
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix

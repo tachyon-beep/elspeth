@@ -31,11 +31,10 @@ if TYPE_CHECKING:
 class TestOrchestratorAuditTrail:
     """Verify audit trail is recorded correctly."""
 
-    def test_run_records_landscape_entries(self) -> None:
+    def test_run_records_landscape_entries(self, payload_store) -> None:
         """Verify that run creates proper audit trail."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -70,7 +69,7 @@ class TestOrchestratorAuditTrail:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -102,7 +101,7 @@ class TestOrchestratorAuditTrail:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify audit trail
         from elspeth.core.canonical import stable_hash
@@ -167,9 +166,9 @@ class TestOrchestratorAuditTrail:
 class TestOrchestratorLandscapeExport:
     """Test landscape export integration."""
 
-    def test_orchestrator_exports_landscape_when_configured(self, plugin_manager) -> None:
+    def test_orchestrator_exports_landscape_when_configured(self, plugin_manager, payload_store) -> None:
         """Orchestrator should export audit trail after run completes."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -179,7 +178,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -288,7 +286,7 @@ class TestOrchestratorLandscapeExport:
 
         # Run with settings
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(pipeline, graph=graph, settings=settings)
+        result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         # Run should complete
         assert result.status == RunStatus.COMPLETED
@@ -300,12 +298,12 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "run" in record_types, f"Expected 'run' record type, got: {record_types}"
 
-    def test_orchestrator_export_with_signing(self, plugin_manager) -> None:
+    def test_orchestrator_export_with_signing(self, plugin_manager, payload_store) -> None:
         """Orchestrator should sign records when export.sign is True."""
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -315,7 +313,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -419,7 +416,7 @@ class TestOrchestratorLandscapeExport:
 
         # Set signing key environment variable
         with patch.dict(os.environ, {"ELSPETH_SIGNING_KEY": "test-signing-key-12345"}):
-            result = orchestrator.run(pipeline, graph=graph, settings=settings)
+            result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
         assert len(export_sink.captured_rows) > 0
@@ -432,12 +429,12 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "manifest" in record_types
 
-    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self, plugin_manager) -> None:
+    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self, plugin_manager, payload_store) -> None:
         """Should raise error when sign=True but ELSPETH_SIGNING_KEY not set."""
         import os
         from unittest.mock import patch
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeExportSettings,
@@ -447,7 +444,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -551,11 +547,11 @@ class TestOrchestratorLandscapeExport:
             patch.dict(os.environ, env_without_key, clear=True),
             pytest.raises(ValueError, match="ELSPETH_SIGNING_KEY"),
         ):
-            orchestrator.run(pipeline, graph=graph, settings=settings)
+            orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
-    def test_orchestrator_no_export_when_disabled(self, plugin_manager) -> None:
+    def test_orchestrator_no_export_when_disabled(self, plugin_manager, payload_store) -> None:
         """Should not export when export.enabled is False."""
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.config import (
             ElspethSettings,
             LandscapeSettings,
@@ -564,7 +560,6 @@ class TestOrchestratorLandscapeExport:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         class ValueSchema(PluginSchema):
@@ -657,7 +652,7 @@ class TestOrchestratorLandscapeExport:
             coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
-        result = orchestrator.run(pipeline, graph=graph, settings=settings)
+        result = orchestrator.run(pipeline, graph=graph, settings=settings, payload_store=payload_store)
 
         assert result.status == RunStatus.COMPLETED
         # Output sink should have the row
@@ -669,13 +664,12 @@ class TestOrchestratorLandscapeExport:
 class TestOrchestratorConfigRecording:
     """Test that runs record the resolved configuration."""
 
-    def test_run_records_resolved_config(self) -> None:
+    def test_run_records_resolved_config(self, payload_store) -> None:
         """Run should record the full resolved configuration in Landscape."""
         import json
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -710,7 +704,7 @@ class TestOrchestratorConfigRecording:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "identity"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -750,7 +744,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify config was recorded
         recorder = LandscapeRecorder(db)
@@ -763,13 +757,12 @@ class TestOrchestratorConfigRecording:
         assert "source" in settings
         assert settings["source"]["plugin"] == "csv"
 
-    def test_run_with_empty_config_records_empty(self) -> None:
+    def test_run_with_empty_config_records_empty(self, payload_store) -> None:
         """Run with no config passed should record empty dict (current behavior)."""
         import json
 
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
@@ -825,7 +818,7 @@ class TestOrchestratorConfigRecording:
         )
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=build_production_graph(config))
+        run_result = orchestrator.run(config, graph=build_production_graph(config), payload_store=payload_store)
 
         # Query Landscape to verify empty config was recorded
         recorder = LandscapeRecorder(db)
@@ -845,16 +838,15 @@ class TestNodeMetadataFromPlugin:
     instead of reading from the actual plugin class attributes.
     """
 
-    def test_node_metadata_records_plugin_version(self) -> None:
+    def test_node_metadata_records_plugin_version(self, payload_store) -> None:
         """Node registration should use actual plugin metadata.
 
         Verifies that the node's plugin_version in Landscape matches
         the plugin class's plugin_version attribute.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -892,7 +884,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "versioned"})
 
         class VersionedSink(_TestSinkBase):
             name = "versioned_sink"
@@ -937,7 +929,7 @@ class TestNodeMetadataFromPlugin:
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify node metadata
         recorder = LandscapeRecorder(db)
@@ -961,16 +953,15 @@ class TestNodeMetadataFromPlugin:
         sink_node = nodes_by_name["versioned_sink"]
         assert sink_node.plugin_version == "4.1.0", f"Sink plugin_version should be '4.1.0', got '{sink_node.plugin_version}'"
 
-    def test_node_metadata_records_determinism(self) -> None:
+    def test_node_metadata_records_determinism(self, payload_store) -> None:
         """Node registration should record plugin determinism.
 
         Verifies that nondeterministic plugins are recorded correctly
         in the Landscape for reproducibility tracking.
         """
-        from elspeth.contracts import PluginSchema
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -1008,7 +999,7 @@ class TestNodeMetadataFromPlugin:
                 super().__init__({"schema": {"fields": "dynamic"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "nondeterministic"})
 
         class CollectSink(_TestSinkBase):
             name = "test_sink"
@@ -1053,7 +1044,7 @@ class TestNodeMetadataFromPlugin:
         graph._default_sink = "default"
 
         orchestrator = Orchestrator(db)
-        run_result = orchestrator.run(config, graph=graph)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # Query Landscape to verify determinism recorded
         recorder = LandscapeRecorder(db)
@@ -1065,4 +1056,368 @@ class TestNodeMetadataFromPlugin:
         # Verify determinism is recorded correctly
         assert transform_node.determinism == Determinism.EXTERNAL_CALL, (
             f"Transform determinism should be 'external_call', got '{transform_node.determinism}'"
+        )
+
+    def test_aggregation_node_uses_transform_metadata(self, payload_store) -> None:
+        """Aggregation nodes should use metadata from their batch-aware transform.
+
+        BUG FIX: P2-2026-01-21-orchestrator-aggregation-metadata-hardcoded
+        Previously, aggregation nodes were always registered with hardcoded
+        plugin_version="1.0.0" and determinism=DETERMINISTIC, even when
+        the underlying transform was non-deterministic (e.g., LLM batch).
+
+        This test verifies the fix: aggregation nodes now correctly inherit
+        metadata from their transform plugin instance.
+        """
+        from elspeth.contracts import AggregationName, ArtifactDescriptor, PluginSchema
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+        from elspeth.plugins.results import TransformResult
+
+        db = LandscapeDB.in_memory()
+
+        class ValueSchema(PluginSchema):
+            value: int
+
+        class ListSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = ValueSchema
+
+            def __init__(self, data: list[dict[str, Any]]) -> None:
+                self._data = data
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                for _row in self._data:
+                    yield SourceRow.valid(_row)
+
+            def close(self) -> None:
+                pass
+
+        class NonDeterministicBatchTransform(BaseTransform):
+            """Simulates an LLM batch transform - explicitly non-deterministic."""
+
+            name = "nondeterministic_batch"
+            input_schema = ValueSchema
+            output_schema = ValueSchema
+            plugin_version = "2.3.4"  # Custom version - NOT 1.0.0
+            determinism = Determinism.NON_DETERMINISTIC  # LLM-like
+
+            def __init__(self) -> None:
+                super().__init__({"schema": {"fields": "dynamic"}})
+
+            def process(
+                self,
+                row: dict[str, Any] | list[dict[str, Any]],
+                ctx: Any,
+            ) -> TransformResult:
+                # Batch-aware: handles list or single row
+                if isinstance(row, list):
+                    total = sum(r.get("value", 0) for r in row)
+                    return TransformResult.success({"value": total}, success_reason={"action": "batch_aggregated"})
+                return TransformResult.success(row, success_reason={"action": "passthrough"})
+
+        class CollectSink(_TestSinkBase):
+            name = "test_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                if isinstance(rows, list):
+                    self.results.extend(rows)
+                else:
+                    self.results.append(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        source = ListSource([{"value": 10}, {"value": 20}])
+        batch_transform = NonDeterministicBatchTransform()
+        sink = CollectSink()
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="nondeterministic_batch",
+            trigger=TriggerConfig(count=2),  # Trigger after 2 rows
+            output_mode="transform",
+            options={"schema": {"fields": "dynamic"}},
+        )
+
+        # Build graph with aggregation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],  # No regular transforms, only aggregation
+            sinks={"default": as_sink(sink)},
+            aggregations={"test_agg": (batch_transform, agg_settings)},
+            gates=[],
+            default_sink="default",
+        )
+
+        # Get aggregation node ID for later lookup
+        agg_id_map = graph.get_aggregation_id_map()
+        agg_node_id = agg_id_map[AggregationName("test_agg")]
+
+        # Set node_id on transform (as CLI would do)
+        batch_transform.node_id = agg_node_id
+
+        # Build aggregation_settings dict for orchestrator
+        aggregation_settings = {agg_node_id: agg_settings}
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(batch_transform)],  # Aggregation transform in list
+            sinks={"default": as_sink(sink)},
+            aggregation_settings=aggregation_settings,
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        # Query Landscape to verify aggregation node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the aggregation node
+        agg_node = next((n for n in nodes if n.node_id == agg_node_id), None)
+        assert agg_node is not None, f"Aggregation node {agg_node_id} not found in Landscape"
+
+        # CRITICAL: Verify aggregation uses transform's metadata, NOT hardcoded values
+        assert agg_node.plugin_version == "2.3.4", (
+            f"Aggregation plugin_version should be '2.3.4' from transform, got '{agg_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+        assert agg_node.determinism == Determinism.NON_DETERMINISTIC, (
+            f"Aggregation determinism should be 'non_deterministic' from transform, "
+            f"got '{agg_node.determinism}' (was hardcoded to 'deterministic')"
+        )
+
+    def test_config_gate_node_uses_engine_version(self, payload_store) -> None:
+        """Config gate nodes should use engine version, not hardcoded '1.0.0'.
+
+        BUG FIX: P2-2026-01-15-node-metadata-hardcoded
+        Config gates are engine-internal nodes (not plugins) that evaluate
+        expressions. They should use 'engine:{VERSION}' format to indicate
+        they're engine components, not user plugins.
+        """
+        from elspeth import __version__ as ENGINE_VERSION
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema
+        from elspeth.core.config import GateSettings
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        class ValueSchema(PluginSchema):
+            value: int
+
+        class ListSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = ValueSchema
+
+            def __init__(self, data: list[dict[str, Any]]) -> None:
+                self._data = data
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def load(self, ctx: Any) -> Any:
+                for _row in self._data:
+                    yield SourceRow.valid(_row)
+
+            def close(self) -> None:
+                pass
+
+        class CollectSink(_TestSinkBase):
+            name = "test_sink"
+
+            def __init__(self) -> None:
+                self.results: list[dict[str, Any]] = []
+
+            def on_start(self, ctx: Any) -> None:
+                pass
+
+            def on_complete(self, ctx: Any) -> None:
+                pass
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                if isinstance(rows, list):
+                    self.results.extend(rows)
+                else:
+                    self.results.append(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        # Create a config gate (expression-based, not plugin-based)
+        # Use literal "True" - the expression parser allows boolean literals
+        config_gate = GateSettings(
+            name="value_check",
+            condition="True",
+            routes={"true": "continue", "false": "continue"},
+        )
+
+        source = ListSource([{"value": 42}])
+        sink = CollectSink()
+
+        # Build graph with config gate
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[config_gate],
+            default_sink="default",
+        )
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+            gates=[config_gate],
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        # Query Landscape to verify config gate node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the config gate node (named "config_gate:value_check")
+        config_gate_node = next(
+            (n for n in nodes if n.plugin_name.startswith("config_gate:")),
+            None,
+        )
+        assert config_gate_node is not None, "Config gate node not found in Landscape"
+
+        # CRITICAL: Verify config gate uses engine version, NOT hardcoded "1.0.0"
+        expected_version = f"engine:{ENGINE_VERSION}"
+        assert config_gate_node.plugin_version == expected_version, (
+            f"Config gate plugin_version should be '{expected_version}', got '{config_gate_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+
+        # Config gates are deterministic (expression evaluation is pure)
+        assert config_gate_node.determinism == Determinism.DETERMINISTIC, (
+            f"Config gate determinism should be DETERMINISTIC, got '{config_gate_node.determinism}'"
+        )
+
+    def test_coalesce_node_uses_engine_version(self, payload_store) -> None:
+        """Coalesce nodes should use engine version, not hardcoded '1.0.0'.
+
+        BUG FIX: P2-2026-01-15-node-metadata-hardcoded (related)
+        Coalesce nodes merge tokens from parallel fork paths. Like config gates,
+        they're engine-internal and should use 'engine:{VERSION}' format.
+        """
+        from elspeth import __version__ as ENGINE_VERSION
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            CoalesceSettings,
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+            TransformSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+        db = LandscapeDB.in_memory()
+
+        # Use settings-based approach which properly wires fork/coalesce
+        settings = ElspethSettings(
+            source=SourceSettings(plugin="null"),  # No file access needed
+            transforms=[
+                TransformSettings(
+                    plugin="passthrough",
+                    name="path_a",
+                    options={"schema": {"fields": "dynamic"}},
+                ),
+                TransformSettings(
+                    plugin="passthrough",
+                    name="path_b",
+                    options={"schema": {"fields": "dynamic"}},
+                ),
+            ],
+            sinks={
+                "default": SinkSettings(
+                    plugin="json",
+                    options={"path": "/tmp/test_coalesce_audit.json", "schema": {"fields": "dynamic"}},
+                ),
+            },
+            default_sink="default",
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    condition="True",
+                    routes={"true": "fork", "false": "continue"},
+                    fork_to=["path_a", "path_b"],
+                ),
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_paths",
+                    branches=["path_a", "path_b"],
+                    policy="require_all",
+                    merge="union",
+                ),
+            ],
+        )
+
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+            coalesce_settings=settings.coalesce,
+        )
+
+        config = PipelineConfig(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            gates=list(settings.gates),
+        )
+
+        orchestrator = Orchestrator(db)
+        run_result = orchestrator.run(config, graph=graph, settings=settings, payload_store=payload_store)
+
+        # Query Landscape to verify coalesce node metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(run_result.run_id)
+
+        # Find the coalesce node (named "coalesce:merge_paths")
+        coalesce_node = next(
+            (n for n in nodes if n.plugin_name.startswith("coalesce:")),
+            None,
+        )
+        assert coalesce_node is not None, "Coalesce node not found in Landscape"
+
+        # CRITICAL: Verify coalesce uses engine version, NOT hardcoded "1.0.0"
+        expected_version = f"engine:{ENGINE_VERSION}"
+        assert coalesce_node.plugin_version == expected_version, (
+            f"Coalesce plugin_version should be '{expected_version}', got '{coalesce_node.plugin_version}' (was hardcoded to '1.0.0')"
+        )
+
+        # Coalesce is deterministic (merging is a pure operation)
+        assert coalesce_node.determinism == Determinism.DETERMINISTIC, (
+            f"Coalesce determinism should be DETERMINISTIC, got '{coalesce_node.determinism}'"
         )

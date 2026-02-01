@@ -9,6 +9,6 @@ Supports multiple authentication methods:
 Plugins are accessed via PluginManager, not direct imports:
     manager = PluginManager()
     manager.register_builtin_plugins()
-    source = manager.get_source_by_name("azure_blob_source")
-    sink = manager.get_sink_by_name("azure_blob_sink")
+    source = manager.get_source_by_name("azure_blob")
+    sink = manager.get_sink_by_name("azure_blob")
 """

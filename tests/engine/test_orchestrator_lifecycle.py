@@ -34,12 +34,12 @@ if TYPE_CHECKING:
 class TestLifecycleHooks:
     """Orchestrator invokes plugin lifecycle hooks."""
 
-    def test_on_start_called_before_processing(self, landscape_db: LandscapeDB) -> None:
+    def test_on_start_called_before_processing(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_start() called before any rows processed."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -64,7 +64,7 @@ class TestLifecycleHooks:
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
         db = landscape_db
 
@@ -79,6 +79,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -111,19 +112,18 @@ class TestLifecycleHooks:
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_start should be called first
         assert call_order[0] == "on_start"
         assert "process" in call_order
 
-    def test_on_complete_called_after_all_rows(self, landscape_db: LandscapeDB) -> None:
+    def test_on_complete_called_after_all_rows(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_complete() called after all rows processed."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
         from elspeth.plugins.results import TransformResult
 
@@ -146,7 +146,7 @@ class TestLifecycleHooks:
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 call_order.append("process")
-                return TransformResult.success(row)
+                return TransformResult.success(row, success_reason={"action": "test"})
 
             def on_complete(self, ctx: Any) -> None:
                 call_order.append("on_complete")
@@ -164,6 +164,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1}), SourceRow.valid({"id": 2})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -195,7 +196,7 @@ class TestLifecycleHooks:
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_complete should be called last (among transform lifecycle calls)
         transform_calls = [c for c in call_order if c in ["on_start", "process", "on_complete"]]
@@ -203,7 +204,7 @@ class TestLifecycleHooks:
         # All processing should happen before on_complete
         assert call_order.count("process") == 2
 
-    def test_on_complete_called_on_error(self, landscape_db: LandscapeDB) -> None:
+    def test_on_complete_called_on_error(self, landscape_db: LandscapeDB, payload_store) -> None:
         """on_complete() called even when run fails."""
         from unittest.mock import MagicMock
 
@@ -247,6 +248,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = FailingTransform()
         mock_sink = MagicMock()
@@ -279,7 +281,7 @@ class TestLifecycleHooks:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_complete should still be called
         assert len(completed) == 1
@@ -288,12 +290,12 @@ class TestLifecycleHooks:
 class TestSourceLifecycleHooks:
     """Tests for source plugin lifecycle hook calls."""
 
-    def test_source_lifecycle_hooks_called(self, landscape_db: LandscapeDB) -> None:
+    def test_source_lifecycle_hooks_called(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Source on_start, on_complete should be called around loading."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         call_order: list[str] = []
@@ -348,7 +350,7 @@ class TestSourceLifecycleHooks:
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_start should be called BEFORE load
         assert "source_on_start" in call_order, "Source on_start should be called"
@@ -362,12 +364,12 @@ class TestSourceLifecycleHooks:
 class TestSinkLifecycleHooks:
     """Tests for sink plugin lifecycle hook calls."""
 
-    def test_sink_lifecycle_hooks_called(self, landscape_db: LandscapeDB) -> None:
+    def test_sink_lifecycle_hooks_called(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Sink on_start and on_complete should be called."""
         from unittest.mock import MagicMock
 
+        from elspeth.contracts import ArtifactDescriptor
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         call_order: list[str] = []
@@ -403,6 +405,7 @@ class TestSinkLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         sink = TrackedSink()
 
@@ -423,7 +426,7 @@ class TestSinkLifecycleHooks:
         graph._default_sink = "output"
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=graph)
+        orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_start should be called before write
         assert "sink_on_start" in call_order, "Sink on_start should be called"
@@ -432,13 +435,12 @@ class TestSinkLifecycleHooks:
         assert "sink_on_complete" in call_order, "Sink on_complete should be called"
         assert call_order.index("sink_on_complete") > call_order.index("sink_write"), "Sink on_complete should be called after write"
 
-    def test_sink_on_complete_called_even_on_error(self, landscape_db: LandscapeDB) -> None:
+    def test_sink_on_complete_called_even_on_error(self, landscape_db: LandscapeDB, payload_store) -> None:
         """Sink on_complete should be called even when run fails."""
         from unittest.mock import MagicMock
 
-        from elspeth.contracts import PluginSchema, SourceRow
+        from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
         from elspeth.core.dag import ExecutionGraph
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         completed: list[str] = []
@@ -492,6 +494,7 @@ class TestSinkLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = FailingTransform()
         sink = TrackedSink()
@@ -516,7 +519,7 @@ class TestSinkLifecycleHooks:
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError):
-            orchestrator.run(config, graph=graph)
+            orchestrator.run(config, graph=graph, payload_store=payload_store)
 
         # on_complete should still be called
         assert "sink_on_complete" in completed

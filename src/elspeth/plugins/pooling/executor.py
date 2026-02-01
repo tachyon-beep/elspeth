@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from threading import Lock, Semaphore
 from typing import Any
 
-from elspeth.contracts import TransformResult
+from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.pooling.config import PoolConfig
 from elspeth.plugins.pooling.errors import CapacityError
@@ -242,6 +242,9 @@ class PooledExecutor:
             for entry in ready:
                 results.append(entry.result)
 
+        if len(results) != len(contexts):
+            raise RuntimeError(f"Pool returned {len(results)} results for {len(contexts)} contexts")
+
         return results
 
     def _wait_for_dispatch_gate(self) -> None:
@@ -372,7 +375,7 @@ class PooledExecutor:
                     # Check if we've exceeded max retry time
                     if time.monotonic() >= max_time:
                         elapsed = time.monotonic() - start_time
-                        error_data = {
+                        error_data: TransformErrorReason = {
                             "reason": "retry_timeout",
                             "error": str(e),
                             "error_type": type(e).__name__,

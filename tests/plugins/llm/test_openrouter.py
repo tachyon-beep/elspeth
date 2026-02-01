@@ -1,9 +1,9 @@
 # tests/plugins/llm/test_openrouter.py
 """Tests for OpenRouter LLM transform with row-level pipelining."""
 
+import json
 from collections.abc import Generator
-from contextlib import contextmanager
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -16,48 +16,56 @@ from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
 
+from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
+
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
 
 
 def _create_mock_response(
+    chaosllm_server,
     content: str = "Analysis result",
     model: str = "anthropic/claude-3-opus",
     usage: dict[str, int] | None = None,
     status_code: int = 200,
     headers: dict[str, str] | None = None,
+    raw_body: str | None = None,
     raise_for_status_error: Exception | None = None,
 ) -> Mock:
-    """Create a mock HTTP response for testing."""
-    response = Mock(spec=httpx.Response)
-    response.status_code = status_code
-    response.headers = headers or {"content-type": "application/json"}
-    response.json.return_value = {
-        "choices": [{"message": {"content": content}}],
+    """Create an httpx.Response using ChaosLLM response generation."""
+    request = {
         "model": model,
-        "usage": usage or {"prompt_tokens": 10, "completion_tokens": 20},
+        "messages": [{"role": "user", "content": "test prompt"}],
+        "temperature": 0.0,
     }
-    if raise_for_status_error:
-        response.raise_for_status.side_effect = raise_for_status_error
-    else:
-        response.raise_for_status = Mock()
-    response.content = b""
-    response.text = ""
+    response = chaosllm_openrouter_httpx_response(
+        chaosllm_server,
+        request,
+        status_code=status_code,
+        headers=headers,
+        template_override=content,
+        raw_body=raw_body,
+        usage_override=usage,
+    )
+    if raise_for_status_error is not None:
+        response.raise_for_status = Mock(side_effect=raise_for_status_error)
     return response
 
 
-@contextmanager
-def mock_httpx_client(response: Mock | None = None, side_effect: Exception | None = None) -> Generator[Mock, None, None]:
-    """Context manager to mock httpx.Client with a response or side_effect."""
-    with patch("httpx.Client") as mock_client_class:
-        mock_client = Mock()
-        if side_effect:
-            mock_client.post.side_effect = side_effect
-        elif response:
-            mock_client.post.return_value = response
-        mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
-        mock_client_class.return_value.__exit__ = Mock(return_value=None)
-        yield mock_client
+def mock_httpx_client(
+    chaosllm_server,
+    response: httpx.Response | list[httpx.Response] | None = None,
+    side_effect: Exception | None = None,
+) -> Generator[Mock, None, None]:
+    """Context manager to mock httpx.Client using ChaosLLM responses."""
+    if response is None and side_effect is None:
+        response = _create_mock_response(chaosllm_server)
+    responses = response if isinstance(response, list) else [response]
+    return chaosllm_openrouter_http_responses(
+        chaosllm_server,
+        responses,
+        side_effect=side_effect,
+    )
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
@@ -300,15 +308,20 @@ class TestOpenRouterLLMTransformPipelining:
         t.close()
 
     def test_successful_api_call_emits_enriched_row(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Successful API call emits row with LLM response to output port."""
         mock_response = _create_mock_response(
+            chaosllm_server,
             content="The analysis is positive.",
             usage={"prompt_tokens": 10, "completion_tokens": 25},
         )
 
-        with mock_httpx_client(response=mock_response):
+        with mock_httpx_client(chaosllm_server, response=mock_response):
             transform.accept({"text": "hello world"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -330,11 +343,15 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.row["text"] == "hello world"
 
     def test_template_rendering_error_emits_error(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Template rendering failure emits TransformResult.error()."""
         # Missing required_field triggers template error (no HTTP call needed)
-        with mock_httpx_client():
+        with mock_httpx_client(chaosllm_server):
             transform.accept({"other_field": "value"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -347,14 +364,17 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.reason["reason"] == "template_rendering_failed"
         assert "template_hash" in result.reason
 
-    def test_http_error_emits_error(self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort) -> None:
+    def test_http_error_emits_error(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+    ) -> None:
         """HTTP error emits TransformResult.error()."""
         with mock_httpx_client(
+            chaosllm_server,
             side_effect=httpx.HTTPStatusError(
                 "Server error",
                 request=Mock(),
                 response=Mock(status_code=500),
-            )
+            ),
         ):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -369,15 +389,20 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.retryable is False
 
     def test_rate_limit_429_is_retryable(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Rate limit (429) errors are marked retryable."""
         with mock_httpx_client(
+            chaosllm_server,
             side_effect=httpx.HTTPStatusError(
                 "429 Too Many Requests",
                 request=Mock(),
                 response=Mock(status_code=429),
-            )
+            ),
         ):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -392,15 +417,20 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.retryable is True
 
     def test_service_unavailable_503_is_retryable(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Service unavailable (503) errors are marked retryable for consistency with pooled mode."""
         with mock_httpx_client(
+            chaosllm_server,
             side_effect=httpx.HTTPStatusError(
                 "503 Service Unavailable",
                 request=Mock(),
                 response=Mock(status_code=503),
-            )
+            ),
         ):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -415,15 +445,20 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.retryable is True
 
     def test_overloaded_529_is_retryable(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Overloaded (529) errors are marked retryable for consistency with pooled mode."""
         with mock_httpx_client(
+            chaosllm_server,
             side_effect=httpx.HTTPStatusError(
                 "529 Site is overloaded",
                 request=Mock(),
                 response=Mock(status_code=529),
-            )
+            ),
         ):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -438,10 +473,14 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.retryable is True
 
     def test_request_error_not_retryable(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Network/connection errors (RequestError) are not retryable."""
-        with mock_httpx_client(side_effect=httpx.ConnectError("Connection refused")):
+        with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Connection refused")):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -488,7 +527,7 @@ class TestOpenRouterLLMTransformPipelining:
         assert isinstance(result.exception, RuntimeError)
         assert "state_id" in str(result.exception)
 
-    def test_system_prompt_included_in_request(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_system_prompt_included_in_request(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """System prompt is included when configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -514,8 +553,8 @@ class TestOpenRouterLLMTransformPipelining:
         )
 
         try:
-            mock_response = _create_mock_response()
-            with mock_httpx_client(response=mock_response) as mock_client:
+            mock_response = _create_mock_response(chaosllm_server)
+            with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -533,11 +572,15 @@ class TestOpenRouterLLMTransformPipelining:
             transform.close()
 
     def test_no_system_prompt_single_message(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Without system prompt, only user message is sent."""
-        mock_response = _create_mock_response()
-        with mock_httpx_client(response=mock_response) as mock_client:
+        mock_response = _create_mock_response(chaosllm_server)
+        with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -548,7 +591,7 @@ class TestOpenRouterLLMTransformPipelining:
             assert len(messages) == 1
             assert messages[0]["role"] == "user"
 
-    def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Custom response_field name is used."""
         transform = OpenRouterLLMTransform(
             {
@@ -574,8 +617,8 @@ class TestOpenRouterLLMTransformPipelining:
         )
 
         try:
-            mock_response = _create_mock_response(content="Result text")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Result text")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -594,13 +637,18 @@ class TestOpenRouterLLMTransformPipelining:
         assert "analysis_model" in result.row
 
     def test_model_from_response_used_when_available(
-        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+        self,
+        ctx: PluginContext,
+        transform: OpenRouterLLMTransform,
+        collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Model name from response is used if different from request."""
         mock_response = _create_mock_response(
-            model="anthropic/claude-3-opus-20240229"  # Different from request
+            chaosllm_server,
+            model="anthropic/claude-3-opus-20240229",  # Different from request
         )
-        with mock_httpx_client(response=mock_response):
+        with mock_httpx_client(chaosllm_server, response=mock_response):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -610,16 +658,19 @@ class TestOpenRouterLLMTransformPipelining:
         assert result.row is not None
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus-20240229"
 
-    def test_raise_for_status_called(self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort) -> None:
+    def test_raise_for_status_called(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort, chaosllm_server
+    ) -> None:
         """raise_for_status is called on response to check errors."""
         mock_response = _create_mock_response(
+            chaosllm_server,
             raise_for_status_error=httpx.HTTPStatusError(
                 "400 Bad Request",
                 request=Mock(),
                 response=Mock(status_code=400),
-            )
+            ),
         )
-        with mock_httpx_client(response=mock_response):
+        with mock_httpx_client(chaosllm_server, response=mock_response):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -701,7 +752,7 @@ class TestOpenRouterLLMTransformIntegration:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
-    def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Complex template with multiple variables works correctly."""
         transform = OpenRouterLLMTransform(
             {
@@ -733,8 +784,8 @@ class TestOpenRouterLLMTransformIntegration:
         )
 
         try:
-            mock_response = _create_mock_response(content="Summary text")
-            with mock_httpx_client(response=mock_response) as mock_client:
+            mock_response = _create_mock_response(chaosllm_server, content="Summary text")
+            with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept(
                     {"name": "Test Item", "score": 95, "category": "A"},
                     ctx,
@@ -755,7 +806,7 @@ class TestOpenRouterLLMTransformIntegration:
         finally:
             transform.close()
 
-    def test_empty_usage_handled_gracefully(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_empty_usage_handled_gracefully(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Empty usage dict from API is handled."""
         transform = OpenRouterLLMTransform(
             {
@@ -779,20 +830,19 @@ class TestOpenRouterLLMTransformIntegration:
             token=token,
         )
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {
-            "choices": [{"message": {"content": "Response"}}],
-            "model": "openai/gpt-4",
-            # No "usage" field at all
-        }
-        response.raise_for_status = Mock()
-        response.content = b""
-        response.text = ""
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps(
+                {
+                    "choices": [{"message": {"content": "Response"}}],
+                    "model": "openai/gpt-4",
+                }
+            ),
+            headers={"content-type": "application/json"},
+        )
 
         try:
-            with mock_httpx_client(response=response):
+            with mock_httpx_client(chaosllm_server, response=response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -805,7 +855,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.row is not None
         assert result.row["llm_response_usage"] == {}
 
-    def test_connection_error_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_connection_error_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Network connection error emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
@@ -830,7 +880,7 @@ class TestOpenRouterLLMTransformIntegration:
         )
 
         try:
-            with mock_httpx_client(side_effect=httpx.ConnectError("Failed to connect to server")):
+            with mock_httpx_client(chaosllm_server, side_effect=httpx.ConnectError("Failed to connect to server")):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -845,7 +895,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert "connect" in result.reason["error"].lower()
         assert result.retryable is False  # Connection errors not auto-retryable
 
-    def test_timeout_passed_to_http_client(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_timeout_passed_to_http_client(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Custom timeout_seconds is used when creating HTTP client."""
         transform = OpenRouterLLMTransform(
             {
@@ -875,8 +925,8 @@ class TestOpenRouterLLMTransformIntegration:
         )
 
         try:
-            mock_response = _create_mock_response()
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server)
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -887,7 +937,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert isinstance(result, TransformResult)
         assert result.status == "success"
 
-    def test_empty_choices_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_empty_choices_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Empty choices array emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
@@ -911,20 +961,20 @@ class TestOpenRouterLLMTransformIntegration:
             token=token,
         )
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {
-            "choices": [],  # Empty choices
-            "model": "openai/gpt-4",
-            "usage": {},
-        }
-        response.raise_for_status = Mock()
-        response.content = b""
-        response.text = ""
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps(
+                {
+                    "choices": [],
+                    "model": "openai/gpt-4",
+                    "usage": {},
+                }
+            ),
+            headers={"content-type": "application/json"},
+        )
 
         try:
-            with mock_httpx_client(response=response):
+            with mock_httpx_client(chaosllm_server, response=response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -937,7 +987,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "empty_choices"
 
-    def test_missing_choices_key_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_missing_choices_key_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Missing 'choices' key in response emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
@@ -961,20 +1011,19 @@ class TestOpenRouterLLMTransformIntegration:
             token=token,
         )
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {
-            "model": "openai/gpt-4",
-            "usage": {},
-            # No "choices" key
-        }
-        response.raise_for_status = Mock()
-        response.content = b""
-        response.text = ""
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps(
+                {
+                    "model": "openai/gpt-4",
+                    "usage": {},
+                }
+            ),
+            headers={"content-type": "application/json"},
+        )
 
         try:
-            with mock_httpx_client(response=response):
+            with mock_httpx_client(chaosllm_server, response=response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -987,7 +1036,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "malformed_response"
 
-    def test_malformed_choice_structure_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_malformed_choice_structure_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Malformed choice structure emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
@@ -1011,20 +1060,20 @@ class TestOpenRouterLLMTransformIntegration:
             token=token,
         )
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.headers = {"content-type": "application/json"}
-        response.json.return_value = {
-            "choices": [{"wrong_key": "no message"}],  # Missing "message"
-            "model": "openai/gpt-4",
-            "usage": {},
-        }
-        response.raise_for_status = Mock()
-        response.content = b""
-        response.text = ""
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body=json.dumps(
+                {
+                    "choices": [{"wrong_key": "no message"}],
+                    "model": "openai/gpt-4",
+                    "usage": {},
+                }
+            ),
+            headers={"content-type": "application/json"},
+        )
 
         try:
-            with mock_httpx_client(response=response):
+            with mock_httpx_client(chaosllm_server, response=response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1037,7 +1086,7 @@ class TestOpenRouterLLMTransformIntegration:
         assert result.reason is not None
         assert result.reason["reason"] == "malformed_response"
 
-    def test_invalid_json_response_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_invalid_json_response_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Non-JSON response body emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
@@ -1061,17 +1110,14 @@ class TestOpenRouterLLMTransformIntegration:
             token=token,
         )
 
-        response = Mock(spec=httpx.Response)
-        response.status_code = 200
-        response.headers = {"content-type": "text/html"}
-        # Simulate non-JSON response (e.g., HTML error page from proxy)
-        response.json.side_effect = ValueError("No JSON object could be decoded")
-        response.raise_for_status = Mock()
-        response.text = "<html><body>Error: Service Unavailable</body></html>"
-        response.content = b"<html><body>Error: Service Unavailable</body></html>"
+        response = _create_mock_response(
+            chaosllm_server,
+            raw_body="<html><body>Error: Service Unavailable</body></html>",
+            headers={"content-type": "text/html"},
+        )
 
         try:
-            with mock_httpx_client(response=response):
+            with mock_httpx_client(chaosllm_server, response=response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1104,7 +1150,7 @@ class TestOpenRouterTemplateFeatures:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
-    def test_lookup_data_accessible_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_lookup_data_accessible_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Lookup data is accessible via lookup.* namespace in templates."""
         transform = OpenRouterLLMTransform(
             {
@@ -1130,8 +1176,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="positive")
-            with mock_httpx_client(response=mock_response) as mock_client:
+            mock_response = _create_mock_response(chaosllm_server, content="positive")
+            with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept({"text": "I love this!"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -1148,7 +1194,7 @@ class TestOpenRouterTemplateFeatures:
         finally:
             transform.close()
 
-    def test_two_dimensional_lookup_row_plus_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_two_dimensional_lookup_row_plus_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Two-dimensional lookup: lookup.X[row.Y] works correctly."""
         transform = OpenRouterLLMTransform(
             {
@@ -1174,8 +1220,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="Processed")
-            with mock_httpx_client(response=mock_response) as mock_client:
+            mock_response = _create_mock_response(chaosllm_server, content="Processed")
+            with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept({"text": "Hello", "tone_id": "formal"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -1190,7 +1236,7 @@ class TestOpenRouterTemplateFeatures:
         finally:
             transform.close()
 
-    def test_lookup_hash_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_lookup_hash_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output includes lookup_hash when lookup data is configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -1216,8 +1262,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="Result")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Result")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "test"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1234,7 +1280,7 @@ class TestOpenRouterTemplateFeatures:
         # lookup_source is None when lookup is inline (not from file)
         assert "llm_response_lookup_source" in result.row
 
-    def test_template_source_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_template_source_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output includes template_source when provided."""
         transform = OpenRouterLLMTransform(
             {
@@ -1260,8 +1306,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="Analysis result")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Analysis result")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "hello"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1274,7 +1320,7 @@ class TestOpenRouterTemplateFeatures:
         assert result.row is not None
         assert result.row["llm_response_template_source"] == "prompts/analysis.j2"
 
-    def test_all_audit_fields_present_with_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_all_audit_fields_present_with_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """All audit metadata fields are present when using template with lookup."""
         transform = OpenRouterLLMTransform(
             {
@@ -1302,8 +1348,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="Done")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Done")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "data"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1328,7 +1374,7 @@ class TestOpenRouterTemplateFeatures:
         assert result.row["llm_response_lookup_source"] == "prompts/lookups.yaml"
         assert result.row["llm_response_lookup_hash"] is not None
 
-    def test_no_lookup_has_none_hash_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_no_lookup_has_none_hash_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Output has None for lookup fields when no lookup configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -1354,8 +1400,8 @@ class TestOpenRouterTemplateFeatures:
         )
 
         try:
-            mock_response = _create_mock_response(content="Result")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Result")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 transform.accept({"text": "test"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -1372,7 +1418,7 @@ class TestOpenRouterTemplateFeatures:
         assert "llm_response_lookup_source" in result.row
         assert result.row["llm_response_lookup_source"] is None
 
-    def test_lookup_iteration_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_lookup_iteration_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Lookup data can be iterated in templates."""
         transform = OpenRouterLLMTransform(
             {
@@ -1407,8 +1453,8 @@ Text: {{ row.text }}""",
         )
 
         try:
-            mock_response = _create_mock_response(content="spam")
-            with mock_httpx_client(response=mock_response) as mock_client:
+            mock_response = _create_mock_response(chaosllm_server, content="spam")
+            with mock_httpx_client(chaosllm_server, response=mock_response) as mock_client:
                 transform.accept({"text": "Buy now! Limited offer!"}, ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -1462,7 +1508,7 @@ Text: {{ row.text }}""",
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "template_rendering_failed"
-        assert result.reason["template_source"] == "prompts/requires_field.j2"
+        assert result.reason["template_file_path"] == "prompts/requires_field.j2"
 
 
 class TestOpenRouterConcurrency:
@@ -1480,7 +1526,7 @@ class TestOpenRouterConcurrency:
         """Create output collector for capturing results."""
         return CollectorOutputPort()
 
-    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort, chaosllm_server) -> None:
         """Multiple rows are emitted in submission order (FIFO)."""
         transform = OpenRouterLLMTransform(
             {
@@ -1502,8 +1548,8 @@ class TestOpenRouterConcurrency:
         ]
 
         try:
-            mock_response = _create_mock_response(content="Response")
-            with mock_httpx_client(response=mock_response):
+            mock_response = _create_mock_response(chaosllm_server, content="Response")
+            with mock_httpx_client(chaosllm_server, response=mock_response):
                 for i, row in enumerate(rows):
                     token = make_token(f"row-{i}")
                     ctx = PluginContext(

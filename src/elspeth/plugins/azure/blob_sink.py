@@ -18,13 +18,14 @@ import csv
 import hashlib
 import io
 import json
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from jinja2 import Environment, StrictUndefined
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.contracts import ArtifactDescriptor, CallStatus, CallType, PluginSchema
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
@@ -270,7 +271,6 @@ class AzureBlobSink(BaseSink):
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
-        assert cfg.schema_config is not None
         self._schema_config = cfg.schema_config
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
@@ -432,6 +432,8 @@ class AzureBlobSink(BaseSink):
         size_bytes = len(content)
 
         # EXTERNAL SYSTEM: Azure Blob SDK calls - wrap with try/except
+        # Record call for audit trail (ctx.operation_id is set by executor)
+        start_time = time.perf_counter()
         try:
             container_client = self._get_container_client()
             blob_client = container_client.get_blob_client(rendered_path)
@@ -442,6 +444,25 @@ class AzureBlobSink(BaseSink):
 
             # Upload the content
             blob_client.upload_blob(content, overwrite=self._overwrite)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record successful blob upload in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data={
+                    "operation": "upload_blob",
+                    "container": self._container,
+                    "blob_path": rendered_path,
+                    "overwrite": self._overwrite,
+                },
+                response_data={
+                    "size_bytes": size_bytes,
+                    "content_hash": content_hash,
+                },
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
 
         except ImportError:
             # Re-raise ImportError as-is for clear dependency messaging
@@ -450,6 +471,23 @@ class AzureBlobSink(BaseSink):
             # Re-raise our own ValueError (overwrite check)
             raise
         except Exception as e:
+            latency_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record failed blob upload in audit trail
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data={
+                    "operation": "upload_blob",
+                    "container": self._container,
+                    "blob_path": rendered_path,
+                    "overwrite": self._overwrite,
+                },
+                error={"type": type(e).__name__, "message": str(e)},
+                latency_ms=latency_ms,
+                provider="azure_blob_storage",
+            )
+
             # Azure SDK errors are external system errors - propagate with context
             raise type(e)(f"Failed to upload blob '{rendered_path}' to container '{self._container}': {e}") from e
 

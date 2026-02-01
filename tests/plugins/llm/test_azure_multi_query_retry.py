@@ -6,121 +6,40 @@ Updated to use row-level pipelining API (BatchTransformMixin).
 
 from __future__ import annotations
 
-import itertools
-import json
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from elspeth.contracts import TransformResult
-from elspeth.contracts.identity import TokenInfo
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
+from .conftest import (
+    chaosllm_azure_openai_responses,
+    chaosllm_azure_openai_sequence,
+    make_azure_multi_query_config,
+    make_plugin_context,
+    make_token,
+)
+
 
 def make_config(**overrides: Any) -> dict[str, Any]:
-    """Create valid config with optional overrides."""
-    config = {
-        "deployment_name": "gpt-4o",
-        "endpoint": "https://test.openai.azure.com",
-        "api_key": "test-key",
-        "template": "Input: {{ row.input_1 }}\nCriterion: {{ row.criterion.name }}",
-        "system_prompt": "You are an assessment AI. Respond in JSON.",
-        "case_studies": [
-            {"name": "cs1", "input_fields": ["cs1_bg", "cs1_sym", "cs1_hist"]},
-            {"name": "cs2", "input_fields": ["cs2_bg", "cs2_sym", "cs2_hist"]},
-        ],
-        "criteria": [
-            {"name": "diagnosis", "code": "DIAG"},
-            {"name": "treatment", "code": "TREAT"},
-        ],
-        "response_format": "standard",
-        "output_mapping": {
-            "score": {"suffix": "score", "type": "integer"},
-            "rationale": {"suffix": "rationale", "type": "string"},
-        },
-        "schema": {"fields": "dynamic"},
-        "required_input_fields": [],  # Explicit opt-out for this test
-        "pool_size": 4,
-        "max_capacity_retry_seconds": 10,  # 10 second retry timeout
-    }
-    config.update(overrides)
-    return config
-
-
-def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
-    """Create a TokenInfo for testing."""
-    return TokenInfo(
-        row_id=row_id,
-        token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
-    )
-
-
-def make_plugin_context(state_id: str = "state-123", token: TokenInfo | None = None) -> PluginContext:
-    """Create a PluginContext with mocked landscape."""
-    mock_landscape = Mock()
-    mock_landscape.record_external_call = Mock()
-    mock_landscape.record_call = Mock()
-    return PluginContext(
-        run_id="run-123",
-        landscape=mock_landscape,
-        state_id=state_id,
-        config={},
-        token=token or make_token("row-1"),
-    )
-
-
-@contextmanager
-def mock_azure_openai_responses(
-    responses: list[dict[str, Any]],
-) -> Generator[Mock, None, None]:
-    """Mock Azure OpenAI to return sequence of JSON responses.
-
-    Thread-safe: Uses itertools.cycle for concurrent access.
-    """
-    # Thread-safe cycling through responses
-    response_cycle = itertools.cycle(responses)
-    lock = threading.Lock()
-
-    def make_response(**kwargs: Any) -> Mock:
-        with lock:
-            response_data = next(response_cycle)
-        content = json.dumps(response_data)
-
-        mock_usage = Mock()
-        mock_usage.prompt_tokens = 10
-        mock_usage.completion_tokens = 5
-
-        mock_message = Mock()
-        mock_message.content = content
-
-        mock_choice = Mock()
-        mock_choice.message = mock_message
-
-        mock_response = Mock()
-        mock_response.choices = [mock_choice]
-        mock_response.model = "gpt-4o"
-        mock_response.usage = mock_usage
-        mock_response.model_dump = Mock(return_value={"model": "gpt-4o"})
-
-        return mock_response
-
-    with patch("openai.AzureOpenAI") as mock_azure_class:
-        mock_client = Mock()
-        mock_client.chat.completions.create.side_effect = make_response
-        mock_azure_class.return_value = mock_client
-        yield mock_client
+    """Create retry-specific config with extra timeout field."""
+    # Set default retry timeout, but allow overrides
+    defaults = {"max_capacity_retry_seconds": 10}
+    defaults.update(overrides)
+    return make_azure_multi_query_config(**defaults)
 
 
 @contextmanager
 def mock_azure_openai_with_counter(
+    chaosllm_server,
     success_response: dict[str, Any],
     failure_condition: Any | None = None,
 ) -> Generator[tuple[Mock, list[int]], None, None]:
@@ -134,44 +53,19 @@ def mock_azure_openai_with_counter(
     Yields:
         Tuple of (mock_client, call_count_list) where call_count_list[0] is the count
     """
-    call_count = [0]
-    lock = threading.Lock()
 
-    def make_response(**kwargs: Any) -> Mock:
-        with lock:
-            call_count[0] += 1
-            current_count = call_count[0]
-
-        # Check failure condition
+    def response_factory(call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
         if failure_condition is not None:
-            exc = failure_condition(current_count)
+            exc = failure_condition(call_index)
             if exc is not None:
                 raise exc
+        return success_response
 
-        content = json.dumps(success_response)
-
-        mock_usage = Mock()
-        mock_usage.prompt_tokens = 10
-        mock_usage.completion_tokens = 5
-
-        mock_message = Mock()
-        mock_message.content = content
-
-        mock_choice = Mock()
-        mock_choice.message = mock_message
-
-        mock_response = Mock()
-        mock_response.choices = [mock_choice]
-        mock_response.model = "gpt-4o"
-        mock_response.usage = mock_usage
-        mock_response.model_dump = Mock(return_value={"model": "gpt-4o"})
-
-        return mock_response
-
-    with patch("openai.AzureOpenAI") as mock_azure_class:
-        mock_client = Mock()
-        mock_client.chat.completions.create.side_effect = make_response
-        mock_azure_class.return_value = mock_client
+    with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+        mock_client,
+        call_count,
+        _mock_azure_class,
+    ):
         yield mock_client, call_count
 
 
@@ -194,6 +88,7 @@ class TestRetryBehavior:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Capacity errors trigger automatic retry until success."""
         from openai import RateLimitError as OpenAIRateLimitError
@@ -208,6 +103,7 @@ class TestRetryBehavior:
             return None
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Success after retry"},
             failure_condition,
         ) as (_mock_client, _call_count):
@@ -249,6 +145,7 @@ class TestRetryBehavior:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Row fails after max_capacity_retry_seconds exceeded."""
         from openai import RateLimitError as OpenAIRateLimitError
@@ -261,6 +158,7 @@ class TestRetryBehavior:
             )
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Never returned"},
             always_fail,
         ):
@@ -302,6 +200,7 @@ class TestRetryBehavior:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Some queries succeed immediately, others succeed after retry."""
         from openai import RateLimitError as OpenAIRateLimitError
@@ -318,6 +217,7 @@ class TestRetryBehavior:
             return None
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Success"},
             intermittent_failure,
         ):
@@ -376,6 +276,7 @@ class TestConcurrentRowProcessing:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Multiple rows processed via pipelining with sequential query execution.
 
@@ -389,7 +290,7 @@ class TestConcurrentRowProcessing:
         config = make_config()
         del config["pool_size"]
 
-        with mock_azure_openai_responses(responses) as mock_client:
+        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = AzureMultiQueryLLMTransform(config)
             init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
             transform.on_start(init_ctx)
@@ -433,6 +334,7 @@ class TestConcurrentRowProcessing:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Atomicity maintained when processing rows with failures.
 
@@ -455,6 +357,7 @@ class TestConcurrentRowProcessing:
         del config["pool_size"]
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "OK"},
             every_7th_fails,
         ):
@@ -508,6 +411,7 @@ class TestConcurrentRowProcessing:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Verify pool is utilized for query-level parallelism within a single row.
 
@@ -520,7 +424,7 @@ class TestConcurrentRowProcessing:
         current_concurrent = [0]
         lock = threading.Lock()
 
-        def make_response(**kwargs: Any) -> Mock:
+        def response_factory(_call_index: int, _request: dict[str, Any]) -> dict[str, Any]:
             """Track concurrent execution."""
             with lock:
                 current_concurrent[0] += 1
@@ -533,31 +437,13 @@ class TestConcurrentRowProcessing:
             with lock:
                 current_concurrent[0] -= 1
 
-            content = json.dumps({"score": 85, "rationale": "OK"})
+            return {"score": 85, "rationale": "OK"}
 
-            mock_usage = Mock()
-            mock_usage.prompt_tokens = 10
-            mock_usage.completion_tokens = 5
-
-            mock_message = Mock()
-            mock_message.content = content
-
-            mock_choice = Mock()
-            mock_choice.message = mock_message
-
-            mock_response = Mock()
-            mock_response.choices = [mock_choice]
-            mock_response.model = "gpt-4o"
-            mock_response.usage = mock_usage
-            mock_response.model_dump = Mock(return_value={"model": "gpt-4o"})
-
-            return mock_response
-
-        with patch("openai.AzureOpenAI") as mock_azure_class:
-            mock_client = Mock()
-            mock_client.chat.completions.create.side_effect = make_response
-            mock_azure_class.return_value = mock_client
-
+        with chaosllm_azure_openai_sequence(chaosllm_server, response_factory) as (
+            _mock_client,
+            call_count,
+            _mock_azure_class,
+        ):
             # pool_size=4, 4 queries/row -> all queries can run in parallel
             transform = AzureMultiQueryLLMTransform(make_config(pool_size=4))
             init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
@@ -586,7 +472,7 @@ class TestConcurrentRowProcessing:
             _, result, _state_id = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert mock_client.chat.completions.create.call_count == 4
+            assert call_count[0] == 4
 
             # Max concurrent should be close to pool_size (4) or at least > 1
             # This verifies query-level parallelism is working
@@ -618,6 +504,7 @@ class TestSequentialFallback:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Sequential mode fails query immediately on capacity error (no retry).
 
@@ -636,6 +523,7 @@ class TestSequentialFallback:
             return None
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Success"},
             first_call_fails,
         ) as (_mock_client, call_count):
@@ -676,7 +564,8 @@ class TestSequentialFallback:
             assert call_count[0] == 4
 
             # Verify it's an immediate failure, not a retry timeout
-            assert result.reason["failed_queries"][0]["error"]["reason"] == "rate_limited"
+            # error is now a string extracted from the TransformErrorReason["error"] field
+            assert "Rate limit" in result.reason["failed_queries"][0]["error"]
 
 
 class TestMemoryLeakPrevention:
@@ -698,6 +587,7 @@ class TestMemoryLeakPrevention:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Per-query LLM clients should be cleaned up after batch processing.
 
@@ -716,7 +606,7 @@ class TestMemoryLeakPrevention:
         config = make_config(max_capacity_retry_seconds=10)
         del config["pool_size"]
 
-        with mock_azure_openai_responses(responses) as mock_client:
+        with chaosllm_azure_openai_responses(chaosllm_server, responses) as mock_client:
             transform = AzureMultiQueryLLMTransform(config)
             init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
             transform.on_start(init_ctx)
@@ -767,6 +657,7 @@ class TestMemoryLeakPrevention:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """Per-query clients should be cleaned up even if batch processing fails."""
         from openai import RateLimitError as OpenAIRateLimitError
@@ -779,6 +670,7 @@ class TestMemoryLeakPrevention:
             )
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 90, "rationale": "Never returned"},
             always_fail,
         ):
@@ -842,6 +734,7 @@ class TestLLMErrorRetry:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """NetworkError should be retried by the pool (P2 bug fix).
 
@@ -861,6 +754,7 @@ class TestLLMErrorRetry:
             return None
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Good"},
             first_two_fail,
         ) as (_mock_client, call_count):
@@ -901,6 +795,7 @@ class TestLLMErrorRetry:
         self,
         mock_recorder: Mock,
         collector: CollectorOutputPort,
+        chaosllm_server,
     ) -> None:
         """ContentPolicyError should NOT be retried (non-retryable error).
 
@@ -918,6 +813,7 @@ class TestLLMErrorRetry:
             )
 
         with mock_azure_openai_with_counter(
+            chaosllm_server,
             {"score": 85, "rationale": "Never returned"},
             always_fail_content_policy,
         ) as (_mock_client, call_count):
