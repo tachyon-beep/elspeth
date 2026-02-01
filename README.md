@@ -336,6 +336,24 @@ concurrency:
 
 This design ensures audit trail integrity while optimizing performance where it matters. See [ADR-001](docs/design/adr/001-plugin-level-concurrency.md) for rationale.
 
+### Rate Limiting
+
+Control external API call rates to avoid provider throttling:
+
+```yaml
+rate_limit:
+  enabled: true
+  services:
+    azure_openai:           # Azure OpenAI LLM transforms
+      requests_per_minute: 100
+    azure_content_safety:   # Content Safety transform
+      requests_per_minute: 50
+    azure_prompt_shield:    # Prompt Shield transform
+      requests_per_minute: 50
+```
+
+Rate limits are **per-service** - all plugins using the same service share the bucket. See [Configuration Reference](docs/reference/configuration.md#rate-limit-settings) for details.
+
 </details>
 
 ---

@@ -505,32 +505,119 @@ concurrency:
 
 ## Rate Limit Settings
 
-Limit external API calls to avoid throttling.
+Limit external API calls to avoid throttling. Rate limits are applied at the **service level** - all plugins using the same service share the rate limit bucket.
 
 ```yaml
 rate_limit:
   enabled: true
-  default_requests_per_minute: 100
+  default_requests_per_minute: 60
   persistence_path: ./rate_limits.db
   services:
-    openai:
+    azure_openai:
       requests_per_minute: 100
-    weather_api:
-      requests_per_minute: 120
+    azure_content_safety:
+      requests_per_minute: 50
+    azure_prompt_shield:
+      requests_per_minute: 50
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Enable rate limiting |
-| `default_requests_per_minute` | int | `60` | Default per-minute limit |
-| `persistence_path` | string | - | SQLite path for cross-process limits |
-| `services` | object | `{}` | Per-service configurations |
+| `default_requests_per_minute` | int | `60` | Default per-minute limit for unconfigured services |
+| `persistence_path` | string | - | SQLite path for cross-process rate limit state |
+| `services` | object | `{}` | Per-service rate limit configurations |
 
 ### Service Rate Limit
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `requests_per_minute` | int | **Yes** | Maximum requests per minute |
+| `requests_per_minute` | int | **Yes** | Maximum requests per minute for this service |
+
+### Built-in Service Names
+
+ELSPETH's built-in plugins use these service names for rate limiting:
+
+| Service Name | Used By | Description |
+|--------------|---------|-------------|
+| `azure_openai` | `azure_llm`, `azure_multi_query_llm` | Azure OpenAI API calls |
+| `azure_content_safety` | `azure_content_safety` | Azure Content Safety API |
+| `azure_prompt_shield` | `azure_prompt_shield` | Azure Prompt Shield API |
+
+**Important:** Service names must use **underscores**, not hyphens (e.g., `azure_openai`, not `azure-openai`). This follows the internal validation pattern `^[a-zA-Z][a-zA-Z0-9_]*`.
+
+### How Rate Limiting Works
+
+1. **Configuration**: Define service limits in your pipeline YAML
+2. **Registry**: The `RateLimitRegistry` creates limiters for each configured service
+3. **Acquisition**: Plugins acquire rate limit tokens before making external calls
+4. **Blocking**: When the limit is reached, calls block until capacity is available
+
+Rate limits apply per-service across all uses in a pipeline. For example, if you have two `azure_llm` transforms, they share the `azure_openai` rate limit.
+
+### Example: Azure LLM Pipeline with Rate Limits
+
+```yaml
+source:
+  plugin: csv
+  options:
+    path: data/prompts.csv
+    schema:
+      fields: dynamic
+
+transforms:
+  # First LLM transform
+  - plugin: azure_llm
+    options:
+      deployment_name: gpt-4o
+      endpoint: ${AZURE_OPENAI_ENDPOINT}
+      api_key: ${AZURE_OPENAI_KEY}
+      template: "Classify: {{ row.text }}"
+      schema:
+        fields: dynamic
+
+  # Second LLM transform - shares rate limit with first
+  - plugin: azure_llm
+    options:
+      deployment_name: gpt-4o
+      endpoint: ${AZURE_OPENAI_ENDPOINT}
+      api_key: ${AZURE_OPENAI_KEY}
+      template: "Summarize: {{ row.text }}"
+      schema:
+        fields: dynamic
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output/results.csv
+      schema:
+        fields: dynamic
+
+default_sink: output
+
+# Rate limiting - both transforms share this limit
+rate_limit:
+  enabled: true
+  services:
+    azure_openai:
+      requests_per_minute: 100  # 100 RPM shared across all azure_llm transforms
+```
+
+### Persistence for Distributed Systems
+
+For multi-process or distributed deployments, configure `persistence_path` to share rate limit state:
+
+```yaml
+rate_limit:
+  enabled: true
+  persistence_path: /shared/rate_limits.db  # SQLite file on shared storage
+  services:
+    azure_openai:
+      requests_per_minute: 100
+```
+
+This ensures rate limits are respected across multiple pipeline processes hitting the same external APIs.
 
 ---
 
@@ -833,7 +920,10 @@ retry:
 
 rate_limit:
   enabled: true
-  default_requests_per_minute: 600
+  default_requests_per_minute: 60
+  services:
+    azure_openai:
+      requests_per_minute: 100
 
 payload_store:
   backend: filesystem
