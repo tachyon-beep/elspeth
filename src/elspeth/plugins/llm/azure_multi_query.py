@@ -245,7 +245,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
-        self._limiter = ctx.rate_limit_registry.get_limiter("azure-openai") if ctx.rate_limit_registry is not None else None
+        self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""

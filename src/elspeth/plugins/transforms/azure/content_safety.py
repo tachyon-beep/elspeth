@@ -211,7 +211,7 @@ class AzureContentSafety(BaseTransform, BatchTransformMixin):
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure Content Safety service (None if rate limiting disabled)
-        self._limiter = ctx.rate_limit_registry.get_limiter("azure-content-safety") if ctx.rate_limit_registry is not None else None
+        self._limiter = ctx.rate_limit_registry.get_limiter("azure_content_safety") if ctx.rate_limit_registry is not None else None
 
     def connect_output(
         self,
