@@ -177,6 +177,7 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "SIM108", # ternary operator - prefer explicit if/else for readability with comments
+    "UP043",  # unnecessary default type args - keep explicit for Python 3.12 compatibility
 ]
 
 [tool.ruff.lint.isort]
