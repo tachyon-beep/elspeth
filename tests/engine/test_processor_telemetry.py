@@ -536,6 +536,62 @@ class BatchAwareTransformForTelemetry(BaseTransform):
             return TransformResult.success(row, success_reason={"action": "passthrough"})
 
 
+class FailingBatchAwareTransform(BaseTransform):
+    """Batch-aware transform that fails during batch processing.
+
+    Used to test telemetry ordering in failed flush paths.
+    """
+
+    name = "failing_batch"
+    input_schema = DynamicSchema
+    output_schema = DynamicSchema
+    is_batch_aware = True
+    plugin_version = "1.0.0"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"fields": "dynamic"}})
+
+    def process(self, row: Any, ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            # Batch mode - return error to simulate flush failure
+            return TransformResult.error({"reason": "intentional_batch_failure"})
+        else:
+            # Single row mode - succeed (shouldn't be called in batch mode)
+            return TransformResult.success(row)
+
+
+class PassthroughBatchAwareTransform(BaseTransform):
+    """Batch-aware transform that enriches rows for passthrough mode testing.
+
+    Unlike BatchAwareTransformForTelemetry which aggregates N rows → 1 row,
+    this transform returns N enriched rows (1:1 mapping) for passthrough mode.
+    """
+
+    name = "batch_passthrough"
+    input_schema = DynamicSchema
+    output_schema = DynamicSchema
+    is_batch_aware = True
+    plugin_version = "1.0.0"
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"fields": "dynamic"}})
+
+    def process(self, row: Any, ctx: Any) -> TransformResult:
+        if isinstance(row, list):
+            # Batch mode - enrich each row with batch metadata
+            enriched_rows = [{**r, "batch_processed": True, "batch_size": len(row)} for r in row]
+            return TransformResult.success_multi(
+                enriched_rows,
+                success_reason={"action": "batch_passthrough"},
+            )
+        else:
+            # Single row mode
+            return TransformResult.success(
+                {**row, "batch_processed": False},
+                success_reason={"action": "passthrough"},
+            )
+
+
 class TelemetryTestSource:
     """Simple test source for telemetry tests."""
 
@@ -746,3 +802,313 @@ class TestAggregationFlushTelemetry:
             f"got {len(transform_events)}. "
             f"Bug P3-2026-01-31: End-of-source flush should emit TransformCompleted."
         )
+
+    def test_transform_mode_aggregation_ordering_bug(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Bug P2-2026-02-01: TransformCompleted must precede TokenCompleted for aggregation.
+
+        In transform-mode aggregation, tokens become terminal (CONSUMED_IN_BATCH) when buffered,
+        but TransformCompleted only fires at flush time. This causes TransformCompleted to
+        arrive AFTER TokenCompleted for buffered (non-triggering) tokens.
+        """
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        transform = BatchAwareTransformForTelemetry()
+
+        # Create source with 3 rows - tokens 1 and 2 will buffer, token 3 triggers flush
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+                {"id": 3, "value": 30},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # Configure aggregation with count=3 trigger in TRANSFORM mode
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_telemetry",
+            trigger=TriggerConfig(count=3),
+            output_mode="transform",  # Crucial: transform mode makes tokens terminal on buffer
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Get events and check ordering per token
+        events = exporter.events
+
+        # Find all TransformCompleted and TokenCompleted events
+        transform_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TransformCompleted)]
+        token_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TokenCompleted)]
+
+        # For EACH token, TransformCompleted MUST come before TokenCompleted
+        for tc_idx, tc_event in token_completed_events:
+            token_id = tc_event.token_id
+
+            # Find matching TransformCompleted for this token
+            matching_transform = [(idx, e) for idx, e in transform_completed_events if e.token_id == token_id]
+
+            if matching_transform:
+                tf_idx, _tf_event = matching_transform[0]
+                assert tf_idx < tc_idx, (
+                    f"Bug P2-2026-02-01: TransformCompleted (index {tf_idx}) arrived AFTER "
+                    f"TokenCompleted (index {tc_idx}) for token {token_id}. "
+                    f"Transform-mode aggregation emits TokenCompleted at buffer time, "
+                    f"but TransformCompleted at flush time - ordering is reversed."
+                )
+
+    def test_transform_mode_aggregation_batch_size_one_ordering(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Bug P2-2026-02-01: Batch size=1 triggers flush immediately - verify ordering.
+
+        Edge case: when count=1, every token triggers flush immediately.
+        There's no "buffering" period, so ordering should still be correct.
+        """
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        transform = BatchAwareTransformForTelemetry()
+
+        # 3 rows, each triggers flush immediately (count=1)
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+                {"id": 3, "value": 30},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # Batch size = 1: every token triggers flush immediately
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_telemetry",
+            trigger=TriggerConfig(count=1),
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        # Verify ordering for each token
+        events = exporter.events
+        transform_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TransformCompleted)]
+        token_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TokenCompleted)]
+
+        # Should have 3 TransformCompleted (one per token, since batch_size=1)
+        assert len(transform_completed_events) == 3
+
+        # For each token, TransformCompleted must precede TokenCompleted
+        for tc_idx, tc_event in token_completed_events:
+            token_id = tc_event.token_id
+            matching_transform = [(idx, e) for idx, e in transform_completed_events if e.token_id == token_id]
+            if matching_transform:
+                tf_idx, _ = matching_transform[0]
+                assert tf_idx < tc_idx, (
+                    f"Batch size=1 edge case: TransformCompleted ({tf_idx}) must precede TokenCompleted ({tc_idx}) for token {token_id}"
+                )
+
+    def test_passthrough_mode_no_ordering_issue(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Negative test: Passthrough mode should NOT have the P2-2026-02-01 ordering bug.
+
+        In passthrough mode, tokens get BUFFERED (non-terminal) when buffered, then
+        COMPLETED when flush succeeds. TokenCompleted only fires at flush time, so
+        ordering is naturally correct (TransformCompleted, then TokenCompleted).
+        """
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        # Use passthrough-compatible transform (returns N rows for N inputs)
+        transform = PassthroughBatchAwareTransform()
+
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+                {"id": 3, "value": 30},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # PASSTHROUGH mode - tokens continue after flush, not consumed
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_passthrough",
+            trigger=TriggerConfig(count=3),
+            output_mode="passthrough",  # Key difference from transform mode
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        assert result.status == RunStatus.COMPLETED
+
+        events = exporter.events
+        transform_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TransformCompleted)]
+        token_completed_events = [(i, e) for i, e in enumerate(events) if isinstance(e, TokenCompleted)]
+
+        # Passthrough mode: tokens get COMPLETED at flush, so TokenCompleted fires then
+        # Verify ordering is correct (TransformCompleted before TokenCompleted)
+        for tc_idx, tc_event in token_completed_events:
+            token_id = tc_event.token_id
+            matching_transform = [(idx, e) for idx, e in transform_completed_events if e.token_id == token_id]
+            if matching_transform:
+                tf_idx, _ = matching_transform[0]
+                assert tf_idx < tc_idx, (
+                    f"Passthrough mode should NOT have ordering bug: TransformCompleted ({tf_idx}) "
+                    f"must precede TokenCompleted ({tc_idx}) for token {token_id}"
+                )
+
+    def test_transform_mode_failed_flush_emits_token_completed(self, landscape_db: LandscapeDB, payload_store) -> None:
+        """Bug P2-2026-02-01: Failed flush must still emit TokenCompleted for buffered tokens.
+
+        On error path in transform mode:
+        - TransformCompleted is NOT emitted (transform didn't succeed)
+        - TokenCompleted MUST be emitted (tokens are terminal with CONSUMED_IN_BATCH)
+        """
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+
+        exporter = RecordingExporter()
+        telemetry_manager = TelemetryManager(MockTelemetryConfig(), exporters=[exporter])
+
+        # Use failing batch-aware transform
+        transform = FailingBatchAwareTransform()
+
+        source = TelemetryTestSource(
+            [
+                {"id": 1, "value": 10},
+                {"id": 2, "value": 20},
+                {"id": 3, "value": 30},
+            ]
+        )
+
+        sink = TelemetryTestSink()
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+            default_sink="output",
+            coalesce_settings=None,
+        )
+
+        transform_id_map = graph.get_transform_id_map()
+        transform_node_id = transform_id_map[0]
+
+        # Transform mode with count=3 trigger
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="failing_batch",
+            trigger=TriggerConfig(count=3),
+            output_mode="transform",
+        )
+
+        config = PipelineConfig(
+            source=source,
+            transforms=[transform],
+            sinks={"output": sink},
+            aggregation_settings={transform_node_id: agg_settings},
+        )
+
+        orchestrator = Orchestrator(landscape_db, telemetry_manager=telemetry_manager)
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        # Run completes (with failures recorded)
+        assert result.status == RunStatus.COMPLETED
+
+        events = exporter.events
+        token_completed_events = [e for e in events if isinstance(e, TokenCompleted)]
+        transform_completed_events = [e for e in events if isinstance(e, TransformCompleted)]
+
+        # On failed flush, TransformCompleted is NOT emitted (transform didn't succeed)
+        assert len(transform_completed_events) == 0, "TransformCompleted should NOT be emitted on failed flush"
+
+        # But TokenCompleted MUST be emitted for all 3 buffered tokens
+        # (they have CONSUMED_IN_BATCH outcome from buffer time)
+        assert len(token_completed_events) == 3, (
+            f"Expected 3 TokenCompleted events for buffered tokens, got {len(token_completed_events)}. "
+            f"Bug P2-2026-02-01: TokenCompleted must be emitted even on failed flush."
+        )
+
+        # All should have CONSUMED_IN_BATCH outcome (not FAILED - that would violate
+        # unique terminal outcome constraint)
+        for event in token_completed_events:
+            assert event.outcome == RowOutcome.CONSUMED_IN_BATCH, (
+                f"Expected CONSUMED_IN_BATCH outcome for token {event.token_id}, got {event.outcome}"
+            )

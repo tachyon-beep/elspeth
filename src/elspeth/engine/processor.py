@@ -534,7 +534,13 @@ class RowProcessor:
                 # Single/transform mode: tokens already have CONSUMED_IN_BATCH (terminal)
                 # DO NOT record FAILED - would violate unique terminal outcome constraint
                 # Return FAILED results for count tracking, but no DB recording needed
+                #
+                # Bug P2-2026-02-01: Emit TokenCompleted for all buffered tokens.
+                # TokenCompleted was deferred from buffer time to maintain ordering.
+                # Even on failed flush, tokens have CONSUMED_IN_BATCH outcome (terminal).
+                # Note: TransformCompleted is NOT emitted on error path (no successful processing).
                 for token in buffered_tokens:
+                    self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
                     results.append(
                         RowResult(
                             token=token,
@@ -627,6 +633,13 @@ class RowProcessor:
 
         elif output_mode == OutputMode.TRANSFORM:
             # Transform mode: N input rows -> M output rows with NEW tokens
+            #
+            # Bug P2-2026-02-01: Emit TokenCompleted for all buffered tokens AFTER
+            # TransformCompleted (emitted above at line 556-561). TokenCompleted was
+            # deferred from buffer time to maintain correct ordering.
+            for token in buffered_tokens:
+                self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+
             # Get output rows
             if result.is_multi_row:
                 if result.rows is None:
@@ -714,6 +727,27 @@ class RowProcessor:
 
         Engine buffers rows and calls transform.process(rows: list[dict])
         when the trigger fires.
+
+        TEMPORAL DECOUPLING (Bug P2-2026-02-01):
+
+        For transform-mode aggregation, there is intentional temporal decoupling
+        between Landscape recording and telemetry emission:
+
+        - **Landscape (audit trail)**: Records CONSUMED_IN_BATCH at buffer time.
+          This is the source of truth - the token IS terminal when buffered.
+
+        - **Telemetry (observability)**: Emits TokenCompleted at flush time.
+          Deferred to maintain ordering invariant (TransformCompleted before
+          TokenCompleted for each token).
+
+        DO NOT assume "Landscape recording and telemetry emission happen together"
+        for transform-mode aggregation. These two events have different timestamps.
+
+        This decoupling is necessary because:
+        1. Tokens become terminal (CONSUMED_IN_BATCH) when buffered
+        2. But TransformCompleted can only fire when the batch actually processes
+        3. Telemetry ordering requires TransformCompleted before TokenCompleted
+        4. Therefore TokenCompleted must be deferred to flush time
 
         Args:
             transform: The batch-aware transform
@@ -814,8 +848,15 @@ class RowProcessor:
                         outcome=RowOutcome.CONSUMED_IN_BATCH,
                         batch_id=batch_id,
                     )
-                    # Emit TokenCompleted telemetry AFTER Landscape recording
-                    self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
+
+                    # Bug P2-2026-02-01: Emit TokenCompleted for ALL buffered tokens.
+                    # TokenCompleted was deferred from buffer time to maintain ordering.
+                    # Even on failed flush, tokens have CONSUMED_IN_BATCH outcome (terminal).
+                    # Note: TransformCompleted is NOT emitted on error path (no successful processing).
+                    # Note: buffered_tokens includes the triggering token (buffered before flush check).
+                    for token in buffered_tokens:
+                        self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+
                     for token in buffered_tokens:
                         results.append(
                             RowResult(
@@ -834,6 +875,10 @@ class RowProcessor:
             # Each input token was processed by this aggregation transform as part of the batch.
             # Emitting per-token (rather than per-batch) maintains consistency with regular
             # transform telemetry and allows accurate token counting in observability dashboards.
+            #
+            # NOTE: For transform mode, the triggering token (current_token) also needs
+            # TransformCompleted, but it's emitted in the transform-mode block below AFTER
+            # its Landscape recording and BEFORE its TokenCompleted (Bug P2-2026-02-01).
             for token in buffered_tokens:
                 self._emit_transform_completed(
                     token=token,
@@ -960,8 +1005,18 @@ class RowProcessor:
                     outcome=RowOutcome.CONSUMED_IN_BATCH,
                     batch_id=batch_id,
                 )
-                # Emit TokenCompleted telemetry AFTER Landscape recording
-                self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
+
+                # Bug P2-2026-02-01: Emit TokenCompleted for ALL buffered tokens
+                # TransformCompleted was already emitted for all tokens (including current_token)
+                # in the loop at line 837-842 (buffered_tokens includes the triggering token
+                # because buffer_row() adds it before should_flush() is checked).
+                #
+                # TokenCompleted was deferred from buffer time for non-triggering tokens to
+                # maintain correct ordering (TransformCompleted before TokenCompleted).
+                # Now emit TokenCompleted for all of them.
+                for token in buffered_tokens:
+                    self._emit_token_completed(token, RowOutcome.CONSUMED_IN_BATCH)
+
                 triggering_result = RowResult(
                     token=current_token,
                     final_data=current_token.row_data,
@@ -1040,9 +1095,11 @@ class RowProcessor:
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
                 batch_id=nf_batch_id,
             )
-            # Emit TokenCompleted telemetry AFTER Landscape recording
-            # (CONSUMED_IN_BATCH is terminal - token won't reappear)
-            self._emit_token_completed(current_token, RowOutcome.CONSUMED_IN_BATCH)
+            # NOTE: Do NOT emit TokenCompleted telemetry here!
+            # Bug P2-2026-02-01: TokenCompleted must be deferred to flush time so that
+            # TransformCompleted can be emitted first. The token IS terminal in Landscape
+            # (CONSUMED_IN_BATCH recorded above), but telemetry ordering requires waiting
+            # until the batch actually processes at flush time.
             return (
                 RowResult(
                     token=current_token,

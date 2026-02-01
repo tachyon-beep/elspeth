@@ -83,3 +83,41 @@
 ## Notes / Links
 
 - Related change: `docs/bugs/closed/engine-processor/P3-2026-01-31-aggregation-flush-missing-telemetry.md`
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+**Approach:** Option A - Defer `TokenCompleted` for transform-mode buffered tokens until flush time.
+
+**Code Changes (5 locations in `src/elspeth/engine/processor.py`):**
+
+1. **Buffer path (lines 1078-1082):** Removed `TokenCompleted` emission at buffer time. Tokens are recorded as `CONSUMED_IN_BATCH` in Landscape immediately (audit trail), but telemetry is deferred to flush.
+
+2. **Count-trigger success (lines 1017-1023):** Added `TokenCompleted` emission for all buffered tokens after `TransformCompleted` loop completes.
+
+3. **Count-trigger error (lines 824-831):** Added `TokenCompleted` emission for buffered tokens on failed flush. Even when flush fails, tokens have terminal state that needs telemetry.
+
+4. **Timeout/EOS success (lines 633-636):** Same pattern as count-trigger - emit `TokenCompleted` after `TransformCompleted`.
+
+5. **Timeout/EOS error (lines 539-543):** Added `TokenCompleted` emission for error path.
+
+**Documentation Added:**
+
+- Temporal decoupling comment in `_process_batch_aggregation_node` docstring (lines 726-743) explaining that Landscape recording and telemetry emission intentionally happen at different times for transform-mode aggregation.
+
+**Tests Added (4 new tests in `tests/engine/test_processor_telemetry.py`):**
+
+1. `test_transform_mode_aggregation_ordering_bug` - Core fix validation
+2. `test_transform_mode_aggregation_batch_size_one_ordering` - Edge case: batch_size=1
+3. `test_passthrough_mode_no_ordering_issue` - Negative test confirming passthrough mode unaffected
+4. `test_transform_mode_failed_flush_emits_token_completed` - Error path telemetry
+
+**Test Results:**
+
+- 786 engine tests pass
+- 16 telemetry tests pass
+- mypy: no issues
+- ruff: all checks passed
+
+**ARB Review:** Approved by 4 specialist agents (architecture, python, quality, systems thinking) with all feedback implemented.
