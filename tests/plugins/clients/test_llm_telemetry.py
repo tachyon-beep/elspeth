@@ -107,6 +107,13 @@ class TestLLMClientTelemetry:
         assert len(event.request_hash) == 64  # SHA-256 hex digest
         assert event.response_hash is not None
         assert len(event.response_hash) == 64  # SHA-256 hex digest
+        # Full payloads are included for observability
+        assert event.request_payload is not None
+        assert event.request_payload["messages"] == [{"role": "user", "content": "Hello"}]
+        assert event.request_payload["model"] == "gpt-4"
+        assert event.response_payload is not None
+        assert event.response_payload["content"] == "Hello!"
+        assert event.response_payload["model"] == "gpt-4"
         assert event.token_usage == {"prompt_tokens": 10, "completion_tokens": 5}
         assert isinstance(event.timestamp, datetime)
 
@@ -150,6 +157,10 @@ class TestLLMClientTelemetry:
         assert event.request_hash is not None
         assert len(event.request_hash) == 64  # SHA-256 hex digest
         assert event.response_hash is None  # No response on error
+        # Request payload is still included on error for debugging
+        assert event.request_payload is not None
+        assert event.request_payload["messages"] == [{"role": "user", "content": "Hello"}]
+        assert event.response_payload is None  # No response on error
         assert event.token_usage is None
 
     def test_noop_callback_works(self) -> None:

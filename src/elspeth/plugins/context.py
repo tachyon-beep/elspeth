@@ -331,6 +331,8 @@ class PluginContext:
                     latency_ms=latency_ms or 0.0,
                     request_hash=stable_hash(request_data),
                     response_hash=stable_hash(response_data) if response_data is not None else None,
+                    request_payload=request_data,  # Full request for observability
+                    response_payload=response_data,  # Full response for observability
                     token_usage=token_usage,
                 )
             )

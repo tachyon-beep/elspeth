@@ -386,18 +386,22 @@ class _SyntheticReadableSpan(_ReadableSpanBase):
         start_time: int,
         end_time: int,
         kind: Any,  # SpanKind
+        resource: Any | None = None,  # Resource - optional, defaults to empty
     ) -> None:
         # Import SDK types for parent __init__
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.util.instrumentation import InstrumentationScope
         from opentelemetry.trace import Status, StatusCode
 
+        # Use provided resource or create empty default
+        span_resource = resource if resource is not None else Resource.create({})
+
         # Call parent __init__ with appropriate defaults
         super().__init__(
             name=name,
             context=context,
             parent=None,  # Synthetic spans have no parent
-            resource=Resource.create({}),
+            resource=span_resource,
             attributes=attributes,
             events=(),
             links=(),

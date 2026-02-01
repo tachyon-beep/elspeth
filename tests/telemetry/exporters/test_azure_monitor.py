@@ -36,6 +36,9 @@ def mock_azure_exporter():
     Uses patch on the specific import location rather than polluting sys.modules.
     This is the correct pattern for mocking optional dependencies that are
     imported lazily inside methods.
+
+    Note: We don't mock the OpenTelemetry SDK (Resource, TracerProvider) because
+    they are required to test the proper creation of resource attributes.
     """
     mock_exporter_class = MagicMock()
     mock_instance = MagicMock()
@@ -126,13 +129,74 @@ class TestAzureMonitorExporterConfiguration:
         assert exporter._configured is True
 
     def test_configure_passes_connection_string_to_sdk(self, mock_azure_exporter) -> None:
-        """Connection string is passed to Azure SDK."""
+        """Connection string and tracer_provider are passed to Azure SDK."""
         exporter = AzureMonitorExporter()
         exporter.configure({"connection_string": "InstrumentationKey=my-key-123"})
 
-        mock_azure_exporter["class"].assert_called_once_with(
-            connection_string="InstrumentationKey=my-key-123",
+        # Verify connection_string was passed
+        call_kwargs = mock_azure_exporter["class"].call_args.kwargs
+        assert call_kwargs["connection_string"] == "InstrumentationKey=my-key-123"
+        # Verify tracer_provider was passed (fixes ProxyTracerProvider bug)
+        assert "tracer_provider" in call_kwargs
+        assert call_kwargs["tracer_provider"] is not None
+
+    def test_configure_validates_service_name_type(self, mock_azure_exporter) -> None:
+        """service_name must be a string if provided."""
+        exporter = AzureMonitorExporter()
+        with pytest.raises(TelemetryExporterError) as exc_info:
+            exporter.configure({"connection_string": "test", "service_name": 123})
+        assert "'service_name' must be a string" in str(exc_info.value)
+
+    def test_configure_validates_service_version_type(self, mock_azure_exporter) -> None:
+        """service_version must be a string or None if provided."""
+        exporter = AzureMonitorExporter()
+        with pytest.raises(TelemetryExporterError) as exc_info:
+            exporter.configure({"connection_string": "test", "service_version": 123})
+        assert "'service_version' must be a string or null" in str(exc_info.value)
+
+    def test_configure_validates_deployment_environment_type(self, mock_azure_exporter) -> None:
+        """deployment_environment must be a string or None if provided."""
+        exporter = AzureMonitorExporter()
+        with pytest.raises(TelemetryExporterError) as exc_info:
+            exporter.configure({"connection_string": "test", "deployment_environment": 123})
+        assert "'deployment_environment' must be a string or null" in str(exc_info.value)
+
+    def test_configure_with_service_metadata(self, mock_azure_exporter) -> None:
+        """Service metadata is passed to TracerProvider resource."""
+        from opentelemetry.sdk.resources import SERVICE_NAME
+        from opentelemetry.sdk.trace import TracerProvider
+
+        exporter = AzureMonitorExporter()
+        exporter.configure(
+            {
+                "connection_string": "InstrumentationKey=test-key",
+                "service_name": "my-pipeline",
+                "service_version": "2.0.0",
+                "deployment_environment": "staging",
+            }
         )
+
+        # Verify tracer_provider was passed with correct resource
+        call_kwargs = mock_azure_exporter["class"].call_args.kwargs
+        tracer_provider = call_kwargs["tracer_provider"]
+        assert isinstance(tracer_provider, TracerProvider)
+
+        # Verify resource attributes
+        resource_attrs = tracer_provider.resource.attributes
+        assert resource_attrs[SERVICE_NAME] == "my-pipeline"
+        assert resource_attrs["service.version"] == "2.0.0"
+        assert resource_attrs["deployment.environment"] == "staging"
+
+    def test_configure_default_service_name(self, mock_azure_exporter) -> None:
+        """Default service name is 'elspeth' when not specified."""
+        from opentelemetry.sdk.resources import SERVICE_NAME
+
+        exporter = AzureMonitorExporter()
+        exporter.configure({"connection_string": "InstrumentationKey=test-key"})
+
+        call_kwargs = mock_azure_exporter["class"].call_args.kwargs
+        tracer_provider = call_kwargs["tracer_provider"]
+        assert tracer_provider.resource.attributes[SERVICE_NAME] == "elspeth"
 
 
 class TestAzureMonitorExporterBuffering:

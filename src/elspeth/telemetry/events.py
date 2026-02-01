@@ -15,6 +15,7 @@ Event categories:
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from elspeth.contracts.enums import (
     CallStatus,
@@ -121,6 +122,12 @@ class ExternalCallCompleted(TelemetryEvent):
         latency_ms: Call duration in milliseconds
         request_hash: Hash of request payload for debugging (optional)
         response_hash: Hash of response payload for debugging (optional)
+        request_payload: Full request data for observability (optional).
+            For LLM calls: contains 'messages' (prompt), 'model', 'temperature', etc.
+            For HTTP calls: contains 'method', 'url', 'json', 'headers', etc.
+        response_payload: Full response data for observability (optional).
+            For LLM calls: contains 'content' (completion), 'model', 'usage', etc.
+            For HTTP calls: contains 'status_code', 'headers', 'body', etc.
         token_usage: LLM token counts if applicable (optional)
     """
 
@@ -132,6 +139,8 @@ class ExternalCallCompleted(TelemetryEvent):
     operation_id: str | None = None
     request_hash: str | None = None
     response_hash: str | None = None
+    request_payload: dict[str, Any] | None = None
+    response_payload: dict[str, Any] | None = None
     token_usage: dict[str, int] | None = None
 
     def __post_init__(self) -> None:

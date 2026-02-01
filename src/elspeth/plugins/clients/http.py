@@ -337,6 +337,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
+                        request_payload=request_data,  # Full request for observability
+                        response_payload=response_data,  # Full response for observability
                         token_usage=None,  # HTTP calls don't have token usage
                     )
                 )
@@ -384,6 +386,8 @@ class AuditedHTTPClient(AuditedClientBase):
                         operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=None,  # No response on exception
+                        request_payload=request_data,  # Full request for observability
+                        response_payload=None,  # No response on exception
                         token_usage=None,
                     )
                 )

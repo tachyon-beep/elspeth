@@ -155,6 +155,9 @@ telemetry:
       options:
         connection_string: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
         batch_size: 100  # Events per batch (default: 100)
+        service_name: "my-pipeline"  # Service name in App Insights (default: "elspeth")
+        service_version: "1.0.0"  # Service version (optional)
+        deployment_environment: "production"  # Environment tag (optional)
 ```
 
 **Required dependency:**
@@ -166,6 +169,7 @@ uv pip install azure-monitor-opentelemetry-exporter
 - Spans include `cloud.provider=azure` for filtering
 - Full integration with Application Insights Distributed Tracing blade
 - Compatible with Azure Monitor alerting rules
+- Resource attributes (`service.name`, `service.version`, `deployment.environment`) for proper service identification
 
 **Finding your connection string:**
 1. Go to Azure Portal > Application Insights resource

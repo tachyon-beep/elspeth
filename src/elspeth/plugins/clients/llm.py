@@ -351,6 +351,8 @@ class AuditedLLMClient(AuditedClientBase):
                         operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=stable_hash(response_data),
+                        request_payload=request_data,  # Full request for observability
+                        response_payload=response_data,  # Full response for observability
                         token_usage=usage if usage else None,
                     )
                 )
@@ -411,6 +413,8 @@ class AuditedLLMClient(AuditedClientBase):
                         operation_id=None,  # Not in source/sink context
                         request_hash=stable_hash(request_data),
                         response_hash=None,  # No response on error
+                        request_payload=request_data,  # Full request for observability
+                        response_payload=None,  # No response on error
                         token_usage=None,
                     )
                 )

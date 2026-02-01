@@ -2233,6 +2233,36 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=f8945e242d939c22
+  owner: architecture
+  reason: Optional field access at trust boundary (service_name from user config)
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=d0f9f61fb8ca36b4
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=2c2f502ecdbb09eb
+  owner: architecture
+  reason: Optional field access at trust boundary (service_version from user config)
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=2dab84922a954e5b
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=0e956ff0da7c5be4
+  owner: architecture
+  reason: Optional field access at trust boundary (deployment_environment from user config)
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=7e06a415b1ef7350
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
 - key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:fp=e9e0e9f016c30c80
   owner: architecture
   reason: Broad exception handling at external boundary with logging
