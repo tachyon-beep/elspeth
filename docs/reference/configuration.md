@@ -619,6 +619,96 @@ rate_limit:
 
 This ensures rate limits are respected across multiple pipeline processes hitting the same external APIs.
 
+### Two-Layer Rate Control (LLM Transforms)
+
+LLM transforms like `azure_multi_query_llm` have **two complementary throttling mechanisms** working at different layers:
+
+| Layer | Mechanism | Purpose | When It Acts |
+|-------|-----------|---------|--------------|
+| **Client** | `RateLimiter` | Proactive prevention | **Before** each API call |
+| **Transform** | `PooledExecutor` with AIMD | Reactive handling | **After** receiving 429 |
+
+These are **defense-in-depth**, not competing systems.
+
+**Request Flow:**
+
+```
+                          Row arrives
+                               │
+                               ▼
+              ┌────────────────────────────────┐
+              │      BatchTransformMixin       │
+              │   (row-level pipelining)       │
+              └────────────────────────────────┘
+                               │
+                               ▼
+              ┌────────────────────────────────┐
+              │      PooledExecutor            │
+              │  (query-level parallelism)     │
+              │  - Runs N queries in parallel  │
+              │  - AIMD retry on 429           │
+              └────────────────────────────────┘
+                               │
+                               ▼  (for each query)
+              ┌────────────────────────────────┐
+              │      AuditedLLMClient          │
+              │  1. _acquire_rate_limit() ◄────┼── Blocks until RPM available
+              │  2. Make API call              │
+              │  3. Record to audit trail      │
+              └────────────────────────────────┘
+                               │
+                               ▼
+                          Azure API
+```
+
+**How each layer works:**
+
+1. **RateLimiter (Proactive)** - Configured in YAML under `rate_limit.services`:
+   - Blocks each API call until the configured RPM limit has capacity
+   - Uses a sliding window (per minute)
+   - Shared across all uses of the same service (e.g., `azure_openai`)
+   - **Prevents** 429s through smooth, predictable throttling
+
+2. **PooledExecutor AIMD (Reactive)** - Configured in plugin options:
+   - Handles 429 errors that slip through (bursts, quota changes, shared quotas)
+   - Uses AIMD backoff: multiply delay on 429, subtract on success
+   - Retries until `max_capacity_retry_seconds` timeout
+   - **Recovers** from 429s gracefully
+
+**Configuration example with both layers:**
+
+```yaml
+# Proactive rate limiting (YAML config)
+rate_limit:
+  enabled: true
+  services:
+    azure_openai:
+      requests_per_minute: 100  # Proactive: block before exceeding this rate
+
+# Reactive handling (plugin options)
+transforms:
+  - plugin: azure_multi_query_llm
+    options:
+      deployment_name: gpt-4o
+      endpoint: ${AZURE_OPENAI_ENDPOINT}
+      api_key: ${AZURE_OPENAI_KEY}
+      pool_size: 8                      # Concurrent queries per row
+      max_dispatch_delay_ms: 5000       # Max AIMD backoff delay (ms)
+      max_capacity_retry_seconds: 3600  # Give up after 1 hour of 429s
+      # ... other options
+```
+
+**Tuning guide:**
+
+| Symptom | Tune This | How |
+|---------|-----------|-----|
+| Getting 429s frequently | `rate_limit.services.<name>.requests_per_minute` | Lower the RPM |
+| Queries too slow (blocking unnecessarily) | `rate_limit.services.<name>.requests_per_minute` | Raise RPM (if quota allows) |
+| 429 recovery too aggressive | Plugin `max_dispatch_delay_ms` | Increase max backoff |
+| 429s causing row failures | Plugin `max_capacity_retry_seconds` | Increase retry timeout |
+
+**Key insight:** RateLimiter is your first line of defense (smooth, predictable throttling), while PooledExecutor AIMD is your safety net (handles bursts and quota changes gracefully).
+
 ---
 
 ## Telemetry Settings
