@@ -60,6 +60,13 @@ class PluginConfig(BaseModel):
             config_copy = dict(config)
             if "schema" in config_copy:
                 schema_dict = config_copy.pop("schema")
+                # Type guard: schema must be a dict (not None, string, list, etc.)
+                if not isinstance(schema_dict, dict):
+                    raise PluginConfigError(
+                        f"Invalid configuration for {cls.__name__}: "
+                        f"'schema' must be a dict, got {type(schema_dict).__name__}. "
+                        f"Use 'schema: {{fields: dynamic}}' or provide explicit field definitions."
+                    )
                 config_copy["schema_config"] = SchemaConfig.from_dict(schema_dict)
             return cls.model_validate(config_copy)
         except ValidationError as e:

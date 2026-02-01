@@ -2974,3 +2974,139 @@ class TestEnvVarExpansion:
         result = _expand_env_vars(config)
 
         assert result["prefix"] == ""
+
+
+class TestSinkNameCasing:
+    """Sink names must be lowercase - explicit validation, no silent transformation."""
+
+    def test_lowercase_sink_names_accepted(self) -> None:
+        """Lowercase sink names work as expected."""
+        from elspeth.core.config import ElspethSettings
+
+        settings = ElspethSettings(
+            source={"plugin": "csv"},
+            sinks={"output": {"plugin": "csv"}, "error_sink": {"plugin": "csv"}},
+            default_sink="output",
+        )
+        assert "output" in settings.sinks
+        assert "error_sink" in settings.sinks
+
+    def test_mixed_case_sink_name_rejected(self) -> None:
+        """Mixed-case sink names are rejected with a clear error."""
+        from elspeth.core.config import ElspethSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            ElspethSettings(
+                source={"plugin": "csv"},
+                sinks={"MyOutput": {"plugin": "csv"}},
+                default_sink="MyOutput",
+            )
+        # Should get a clear error about lowercase requirement
+        assert "lowercase" in str(exc_info.value).lower()
+        assert "MyOutput" in str(exc_info.value)
+
+    def test_uppercase_sink_name_rejected(self) -> None:
+        """Uppercase sink names are rejected with a clear error."""
+        from elspeth.core.config import ElspethSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            ElspethSettings(
+                source={"plugin": "csv"},
+                sinks={"OUTPUT": {"plugin": "csv"}},
+                default_sink="OUTPUT",
+            )
+        assert "lowercase" in str(exc_info.value).lower()
+
+    def test_sink_name_with_underscores_and_numbers_accepted(self) -> None:
+        """Sink names with underscores and numbers are fine if lowercase."""
+        from elspeth.core.config import ElspethSettings
+
+        settings = ElspethSettings(
+            source={"plugin": "csv"},
+            sinks={"output_v2": {"plugin": "csv"}, "sink_123": {"plugin": "csv"}},
+            default_sink="output_v2",
+        )
+        assert "output_v2" in settings.sinks
+        assert "sink_123" in settings.sinks
+
+    def test_default_sink_must_exist(self) -> None:
+        """default_sink must reference a defined sink."""
+        from elspeth.core.config import ElspethSettings
+
+        with pytest.raises(ValidationError) as exc_info:
+            ElspethSettings(
+                source={"plugin": "csv"},
+                sinks={"output": {"plugin": "csv"}},
+                default_sink="nonexistent",
+            )
+        assert "nonexistent" in str(exc_info.value)
+        assert "not found" in str(exc_info.value).lower()
+
+    def test_load_settings_preserves_sink_names(self, tmp_path: Path) -> None:
+        """Sink names from YAML are preserved (not silently lowercased)."""
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+sinks:
+  MyOutput:
+    plugin: csv
+default_sink: MyOutput
+""")
+        # Should fail with clear error about lowercase requirement
+        with pytest.raises(ValidationError) as exc_info:
+            load_settings(config_file)
+        assert "lowercase" in str(exc_info.value).lower()
+        assert "MyOutput" in str(exc_info.value)
+
+
+class TestPluginConfigSchemaValidation:
+    """PluginConfig.from_dict handles malformed schema gracefully."""
+
+    def test_schema_null_gives_clear_error(self) -> None:
+        """schema: null should give a clear error, not TypeError."""
+        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            PluginConfig.from_dict({"schema": None})
+        # Should mention schema must be a dict/mapping, not TypeError
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg
+        assert "dict" in error_msg or "mapping" in error_msg
+
+    def test_schema_string_gives_clear_error(self) -> None:
+        """schema: 'invalid' should give a clear error."""
+        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            PluginConfig.from_dict({"schema": "invalid"})
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg
+
+    def test_schema_list_gives_clear_error(self) -> None:
+        """schema: [fields] should give a clear error."""
+        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            PluginConfig.from_dict({"schema": ["fields"]})
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg
+
+    def test_schema_int_gives_clear_error(self) -> None:
+        """schema: 123 should give a clear error."""
+        from elspeth.plugins.config_base import PluginConfig, PluginConfigError
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            PluginConfig.from_dict({"schema": 123})
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg
+
+    def test_valid_schema_dict_works(self) -> None:
+        """Valid schema dict should work fine."""
+        from elspeth.plugins.config_base import PluginConfig
+
+        config = PluginConfig.from_dict({"schema": {"fields": "dynamic"}})
+        assert config.schema_config is not None
+        assert config.schema_config.is_dynamic

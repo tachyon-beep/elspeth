@@ -892,6 +892,23 @@ class ElspethSettings(BaseModel):
             raise ValueError("At least one sink is required")
         return v
 
+    @field_validator("sinks")
+    @classmethod
+    def validate_sink_names_lowercase(cls, v: dict[str, SinkSettings]) -> dict[str, SinkSettings]:
+        """Sink names must be lowercase identifiers.
+
+        This is enforced explicitly rather than silently normalized to:
+        1. Fail fast with clear error messages
+        2. Avoid case mismatches between keys and references
+        3. Ensure consistency with environment variable overrides (which are uppercased by Dynaconf)
+        """
+        non_lowercase = [name for name in v if name != name.lower()]
+        if non_lowercase:
+            # Provide helpful suggestions
+            suggestions = [f"'{name}' -> '{name.lower()}'" for name in non_lowercase]
+            raise ValueError(f"Sink names must be lowercase. Found: {non_lowercase}. Suggested fixes: {', '.join(suggestions)}")
+        return v
+
 
 # Regex pattern for ${VAR} or ${VAR:-default} syntax
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}")
@@ -1330,20 +1347,21 @@ def _expand_template_files(
     return result
 
 
-def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False) -> Any:
+def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _parent_key: str = "") -> Any:
     """Lowercase dictionary keys for Pydantic schema matching, preserving user data.
 
     Dynaconf returns keys in UPPERCASE when they come from environment variables,
-    but Pydantic expects lowercase field names. However, user data inside 'options'
-    dicts must be preserved exactly as written - these can contain case-sensitive
-    keys like output_mapping: {"Score": "score"} where "Score" must match the
-    LLM's JSON response field name.
+    but Pydantic expects lowercase field names. However, user-defined identifiers
+    must be preserved exactly as written:
+    - 'options' dict contents (case-sensitive keys like output_mapping: {"Score": "score"})
+    - 'sinks' dict keys (user-defined sink names - validated separately for lowercase)
 
     Args:
         obj: Any value - dicts are processed recursively, lists have their
              elements processed, other types pass through unchanged.
         _preserve_nested: Internal flag - when True, stop lowercasing keys
-             (we're inside an 'options' dict).
+             (we're inside an 'options' or 'sinks' dict).
+        _parent_key: The key that led to this dict (used to detect 'sinks' entries).
 
     Returns:
         The input with schema-level dict keys lowercased, but user data preserved.
@@ -1351,14 +1369,17 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False) -> Any:
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
-            # Lowercase the key unless we're inside an options dict
+            # Lowercase the key unless we're inside user data (options or sinks)
             new_key = k if _preserve_nested else k.lower()
-            # Once we enter 'options', preserve all nested keys
-            child_preserve = _preserve_nested or (new_key == "options")
-            result[new_key] = _lowercase_schema_keys(v, _preserve_nested=child_preserve)
+            # Preserve keys inside 'options' (user data like {"Score": "score"})
+            # Preserve keys inside 'sinks' (user-defined sink names)
+            # Note: sink names are validated for lowercase separately
+            is_user_data_container = new_key in ("options", "sinks")
+            child_preserve = _preserve_nested or is_user_data_container
+            result[new_key] = _lowercase_schema_keys(v, _preserve_nested=child_preserve, _parent_key=new_key)
         return result
     if isinstance(obj, list):
-        return [_lowercase_schema_keys(item, _preserve_nested=_preserve_nested) for item in obj]
+        return [_lowercase_schema_keys(item, _preserve_nested=_preserve_nested, _parent_key=_parent_key) for item in obj]
     return obj
 
 

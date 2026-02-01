@@ -2598,3 +2598,8 @@ allow_hits:
   reason: Tier-3 boundary validation - Azure batch API response is external data requiring type validation
   safety: Malformed response is recorded in malformed_lines and batch fails gracefully with audit trail
   expires: '2026-05-02'
+- key: plugins/config_base.py:R5:PluginConfig:from_dict:fp=424af2ed9bbafb71
+  owner: bugfix
+  reason: Tier-3 boundary validation - user config 'schema' field is external data requiring type validation before SchemaConfig.from_dict()
+  safety: Raises explicit PluginConfigError with helpful message; prevents confusing TypeError from downstream code
+  expires: null
