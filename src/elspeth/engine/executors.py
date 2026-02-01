@@ -376,6 +376,7 @@ class TransformExecutor:
                 output_data=output_data,
                 duration_ms=duration_ms,
                 success_reason=result.success_reason,
+                context_after=result.context_after,
             )
             # Update token with new row data, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)

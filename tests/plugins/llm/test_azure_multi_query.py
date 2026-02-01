@@ -721,3 +721,154 @@ class TestSequentialMode:
             assert len(transform._llm_clients) == 0
         finally:
             transform.close()
+
+
+class TestPoolMetadataAuditIntegration:
+    """Tests for pool metadata flowing to audit trail.
+
+    P3-2026-02-02: Pooling metadata should be persisted to context_after_json.
+    """
+
+    @pytest.fixture
+    def mock_recorder(self) -> Mock:
+        """Create mock LandscapeRecorder."""
+        recorder = Mock()
+        recorder.record_call = Mock()
+        return recorder
+
+    @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
+
+    def test_parallel_mode_includes_pool_stats_in_context_after(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
+        """Parallel mode should include pool_stats in TransformResult.context_after.
+
+        This metadata enables auditors to verify:
+        - Pool utilization (max_concurrent_reached)
+        - Throttle behavior (capacity_retries, total_throttle_time_ms)
+        - Config at completion time (dispatch_delay_at_completion_ms)
+        """
+        config = make_config(pool_size=4)
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        # 4 queries per row (2 case studies x 2 criteria)
+        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+
+        try:
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
+                row = {
+                    "cs1_bg": "bg1",
+                    "cs1_sym": "sym1",
+                    "cs1_hist": "hist1",
+                    "cs2_bg": "bg2",
+                    "cs2_sym": "sym2",
+                    "cs2_hist": "hist2",
+                }
+                token = make_token("row-1")
+                ctx = PluginContext(
+                    run_id="run-123",
+                    config={},
+                    landscape=mock_recorder,
+                    state_id="state-pool-001",
+                    token=token,
+                )
+                transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
+        assert result.status == "success"
+
+        # VERIFY: context_after should contain pool metadata
+        assert result.context_after is not None, (
+            "TransformResult.context_after should contain pool metadata. "
+            "_execute_queries_parallel must call executor.get_stats() and "
+            "include it in the result."
+        )
+
+        # Verify pool_config is present
+        assert "pool_config" in result.context_after, f"pool_config missing from context_after. Got: {result.context_after.keys()}"
+        pool_config = result.context_after["pool_config"]
+        assert pool_config["pool_size"] == 4
+
+        # Verify pool_stats is present
+        assert "pool_stats" in result.context_after, f"pool_stats missing from context_after. Got: {result.context_after.keys()}"
+        pool_stats = result.context_after["pool_stats"]
+        # max_concurrent_reached should be > 0 since queries ran in parallel
+        assert "max_concurrent_reached" in pool_stats
+        assert pool_stats["max_concurrent_reached"] > 0
+
+    def test_parallel_mode_includes_query_ordering_in_context_after(
+        self,
+        mock_recorder: Mock,
+        collector: CollectorOutputPort,
+        chaosllm_server,
+    ) -> None:
+        """Parallel mode should include per-query ordering metadata.
+
+        This enables auditors to:
+        - Verify reordering worked correctly
+        - Identify "lost" rows by examining ordering gaps
+        - Measure buffer wait times
+        """
+        config = make_config(pool_size=4)
+        transform = AzureMultiQueryLLMTransform(config)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        responses = [{"score": i, "rationale": f"R{i}"} for i in range(4)]
+
+        try:
+            with chaosllm_azure_openai_responses(chaosllm_server, responses):
+                row = {
+                    "cs1_bg": "bg1",
+                    "cs1_sym": "sym1",
+                    "cs1_hist": "hist1",
+                    "cs2_bg": "bg2",
+                    "cs2_sym": "sym2",
+                    "cs2_hist": "hist2",
+                }
+                token = make_token("row-1")
+                ctx = PluginContext(
+                    run_id="run-123",
+                    config={},
+                    landscape=mock_recorder,
+                    state_id="state-ordering-001",
+                    token=token,
+                )
+                transform.accept(row, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        _, result, _ = collector.results[0]
+        assert result.context_after is not None
+
+        # Verify query_ordering is present
+        assert "query_ordering" in result.context_after, f"query_ordering missing from context_after. Got: {result.context_after.keys()}"
+        query_ordering = result.context_after["query_ordering"]
+
+        # Should have 4 entries (2 case studies x 2 criteria)
+        assert len(query_ordering) == 4, f"Expected 4 query ordering entries, got {len(query_ordering)}"
+
+        # Each entry should have ordering metadata
+        for entry in query_ordering:
+            assert "submit_index" in entry
+            assert "complete_index" in entry
+            assert "buffer_wait_ms" in entry
+            assert isinstance(entry["submit_index"], int)
+            assert isinstance(entry["complete_index"], int)
+            assert isinstance(entry["buffer_wait_ms"], float)

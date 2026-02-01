@@ -17,7 +17,7 @@ open/
 ├── core-dag/                 # DAG validation, graph construction (0 P1, 0 P2, 0 P3)
 ├── core-landscape/           # Audit trail, recovery, verifier (0 P1, 0 P2, 0 P3)
 ├── core-logging/             # Logging/telemetry output (0 P1, 0 P2, 0 P3)
-├── core-rate-limit/          # Rate limiters (0 P1, 1 P2, 0 P3)
+├── core-rate-limit/          # Rate limiters (0 P1, 0 P2, 0 P3)
 ├── core-retention/           # Retention/purge (0 P1, 0 P2, 0 P3)
 ├── core-security/            # Secret handling (0 P1, 0 P2, 0 P3)
 ├── engine-coalesce/          # Fork/join/merge logic (0 P1, 0 P2, 0 P3) - EMPTY
@@ -53,7 +53,7 @@ open/
 | **engine-processor** | 0 | 0 | 0 | 0 | — |
 | **engine-retry** | 0 | 0 | 0 | 0 | — |
 | **engine-spans** | 0 | 0 | 1 | 1 | Observability spans |
-| **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiting wiring |
+| **core-rate-limit** | 0 | 0 | 0 | 0 | — |
 | **plugins-sinks** | 0 | 0 | 0 | 0 | — |
 | **cli** | 0 | 0 | 0 | 0 | — |
 | **core-dag** | 0 | 0 | 0 | 0 | — |
@@ -70,7 +70,7 @@ open/
 | **engine-triggers** | 0 | 0 | 0 | 0 | — |
 | **plugins-sources** | 0 | 0 | 0 | 0 | — |
 | **plugins-transforms** | 0 | 0 | 0 | 0 | — |
-| **TOTAL** | **0** | **2** | **2** | **4** | All bugs organized |
+| **TOTAL** | **0** | **1** | **2** | **3** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -123,7 +123,7 @@ Note: P1s closed during RC1 bug hunt:
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 0 P1, 2 P2, 2 P3 = 4 total.**
+**Open bugs (as of 2026-02-01): 0 P1, 1 P2, 2 P3 = 3 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).

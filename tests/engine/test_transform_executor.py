@@ -582,6 +582,95 @@ class TestTransformExecutor:
         call_kwargs = mock.call_args.kwargs
         assert call_kwargs.get("attempt") == 2
 
+    def test_execute_transform_passes_context_after_to_recorder(self) -> None:
+        """TransformResult.context_after should be passed to complete_node_state.
+
+        P3-2026-02-02: Pooling metadata flows through context_after to the audit trail.
+        This test verifies the executor passes context_after to the recorder.
+        """
+        import json
+
+        from elspeth.contracts import TokenInfo
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="pool_metadata",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Transform that returns context_after (simulating pooled executor)
+        pool_context = {
+            "pool_config": {"pool_size": 4, "dispatch_delay_at_completion_ms": 50},
+            "pool_stats": {"max_concurrent_reached": 4, "capacity_retries": 2},
+            "query_ordering": [
+                {"submit_index": 0, "complete_index": 1, "buffer_wait_ms": 15.3},
+                {"submit_index": 1, "complete_index": 0, "buffer_wait_ms": 0.5},
+            ],
+        }
+
+        class PooledTransform:
+            name = "pool_metadata"
+            node_id = node.node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(
+                    row,
+                    success_reason={"action": "enriched"},
+                    context_after=pool_context,
+                )
+
+        transform = PooledTransform()
+        ctx = PluginContext(run_id=run.run_id, config={})
+        executor = TransformExecutor(recorder, SpanFactory())
+
+        token = TokenInfo(
+            row_id="row-1",
+            token_id="token-1",
+            row_data={"value": 42},
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data=token.row_data,
+            row_id=token.row_id,
+        )
+        recorder.create_token(row_id=row.row_id, token_id=token.token_id)
+
+        executor.execute_transform(
+            transform=as_transform(transform),
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=1,
+        )
+
+        # Verify context_after was recorded in node state
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        state = states[0]
+        assert isinstance(state, NodeStateCompleted)
+        assert state.context_after_json is not None, (
+            "context_after should be recorded in node state. "
+            "TransformExecutor.execute_transform must pass context_after to complete_node_state."
+        )
+
+        # Verify the content
+        context_after = json.loads(state.context_after_json)
+        assert context_after["pool_config"]["pool_size"] == 4
+        assert context_after["pool_stats"]["max_concurrent_reached"] == 4
+        assert len(context_after["query_ordering"]) == 2
+
 
 class TestTransformErrorIdRegression:
     """Regression tests for P2-2026-01-19-transform-errors-ambiguous-transform-id.

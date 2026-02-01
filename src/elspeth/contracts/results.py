@@ -112,6 +112,11 @@ class TransformResult:
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)
 
+    # Context snapshot for audit trail (optional)
+    # Contains operational metadata like pool stats, ordering info
+    # P3-2026-02-02: Enables pool metadata to flow to context_after_json
+    context_after: dict[str, Any] | None = field(default=None, repr=False)
+
     def __post_init__(self) -> None:
         """Validate invariants - success results MUST have success_reason."""
         if self.status == "success" and self.success_reason is None:
@@ -137,6 +142,7 @@ class TransformResult:
         row: dict[str, Any],
         *,
         success_reason: TransformSuccessReason,
+        context_after: dict[str, Any] | None = None,
     ) -> TransformResult:
         """Create successful result with single output row.
 
@@ -145,6 +151,8 @@ class TransformResult:
             success_reason: REQUIRED metadata about what the transform did.
                            Must include at least 'action' field.
                            See TransformSuccessReason for available fields.
+            context_after: Optional operational metadata for audit trail
+                          (e.g., pool stats, ordering info).
 
         Returns:
             TransformResult with status="success" and the provided row.
@@ -161,6 +169,7 @@ class TransformResult:
             reason=None,
             rows=None,
             success_reason=success_reason,
+            context_after=context_after,
         )
 
     @classmethod
@@ -169,6 +178,7 @@ class TransformResult:
         rows: list[dict[str, Any]],
         *,
         success_reason: TransformSuccessReason,
+        context_after: dict[str, Any] | None = None,
     ) -> TransformResult:
         """Create successful result with multiple output rows.
 
@@ -177,6 +187,8 @@ class TransformResult:
             success_reason: REQUIRED metadata about what the transform did.
                            Must include at least 'action' field.
                            See TransformSuccessReason for available fields.
+            context_after: Optional operational metadata for audit trail
+                          (e.g., pool stats, ordering info).
 
         Returns:
             TransformResult with status="success", row=None, rows=rows
@@ -198,6 +210,7 @@ class TransformResult:
             reason=None,
             rows=rows,
             success_reason=success_reason,
+            context_after=context_after,
         )
 
     @classmethod
@@ -206,6 +219,7 @@ class TransformResult:
         reason: TransformErrorReason,
         *,
         retryable: bool = False,
+        context_after: dict[str, Any] | None = None,
     ) -> TransformResult:
         """Create error result with structured reason.
 
@@ -214,6 +228,8 @@ class TransformResult:
                     TransformErrorCategory (compile-time validated).
                     See TransformErrorReason for all available context fields.
             retryable: Whether the error is transient and should be retried.
+            context_after: Optional operational metadata for audit trail
+                          (e.g., pool stats from partial execution).
 
         Returns:
             TransformResult with status="error" and the provided reason.
@@ -224,6 +240,7 @@ class TransformResult:
             reason=reason,
             retryable=retryable,
             rows=None,
+            context_after=context_after,
         )
 
 

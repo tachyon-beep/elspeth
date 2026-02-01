@@ -2845,3 +2845,170 @@ allow_hits:
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
   expires: null
+# Updated fingerprints after pooling metadata integration (2026-02-02)
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryConfig:parse_output_mapping:fp=2b8dde2ec6798ba0
+  owner: architecture
+  reason: AST/type checking - required for safe parsing or discriminated unions
+  safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=039eec1cb7c4e678
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=8c87442482ab3458
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=29a3917e355e9c46
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=968863ecb5f1cadc
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=1dfc1d63e78aaf10
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=2ed34d4583975ae7
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=8dd20e8ff7ab1e33
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=4bdaf0be6db1e7d1
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=8959b675e773fe47
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=455f3255c0ee0f4f
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=9b9efbb5e4f6f57a
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=05dd82b8fe3e4ae0
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=bf769a0ddee7b909
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=a987e8f48bf176f2
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=8110ee1b402ee402
+  owner: architecture
+  reason: Optional field access - Azure OpenAI usage response may have missing fields
+  safety: Defaults to 0 - safe for metrics, not audit critical
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=909745d538b68471
+  owner: architecture
+  reason: Optional field access - Azure OpenAI usage response may have missing fields
+  safety: Defaults to 0 - safe for metrics, not audit critical
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_process_single_query:fp=350225b0762703bf
+  owner: architecture
+  reason: AST/type checking - discriminated union result validation
+  safety: Returns error result on validation failure
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R9:AzureMultiQueryLLMTransform:_process_row:fp=90a7d49f630e8b48
+  owner: architecture
+  reason: Cleanup/pop with default - client may not exist if row processing failed early
+  safety: Safe cleanup pattern, no-op if key missing
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R6:AzureMultiQueryLLMTransform:_execute_queries_sequential:fp=22922f2188c27dae
+  owner: architecture
+  reason: CapacityError handled - re-raised after adding to results
+  safety: Error propagates correctly via result list
+  expires: '2026-05-02'
+# Additional fingerprints for openrouter_multi_query.py (line shifts)
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=5b8e2c83a5486bd9
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=6e72a0ab7d61abdd
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=80048896a95550ac
+  owner: architecture
+  reason: Optional field access - HTTP response headers may be missing
+  safety: Defaults to unknown - safe for audit context
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=1de7fdda88870e63
+  owner: architecture
+  reason: Defensive check for malformed response data
+  safety: Logs actual keys when response is not a dict
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=c8d2bafafbee0416
+  owner: architecture
+  reason: Optional field access - usage may not be present in response
+  safety: Defaults to empty dict - safe for metrics
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=50004002d9e5742f
+  owner: architecture
+  reason: Optional field access - completion_tokens may be missing
+  safety: Defaults to 0 - safe for metrics
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=3b03c0a326990ff1
+  owner: architecture
+  reason: Optional field access - prompt_tokens may be missing
+  safety: Defaults to 0 - safe for metrics
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=5fa270f1e99a0e0f
+  owner: architecture
+  reason: Tier-3 boundary validation - JSON response must be dict
+  safety: Returns error result if not dict
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=70a60b60cc456f3e
+  owner: architecture
+  reason: Optional field - actual model may differ from requested
+  safety: Falls back to configured model - safe for audit
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R9:OpenRouterMultiQueryLLMTransform:_process_row:fp=8627ed431a9edfed
+  owner: architecture
+  reason: Cleanup/pop with default - client may not exist if row processing failed early
+  safety: Safe cleanup pattern, no-op if key missing
+  expires: '2026-05-02'
+- key: plugins/llm/openrouter_multi_query.py:R6:OpenRouterMultiQueryLLMTransform:_execute_queries_sequential:fp=e46e7c2f8c38d4db
+  owner: architecture
+  reason: CapacityError handled - re-raised after adding to results
+  safety: Error propagates correctly via result list
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=07c1d40e9afeb88f
+  owner: architecture
+  reason: AST/type checking - bool is subclass of int check
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'
+- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=a04fbcb4f9c16682
+  owner: architecture
+  reason: AST/type checking - LLM response validation at Tier-3 boundary
+  safety: Returns validation error if type doesn't match
+  expires: '2026-05-02'

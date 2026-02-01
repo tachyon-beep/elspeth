@@ -54,7 +54,7 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "success"
+        assert results[0].result.status == "success"
         assert call_count[0] == 3  # Failed twice, succeeded third time
 
     def test_server_error_503_triggers_retry(
@@ -76,7 +76,7 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "success"
+        assert results[0].result.status == "success"
         assert call_count[0] == 2  # Failed once, succeeded second time
 
     def test_rate_limit_error_triggers_retry(
@@ -98,7 +98,7 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "success"
+        assert results[0].result.status == "success"
         assert call_count[0] == 4  # Failed 3x, succeeded 4th time
 
     def test_content_policy_error_fails_immediately_no_retry(
@@ -118,11 +118,11 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "error"
+        assert results[0].result.status == "error"
         assert call_count[0] == 1  # Only called once, no retry
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "permanent_error"
-        assert "ContentPolicyError" in results[0].reason["error_type"]
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "permanent_error"
+        assert "ContentPolicyError" in results[0].result.reason["error_type"]
 
     def test_context_length_error_fails_immediately_no_retry(
         self,
@@ -141,10 +141,10 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "error"
+        assert results[0].result.status == "error"
         assert call_count[0] == 1  # Only called once, no retry
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "permanent_error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "permanent_error"
 
     def test_client_error_401_fails_immediately_no_retry(
         self,
@@ -163,10 +163,10 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "error"
+        assert results[0].result.status == "error"
         assert call_count[0] == 1  # Only called once, no retry
-        assert results[0].reason is not None
-        assert "401" in results[0].reason["error"]
+        assert results[0].result.reason is not None
+        assert "401" in results[0].result.reason["error"]
 
     def test_retryable_error_timeout_after_max_retry_seconds(
         self,
@@ -186,10 +186,10 @@ class TestRetryableErrorHandling:
         elapsed = time.monotonic() - start
 
         assert len(results) == 1
-        assert results[0].status == "error"
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "retry_timeout"
-        assert results[0].reason["error_type"] == "NetworkError"
+        assert results[0].result.status == "error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "retry_timeout"
+        assert results[0].result.reason["error_type"] == "NetworkError"
         # Should timeout around 1 second (max_capacity_retry_seconds)
         # Allow some variance for system load
         assert 0.9 <= elapsed <= 2.0
@@ -229,17 +229,17 @@ class TestRetryableErrorHandling:
         assert len(results) == 3
 
         # Row 0: Retried and succeeded
-        assert results[0].status == "success"
+        assert results[0].result.status == "success"
         assert call_counts[0][0] == 2
 
         # Row 1: Failed immediately (no retry)
-        assert results[1].status == "error"
+        assert results[1].result.status == "error"
         assert call_counts[1][0] == 1
-        assert results[1].reason is not None
-        assert results[1].reason["reason"] == "permanent_error"
+        assert results[1].result.reason is not None
+        assert results[1].result.reason["reason"] == "permanent_error"
 
         # Row 2: Immediate success
-        assert results[2].status == "success"
+        assert results[2].result.status == "success"
         assert call_counts[2][0] == 1
 
     def test_capacity_error_still_works(
@@ -261,7 +261,7 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "success"
+        assert results[0].result.status == "success"
         assert call_count[0] == 2  # Failed once, succeeded second time
 
     def test_capacity_error_timeout_includes_status_code(
@@ -279,10 +279,10 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "error"
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "retry_timeout"
-        assert results[0].reason["status_code"] == 429  # Should include status_code
+        assert results[0].result.status == "error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "retry_timeout"
+        assert results[0].result.reason["status_code"] == 429  # Should include status_code
 
     def test_non_capacity_error_timeout_no_status_code(
         self,
@@ -299,11 +299,11 @@ class TestRetryableErrorHandling:
         results = executor.execute_batch(contexts, process_fn)
 
         assert len(results) == 1
-        assert results[0].status == "error"
-        assert results[0].reason is not None
-        assert results[0].reason["reason"] == "retry_timeout"
-        assert "status_code" not in results[0].reason  # Should NOT include status_code
-        assert results[0].reason["error_type"] == "NetworkError"
+        assert results[0].result.status == "error"
+        assert results[0].result.reason is not None
+        assert results[0].result.reason["reason"] == "retry_timeout"
+        assert "status_code" not in results[0].result.reason  # Should NOT include status_code
+        assert results[0].result.reason["error_type"] == "NetworkError"
 
 
 class TestDispatchGateAfterRetry:

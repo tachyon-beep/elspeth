@@ -83,6 +83,53 @@ class TestTransformResultMultiRow:
         assert error.has_output_data is False
 
 
+class TestTransformResultContextAfter:
+    """Tests for context_after field in TransformResult.
+
+    P3-2026-02-02: Pool metadata (ordering, stats) should flow through
+    TransformResult to the audit trail via context_after.
+    """
+
+    def test_context_after_defaults_to_none(self) -> None:
+        """context_after should default to None when not provided."""
+        result = TransformResult.success({"x": 1}, success_reason={"action": "test"})
+        assert result.context_after is None
+
+    def test_context_after_can_be_provided_to_success(self) -> None:
+        """Success factory should accept context_after for audit metadata."""
+        pool_context = {
+            "pool_config": {"pool_size": 4},
+            "pool_stats": {"max_concurrent_reached": 4},
+        }
+        result = TransformResult.success(
+            {"x": 1},
+            success_reason={"action": "enriched"},
+            context_after=pool_context,
+        )
+        assert result.context_after == pool_context
+
+    def test_context_after_can_be_provided_to_error(self) -> None:
+        """Error factory should accept context_after for partial execution metadata."""
+        pool_context = {
+            "pool_stats": {"capacity_retries": 5},
+        }
+        result = TransformResult.error(
+            {"reason": "retry_timeout"},
+            context_after=pool_context,
+        )
+        assert result.context_after == pool_context
+
+    def test_context_after_not_in_repr(self) -> None:
+        """context_after should have repr=False for cleaner output."""
+        result = TransformResult.success(
+            {"x": 1},
+            success_reason={"action": "test"},
+            context_after={"pool_stats": {"large": "metadata"}},
+        )
+        repr_str = repr(result)
+        assert "context_after" not in repr_str
+
+
 class TestTransformResult:
     """Tests for TransformResult."""
 

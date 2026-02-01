@@ -17,12 +17,13 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism, TransformErrorReason, TransformResult
+from elspeth.contracts.errors import QueryFailureDetail
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
@@ -801,27 +802,37 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             TransformResult with all query results merged, or error
         """
         # Execute all queries (parallel or sequential)
+        # P3-2026-02-02: Parallel mode returns pool context for audit trail
+        pool_context: dict[str, Any] | None = None
         if self._executor is not None:
-            results = self._execute_queries_parallel(row, state_id)
+            results, pool_context = self._execute_queries_parallel(row, state_id)
         else:
             results = self._execute_queries_sequential(row, state_id)
 
         # Check for failures (all-or-nothing for this row)
         failed = [(spec, r) for spec, r in zip(self._query_specs, results, strict=True) if r.status != "success"]
         if failed:
+            # Include pool context even on error for partial execution audit
             return TransformResult.error(
                 {
                     "reason": "query_failed",
                     "failed_queries": [
-                        {
-                            "query": spec.output_prefix,
-                            "error": r.reason.get("error", str(r.reason)) if isinstance(r.reason, dict) else str(r.reason),
-                        }
+                        cast(
+                            QueryFailureDetail,
+                            {
+                                "query": spec.output_prefix,
+                                # r.reason is always dict with "error" key for failed results
+                                # (TransformResult.error always sets reason, PooledExecutor
+                                # always includes "error" key in error dicts)
+                                "error": r.reason["error"] if r.reason is not None else "unknown",
+                            },
+                        )
                         for spec, r in failed
                     ],
                     "succeeded_count": len(results) - len(failed),
                     "total_count": len(results),
-                }
+                },
+                context_after=pool_context,
             )
 
         # Merge all results into output row
@@ -840,13 +851,14 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         return TransformResult.success(
             output,
             success_reason={"action": "enriched", "fields_added": all_fields_added},
+            context_after=pool_context,
         )
 
     def _execute_queries_parallel(
         self,
         row: dict[str, Any],
         state_id: str,
-    ) -> list[TransformResult]:
+    ) -> tuple[list[TransformResult], dict[str, Any]]:
         """Execute queries in parallel via PooledExecutor with AIMD retry.
 
         Uses PooledExecutor.execute_batch() to get:
@@ -859,7 +871,9 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             state_id: State ID for audit trail (shared across all queries for this row)
 
         Returns:
-            List of TransformResults in query spec order
+            Tuple of:
+            - List of TransformResults in query spec order
+            - Pool context dict for audit trail (pool_config, pool_stats, query_ordering)
         """
         from elspeth.plugins.pooling.executor import RowContext
 
@@ -891,10 +905,28 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             ),
         )
 
+        # Capture pool stats for audit trail (P3-2026-02-02)
+        pool_stats = self._executor.get_stats()
+
+        # Build ordering metadata from entries
+        query_ordering = [
+            {
+                "submit_index": entry.submit_index,
+                "complete_index": entry.complete_index,
+                "buffer_wait_ms": entry.buffer_wait_ms,
+            }
+            for entry in entries
+        ]
+
+        # Combine into pool context for context_after
+        pool_context = {
+            "pool_config": pool_stats["pool_config"],
+            "pool_stats": pool_stats["pool_stats"],
+            "query_ordering": query_ordering,
+        }
+
         # Extract results for return
-        # Note: entries contain ordering metadata (submit_index, complete_index,
-        # buffer_wait_ms) available for audit trail integration
-        return [entry.result for entry in entries]
+        return [entry.result for entry in entries], pool_context
 
     def _execute_queries_sequential(
         self,

@@ -149,7 +149,7 @@ These are the core promises of ELSPETH. Failure here is a showstopper.
 - [x] Azure LLM transform calls API and records response **[VERIFIED 2026-02-01]**
 - [x] Template variables substituted correctly **[VERIFIED 2026-02-01]**
 - [x] Structured output mode returns parsed JSON **[VERIFIED 2026-02-01]**
-- [ ] Rate limiting prevents 429 errors **[GAP: service names like "azure-openai" include '-' and violate RateLimiter name validation]**
+- [x] Rate limiting prevents 429 errors **[VERIFIED 2026-02-01]**
 
 ### 4.4 Sinks
 
