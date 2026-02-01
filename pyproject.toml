@@ -83,6 +83,9 @@ dev = [
     "types-PyYAML>=6.0,<7",  # PyYAML type hints
     # Mutation testing (Phase 3)
     "mutmut>=2.4,<3",  # Mutation testing
+    # ChaosLLM test server
+    "starlette>=0.45,<1",  # ASGI framework for ChaosLLM
+    "uvicorn>=0.34,<1",  # ASGI server for ChaosLLM
 ]
 
 llm = [
@@ -122,6 +125,8 @@ all = [
     "types-networkx>=3.2,<4",
     "types-PyYAML>=6.0,<7",
     "mutmut>=2.4,<3",
+    "starlette>=0.45,<1",
+    "uvicorn>=0.34,<1",
     # llm dependencies
     "jinja2>=3.1,<4",
     "openai>=2.15,<3",
