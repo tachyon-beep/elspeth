@@ -479,7 +479,7 @@ class TestOpenRouterLLMTransformIntegration:
         transform.close()
 
     @pytest.mark.chaosllm(internal_error_pct=100.0)
-    def test_http_error_returns_transform_error(
+    def test_http_server_error_raises_exception_for_retry(
         self,
         recorder: LandscapeRecorder,
         executor: TransformExecutor,
@@ -487,7 +487,9 @@ class TestOpenRouterLLMTransformIntegration:
         node_id: str,
         chaosllm_server,
     ) -> None:
-        """Verify HTTP errors are handled gracefully."""
+        """Verify 500 errors raise ServerError for engine RetryManager."""
+        from elspeth.plugins.clients.llm import ServerError
+
         transform = OpenRouterLLMTransform(
             {
                 "model": "anthropic/claude-3-opus",
@@ -512,25 +514,21 @@ class TestOpenRouterLLMTransformIntegration:
         row_data = {"text": "test"}
         token = self._create_token(recorder, run_id, node_id, row_data)
 
-        with self._patch_httpx_for_chaosllm(chaosllm_server):
-            result, _, error_sink = executor.execute_transform(
+        # Server errors (5xx) raise exceptions for engine RetryManager to handle
+        with self._patch_httpx_for_chaosllm(chaosllm_server), pytest.raises(ServerError) as exc_info:
+            executor.execute_transform(
                 transform=transform,
                 token=token,
                 ctx=ctx,
                 step_in_pipeline=0,
             )
 
-        # Verify error result
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "api_call_failed"
-        assert result.retryable is False  # 500 is not rate limit
-        assert error_sink == "discard"
+        assert "500" in str(exc_info.value)
 
         transform.close()
 
     @pytest.mark.chaosllm(rate_limit_pct=100.0)
-    def test_rate_limit_http_error_is_retryable(
+    def test_rate_limit_http_error_raises_exception_for_retry(
         self,
         recorder: LandscapeRecorder,
         executor: TransformExecutor,
@@ -538,7 +536,9 @@ class TestOpenRouterLLMTransformIntegration:
         node_id: str,
         chaosllm_server,
     ) -> None:
-        """Verify 429 HTTP errors are marked retryable."""
+        """Verify 429 HTTP errors raise RateLimitError for engine RetryManager."""
+        from elspeth.plugins.clients.llm import RateLimitError
+
         transform = OpenRouterLLMTransform(
             {
                 "model": "anthropic/claude-3-opus",
@@ -563,18 +563,16 @@ class TestOpenRouterLLMTransformIntegration:
         row_data = {"text": "test"}
         token = self._create_token(recorder, run_id, node_id, row_data)
 
-        with self._patch_httpx_for_chaosllm(chaosllm_server):
-            result, _, error_sink = executor.execute_transform(
+        # Rate limit errors (429) raise exceptions for engine RetryManager to handle
+        with self._patch_httpx_for_chaosllm(chaosllm_server), pytest.raises(RateLimitError) as exc_info:
+            executor.execute_transform(
                 transform=transform,
                 token=token,
                 ctx=ctx,
                 step_in_pipeline=0,
             )
 
-        # Verify retryable error
-        assert result.status == "error"
-        assert result.retryable is True
-        assert error_sink == "discard"
+        assert "429" in str(exc_info.value)
 
         transform.close()
 
