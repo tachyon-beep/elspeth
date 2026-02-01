@@ -25,7 +25,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import RoutingAction
+from elspeth.contracts import CoalesceName, GateName, RoutingAction, RoutingMode, SinkName
 from elspeth.contracts.enums import RowOutcome
 from elspeth.core.config import CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
@@ -150,6 +150,27 @@ def get_fork_group_stats(db: LandscapeDB, run_id: str) -> dict[str, int]:
         }
 
 
+def count_fork_groups_with_unexpected_children(db: LandscapeDB, run_id: str, expected_children: int) -> int:
+    """Count fork groups that don't have the expected number of children."""
+    with db.connection() as conn:
+        result = conn.execute(
+            text("""
+                SELECT COUNT(*)
+                FROM (
+                    SELECT t.fork_group_id, COUNT(*) AS child_count
+                    FROM tokens t
+                    JOIN rows r ON r.row_id = t.row_id
+                    WHERE r.run_id = :run_id
+                      AND t.fork_group_id IS NOT NULL
+                    GROUP BY t.fork_group_id
+                    HAVING COUNT(*) != :expected_children
+                ) bad_groups
+            """),
+            {"run_id": run_id, "expected_children": expected_children},
+        ).scalar()
+        return result or 0
+
+
 # =============================================================================
 # Hypothesis Strategies
 # =============================================================================
@@ -225,7 +246,19 @@ class TestDagForkBranchValidation:
             default_sink="sink_a",
         )
 
-        assert graph is not None
+        gate_id = graph.get_config_gate_id_map()[GateName(gate.name)]
+        sink_ids = graph.get_sink_id_map()
+        edges = graph.get_edges()
+
+        def has_fork_edge(branch: str, sink_name: str) -> bool:
+            sink_id = sink_ids[SinkName(sink_name)]
+            return any(
+                edge.from_node == gate_id and edge.to_node == sink_id and edge.label == branch and edge.mode == RoutingMode.COPY
+                for edge in edges
+            )
+
+        assert has_fork_edge("sink_a", "sink_a")
+        assert has_fork_edge("sink_b", "sink_b")
 
     def test_fork_to_coalesce_is_valid(self) -> None:
         """Fork branch targeting a coalesce is accepted."""
@@ -255,10 +288,21 @@ class TestDagForkBranchValidation:
             default_sink="default",
         )
 
-        assert graph is not None
         branch_map = graph.get_branch_to_coalesce_map()
-        assert "branch_a" in str(branch_map)
-        assert "branch_b" in str(branch_map)
+        assert branch_map == {"branch_a": "merge_point", "branch_b": "merge_point"}
+
+        gate_id = graph.get_config_gate_id_map()[GateName(gate.name)]
+        coalesce_id = graph.get_coalesce_id_map()[CoalesceName(coalesce.name)]
+        edges = graph.get_edges()
+
+        def has_fork_edge(branch: str) -> bool:
+            return any(
+                edge.from_node == gate_id and edge.to_node == coalesce_id and edge.label == branch and edge.mode == RoutingMode.COPY
+                for edge in edges
+            )
+
+        assert has_fork_edge("branch_a")
+        assert has_fork_edge("branch_b")
 
     def test_duplicate_fork_branches_rejected(self) -> None:
         """Fork with duplicate branch names is rejected."""
@@ -387,9 +431,20 @@ class TestForkJoinRuntimeBalance:
 
         # Verify fork statistics
         stats = get_fork_group_stats(db, run.run_id)
+        expected_children_per_group = len(gate.fork_to or [])
+        expected_children_total = n_rows * expected_children_per_group
         assert stats["total_fork_children"] == stats["children_with_parents"], (
             f"Not all fork children have parents: {stats['children_with_parents']}/{stats['total_fork_children']}"
         )
+        assert stats["total_fork_children"] == expected_children_total, (
+            f"Expected {expected_children_total} fork children (rows={n_rows}, branches={expected_children_per_group}), "
+            f"got {stats['total_fork_children']}."
+        )
+        assert stats["total_fork_groups"] == n_rows, (
+            f"Expected {n_rows} fork groups (one per parent token), got {stats['total_fork_groups']}."
+        )
+        bad_groups = count_fork_groups_with_unexpected_children(db, run.run_id, expected_children=expected_children_per_group)
+        assert bad_groups == 0, f"{bad_groups} fork groups have unexpected child counts."
 
 
 class TestForkJoinEnumProperties:

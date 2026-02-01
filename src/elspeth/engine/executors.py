@@ -311,18 +311,16 @@ class TransformExecutor:
                 # 3. Retry attempt gets new sequence number and can proceed
                 # 4. Original worker may still complete, but result is discarded
                 if isinstance(e, TimeoutError) and has_accept:
-                    evict_fn = getattr(transform, "evict_submission", None)
-                    if evict_fn is not None:
-                        try:
-                            evict_fn(token.token_id, state.state_id)
-                        except Exception as evict_err:
-                            # Eviction failure is logged but doesn't change the
-                            # original exception - timeout is still the root cause
-                            logger.warning(
-                                "Failed to evict timed-out submission for token %s: %s",
-                                token.token_id,
-                                evict_err,
-                            )
+                    # has_accept guarantees transform has evict_submission (batch protocol)
+                    evict_fn = transform.evict_submission  # type: ignore[attr-defined]
+                    if not callable(evict_fn):
+                        raise TypeError(
+                            f"Transform '{transform.name}' evict_submission must be callable, got {type(evict_fn).__name__}"
+                        ) from None
+                    try:
+                        evict_fn(token.token_id, state.state_id)
+                    except Exception as evict_err:
+                        raise RuntimeError(f"Failed to evict timed-out submission for token {token.token_id}") from evict_err
 
                 raise
 
@@ -1317,6 +1315,14 @@ class AggregationExecutor:
             evaluator = self._trigger_evaluators.get(node_id)
             elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
 
+            if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
+                raise RuntimeError(
+                    f"AggregationExecutor checkpoint missing batch_id for node {node_id}. "
+                    "Buffered tokens exist without an active batch_id - internal state corruption."
+                )
+
+            batch_id = self._batch_ids[node_id]
+
             # Store full TokenInfo as dicts (not just IDs)
             state[node_id] = {
                 "tokens": [
@@ -1328,7 +1334,7 @@ class AggregationExecutor:
                     }
                     for t in tokens
                 ],
-                "batch_id": self._batch_ids.get(node_id),
+                "batch_id": batch_id,
                 "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
             }
 
@@ -1367,7 +1373,7 @@ class AggregationExecutor:
                     "_version": "1.0",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
-                        "batch_id": str | None
+                        "batch_id": str
                     }
                 }
 
@@ -1433,15 +1439,24 @@ class AggregationExecutor:
             self._buffer_tokens[node_id] = reconstructed_tokens
             self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
 
-            # Restore batch tracking (batch_id is optional)
-            batch_id = node_state.get("batch_id")
-            if batch_id is not None:
-                self._batch_ids[node_id] = batch_id
-                self._member_counts[batch_id] = len(reconstructed_tokens)
+            if "batch_id" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'batch_id' key. "
+                    f"Found keys: {list(node_state.keys())}. "
+                    "Checkpoint entries with tokens must include batch_id."
+                )
+            batch_id = node_state["batch_id"]
+            if batch_id is None:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: 'batch_id' is None. "
+                    "Checkpoint entries with tokens must include a batch_id."
+                )
+            self._batch_ids[node_id] = batch_id
+            self._member_counts[batch_id] = len(reconstructed_tokens)
 
             # Restore trigger evaluator count and timeout age (Bug #6 fix)
-            evaluator = self._trigger_evaluators.get(node_id)
-            if evaluator is not None:
+            if node_id in self._trigger_evaluators:
+                evaluator = self._trigger_evaluators[node_id]
                 # Record each restored row as "accepted" to advance the count
                 for _ in reconstructed_tokens:
                     evaluator.record_accept()

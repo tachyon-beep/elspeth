@@ -317,18 +317,15 @@ class TestIdempotencyProperties:
     @settings(max_examples=50)
     def test_order_independent_extraction(self, fields: list[str]) -> None:
         """Property: Field order in template doesn't affect result set."""
-        import random
-
         # Create template with fields in original order
         template1 = " ".join(f"{{{{ row.{f} }}}}" for f in fields)
 
         # Create template with fields in reversed order
         template2 = " ".join(f"{{{{ row.{f} }}}}" for f in reversed(fields))
 
-        # Create template with fields in random order
-        shuffled = fields.copy()
-        random.shuffle(shuffled)
-        template3 = " ".join(f"{{{{ row.{f} }}}}" for f in shuffled)
+        # Create template with fields in rotated order
+        rotated = fields[1:] + fields[:1] if len(fields) > 1 else fields
+        template3 = " ".join(f"{{{{ row.{f} }}}}" for f in rotated)
 
         result1 = extract_jinja2_fields(template1)
         result2 = extract_jinja2_fields(template2)

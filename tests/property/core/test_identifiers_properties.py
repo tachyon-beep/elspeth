@@ -335,18 +335,15 @@ class TestValidationOrderProperties:
     @settings(max_examples=100)
     def test_order_of_valid_names_doesnt_matter(self, names: list[str]) -> None:
         """Property: Valid names pass regardless of order."""
-        import random
-
         # Original order
         validate_field_names(names, context="test")
 
         # Reversed order
         validate_field_names(list(reversed(names)), context="test")
 
-        # Shuffled order
-        shuffled = names.copy()
-        random.shuffle(shuffled)
-        validate_field_names(shuffled, context="test")
+        # Rotated order
+        rotated = names[1:] + names[:1] if len(names) > 1 else names
+        validate_field_names(rotated, context="test")
 
     @given(
         valid1=valid_identifiers,

@@ -691,10 +691,11 @@ class TestGuaranteedFieldsProperties:
     )
     @settings(max_examples=50)
     def test_guarantees_propagate_through_chain(self, g1: frozenset[str], g2: frozenset[str]) -> None:
-        """Property: Later nodes can add guarantees but earlier guarantees persist.
+        """Property: Later nodes define their own guarantees for downstream.
 
         In a chain: source(g1) -> transform(g2) -> sink
-        The transform's effective output is g2 (its declared guarantees).
+        The transform's effective output is g2 (its declared guarantees),
+        not a union with upstream.
         """
         graph = ExecutionGraph()
 

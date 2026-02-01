@@ -12,7 +12,6 @@ These tests exercise the PRODUCTION validation code in:
 They verify that validation correctly handles:
 - Non-JSON responses
 - Wrong JSON types (array when object expected)
-- Missing required fields
 - Truncated/partial JSON
 - Valid responses (positive cases)
 """

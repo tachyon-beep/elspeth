@@ -30,9 +30,11 @@ from enum import Enum, auto
 from typing import Any
 
 import hypothesis.strategies as st
+import pytest
 from hypothesis import given, settings
 from hypothesis.stateful import Bundle, RuleBasedStateMachine, invariant, multiple, rule
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts import (
     Determinism,
@@ -211,6 +213,10 @@ class TokenLifecycleStateMachine(RuleBasedStateMachine):
         self.model_tokens: dict[str, ModelToken] = {}
         self.row_index = 0
         self.step_counter = 0
+
+    def teardown(self) -> None:
+        """Close the in-memory database between state machine runs."""
+        self.db.close()
 
     # -------------------------------------------------------------------------
     # Rules: Token Creation
@@ -478,244 +484,253 @@ class TestTokenLifecycleInvariants:
     @settings(max_examples=20, deadline=None)
     def test_token_id_uniqueness(self, token_count: int) -> None:
         """Property: Token IDs are unique across multiple creations."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        with LandscapeDB.in_memory() as db:
+            recorder = LandscapeRecorder(db)
 
-        run = recorder.begin_run(
-            config={"source": {"plugin": "test"}},
-            canonical_version="1.0",
-        )
+            run = recorder.begin_run(
+                config={"source": {"plugin": "test"}},
+                canonical_version="1.0",
+            )
 
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=create_dynamic_schema(),
-        )
+            source_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_source",
+                node_type=NodeType.SOURCE,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
 
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source_node.node_id,
-            row_index=0,
-            data={"value": 1},
-        )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=source_node.node_id,
+                row_index=0,
+                data={"value": 1},
+            )
 
-        # Create multiple tokens for same row
-        token_ids = set()
-        for _ in range(token_count):
-            token = recorder.create_token(row_id=row.row_id)
-            assert token.token_id not in token_ids, f"Duplicate token ID: {token.token_id}"
-            token_ids.add(token.token_id)
+            # Create multiple tokens for same row
+            token_ids = set()
+            for _ in range(token_count):
+                token = recorder.create_token(row_id=row.row_id)
+                assert token.token_id not in token_ids, f"Duplicate token ID: {token.token_id}"
+                token_ids.add(token.token_id)
 
     @given(branch_count=st.integers(min_value=2, max_value=5))
     @settings(max_examples=20, deadline=None)
     def test_fork_atomic_parent_outcome(self, branch_count: int) -> None:
         """Property: Fork atomically records FORKED outcome for parent."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        with LandscapeDB.in_memory() as db:
+            recorder = LandscapeRecorder(db)
 
-        run = recorder.begin_run(
-            config={"source": {"plugin": "test"}},
-            canonical_version="1.0",
-        )
+            run = recorder.begin_run(
+                config={"source": {"plugin": "test"}},
+                canonical_version="1.0",
+            )
 
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=create_dynamic_schema(),
-        )
+            source_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_source",
+                node_type=NodeType.SOURCE,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
 
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source_node.node_id,
-            row_index=0,
-            data={"value": 1},
-        )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=source_node.node_id,
+                row_index=0,
+                data={"value": 1},
+            )
 
-        token = recorder.create_token(row_id=row.row_id)
+            token = recorder.create_token(row_id=row.row_id)
 
-        # Generate branch names based on count
-        branches = [f"branch_{i}" for i in range(branch_count)]
+            # Generate branch names based on count
+            branches = [f"branch_{i}" for i in range(branch_count)]
 
-        # Fork should record parent outcome atomically
-        children, _fork_group_id = recorder.fork_token(
-            parent_token_id=token.token_id,
-            row_id=row.row_id,
-            branches=branches,
-            run_id=run.run_id,
-            step_in_pipeline=1,
-        )
+            # Fork should record parent outcome atomically
+            children, _fork_group_id = recorder.fork_token(
+                parent_token_id=token.token_id,
+                row_id=row.row_id,
+                branches=branches,
+                run_id=run.run_id,
+                step_in_pipeline=1,
+            )
 
-        # Verify parent has FORKED outcome
-        with db.connection() as conn:
-            result = conn.execute(
-                text("SELECT outcome FROM token_outcomes WHERE token_id = :token_id"),
-                {"token_id": token.token_id},
-            ).fetchone()
+            # Verify parent has FORKED outcome
+            with db.connection() as conn:
+                result = conn.execute(
+                    text("SELECT outcome FROM token_outcomes WHERE token_id = :token_id"),
+                    {"token_id": token.token_id},
+                ).fetchone()
 
-            assert result is not None, "Parent token missing outcome after fork"
-            assert result[0] == RowOutcome.FORKED.value, f"Wrong outcome: {result[0]}"
+                assert result is not None, "Parent token missing outcome after fork"
+                assert result[0] == RowOutcome.FORKED.value, f"Wrong outcome: {result[0]}"
 
-        # Verify children exist with parent links
-        assert len(children) == branch_count
-        for child in children:
-            parent_ids = get_token_parent_ids(db, child.token_id)
-            assert token.token_id in parent_ids, f"Child {child.token_id} missing parent link"
+            # Verify children exist with parent links
+            assert len(children) == branch_count
+            for child in children:
+                parent_ids = get_token_parent_ids(db, child.token_id)
+                assert token.token_id in parent_ids, f"Child {child.token_id} missing parent link"
 
     @given(data=row_data)
     @settings(max_examples=20, deadline=None)
     def test_terminal_state_is_final(self, data: dict[str, Any]) -> None:
         """Property: Once a token reaches terminal state, no new outcomes can be recorded."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        with LandscapeDB.in_memory() as db:
+            recorder = LandscapeRecorder(db)
 
-        run = recorder.begin_run(
-            config={"source": {"plugin": "test"}},
-            canonical_version="1.0",
-        )
+            run = recorder.begin_run(
+                config={"source": {"plugin": "test"}},
+                canonical_version="1.0",
+            )
 
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=create_dynamic_schema(),
-        )
+            source_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_source",
+                node_type=NodeType.SOURCE,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
 
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source_node.node_id,
-            row_index=0,
-            data=data,
-        )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=source_node.node_id,
+                row_index=0,
+                data=data,
+            )
 
-        token = recorder.create_token(row_id=row.row_id)
+            token = recorder.create_token(row_id=row.row_id)
 
-        # Record COMPLETED outcome
-        recorder.record_token_outcome(
-            run_id=run.run_id,
-            token_id=token.token_id,
-            outcome=RowOutcome.COMPLETED,
-            sink_name="default",
-        )
+            # Record COMPLETED outcome
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COMPLETED,
+                sink_name="default",
+            )
 
-        # Count outcomes - should be exactly 1
-        with db.connection() as conn:
-            count = conn.execute(
-                text("SELECT COUNT(*) FROM token_outcomes WHERE token_id = :token_id"),
-                {"token_id": token.token_id},
-            ).scalar()
+            # Second terminal outcome should violate unique constraint
+            with pytest.raises(IntegrityError):
+                recorder.record_token_outcome(
+                    run_id=run.run_id,
+                    token_id=token.token_id,
+                    outcome=RowOutcome.QUARANTINED,
+                    error_hash="test_error_hash",
+                )
 
-            assert count == 1, f"Token should have exactly 1 outcome, got {count}"
+            # Count outcomes - should be exactly 1
+            with db.connection() as conn:
+                count = conn.execute(
+                    text("SELECT COUNT(*) FROM token_outcomes WHERE token_id = :token_id"),
+                    {"token_id": token.token_id},
+                ).scalar()
+
+                assert count == 1, f"Token should have exactly 1 outcome, got {count}"
 
     @given(data=row_data)
     @settings(max_examples=20, deadline=None)
     def test_row_data_preserved_through_lifecycle(self, data: dict[str, Any]) -> None:
         """Property: row_id remains constant through token lifecycle."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        with LandscapeDB.in_memory() as db:
+            recorder = LandscapeRecorder(db)
 
-        run = recorder.begin_run(
-            config={"source": {"plugin": "test"}},
-            canonical_version="1.0",
-        )
+            run = recorder.begin_run(
+                config={"source": {"plugin": "test"}},
+                canonical_version="1.0",
+            )
 
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=create_dynamic_schema(),
-        )
+            source_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_source",
+                node_type=NodeType.SOURCE,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
 
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source_node.node_id,
-            row_index=0,
-            data=data,
-        )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=source_node.node_id,
+                row_index=0,
+                data=data,
+            )
 
-        token = recorder.create_token(row_id=row.row_id)
-        original_row_id = row.row_id
+            token = recorder.create_token(row_id=row.row_id)
+            original_row_id = row.row_id
 
-        # Fork token
-        children, _ = recorder.fork_token(
-            parent_token_id=token.token_id,
-            row_id=row.row_id,
-            branches=["a", "b"],
-            run_id=run.run_id,
-            step_in_pipeline=1,
-        )
+            # Fork token
+            children, _ = recorder.fork_token(
+                parent_token_id=token.token_id,
+                row_id=row.row_id,
+                branches=["a", "b"],
+                run_id=run.run_id,
+                step_in_pipeline=1,
+            )
 
-        # All children should have same row_id
-        for child in children:
-            with db.connection() as conn:
-                result = conn.execute(
-                    text("SELECT row_id FROM tokens WHERE token_id = :token_id"),
-                    {"token_id": child.token_id},
-                ).fetchone()
-                assert result is not None, f"Child token {child.token_id} not found"
-                assert result[0] == original_row_id, f"Child has wrong row_id: {result[0]} != {original_row_id}"
+            # All children should have same row_id
+            for child in children:
+                with db.connection() as conn:
+                    result = conn.execute(
+                        text("SELECT row_id FROM tokens WHERE token_id = :token_id"),
+                        {"token_id": child.token_id},
+                    ).fetchone()
+                    assert result is not None, f"Child token {child.token_id} not found"
+                    assert result[0] == original_row_id, f"Child has wrong row_id: {result[0]} != {original_row_id}"
 
     @given(parent_count=st.integers(min_value=2, max_value=5))
     @settings(max_examples=20, deadline=None)
     def test_coalesce_creates_merged_token(self, parent_count: int) -> None:
         """Property: Coalesce creates a new token linking to parent tokens."""
-        db = LandscapeDB.in_memory()
-        recorder = LandscapeRecorder(db)
+        with LandscapeDB.in_memory() as db:
+            recorder = LandscapeRecorder(db)
 
-        run = recorder.begin_run(
-            config={"source": {"plugin": "test"}},
-            canonical_version="1.0",
-        )
+            run = recorder.begin_run(
+                config={"source": {"plugin": "test"}},
+                canonical_version="1.0",
+            )
 
-        source_node = recorder.register_node(
-            run_id=run.run_id,
-            plugin_name="test_source",
-            node_type=NodeType.SOURCE,
-            plugin_version="1.0.0",
-            config={},
-            schema_config=create_dynamic_schema(),
-        )
+            source_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_source",
+                node_type=NodeType.SOURCE,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
 
-        row = recorder.create_row(
-            run_id=run.run_id,
-            source_node_id=source_node.node_id,
-            row_index=0,
-            data={"value": 1},
-        )
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=source_node.node_id,
+                row_index=0,
+                data={"value": 1},
+            )
 
-        # Create parent token and fork with variable number of branches
-        branches = [chr(ord("a") + i) for i in range(parent_count)]
-        parent = recorder.create_token(row_id=row.row_id)
-        children, _ = recorder.fork_token(
-            parent_token_id=parent.token_id,
-            row_id=row.row_id,
-            branches=branches,
-            run_id=run.run_id,
-            step_in_pipeline=1,
-        )
+            # Create parent token and fork with variable number of branches
+            branches = [chr(ord("a") + i) for i in range(parent_count)]
+            parent = recorder.create_token(row_id=row.row_id)
+            children, _ = recorder.fork_token(
+                parent_token_id=parent.token_id,
+                row_id=row.row_id,
+                branches=branches,
+                run_id=run.run_id,
+                step_in_pipeline=1,
+            )
 
-        # Coalesce the children
-        merged = recorder.coalesce_tokens(
-            parent_token_ids=[c.token_id for c in children],
-            row_id=row.row_id,
-            step_in_pipeline=2,
-        )
+            # Coalesce the children
+            merged = recorder.coalesce_tokens(
+                parent_token_ids=[c.token_id for c in children],
+                row_id=row.row_id,
+                step_in_pipeline=2,
+            )
 
-        # Verify merged token exists and has correct parents
-        assert merged.token_id is not None
-        assert merged.row_id == row.row_id
-        assert merged.join_group_id is not None
+            # Verify merged token exists and has correct parents
+            assert merged.token_id is not None
+            assert merged.row_id == row.row_id
+            assert merged.join_group_id is not None
 
-        parent_ids = get_token_parent_ids(db, merged.token_id)
-        assert len(parent_ids) == parent_count, f"Merged token should have {parent_count} parents, got {len(parent_ids)}"
-        for child in children:
-            assert child.token_id in parent_ids, f"Merged token missing parent {child.token_id}"
+            parent_ids = get_token_parent_ids(db, merged.token_id)
+            assert len(parent_ids) == parent_count, f"Merged token should have {parent_count} parents, got {len(parent_ids)}"
+            for child in children:
+                assert child.token_id in parent_ids, f"Merged token missing parent {child.token_id}"

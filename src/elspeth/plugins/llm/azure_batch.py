@@ -292,12 +292,16 @@ class AzureBatchLLMTransform(BaseTransform):
         # Check checkpoint for resume
         checkpoint = self._get_checkpoint(ctx)
 
-        if checkpoint and checkpoint.get("batch_id"):
+        if checkpoint is not None:
+            if "batch_id" not in checkpoint:
+                raise RuntimeError(
+                    f"Checkpoint missing required 'batch_id' for AzureBatchLLMTransform. Checkpoint keys: {sorted(checkpoint.keys())}"
+                )
             # PHASE 2: Resume - batch already submitted
             return self._check_batch_status(checkpoint, rows, ctx)
-        else:
-            # PHASE 1: Fresh batch - submit new
-            return self._submit_batch(rows, ctx)
+
+        # PHASE 1: Fresh batch - submit new
+        return self._submit_batch(rows, ctx)
 
     def _get_checkpoint(self, ctx: PluginContext) -> dict[str, Any] | None:
         """Get checkpoint state from context.
@@ -635,21 +639,20 @@ class AzureBatchLLMTransform(BaseTransform):
         else:
             # Still processing (validating, in_progress, finalizing)
             # Check if we've exceeded max wait time
-            submitted_at_str = checkpoint.get("submitted_at")
-            if submitted_at_str:
-                submitted_at = datetime.fromisoformat(submitted_at_str)
-                elapsed_hours = (datetime.now(UTC) - submitted_at).total_seconds() / 3600
+            submitted_at_str = checkpoint["submitted_at"]
+            submitted_at = datetime.fromisoformat(submitted_at_str)
+            elapsed_hours = (datetime.now(UTC) - submitted_at).total_seconds() / 3600
 
-                if elapsed_hours > self._max_wait_hours:
-                    self._clear_checkpoint(ctx)
-                    return TransformResult.error(
-                        {
-                            "reason": "batch_timeout",
-                            "batch_id": batch_id,
-                            "elapsed_hours": elapsed_hours,
-                            "max_wait_hours": self._max_wait_hours,
-                        }
-                    )
+            if elapsed_hours > self._max_wait_hours:
+                self._clear_checkpoint(ctx)
+                return TransformResult.error(
+                    {
+                        "reason": "batch_timeout",
+                        "batch_id": batch_id,
+                        "elapsed_hours": elapsed_hours,
+                        "max_wait_hours": self._max_wait_hours,
+                    }
+                )
 
             # Still waiting - raise BatchPendingError for retry
             # Include checkpoint and node_id so caller can persist and restore
@@ -680,8 +683,12 @@ class AzureBatchLLMTransform(BaseTransform):
             TransformResult with all processed rows
         """
         client = self._get_client()
-        row_mapping: dict[str, dict[str, Any]] = checkpoint.get("row_mapping", {})
-        template_errors: list[tuple[int, str]] = checkpoint.get("template_errors", [])
+        if "row_mapping" not in checkpoint:
+            raise RuntimeError("Checkpoint missing required 'row_mapping' for AzureBatchLLMTransform.")
+        if "template_errors" not in checkpoint:
+            raise RuntimeError("Checkpoint missing required 'template_errors' for AzureBatchLLMTransform.")
+        row_mapping: dict[str, dict[str, Any]] = checkpoint["row_mapping"]
+        template_errors: list[tuple[int, str]] = checkpoint["template_errors"]
 
         # Download output file (with audit recording)
         output_file_id = batch.output_file_id
@@ -806,9 +813,11 @@ class AzureBatchLLMTransform(BaseTransform):
                 continue
 
             # Find result by custom_id using pre-built reverse mapping
-            custom_id = idx_to_custom_id.get(idx)
+            if idx not in idx_to_custom_id:
+                raise RuntimeError(f"Checkpoint row_mapping missing entry for row index {idx} in AzureBatchLLMTransform.")
+            custom_id = idx_to_custom_id[idx]
 
-            if custom_id is None or custom_id not in results_by_id:
+            if custom_id not in results_by_id:
                 # Result not found - should not happen
                 output_row = dict(row)
                 output_row[self._response_field] = None
@@ -822,7 +831,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
             result = results_by_id[custom_id]
 
-            if result.get("error"):
+            if "error" in result:
                 # API error for this row
                 output_row = dict(row)
                 output_row[self._response_field] = None
@@ -834,8 +843,8 @@ class AzureBatchLLMTransform(BaseTransform):
                 row_errors.append({"row_index": idx, "reason": "api_error", "error": result["error"]})
             else:
                 # Success - extract response
-                response = result.get("response", {})
-                body = response.get("body", {})
+                response = result["response"]
+                body = response["body"]
                 choices = body.get("choices", [])
 
                 if choices:

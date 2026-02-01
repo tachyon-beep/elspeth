@@ -281,26 +281,13 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         output_rows: list[dict[str, Any]] = []
 
         for idx in range(len(rows)):
-            result = results.get(idx)
-
-            if result is None:
-                # Should not happen - but audit trail must record everything
-                output_row = dict(rows[idx])
-                output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = {"reason": "result_missing"}
-                output_rows.append(output_row)
-                # Record to audit trail - "I don't know what happened" is never acceptable
-                ctx.record_call(
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data={"row_index": idx, "reason": "result_missing_from_future"},
-                    response_data=None,
-                    error={"reason": "result_missing", "row_index": idx},
-                    latency_ms=None,
-                    provider="openrouter",
+            if idx not in results:
+                raise RuntimeError(
+                    f"OpenRouter batch results missing for row index {idx}. This indicates an internal concurrency or collection bug."
                 )
+            result = results[idx]
 
-            elif isinstance(result, Exception):
+            if isinstance(result, Exception):
                 # Unexpected exception (httpx transport errors caught in as_completed loop)
                 output_row = dict(rows[idx])
                 output_row[self._response_field] = None

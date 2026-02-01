@@ -36,8 +36,7 @@ from typing import Any
 
 from hypothesis import strategies as st
 
-from elspeth.contracts import SourceRow
-from elspeth.engine.artifacts import ArtifactDescriptor
+from elspeth.contracts import ArtifactDescriptor, SourceRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestSchema, _TestSinkBase, _TestSourceBase

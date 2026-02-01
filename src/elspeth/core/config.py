@@ -64,7 +64,7 @@ class TriggerConfig(BaseModel):
           condition: "batch_count >= 100 and batch_age_seconds < 30"  # Or batch metrics
     """
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "extra": "forbid"}
 
     count: int | None = Field(
         default=None,
@@ -941,16 +941,29 @@ def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:
     return {k: _expand_value(v) for k, v in config.items()}
 
 
-# Secret field names that should be fingerprinted (exact matches)
-_SECRET_FIELD_NAMES = frozenset({"api_key", "token", "password", "secret", "credential"})
+# Secret field names that should be fingerprinted (exact matches, case-insensitive)
+_SECRET_FIELD_NAMES = frozenset(
+    {
+        "api_key",
+        "api-key",
+        "authorization",
+        "connection_string",
+        "credential",
+        "password",
+        "secret",
+        "token",
+        "x-api-key",
+    }
+)
 
-# Secret field suffixes that should be fingerprinted
-_SECRET_FIELD_SUFFIXES = ("_secret", "_key", "_token", "_password", "_credential")
+# Secret field suffixes that should be fingerprinted (case-insensitive)
+_SECRET_FIELD_SUFFIXES = ("_secret", "_key", "_token", "_password", "_credential", "_connection_string")
 
 
 def _is_secret_field(field_name: str) -> bool:
     """Check if a field name represents a secret that should be fingerprinted."""
-    return field_name in _SECRET_FIELD_NAMES or field_name.endswith(_SECRET_FIELD_SUFFIXES)
+    normalized = field_name.lower()
+    return normalized in _SECRET_FIELD_NAMES or normalized.endswith(_SECRET_FIELD_SUFFIXES)
 
 
 def _fingerprint_secrets(
@@ -1224,6 +1237,15 @@ def _fingerprint_config_for_audit(
         for agg in config["aggregations"]:
             if isinstance(agg, dict) and "options" in agg and isinstance(agg["options"], dict):
                 agg["options"] = _fingerprint_secrets(agg["options"], fail_if_no_key=fail_if_no_key)
+
+    # === Telemetry exporter options ===
+    if "telemetry" in config and isinstance(config["telemetry"], dict):
+        telemetry = config["telemetry"]
+        exporters = telemetry.get("exporters")
+        if isinstance(exporters, list):
+            for exporter in exporters:
+                if isinstance(exporter, dict) and "options" in exporter and isinstance(exporter["options"], dict):
+                    exporter["options"] = _fingerprint_secrets(exporter["options"], fail_if_no_key=fail_if_no_key)
 
     return config
 

@@ -110,6 +110,15 @@ transform_error_reasons = st.fixed_dictionaries(
     },
 )
 
+# TransformSuccessReason dictionaries for TransformResult.success()
+success_reasons = st.fixed_dictionaries(
+    {"action": st.sampled_from(["processed", "validated", "enriched", "passthrough"])},
+    optional={
+        "fields_modified": st.lists(st.text(min_size=1, max_size=30, alphabet="abcdefghijklmnopqrstuvwxyz_"), max_size=5),
+        "validation_warnings": st.lists(st.text(min_size=1, max_size=50), max_size=3),
+    },
+)
+
 
 # =============================================================================
 # TokenInfo Construction and Serialization Properties
@@ -256,6 +265,8 @@ class TestTokenInfoJsonSerializationProperties:
         data=row_data,
         branch_name=token_branch_names,
         fork_group_id=token_group_ids,
+        join_group_id=token_group_ids,
+        expand_group_id=token_group_ids,
     )
     @settings(max_examples=100)
     def test_token_info_json_round_trip_preserves_optional_fields(
@@ -265,6 +276,8 @@ class TestTokenInfoJsonSerializationProperties:
         data: dict[str, Any],
         branch_name: str | None,
         fork_group_id: str | None,
+        join_group_id: str | None,
+        expand_group_id: str | None,
     ) -> None:
         """Property: TokenInfo JSON round-trip preserves optional fields."""
         token = TokenInfo(
@@ -273,6 +286,8 @@ class TestTokenInfoJsonSerializationProperties:
             row_data=data,
             branch_name=branch_name,
             fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            expand_group_id=expand_group_id,
         )
 
         serialized = json.dumps(asdict(token))
@@ -280,6 +295,8 @@ class TestTokenInfoJsonSerializationProperties:
 
         assert parsed["branch_name"] == branch_name
         assert parsed["fork_group_id"] == fork_group_id
+        assert parsed["join_group_id"] == join_group_id
+        assert parsed["expand_group_id"] == expand_group_id
 
 
 # =============================================================================
@@ -305,14 +322,15 @@ class TestTransformResultJsonSerializationProperties:
         assert isinstance(parsed, dict)
         assert parsed["status"] == "success"
 
-    @given(data=row_data)
+    @given(data=row_data, success_reason=success_reasons)
     @settings(max_examples=100)
     def test_transform_result_success_json_round_trip_preserves_row(
         self,
         data: dict[str, Any],
+        success_reason: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success() JSON round-trip preserves row."""
-        result = TransformResult.success(data, success_reason={"action": "test"})
+        result = TransformResult.success(data, success_reason=success_reason)
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)
@@ -320,6 +338,7 @@ class TestTransformResultJsonSerializationProperties:
         assert parsed["status"] == "success"
         assert parsed["row"] == data
         assert parsed["reason"] is None
+        assert parsed["success_reason"] == success_reason
 
     @given(reason=transform_error_reasons)
     @settings(max_examples=100)
@@ -352,14 +371,15 @@ class TestTransformResultJsonSerializationProperties:
 
         assert parsed["retryable"] is retryable
 
-    @given(rows=st.lists(row_data, min_size=1, max_size=5))
+    @given(rows=st.lists(row_data, min_size=1, max_size=5), success_reason=success_reasons)
     @settings(max_examples=100)
     def test_transform_result_success_multi_json_round_trip_preserves_rows(
         self,
         rows: list[dict[str, Any]],
+        success_reason: dict[str, Any],
     ) -> None:
         """Property: TransformResult.success_multi() JSON round-trip preserves rows."""
-        result = TransformResult.success_multi(rows, success_reason={"action": "test"})
+        result = TransformResult.success_multi(rows, success_reason=success_reason)
 
         serialized = json.dumps(asdict(result))
         parsed = json.loads(serialized)
@@ -367,6 +387,7 @@ class TestTransformResultJsonSerializationProperties:
         assert parsed["status"] == "success"
         assert parsed["rows"] == rows
         assert parsed["row"] is None
+        assert parsed["success_reason"] == success_reason
 
 
 # =============================================================================

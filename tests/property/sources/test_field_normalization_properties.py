@@ -15,7 +15,6 @@ Properties tested:
 from __future__ import annotations
 
 import keyword
-import random
 from typing import TYPE_CHECKING
 
 from hypothesis import assume, given, settings
@@ -116,16 +115,16 @@ class TestNormalizeFieldNameProperties:
 class TestCollisionDetectionProperties:
     """Property tests for check_normalization_collisions()."""
 
-    @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True))
+    @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True), data=st.data())
     @settings(max_examples=200)
-    def test_collision_detection_is_order_independent(self, headers: list[str]) -> None:
+    def test_collision_detection_is_order_independent(self, headers: list[str], data: st.DataObject) -> None:
         """Property: Collision detection doesn't depend on header order.
 
         Whether we check [A, B, C] or [C, A, B], if there's a collision
         it should be detected in both cases.
         """
         try:
-            normalized = [normalize_field_name(h) for h in headers]
+            normalized_map = {h: normalize_field_name(h) for h in headers}
         except ValueError:
             assume(False)
             return
@@ -133,14 +132,14 @@ class TestCollisionDetectionProperties:
         # Check if original order has collision
         has_collision_original = False
         try:
-            check_normalization_collisions(headers, normalized)
+            check_normalization_collisions(headers, [normalized_map[h] for h in headers])
         except ValueError:
             has_collision_original = True
 
-        # Shuffle and check again
-        combined = list(zip(headers, normalized, strict=True))
-        random.shuffle(combined)
-        shuffled_raw, shuffled_norm = zip(*combined, strict=True) if combined else ([], [])
+        # Permute deterministically via Hypothesis data to avoid flakiness
+        permuted = list(data.draw(st.permutations(headers)))
+        shuffled_raw = permuted
+        shuffled_norm = [normalized_map[h] for h in shuffled_raw]
 
         has_collision_shuffled = False
         try:
@@ -247,3 +246,62 @@ class TestResolveFieldNamesProperties:
 
         assert result.final_headers == headers, "Without normalization, headers should pass through"
         assert result.normalization_version is None, "Without normalization, version should be None"
+
+    @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True), data=st.data())
+    @settings(max_examples=100)
+    def test_resolve_applies_field_mapping(self, headers: list[str], data: st.DataObject) -> None:
+        """Property: field_mapping overrides only specified headers."""
+        # Choose a subset of headers to map
+        keys_to_map = data.draw(st.lists(st.sampled_from(headers), min_size=1, max_size=len(headers), unique=True))
+        field_mapping = {key: f"mapped_{i}" for i, key in enumerate(keys_to_map)}
+
+        result = resolve_field_names(
+            raw_headers=headers,
+            normalize_fields=False,
+            field_mapping=field_mapping,
+            columns=None,
+        )
+
+        for original in headers:
+            expected = field_mapping.get(original, original)
+            assert result.resolution_mapping[original] == expected
+        assert result.final_headers == [field_mapping.get(h, h) for h in headers]
+
+    @given(headers=st.lists(normalizable_headers, min_size=1, max_size=10, unique=True))
+    @settings(max_examples=50)
+    def test_resolve_rejects_missing_mapping_keys(self, headers: list[str]) -> None:
+        """Property: field_mapping keys must exist in effective headers."""
+        # normalizable_headers never include underscores, so this is guaranteed missing
+        missing_key = "missing_key"
+        field_mapping = {missing_key: "mapped_missing"}
+
+        try:
+            resolve_field_names(
+                raw_headers=headers,
+                normalize_fields=False,
+                field_mapping=field_mapping,
+                columns=None,
+            )
+        except ValueError:
+            return
+        raise AssertionError("Expected ValueError for missing field_mapping keys")
+
+    @given(headers=st.lists(normalizable_headers, min_size=2, max_size=10, unique=True), data=st.data())
+    @settings(max_examples=50)
+    def test_resolve_rejects_mapping_collisions(self, headers: list[str], data: st.DataObject) -> None:
+        """Property: field_mapping cannot collapse multiple headers to same name."""
+        key_a = data.draw(st.sampled_from(headers))
+        key_b = data.draw(st.sampled_from(headers))
+        assume(key_a != key_b)
+        field_mapping = {key_a: "collision", key_b: "collision"}
+
+        try:
+            resolve_field_names(
+                raw_headers=headers,
+                normalize_fields=False,
+                field_mapping=field_mapping,
+                columns=None,
+            )
+        except ValueError:
+            return
+        raise AssertionError("Expected ValueError for field_mapping collision")

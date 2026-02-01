@@ -20,11 +20,10 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from elspeth.contracts import SourceRow
+from elspeth.contracts import ArtifactDescriptor, SourceRow
 from elspeth.core.config import CoalesceSettings, ElspethSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
-from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
@@ -308,6 +307,7 @@ class TestForkCoalesceFlow:
             f"Expected {expected_forked} FORKED outcomes, got {stats['forked_count']}. "
             f"Each source row should produce exactly one FORKED parent token."
         )
+        assert stats["fork_groups"] == n_rows, f"Expected {n_rows} fork groups (one per source row), got {stats['fork_groups']}."
 
         assert stats["coalesced_count"] == expected_coalesced, (
             f"Expected {expected_coalesced} COALESCED outcomes, got {stats['coalesced_count']}. "

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
@@ -620,6 +621,120 @@ class TestTokenOutcomeProperties:
         # Verify count
         outcome_count = count_outcomes_for_run(db, run.run_id)
         assert outcome_count == n_rows, f"Expected {n_rows} outcomes, got {outcome_count}. Data was lost!"
+
+    @pytest.mark.parametrize(
+        ("outcome", "required_field", "kwargs"),
+        [
+            (RowOutcome.COMPLETED, "sink_name", {}),
+            (RowOutcome.ROUTED, "sink_name", {}),
+            (RowOutcome.FORKED, "fork_group_id", {}),
+            (RowOutcome.FAILED, "error_hash", {}),
+            (RowOutcome.QUARANTINED, "error_hash", {}),
+            (RowOutcome.CONSUMED_IN_BATCH, "batch_id", {}),
+            (RowOutcome.COALESCED, "join_group_id", {}),
+            (RowOutcome.EXPANDED, "expand_group_id", {}),
+            (RowOutcome.BUFFERED, "batch_id", {}),
+        ],
+    )
+    def test_record_outcome_requires_fields(
+        self,
+        outcome: RowOutcome,
+        required_field: str,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Required fields are enforced for each outcome type."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=create_dynamic_schema(),
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            data={"value": 1},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        with pytest.raises(ValueError, match=required_field):
+            recorder.record_token_outcome(
+                run_id=run.run_id,
+                token_id=token.token_id,
+                outcome=outcome,
+                **kwargs,
+            )
+
+    @pytest.mark.parametrize(
+        ("outcome", "kwargs"),
+        [
+            (RowOutcome.COMPLETED, {"sink_name": "default"}),
+            (RowOutcome.ROUTED, {"sink_name": "error_sink"}),
+            (RowOutcome.FORKED, {"fork_group_id": "fork_group_1"}),
+            (RowOutcome.FAILED, {"error_hash": stable_hash({"reason": "failure"})}),
+            (RowOutcome.QUARANTINED, {"error_hash": stable_hash({"reason": "validation"})}),
+            (RowOutcome.CONSUMED_IN_BATCH, {"batch_id": "batch_1"}),
+            (RowOutcome.COALESCED, {"join_group_id": "join_group_1"}),
+            (RowOutcome.EXPANDED, {"expand_group_id": "expand_group_1"}),
+            (RowOutcome.BUFFERED, {"batch_id": "batch_2"}),
+        ],
+    )
+    def test_record_outcome_accepts_required_fields(self, outcome: RowOutcome, kwargs: dict[str, Any]) -> None:
+        """Outcomes with required fields are recorded and retrievable."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={"source": {"plugin": "test"}}, canonical_version="1.0")
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=create_dynamic_schema(),
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            data={"value": 1},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        if outcome in {RowOutcome.CONSUMED_IN_BATCH, RowOutcome.BUFFERED}:
+            aggregation_node = recorder.register_node(
+                run_id=run.run_id,
+                plugin_name="test_aggregation",
+                node_type=NodeType.AGGREGATION,
+                plugin_version="1.0.0",
+                config={},
+                schema_config=create_dynamic_schema(),
+            )
+            batch_id = kwargs["batch_id"]
+            recorder.create_batch(
+                run_id=run.run_id,
+                aggregation_node_id=aggregation_node.node_id,
+                batch_id=batch_id,
+            )
+
+        outcome_id = recorder.record_token_outcome(
+            run_id=run.run_id,
+            token_id=token.token_id,
+            outcome=outcome,
+            **kwargs,
+        )
+        assert outcome_id is not None
+
+        persisted = recorder.get_token_outcome(token.token_id)
+        assert persisted is not None
+        assert persisted.outcome == outcome.value
+        assert persisted.is_terminal == outcome.is_terminal
 
 
 # =============================================================================

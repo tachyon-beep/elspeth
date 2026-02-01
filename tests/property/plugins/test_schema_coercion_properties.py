@@ -17,11 +17,14 @@ Per CLAUDE.md Three-Tier Trust Model:
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.schema_factory import create_schema_from_config
+from tests.property.conftest import json_primitives, row_data
 
 # =============================================================================
 # Strategies for generating coercible values
@@ -235,7 +238,7 @@ class TestIntToFloatWidening:
             }
         )
 
-        Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=True)
+        Schema = create_schema_from_config(schema_config, "TestSchema", allow_coercion=False)
 
         # First pass: int → float
         first_result = Schema.model_validate({"value": value})
@@ -323,3 +326,111 @@ class TestCoercionDeterminism:
 
         # All results should be identical
         assert all(r == results[0] for r in results), f"Non-deterministic coercion: {results}"
+
+
+class TestNoCoercionRejection:
+    """Property tests verifying strict schemas reject coercion."""
+
+    @given(str_value=str_integers)
+    @settings(max_examples=50)
+    def test_string_to_int_rejected_when_coercion_disabled(self, str_value: str) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        Schema = create_schema_from_config(schema_config, "NoCoerceInt", allow_coercion=False)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": str_value})
+
+    @given(str_value=str_floats)
+    @settings(max_examples=50)
+    def test_string_to_float_rejected_when_coercion_disabled(self, str_value: str) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]})
+        Schema = create_schema_from_config(schema_config, "NoCoerceFloat", allow_coercion=False)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": str_value})
+
+    @given(str_value=str_bools)
+    @settings(max_examples=50)
+    def test_string_to_bool_rejected_when_coercion_disabled(self, str_value: str) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: bool"]})
+        Schema = create_schema_from_config(schema_config, "NoCoerceBool", allow_coercion=False)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": str_value})
+
+
+class TestExtraFieldHandling:
+    """Property tests for strict vs free extra field handling."""
+
+    @given(extra_key=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"))), extra_value=json_primitives)
+    @settings(max_examples=50)
+    def test_strict_schema_rejects_extra_fields(self, extra_key: str, extra_value: object) -> None:
+        assume(extra_key != "value")
+
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        Schema = create_schema_from_config(schema_config, "StrictSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": 1, extra_key: extra_value})
+
+    @given(extra_key=st.text(min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"))), extra_value=json_primitives)
+    @settings(max_examples=50)
+    def test_free_schema_allows_extra_fields(self, extra_key: str, extra_value: object) -> None:
+        assume(extra_key != "value")
+
+        schema_config = SchemaConfig.from_dict({"mode": "free", "fields": ["value: int"]})
+        Schema = create_schema_from_config(schema_config, "FreeSchema", allow_coercion=True)
+
+        result = Schema.model_validate({"value": 1, extra_key: extra_value})
+        result_row = result.to_row()
+        assert result_row["value"] == 1
+        assert result_row[extra_key] == extra_value
+
+
+class TestOptionalAndDynamicSchemas:
+    """Property tests for optional and dynamic schema behavior."""
+
+    @given(value=st.one_of(native_ints, st.none()))
+    @settings(max_examples=50)
+    def test_optional_field_accepts_none(self, value: int | None) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int?"]})
+        Schema = create_schema_from_config(schema_config, "OptionalSchema", allow_coercion=False)
+
+        result = Schema.model_validate({"value": value})
+        assert result.to_row()["value"] == value
+
+    def test_optional_field_missing_defaults_to_none(self) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int?"]})
+        Schema = create_schema_from_config(schema_config, "OptionalMissingSchema", allow_coercion=False)
+
+        result = Schema.model_validate({})
+        assert result.to_row()["value"] is None
+
+    def test_required_field_missing_rejected(self) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        Schema = create_schema_from_config(schema_config, "RequiredSchema", allow_coercion=False)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({})
+
+    @given(row=row_data)
+    @settings(max_examples=50)
+    def test_dynamic_schema_accepts_any_fields(self, row: dict[str, object]) -> None:
+        schema_config = SchemaConfig.from_dict({"fields": "dynamic"})
+        Schema = create_schema_from_config(schema_config, "DynamicSchema", allow_coercion=False)
+
+        result = Schema.model_validate(row)
+        assert result.to_row() == row
+
+
+class TestFiniteFloatRejection:
+    """Property tests for NaN/Infinity rejection at source boundary."""
+
+    @given(value=st.sampled_from([float("nan"), float("inf"), float("-inf")]))
+    @settings(max_examples=50)
+    def test_nan_and_infinity_rejected(self, value: float) -> None:
+        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]})
+        Schema = create_schema_from_config(schema_config, "FiniteFloatSchema", allow_coercion=True)
+
+        with pytest.raises(ValidationError):
+            Schema.model_validate({"value": value})

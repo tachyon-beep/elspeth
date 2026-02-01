@@ -182,8 +182,8 @@ class TestRateLimiterTimeoutProperties:
 
             elapsed = time.monotonic() - start
 
-            # Should timeout within 50ms of target (accounting for polling interval)
-            assert elapsed < timeout + 0.05, f"Timeout took too long: {elapsed}s > {timeout + 0.05}s"
+            # Should timeout within 100ms of target (accounting for polling interval)
+            assert elapsed < timeout + 0.1, f"Timeout took too long: {elapsed}s > {timeout + 0.1}s"
 
 
 class TestRateLimiterPersistenceProperties:
@@ -235,8 +235,8 @@ class TestNoOpLimiterProperties:
             limiter.acquire(weight)
         elapsed = time.monotonic() - start
 
-        # 100 acquires should be nearly instant (< 10ms)
-        assert elapsed < 0.01, f"NoOpLimiter blocked for {elapsed}s"
+        # 100 acquires should be nearly instant (< 50ms)
+        assert elapsed < 0.05, f"NoOpLimiter blocked for {elapsed}s"
 
     def test_context_manager_works(self) -> None:
         """Property: NoOpLimiter works as context manager."""

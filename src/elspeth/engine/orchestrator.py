@@ -17,7 +17,6 @@ import json
 import os
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -760,25 +759,21 @@ class Orchestrator:
             from elspeth.telemetry.errors import TelemetryExporterError
 
             logger = structlog.get_logger()
-            telemetry_error: TelemetryExporterError | None = None
+            pending_exc = sys.exc_info()[0]
 
             try:
                 self._flush_telemetry()
             except TelemetryExporterError as e:
-                telemetry_error = e
                 logger.warning(
                     "Telemetry flush failed - will raise after cleanup if no other exception pending",
                     exporter=e.exporter_name,
                     error=e.message,
                 )
-
-            # Always clean up transforms, even on failure
-            self._cleanup_transforms(config)
-
-            # Only raise telemetry error if no other exception is pending.
-            # sys.exc_info()[0] is None when we're NOT handling an exception.
-            if telemetry_error is not None and sys.exc_info()[0] is None:
-                raise telemetry_error
+                if pending_exc is None:
+                    raise
+            finally:
+                # Always clean up transforms, even on failure
+                self._cleanup_transforms(config)
 
     def _execute_run(
         self,
@@ -1183,7 +1178,7 @@ class Orchestrator:
                         if not field_resolution_recorded:
                             field_resolution_recorded = True
                             field_resolution = config.source.get_field_resolution()
-                            if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                            if field_resolution is not None:
                                 resolution_mapping, normalization_version = field_resolution
                                 recorder.record_source_field_resolution(
                                     run_id=run_id,
@@ -1556,7 +1551,7 @@ class Orchestrator:
                     # ─────────────────────────────────────────────────────────────────
                     if not field_resolution_recorded:
                         field_resolution = config.source.get_field_resolution()
-                        if isinstance(field_resolution, tuple) and len(field_resolution) == 2:
+                        if field_resolution is not None:
                             resolution_mapping, normalization_version = field_resolution
                             recorder.record_source_field_resolution(
                                 run_id=run_id,
@@ -1644,23 +1639,58 @@ class Orchestrator:
             self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
         finally:
+            import sys
+
+            import structlog
+
+            logger = structlog.get_logger()
+            pending_exc = sys.exc_info()[1]
+            cleanup_errors: list[str] = []
+
+            def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
+                logger.warning(
+                    "Plugin cleanup hook failed",
+                    hook=hook,
+                    plugin=plugin_name,
+                    error=str(error),
+                    error_type=type(error).__name__,
+                )
+                cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
+
             # Call on_complete for all plugins (even on error)
             # Base classes provide no-op implementations, so no hasattr needed
-            # suppress(Exception) ensures one plugin failure doesn't prevent others from cleanup
             for transform in config.transforms:
-                with suppress(Exception):
+                try:
                     transform.on_complete(ctx)
+                except Exception as e:
+                    record_cleanup_error("transform.on_complete", transform.name, e)
             for sink in config.sinks.values():
-                with suppress(Exception):
+                try:
                     sink.on_complete(ctx)
-            with suppress(Exception):
+                except Exception as e:
+                    record_cleanup_error("sink.on_complete", sink.name, e)
+            try:
                 config.source.on_complete(ctx)
+            except Exception as e:
+                record_cleanup_error("source.on_complete", config.source.name, e)
 
             # Close source and all sinks
             # SinkProtocol requires close() - if missing, that's a bug
-            config.source.close()
+            try:
+                config.source.close()
+            except Exception as e:
+                record_cleanup_error("source.close", config.source.name, e)
             for sink in config.sinks.values():
-                sink.close()
+                try:
+                    sink.close()
+                except Exception as e:
+                    record_cleanup_error("sink.close", sink.name, e)
+
+            if cleanup_errors:
+                error_summary = "; ".join(cleanup_errors)
+                if pending_exc is not None:
+                    raise RuntimeError(f"Plugin cleanup failed: {error_summary}") from pending_exc
+                raise RuntimeError(f"Plugin cleanup failed: {error_summary}")
 
         # Clear graph after execution completes
         self._current_graph = None
@@ -2515,24 +2545,56 @@ class Orchestrator:
                         )
 
         finally:
+            import sys
+
+            import structlog
+
+            logger = structlog.get_logger()
+            pending_exc = sys.exc_info()[1]
+            cleanup_errors: list[str] = []
+
+            def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
+                logger.warning(
+                    "Plugin cleanup hook failed",
+                    hook=hook,
+                    plugin=plugin_name,
+                    error=str(error),
+                    error_type=type(error).__name__,
+                )
+                cleanup_errors.append(f"{hook}({plugin_name}): {type(error).__name__}: {error}")
+
             # Call on_complete for all plugins (even on error)
             for transform in config.transforms:
-                with suppress(Exception):
+                try:
                     transform.on_complete(ctx)
+                except Exception as e:
+                    record_cleanup_error("transform.on_complete", transform.name, e)
             for sink in config.sinks.values():
-                with suppress(Exception):
+                try:
                     sink.on_complete(ctx)
+                except Exception as e:
+                    record_cleanup_error("sink.on_complete", sink.name, e)
 
             # Close all transforms (release resources - file handles, connections, etc.)
             # Mirrors _cleanup_transforms() pattern from _execute_run()
             for transform in config.transforms:
-                with suppress(Exception):
+                try:
                     transform.close()
+                except Exception as e:
+                    record_cleanup_error("transform.close", transform.name, e)
 
             # Close all sinks (NOT source - wasn't opened)
             for sink in config.sinks.values():
-                with suppress(Exception):
+                try:
                     sink.close()
+                except Exception as e:
+                    record_cleanup_error("sink.close", sink.name, e)
+
+            if cleanup_errors:
+                error_summary = "; ".join(cleanup_errors)
+                if pending_exc is not None:
+                    raise RuntimeError(f"Plugin cleanup failed: {error_summary}") from pending_exc
+                raise RuntimeError(f"Plugin cleanup failed: {error_summary}")
 
         # Clear graph after execution completes
         self._current_graph = None

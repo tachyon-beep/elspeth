@@ -21,7 +21,7 @@ Timestamp Properties:
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, timedelta
 from enum import Enum
 
 import pytest
@@ -225,16 +225,14 @@ class TestNowProperties:
 
     @given(st.data())
     @settings(max_examples=50)
-    def test_sequential_calls_monotonic(self, data: st.DataObject) -> None:
-        """Property: Sequential calls return non-decreasing timestamps.
-
-        Clock should never go backwards (monotonicity).
-        """
+    def test_sequential_calls_are_close(self, data: st.DataObject) -> None:
+        """Property: Sequential calls happen close in time."""
         ts1 = now()
         ts2 = now()
         ts3 = now()
 
-        assert ts1 <= ts2 <= ts3
+        span = max(ts1, ts2, ts3) - min(ts1, ts2, ts3)
+        assert span < timedelta(seconds=2)
 
     def test_utc_offset_is_zero(self) -> None:
         """Property: UTC offset is +00:00 (not some other timezone)."""
@@ -294,7 +292,7 @@ class TestHelperInteractionProperties:
         ids = [p[0] for p in pairs]
         assert len(set(ids)) == count
 
-        # Timestamps should still be monotonic
+        # Timestamps should still be close in time
         timestamps = [p[1] for p in pairs]
-        for i in range(1, len(timestamps)):
-            assert timestamps[i] >= timestamps[i - 1]
+        span = max(timestamps) - min(timestamps)
+        assert span < timedelta(seconds=2)

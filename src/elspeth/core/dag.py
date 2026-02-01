@@ -1178,9 +1178,11 @@ class ExecutionGraph:
 
         # For aggregation nodes, also check inside "options" where transform config is nested
         if node_info.node_type == "aggregation":
-            options = node_info.config.get("options", {})
-            if isinstance(options, dict):
-                required_input = options.get("required_input_fields")
+            options = node_info.config["options"]
+            if not isinstance(options, dict):
+                raise TypeError(f"Aggregation node config 'options' must be dict, got {type(options).__name__}")
+            if "required_input_fields" in options:
+                required_input = options["required_input_fields"]
                 if required_input is not None and len(required_input) > 0:
                     return frozenset(required_input)
 

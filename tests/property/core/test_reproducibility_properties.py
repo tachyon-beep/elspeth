@@ -23,11 +23,24 @@ Enum Integrity Properties:
 
 from __future__ import annotations
 
+import json
+import uuid
+from datetime import UTC, datetime
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from sqlalchemy import select
 
-from elspeth.contracts.enums import Determinism
-from elspeth.core.landscape.reproducibility import ReproducibilityGrade
+from elspeth.contracts.enums import Determinism, NodeType, RunStatus
+from elspeth.core.canonical import stable_hash
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.reproducibility import (
+    ReproducibilityGrade,
+    compute_grade,
+    set_run_grade,
+    update_grade_after_purge,
+)
+from elspeth.core.landscape.schema import nodes_table, runs_table
 
 # =============================================================================
 # Strategies for reproducibility testing
@@ -56,6 +69,67 @@ non_reproducible_determinism = st.sampled_from(
         Determinism.NON_DETERMINISTIC,
     ]
 )
+
+reproducible_lists = st.lists(reproducible_determinism, min_size=1, max_size=6)
+
+
+@st.composite
+def lists_with_non_reproducible(draw: st.DrawFn) -> list[Determinism]:
+    """Generate determinism lists with at least one non-reproducible value."""
+    non_repro = draw(non_reproducible_determinism)
+    others = draw(st.lists(all_determinism, min_size=0, max_size=5))
+    return [non_repro, *others]
+
+
+# =============================================================================
+# Helpers for DB-backed tests
+# =============================================================================
+
+
+def _create_run(db: LandscapeDB) -> str:
+    run_id = f"run-{uuid.uuid4().hex[:12]}"
+    now = datetime.now(UTC)
+    with db.connection() as conn:
+        conn.execute(
+            runs_table.insert().values(
+                run_id=run_id,
+                started_at=now,
+                config_hash=stable_hash({"run_id": run_id}),
+                settings_json="{}",
+                canonical_version="sha256-rfc8785-v1",
+                status=RunStatus.RUNNING,
+            )
+        )
+    return run_id
+
+
+def _insert_nodes(db: LandscapeDB, run_id: str, determinisms: list[Determinism]) -> None:
+    now = datetime.now(UTC)
+    with db.connection() as conn:
+        for idx, det in enumerate(determinisms):
+            node_id = f"node_{idx}"
+            config = {"node_id": node_id, "determinism": det.value}
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id=node_id,
+                    run_id=run_id,
+                    plugin_name="test_plugin",
+                    node_type=NodeType.TRANSFORM,
+                    plugin_version="1.0",
+                    determinism=det.value,
+                    config_hash=stable_hash(config),
+                    config_json=json.dumps(config),
+                    registered_at=now,
+                )
+            )
+
+
+def _get_run_grade(db: LandscapeDB, run_id: str) -> ReproducibilityGrade:
+    with db.connection() as conn:
+        row = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_id)).fetchone()
+    assert row is not None
+    assert row[0] is not None
+    return ReproducibilityGrade(row[0])
 
 
 # =============================================================================
@@ -114,61 +188,40 @@ class TestDeterminismClassificationProperties:
     - {EXTERNAL_CALL, NON_DETERMINISTIC} → REPLAY_REPRODUCIBLE
     """
 
-    def _classify_determinism(self, det: Determinism) -> ReproducibilityGrade:
-        """Classify a single determinism value to its grade.
-
-        This mirrors the logic in compute_grade() but for a single value.
-        """
-        non_reproducible = {
-            Determinism.EXTERNAL_CALL,
-            Determinism.NON_DETERMINISTIC,
-        }
-        if det in non_reproducible:
-            return ReproducibilityGrade.REPLAY_REPRODUCIBLE
-        else:
-            return ReproducibilityGrade.FULL_REPRODUCIBLE
-
-    @given(det=reproducible_determinism)
+    @given(determinisms=reproducible_lists)
     @settings(max_examples=50)
-    def test_reproducible_determinism_yields_full_grade(self, det: Determinism) -> None:
+    def test_reproducible_determinism_yields_full_grade(self, determinisms: list[Determinism]) -> None:
         """Property: Reproducible determinism values yield FULL_REPRODUCIBLE.
 
         DETERMINISTIC, SEEDED, IO_READ, IO_WRITE can all be re-executed
         with identical results (SEEDED needs the seed captured).
         """
-        grade = self._classify_determinism(det)
-        assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            _insert_nodes(db, run_id, determinisms)
+            grade = compute_grade(db, run_id)
+            assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
-    @given(det=non_reproducible_determinism)
+    @given(determinisms=lists_with_non_reproducible())
     @settings(max_examples=50)
-    def test_non_reproducible_determinism_yields_replay_grade(self, det: Determinism) -> None:
-        """Property: Non-reproducible determinism values yield REPLAY_REPRODUCIBLE.
+    def test_non_reproducible_determinism_yields_replay_grade(self, determinisms: list[Determinism]) -> None:
+        """Property: Any non-reproducible determinism yields REPLAY_REPRODUCIBLE.
 
         EXTERNAL_CALL (LLM, APIs) and NON_DETERMINISTIC require recorded
         responses to replay - they can't be re-executed deterministically.
         """
-        grade = self._classify_determinism(det)
-        assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            _insert_nodes(db, run_id, determinisms)
+            grade = compute_grade(db, run_id)
+            assert grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE
 
-    def test_all_determinism_values_classified(self) -> None:
-        """Property: Every Determinism value has a defined classification.
-
-        This ensures no enum value is accidentally unhandled.
-        """
-        for det in Determinism:
-            grade = self._classify_determinism(det)
-            assert grade in (
-                ReproducibilityGrade.FULL_REPRODUCIBLE,
-                ReproducibilityGrade.REPLAY_REPRODUCIBLE,
-            )
-
-    def test_classification_is_exhaustive(self) -> None:
-        """Property: Classification covers all 6 determinism values.
-
-        Canary test - adding a new Determinism value requires
-        updating this test and the classification logic.
-        """
-        assert len(list(Determinism)) == 6
+    def test_empty_pipeline_is_full_reproducible(self) -> None:
+        """Property: Empty pipeline is trivially FULL_REPRODUCIBLE."""
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            grade = compute_grade(db, run_id)
+            assert grade == ReproducibilityGrade.FULL_REPRODUCIBLE
 
 
 # =============================================================================
@@ -226,41 +279,17 @@ class TestGradeDegradationProperties:
     - ATTRIBUTABLE_ONLY → unchanged
     """
 
-    def _degrade_after_purge(self, grade: ReproducibilityGrade) -> ReproducibilityGrade:
-        """Apply purge degradation rule to a grade.
+    @given(grade=all_grades)
+    @settings(max_examples=20)
+    def test_degradation_rule_applies(self, grade: ReproducibilityGrade) -> None:
+        """Property: Degradation rule applied via update_grade_after_purge()."""
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            set_run_grade(db, run_id, grade)
+            update_grade_after_purge(db, run_id)
 
-        This mirrors the logic in update_grade_after_purge().
-        """
-        if grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE:
-            return ReproducibilityGrade.ATTRIBUTABLE_ONLY
-        else:
-            return grade
-
-    def test_replay_reproducible_degrades_to_attributable(self) -> None:
-        """Property: REPLAY_REPRODUCIBLE degrades to ATTRIBUTABLE_ONLY.
-
-        After purge, we no longer have recorded responses, so we can't
-        replay - only verify what happened via hashes.
-        """
-        result = self._degrade_after_purge(ReproducibilityGrade.REPLAY_REPRODUCIBLE)
-        assert result == ReproducibilityGrade.ATTRIBUTABLE_ONLY
-
-    def test_full_reproducible_unchanged_after_purge(self) -> None:
-        """Property: FULL_REPRODUCIBLE is unchanged after purge.
-
-        Fully reproducible runs don't depend on recorded responses -
-        they can be re-executed from inputs alone.
-        """
-        result = self._degrade_after_purge(ReproducibilityGrade.FULL_REPRODUCIBLE)
-        assert result == ReproducibilityGrade.FULL_REPRODUCIBLE
-
-    def test_attributable_only_unchanged_after_purge(self) -> None:
-        """Property: ATTRIBUTABLE_ONLY is unchanged after purge.
-
-        Already at the lowest grade - can't degrade further.
-        """
-        result = self._degrade_after_purge(ReproducibilityGrade.ATTRIBUTABLE_ONLY)
-        assert result == ReproducibilityGrade.ATTRIBUTABLE_ONLY
+            expected = ReproducibilityGrade.ATTRIBUTABLE_ONLY if grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE else grade
+            assert _get_run_grade(db, run_id) == expected
 
     @given(grade=all_grades)
     @settings(max_examples=20)
@@ -269,9 +298,17 @@ class TestGradeDegradationProperties:
 
         degrade(degrade(x)) == degrade(x) for all grades.
         """
-        once = self._degrade_after_purge(grade)
-        twice = self._degrade_after_purge(once)
-        assert once == twice
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            set_run_grade(db, run_id, grade)
+
+            update_grade_after_purge(db, run_id)
+            once = _get_run_grade(db, run_id)
+
+            update_grade_after_purge(db, run_id)
+            twice = _get_run_grade(db, run_id)
+
+            assert once == twice
 
     @given(grade=all_grades)
     @settings(max_examples=20)
@@ -286,7 +323,12 @@ class TestGradeDegradationProperties:
             ReproducibilityGrade.FULL_REPRODUCIBLE: 2,
         }
 
-        result = self._degrade_after_purge(grade)
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            set_run_grade(db, run_id, grade)
+            update_grade_after_purge(db, run_id)
+            result = _get_run_grade(db, run_id)
+
         assert hierarchy[result] <= hierarchy[grade]
 
 
@@ -298,24 +340,6 @@ class TestGradeDegradationProperties:
 class TestClassificationDegradationInteractionProperties:
     """Property tests for interaction between classification and degradation."""
 
-    def _classify_determinism(self, det: Determinism) -> ReproducibilityGrade:
-        """Classify a single determinism value to its grade."""
-        non_reproducible = {
-            Determinism.EXTERNAL_CALL,
-            Determinism.NON_DETERMINISTIC,
-        }
-        if det in non_reproducible:
-            return ReproducibilityGrade.REPLAY_REPRODUCIBLE
-        else:
-            return ReproducibilityGrade.FULL_REPRODUCIBLE
-
-    def _degrade_after_purge(self, grade: ReproducibilityGrade) -> ReproducibilityGrade:
-        """Apply purge degradation rule to a grade."""
-        if grade == ReproducibilityGrade.REPLAY_REPRODUCIBLE:
-            return ReproducibilityGrade.ATTRIBUTABLE_ONLY
-        else:
-            return grade
-
     @given(det=reproducible_determinism)
     @settings(max_examples=50)
     def test_reproducible_determinism_survives_purge(self, det: Determinism) -> None:
@@ -323,10 +347,15 @@ class TestClassificationDegradationInteractionProperties:
 
         DETERMINISTIC nodes don't need recorded payloads to re-execute.
         """
-        initial = self._classify_determinism(det)
-        after_purge = self._degrade_after_purge(initial)
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            _insert_nodes(db, run_id, [det])
 
-        assert after_purge == ReproducibilityGrade.FULL_REPRODUCIBLE
+            grade = compute_grade(db, run_id)
+            set_run_grade(db, run_id, grade)
+            update_grade_after_purge(db, run_id)
+
+            assert _get_run_grade(db, run_id) == ReproducibilityGrade.FULL_REPRODUCIBLE
 
     @given(det=non_reproducible_determinism)
     @settings(max_examples=50)
@@ -335,7 +364,12 @@ class TestClassificationDegradationInteractionProperties:
 
         Without recorded responses, we can only prove what happened via hashes.
         """
-        initial = self._classify_determinism(det)
-        after_purge = self._degrade_after_purge(initial)
+        with LandscapeDB.in_memory() as db:
+            run_id = _create_run(db)
+            _insert_nodes(db, run_id, [det])
 
-        assert after_purge == ReproducibilityGrade.ATTRIBUTABLE_ONLY
+            grade = compute_grade(db, run_id)
+            set_run_grade(db, run_id, grade)
+            update_grade_after_purge(db, run_id)
+
+            assert _get_run_grade(db, run_id) == ReproducibilityGrade.ATTRIBUTABLE_ONLY

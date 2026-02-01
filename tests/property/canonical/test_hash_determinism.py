@@ -12,6 +12,7 @@ examples we think of.
 
 from __future__ import annotations
 
+import string
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -74,29 +75,31 @@ class TestCanonicalJsonDeterminism:
         # Round-trip should preserve structure (though types may change)
         assert parsed is not None or data is None
 
-    @given(data=st.dictionaries(dict_keys, json_primitives, min_size=2, max_size=10))
+    @given(
+        data=st.dictionaries(
+            st.text(min_size=1, max_size=8, alphabet=string.ascii_letters + string.digits),
+            st.one_of(
+                st.integers(min_value=MIN_SAFE_INT, max_value=MAX_SAFE_INT),
+                st.text(max_size=20, alphabet=string.ascii_letters + string.digits),
+                st.booleans(),
+                st.none(),
+            ),
+            min_size=1,
+            max_size=8,
+        )
+    )
     @settings(max_examples=300)
-    def test_canonical_json_sorts_keys_deterministically(self, data: dict[str, Any]) -> None:
-        """Property: Dictionary keys are always in the same order (RFC 8785 sorting).
+    def test_canonical_json_sorts_ascii_keys_and_compact(self, data: dict[str, Any]) -> None:
+        """Property: ASCII-keyed dicts are sorted and compact per RFC 8785.
 
-        Note: RFC 8785 uses a specific lexicographic sort order that may differ
-        from Python's default sorted() for certain Unicode characters. What matters
-        is that the order is DETERMINISTIC, not that it matches Python's sort.
+        For ASCII keys and primitive values, RFC 8785 ordering matches
+        json.dumps(sort_keys=True) and uses compact separators.
         """
         import json
 
-        result1 = canonical_json(data)
-        result2 = canonical_json(data)
-
-        # Parse both results
-        parsed1 = json.loads(result1)
-        parsed2 = json.loads(result2)
-
-        if isinstance(parsed1, dict) and isinstance(parsed2, dict):
-            keys1 = list(parsed1.keys())
-            keys2 = list(parsed2.keys())
-            # Keys must be in the same order both times (determinism)
-            assert keys1 == keys2, f"Key order not deterministic: {keys1} vs {keys2}"
+        result = canonical_json(data)
+        expected = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        assert result == expected
 
 
 class TestStableHashDeterminism:
@@ -310,19 +313,14 @@ class TestStructuralProperties:
     @given(data=json_values)
     @settings(max_examples=100)
     def test_canonical_json_no_whitespace(self, data: Any) -> None:
-        """Property: Canonical JSON has no unnecessary whitespace.
-
-        RFC 8785 specifies compact output with no whitespace between tokens.
-        """
+        """Property: Canonical JSON is compact for simple structures."""
         result = canonical_json(data)
-        # Check for common whitespace patterns that shouldn't exist
         assert "\n" not in result, "Newlines in canonical JSON"
-        # Note: spaces can exist in string values, so we only check
-        # for patterns that indicate formatting
-        if isinstance(data, dict) and data:
-            # There should be no space after colons or commas in object notation
-            # (outside of string values)
-            pass  # Complex to verify without parsing - rely on rfc8785
+
+    def test_canonical_json_compact_for_simple_object(self) -> None:
+        """Canonical JSON uses compact separators for simple objects."""
+        result = canonical_json({"b": 1, "a": 2})
+        assert result == '{"a":2,"b":1}'
 
     @given(data=st.dictionaries(dict_keys, json_primitives, min_size=2, max_size=10))
     @settings(max_examples=100)
@@ -332,15 +330,14 @@ class TestStructuralProperties:
         This is crucial for determinism - dicts created with different
         insertion orders must produce the same hash.
         """
-        import random
-
-        # Get items and shuffle them
         items = list(data.items())
-        shuffled = items.copy()
-        random.shuffle(shuffled)
+        if len(items) < 2:
+            return
+        reversed_items = list(reversed(items))
+        if reversed_items == items:
+            return
 
-        # Create dict from shuffled items
-        dict_from_shuffled = dict(shuffled)
+        dict_from_shuffled = dict(reversed_items)
 
         hash1 = stable_hash(data)
         hash2 = stable_hash(dict_from_shuffled)

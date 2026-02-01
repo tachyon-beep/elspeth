@@ -1292,3 +1292,311 @@ allow_hits:
     trail'
   safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
   expires: null
+# dag.py - Plugin protocol checks at interface boundary
+- key: core/dag.py:R5:ExecutionGraph:from_plugin_instances:fp=b21022bce5ae4b44
+  owner: architecture
+  reason: 'Plugin interface boundary: GateProtocol check determines transform routing
+    behavior - duck typing at plugin instantiation'
+  safety: Determines routing mode (FORK vs standard) - no bug hiding, just polymorphism
+  expires: null
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=45d1be91678e2c10
+  owner: architecture
+  reason: 'Schema introspection: dict check for extracting schema config from plugin
+    options - external config boundary'
+  safety: Returns None for non-dict schemas, caller handles appropriately
+  expires: null
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=ab91f75a5136affd
+  owner: architecture
+  reason: 'Schema introspection: dict check for extracting required fields from plugin
+    options - external config boundary'
+  safety: Returns empty set for non-dict options, caller handles appropriately
+  expires: null
+# openrouter_batch.py - External API response validation at Tier 3 boundary
+- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:process:fp=2368e65319b7368d
+  owner: architecture
+  reason: 'Batch processing mode check: determines single row vs batch processing
+    path - input polymorphism at process entry'
+  safety: Both paths fully implemented, no error hiding
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R6:OpenRouterBatchLLMTransform:_process_batch:fp=ae90a15b5c6592b0
+  owner: architecture
+  reason: 'External API boundary: HTTP errors from OpenRouter API are Tier 3 data
+    - caught and converted to TransformResult.error()'
+  safety: Returns explicit error result with full error context for audit trail
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_batch:fp=394c1ea7a1fa932f
+  owner: architecture
+  reason: 'Async result handling: Exception check for concurrent.futures result -
+    distinguishes success from failure in batch'
+  safety: Exceptions are re-raised or converted to error results with full context
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_single_row:fp=45babdf819831c0a
+  owner: architecture
+  reason: 'External API boundary: LLM response validation at Tier 3 boundary - JSON
+    may not be dict as expected'
+  safety: Returns TransformResult.error() with full context when response is not
+    dict
+  expires: null
+- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_single_row:fp=37b626e8dbabb45a
+  owner: architecture
+  reason: 'Error reporting context: includes response keys in error for debugging
+    - defensive for error message only'
+  safety: Only used in error path to provide debugging context, no control flow impact
+  expires: null
+# azure_batch.py - External API response validation at Tier 3 boundary
+- key: plugins/llm/azure_batch.py:R5:AzureBatchLLMTransform:process:fp=28aef14e8648f105
+  owner: architecture
+  reason: 'Batch processing mode check: determines single row vs batch processing
+    path - input polymorphism at process entry'
+  safety: Both paths fully implemented, no error hiding
+  expires: null
+- key: plugins/llm/azure_batch.py:R6:AzureBatchLLMTransform:_submit_batch:fp=096b3029c907d756
+  owner: architecture
+  reason: 'Template rendering error at Tier 3 boundary: Jinja template may fail on
+    user data - caught and converted to error result'
+  safety: Returns explicit error result with full context for audit trail
+  expires: null
+- key: plugins/llm/azure_batch.py:R6:AzureBatchLLMTransform:_download_results:fp=a2a90dff4b2f2d90
+  owner: architecture
+  reason: 'External API boundary: Azure Batch API response JSON may be malformed -
+    caught and converted to error result'
+  safety: Returns explicit error result with full context for audit trail
+  expires: null
+- key: plugins/llm/azure_batch.py:R5:AzureBatchLLMTransform:_download_results:fp=1b021da8f63321f7
+  owner: architecture
+  reason: 'External API boundary: Azure Batch API response validation at Tier 3 boundary
+    - JSON may not be dict as expected'
+  safety: Returns error result with full context when response is not dict
+  expires: null
+# core/config.py - Configuration parsing at Tier 3 boundary (external YAML/env vars)
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=ee83a5e764357b78
+  owner: architecture
+  reason: 'Config parsing: recursive type dispatch for env var expansion - external
+    YAML structure at Tier 3 boundary'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=c60f1953f79c0c37
+  owner: architecture
+  reason: 'Config parsing: dict traversal for env var expansion - external YAML structure'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=af6a1e91ec96aab7
+  owner: architecture
+  reason: 'Config parsing: list traversal for env var expansion - external YAML structure'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=1bca2bac64ccc1b9
+  owner: architecture
+  reason: 'Config parsing: nested dict traversal for env var expansion'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=6afe2ea26af64ed6
+  owner: architecture
+  reason: 'Config parsing: nested list traversal for env var expansion'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=475b0ebc26b49cc3
+  owner: architecture
+  reason: 'Config fingerprinting: checks if telemetry section exists for redaction'
+  safety: Safe default if telemetry is not dict - proceeds without redaction
+  expires: null
+- key: core/config.py:R1:_fingerprint_config_for_audit:fp=aa5ea1f516a4f35f
+  owner: architecture
+  reason: 'Config fingerprinting: optional exporters field in telemetry config'
+  safety: None is valid - no exporters to redact
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=7350d9ce03243941
+  owner: architecture
+  reason: 'Config fingerprinting: checks exporters is list before iterating'
+  safety: Safe default if not list - proceeds without redaction
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=ca8c991bc85bb49f
+  owner: architecture
+  reason: 'Config fingerprinting: checks exporter structure before accessing options'
+  safety: Safe default if not dict - proceeds without redaction
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=32a9e3888f9ed044
+  owner: architecture
+  reason: 'Config fingerprinting: checks options is dict before redacting api_key'
+  safety: Safe default if not dict - proceeds without redaction
+  expires: null
+- key: core/config.py:R5:_lowercase_schema_keys:fp=dab5899a246b0649
+  owner: architecture
+  reason: 'Schema normalization: recursive type dispatch for case-insensitive keys'
+  safety: Type-based dispatch for correct normalization behavior
+  expires: null
+- key: core/config.py:R5:_lowercase_schema_keys:fp=6774c4c319677614
+  owner: architecture
+  reason: 'Schema normalization: list traversal for case-insensitive keys'
+  safety: Type-based dispatch for correct normalization behavior
+  expires: null
+# engine/executors.py - Exception type checks and protocol handling
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=fadb937a905ccd67
+  owner: architecture
+  reason: 'Exception type check: TimeoutError requires special handling for batch
+    transform eviction - not bug hiding'
+  safety: TimeoutError triggers eviction logic, all other exceptions re-raised
+  expires: null
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=476ec07def9fc777
+  owner: architecture
+  reason: 'Gate result polymorphism: expression evaluation returns bool or str -
+    determines routing behavior'
+  safety: Both types handled correctly, TypeError for unexpected types
+  expires: null
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=2538a071e6e84c55
+  owner: architecture
+  reason: 'Gate result polymorphism: str result indicates named destination routing'
+  safety: Both types handled correctly, TypeError for unexpected types
+  expires: null
+- key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=d005edf49465263c
+  owner: architecture
+  reason: 'Checkpoint validation: tokens_data must be list - checkpoint format contract'
+  safety: Raises ValueError with clear message if checkpoint is malformed
+  expires: null
+# core/config.py - Additional config parsing entries
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=b664a0803c8eb2a0
+  owner: architecture
+  reason: 'Config parsing: dict branch in recursive env var expansion'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R5:_expand_env_vars:_expand_value:fp=a27d1967c5ab41a2
+  owner: architecture
+  reason: 'Config parsing: list branch in recursive env var expansion'
+  safety: Type-based dispatch for correct expansion behavior
+  expires: null
+- key: core/config.py:R6:_fingerprint_secrets:fp=05dc877f42c80ab9
+  owner: architecture
+  reason: 'HMAC fingerprinting: ValueError from HMAC may indicate bad key - fallback to REDACTED'
+  safety: Falls back to REDACTED marker, no secret exposure
+  expires: null
+- key: core/config.py:R5:_fingerprint_secrets:_process_value:fp=1f75ecfab65f3a4c
+  owner: architecture
+  reason: 'Secret fingerprinting: dict traversal for finding secrets in config'
+  safety: Type-based dispatch for correct fingerprinting behavior
+  expires: null
+- key: core/config.py:R5:_fingerprint_secrets:_process_value:fp=b71faa506e88f84d
+  owner: architecture
+  reason: 'Secret fingerprinting: list traversal for finding secrets in config'
+  safety: Type-based dispatch for correct fingerprinting behavior
+  expires: null
+- key: core/config.py:R5:_fingerprint_secrets:_process_value:fp=92e28ee6aaa1e70e
+  owner: architecture
+  reason: 'Secret fingerprinting: string check for secret field replacement'
+  safety: Type-based dispatch for correct fingerprinting behavior
+  expires: null
+- key: core/config.py:R6:_sanitize_dsn:fp=207e5d52a69e337c
+  owner: architecture
+  reason: 'DSN sanitization: ValueError from URL parsing - fallback to REDACTED'
+  safety: Falls back to REDACTED marker, no credential exposure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=482fe3d08da5097a
+  owner: architecture
+  reason: 'Template expansion: check transforms is list before iterating'
+  safety: Safe skip if not list - external YAML structure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=46b7da6e1f999ff7
+  owner: architecture
+  reason: 'Template expansion: check plugin_config is dict before accessing'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=5dc37dde6dbe5a2a
+  owner: architecture
+  reason: 'Template expansion: check options is dict before expanding'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=32e9b1764b94c36b
+  owner: architecture
+  reason: 'Config fingerprinting: check source section exists and is dict'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=3f4cb99c4fff7f1a
+  owner: architecture
+  reason: 'Config fingerprinting: check source options is dict before redacting'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=5eeee697061317a7
+  owner: architecture
+  reason: 'Config fingerprinting: check source options is dict before api_key redact'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=47b8e733811a1f74
+  owner: architecture
+  reason: 'Config fingerprinting: check sinks section exists and is dict'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=85c0abd736106c83
+  owner: architecture
+  reason: 'Config fingerprinting: check sink is dict before accessing options'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=bf9d31ae7641ffab
+  owner: architecture
+  reason: 'Config fingerprinting: check sink options is dict before redacting'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=5ea8601e3411a902
+  owner: architecture
+  reason: 'Config fingerprinting: check transforms section exists and is list'
+  safety: Safe skip if not list - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=89060d3baef08b99
+  owner: architecture
+  reason: 'Config fingerprinting: check plugin is dict before accessing options'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=fefb9816b857492c
+  owner: architecture
+  reason: 'Config fingerprinting: check plugin options is dict before redacting'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=dc16bc4e23c52e3f
+  owner: architecture
+  reason: 'Config fingerprinting: check aggregations section exists and is list'
+  safety: Safe skip if not list - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=b3422975f53764af
+  owner: architecture
+  reason: 'Config fingerprinting: check agg is dict before accessing options'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=5dd8b130fa19ad0d
+  owner: architecture
+  reason: 'Config fingerprinting: check agg options is dict before redacting'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+# core/config.py - Final config parsing entries
+- key: core/config.py:R5:_expand_config_templates:fp=2fd838e54887604e
+  owner: architecture
+  reason: 'Template expansion: check plugin options is dict before expanding'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=231b72d35a6eb9bc
+  owner: architecture
+  reason: 'Template expansion: check aggregations section is list before iterating'
+  safety: Safe skip if not list - external YAML structure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=cf2a5794597f3367
+  owner: architecture
+  reason: 'Template expansion: check agg_config is dict before accessing'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_expand_config_templates:fp=731f751c067f6faf
+  owner: architecture
+  reason: 'Template expansion: check agg options is dict before expanding'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=8bbf8b316582f109
+  owner: architecture
+  reason: 'Config fingerprinting: check landscape section exists and is dict'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=cc9e4920e565bc15
+  owner: architecture
+  reason: 'Config fingerprinting: check landscape url is string before sanitizing'
+  safety: Safe skip if not string - external YAML structure
+  expires: null
+- key: core/config.py:R5:_fingerprint_config_for_audit:fp=93af269c478b1d54
+  owner: architecture
+  reason: 'Config fingerprinting: check source section exists and is dict'
+  safety: Safe skip if not dict - external YAML structure
+  expires: null

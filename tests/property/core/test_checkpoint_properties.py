@@ -217,18 +217,9 @@ class TestAggregationStateRoundTripProperties:
                 aggregation_state=state,
             )
 
-            # Parse stored JSON
-            if checkpoint.aggregation_state_json is not None:
-                restored = json.loads(checkpoint.aggregation_state_json)
-            else:
-                restored = None
-
-            # Empty dict should produce None (or empty), handle both
-            if state == {}:
-                # Empty dict serializes to "{}" which is truthy, so it's stored
-                assert restored == {} or restored is None or restored == state
-            else:
-                assert restored == state, f"Aggregation state corrupted during round-trip!\nOriginal: {state}\nRestored: {restored}"
+            assert checkpoint.aggregation_state_json is not None
+            restored = json.loads(checkpoint.aggregation_state_json)
+            assert restored == state, f"Aggregation state corrupted during round-trip!\nOriginal: {state}\nRestored: {restored}"
         finally:
             db.close()
 
@@ -237,14 +228,37 @@ class TestAggregationStateRoundTripProperties:
     def test_aggregation_state_hash_deterministic(self, state: dict[str, Any]) -> None:
         """Property: Same aggregation state produces same JSON representation.
 
-        The JSON serialization must be deterministic so that comparing
-        checkpoint hashes works correctly.
+        This uses the actual checkpoint serialization path to avoid
+        diverging from production behavior.
         """
-        # Serialize twice
-        json1 = json.dumps(state, sort_keys=True)
-        json2 = json.dumps(state, sort_keys=True)
+        db, _ = create_test_db()
+        try:
+            manager = CheckpointManager(db)
+            graph = create_test_graph()
 
-        assert json1 == json2, "JSON serialization is not deterministic"
+            setup_checkpoint_prerequisites(db, "test-run-json", token_id="token-json")
+
+            checkpoint1 = manager.create_checkpoint(
+                run_id="test-run-json",
+                token_id="token-json",
+                node_id="transform_0",
+                sequence_number=1,
+                graph=graph,
+                aggregation_state=state,
+            )
+            checkpoint2 = manager.create_checkpoint(
+                run_id="test-run-json",
+                token_id="token-json",
+                node_id="transform_0",
+                sequence_number=2,
+                graph=graph,
+                aggregation_state=state,
+            )
+
+            assert checkpoint1.aggregation_state_json is not None
+            assert checkpoint1.aggregation_state_json == checkpoint2.aggregation_state_json
+        finally:
+            db.close()
 
     def test_none_aggregation_state_stored_as_null(self) -> None:
         """Property: None aggregation state is stored as SQL NULL."""
@@ -558,13 +572,8 @@ class TestSequenceNumberProperties:
 
             setup_checkpoint_prerequisites(db, "test-ordering")
 
-            # Create checkpoints in random order
-            import random
-
-            shuffled = seq_numbers.copy()
-            random.shuffle(shuffled)
-
-            for seq in shuffled:
+            # Create checkpoints in reversed order
+            for seq in reversed(seq_numbers):
                 manager.create_checkpoint(
                     run_id="test-ordering",
                     token_id="token-001",  # Reuse same token - sequence_number is unique

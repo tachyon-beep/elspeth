@@ -13,8 +13,8 @@ where data enters the system. This is critical for audit integrity.
 NOTE: Float and NumPy non-finite rejection is comprehensively tested in:
     tests/property/canonical/test_nan_rejection.py
 
-This file complements that coverage with Decimal, enum, and config contracts
-that are NOT covered there.
+This file complements that coverage with enum and config contract validation,
+and extends Decimal coverage to include signaling NaN (sNaN) and nested cases.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ non_finite_decimals = st.sampled_from(
 
 
 # =============================================================================
-# Decimal Rejection Property Tests (UNIQUE - not in test_nan_rejection.py)
+# Decimal Rejection Property Tests
 # =============================================================================
 
 
@@ -58,7 +58,8 @@ class TestDecimalRejectionProperties:
 
     All of these would corrupt audit trail integrity if allowed through.
 
-    NOTE: This is distinct from float/numpy coverage in test_nan_rejection.py.
+    NOTE: This extends float/numpy coverage in test_nan_rejection.py and
+    explicitly includes Decimal("sNaN") edge cases.
     """
 
     @given(value=non_finite_decimals)

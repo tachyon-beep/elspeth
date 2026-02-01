@@ -82,7 +82,7 @@ def resolve_database_url(
 ) -> tuple[str, "ElspethSettings | None"]:
     """Resolve database URL from CLI option or settings file.
 
-    Priority: CLI --database > settings.yaml landscape.url
+    Priority: CLI --database > explicit --settings > settings.yaml landscape.url
 
     Args:
         database: Explicit database path from CLI (optional)
@@ -106,7 +106,9 @@ def resolve_database_url(
         return f"sqlite:///{db_path}", None
 
     # Try explicit settings file
-    if settings_path and settings_path.exists():
+    if settings_path is not None:
+        if not settings_path.exists():
+            raise ValueError(f"Settings file not found: {settings_path}")
         try:
             config = load_settings(settings_path)
             return config.landscape.url, config
