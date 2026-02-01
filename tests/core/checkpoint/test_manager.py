@@ -96,7 +96,7 @@ class TestCheckpointManager:
         Verifies all checkpoint fields, not just sequence number, to ensure
         resume compatibility and audit lineage integrity.
         """
-        from elspeth.core.canonical import compute_upstream_topology_hash, stable_hash
+        from elspeth.core.canonical import compute_full_topology_hash, stable_hash
 
         checkpoint = manager.create_checkpoint(
             run_id="run-001",
@@ -120,7 +120,8 @@ class TestCheckpointManager:
         assert checkpoint.created_at.tzinfo is not None
 
         # Topology hashes must match expected values (resume compatibility)
-        expected_upstream_hash = compute_upstream_topology_hash(mock_graph, "node-001")
+        # Note: CheckpointManager uses compute_full_topology_hash for ALL branches
+        expected_upstream_hash = compute_full_topology_hash(mock_graph)
         node_info = mock_graph.get_node_info("node-001")
         expected_config_hash = stable_hash(node_info.config)
 

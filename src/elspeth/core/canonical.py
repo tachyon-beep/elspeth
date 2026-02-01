@@ -211,66 +211,6 @@ def compute_full_topology_hash(graph: ExecutionGraph) -> str:
     return stable_hash(topology_data)
 
 
-def compute_upstream_topology_hash(
-    graph: ExecutionGraph,
-    node_id: str,
-) -> str:
-    """Compute hash of upstream topology (nodes + edges) for checkpoint validation.
-
-    NOTE: This function is DEPRECATED for checkpoint validation in multi-sink DAGs.
-    Use compute_full_topology_hash() instead to ensure ALL branches are validated.
-
-    This function is kept for backwards compatibility with existing code that
-    needs upstream-only topology hashing for other purposes (e.g., lineage queries).
-
-    Captures both:
-    - Which nodes must execute before checkpoint node
-    - How those nodes are connected (edge structure)
-    - Incoming edges to the checkpoint node (routing changes)
-
-    This prevents false negatives where node set is preserved
-    but edge connectivity changes.
-
-    Args:
-        graph: Execution graph to analyze
-        node_id: Checkpoint node ID
-
-    Returns:
-        SHA-256 hash of canonical upstream topology representation.
-    """
-    # Get NetworkX graph via public accessor
-    nx_graph = graph.get_nx_graph()
-
-    # Get all ancestor nodes
-    ancestors = nx.ancestors(nx_graph, node_id)
-
-    # Include checkpoint node to capture incoming edges
-    # (outgoing edges are automatically excluded since descendants aren't in ancestors)
-    upstream_nodes = [*list(ancestors), node_id]
-    upstream_subgraph: nx.MultiDiGraph[Any] = nx_graph.subgraph(upstream_nodes)  # type: ignore[assignment]
-
-    # Create canonical representation of topology
-    topology_data = {
-        "nodes": sorted(
-            [
-                {
-                    "node_id": n,
-                    "plugin_name": graph.get_node_info(n).plugin_name,
-                    "config_hash": stable_hash(graph.get_node_info(n).config),
-                }
-                for n in upstream_nodes
-            ],
-            key=lambda x: x["node_id"],
-        ),
-        "edges": sorted(
-            [_edge_to_canonical_dict(upstream_subgraph, u, v, k) for u, v, k in upstream_subgraph.edges(keys=True)],
-            key=lambda x: (x["from"], x["to"], x["key"]),
-        ),
-    }
-
-    return stable_hash(topology_data)
-
-
 def _edge_to_canonical_dict(
     graph: nx.MultiDiGraph[Any],
     u: str,

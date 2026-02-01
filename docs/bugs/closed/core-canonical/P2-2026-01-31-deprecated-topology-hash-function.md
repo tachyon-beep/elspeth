@@ -38,3 +38,12 @@
 **Status: STILL VALID**
 
 - `compute_upstream_topology_hash()` remains and still documents backwards compatibility usage. (`src/elspeth/core/canonical.py:214-224`)
+
+## Resolution (2026-02-02)
+
+**Status: CLOSED**
+
+- Deleted `compute_upstream_topology_hash()` function from `src/elspeth/core/canonical.py`
+- Updated `tests/core/checkpoint/test_manager.py` to use `compute_full_topology_hash(mock_graph)` instead
+- No production code used the function (only the test file had a call site)
+- Test was also corrected: it was verifying against the deprecated function while `CheckpointManager` actually uses `compute_full_topology_hash()`
