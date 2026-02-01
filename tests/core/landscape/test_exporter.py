@@ -74,9 +74,23 @@ class TestLandscapeExporterRunMetadata:
             "completed_at",
             "canonical_version",
             "config_hash",
+            "settings",  # Full resolved settings for audit trail portability
         ]
         for field in required_fields:
             assert field in run_record, f"Missing required field: {field}"
+
+    def test_exporter_run_includes_resolved_settings(self, populated_db: tuple[LandscapeDB, str]) -> None:
+        """Run record should include parsed settings for audit trail portability."""
+        db, run_id = populated_db
+        exporter = LandscapeExporter(db)
+
+        records = list(exporter.export_run(run_id))
+        run_record = next(r for r in records if r["record_type"] == "run")
+
+        # Settings should be a dict, not a JSON string
+        assert isinstance(run_record["settings"], dict), "settings should be parsed dict, not JSON string"
+        # Should contain the config we passed to begin_run
+        assert run_record["settings"] == {"test": True}
 
 
 class TestLandscapeExporterRows:
@@ -127,6 +141,48 @@ class TestLandscapeExporterNodes:
         assert len(node_records) == 1
         assert node_records[0]["node_id"] == "source_1"
         assert node_records[0]["plugin_name"] == "csv"
+
+    def test_exporter_node_has_required_fields(self, populated_db: tuple[LandscapeDB, str]) -> None:
+        """Node record should have all required fields for audit trail portability."""
+        db, run_id = populated_db
+        exporter = LandscapeExporter(db)
+
+        records = list(exporter.export_run(run_id))
+        node_record = next(r for r in records if r["record_type"] == "node")
+
+        required_fields = [
+            "record_type",
+            "run_id",
+            "node_id",
+            "plugin_name",
+            "node_type",
+            "plugin_version",
+            "determinism",  # How reproducible is this node?
+            "config_hash",
+            "config",  # Full resolved config for audit trail portability
+            "schema_hash",
+            "schema_mode",  # Schema validation mode (dynamic/strict/free/parse/null)
+            "schema_fields",  # Explicit field definitions (list or null)
+            "sequence_in_pipeline",
+        ]
+        for field in required_fields:
+            assert field in node_record, f"Missing required field: {field}"
+
+    def test_exporter_node_includes_resolved_config(self, populated_db: tuple[LandscapeDB, str]) -> None:
+        """Node record should include parsed config for audit trail portability."""
+        db, run_id = populated_db
+        exporter = LandscapeExporter(db)
+
+        records = list(exporter.export_run(run_id))
+        node_record = next(r for r in records if r["record_type"] == "node")
+
+        # Config should be a dict, not a JSON string
+        assert isinstance(node_record["config"], dict), "config should be parsed dict, not JSON string"
+        # Should contain the config we passed to register_node
+        assert node_record["config"] == {"path": "input.csv"}
+        # Determinism should be a string value, not enum object
+        assert isinstance(node_record["determinism"], str)
+        assert node_record["determinism"] == "deterministic"
 
 
 class TestLandscapeExporterErrors:

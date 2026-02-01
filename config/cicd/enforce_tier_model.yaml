@@ -1508,17 +1508,17 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=62299adb3b6e3458
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=833be078c2b7dc59
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=e1835605f4deac37
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=19fed39d728d081f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=13bc34cd7b401e08
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=a2abc5cdc61b3112
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

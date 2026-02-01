@@ -175,3 +175,59 @@ This requires an **architectural decision**, not just a bug fix:
 - Cons: More complex API, config decision burden on users
 
 Given the "suitable for compliance review and legal inquiry" docstring claim, **Option 1 or 3** appears most aligned with stated intent.
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+Implemented **Option 1: Full portability** - exports are now self-contained.
+
+### Changes Made
+
+**`src/elspeth/core/landscape/exporter.py`:**
+
+1. **Run record** now includes:
+   - `settings`: Full resolved settings as parsed dict (not JSON string)
+   - `status`: Now correctly converted from enum to string value
+
+2. **Node record** now includes:
+   - `config`: Full resolved config as parsed dict (not JSON string)
+   - `determinism`: Enum value string (deterministic/seeded/nondeterministic)
+   - `schema_mode`: Schema validation mode (dynamic/strict/free/parse/null)
+   - `schema_fields`: Explicit field definitions (list or null)
+   - `node_type`: Now correctly converted from enum to string value
+
+3. **All enum fields** across all record types now correctly use `.value`:
+   - `edge.default_mode`
+   - `routing_event.mode`
+   - `call.call_type` and `call.status`
+   - `batch.status` (also added `trigger_type`)
+
+4. **Updated docstring** to clarify self-contained export contract.
+
+**`tests/core/landscape/test_exporter.py`:**
+
+- Added `test_exporter_run_includes_resolved_settings` - verifies settings is parsed dict
+- Added `test_exporter_node_has_required_fields` - verifies all new node fields present
+- Added `test_exporter_node_includes_resolved_config` - verifies config is parsed dict
+- Updated required_fields lists to include new fields
+
+### Design Decisions
+
+1. **Parsed JSON, not strings**: Config fields are included as structured data (`dict`), not JSON-encoded strings. This makes exports directly usable for audit review without additional parsing.
+
+2. **Field names changed**: `settings_json` → `settings`, `config_json` → `config` to reflect they're now structured data.
+
+3. **Null for optional fields**: `schema_mode` and `schema_fields` can be null, which accurately represents "not configured" (e.g., sinks don't have schemas).
+
+4. **No backwards compatibility**: Per CLAUDE.md policy, no legacy shims or optional parameters were added.
+
+### Verification
+
+- All 31 exporter tests pass
+- All 500 landscape tests pass
+- mypy type check passes
+
+### Commit
+
+Branch: `RC1-bugs-final`

@@ -2,10 +2,16 @@
 
 Exports complete audit data for a run in a format suitable for
 compliance review and legal inquiry.
+
+Export records are SELF-CONTAINED: they include the full resolved
+configuration, not just hashes. This allows third-party auditors to
+understand exactly what configuration drove each decision without
+requiring access to the original database.
 """
 
 import hashlib
 import hmac
+import json
 from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -163,11 +169,13 @@ class LandscapeExporter:
         yield {
             "record_type": "run",
             "run_id": run.run_id,
-            "status": run.status,
+            "status": run.status.value,
             "started_at": run.started_at.isoformat() if run.started_at else None,
             "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             "canonical_version": run.canonical_version,
             "config_hash": run.config_hash,
+            # Full resolved settings for audit trail portability (not just hash)
+            "settings": json.loads(run.settings_json),
             "reproducibility_grade": run.reproducibility_grade,
         }
 
@@ -178,10 +186,15 @@ class LandscapeExporter:
                 "run_id": run_id,
                 "node_id": node.node_id,
                 "plugin_name": node.plugin_name,
-                "node_type": node.node_type,
+                "node_type": node.node_type.value,
                 "plugin_version": node.plugin_version,
+                "determinism": node.determinism.value,
                 "config_hash": node.config_hash,
+                # Full resolved config for audit trail portability (not just hash)
+                "config": json.loads(node.config_json),
                 "schema_hash": node.schema_hash,
+                "schema_mode": node.schema_mode,
+                "schema_fields": node.schema_fields,
                 "sequence_in_pipeline": node.sequence_in_pipeline,
             }
 
@@ -194,7 +207,7 @@ class LandscapeExporter:
                 "from_node_id": edge.from_node_id,
                 "to_node_id": edge.to_node_id,
                 "label": edge.label,
-                "default_mode": edge.default_mode,
+                "default_mode": edge.default_mode.value,
             }
 
         # Operations (source loads, sink writes)
@@ -221,8 +234,8 @@ class LandscapeExporter:
                     "state_id": None,  # Operation calls don't have state_id
                     "operation_id": call.operation_id,
                     "call_index": call.call_index,
-                    "call_type": call.call_type,
-                    "status": call.status,
+                    "call_type": call.call_type.value,
+                    "status": call.status.value,
                     "request_hash": call.request_hash,
                     "response_hash": call.response_hash,
                     "latency_ms": call.latency_ms,
@@ -341,7 +354,7 @@ class LandscapeExporter:
                             "edge_id": event.edge_id,
                             "routing_group_id": event.routing_group_id,
                             "ordinal": event.ordinal,
-                            "mode": event.mode,
+                            "mode": event.mode.value,
                             "reason_hash": event.reason_hash,
                         }
 
@@ -354,8 +367,8 @@ class LandscapeExporter:
                             "state_id": call.state_id,
                             "operation_id": None,  # State calls don't have operation_id
                             "call_index": call.call_index,
-                            "call_type": call.call_type,
-                            "status": call.status,
+                            "call_type": call.call_type.value,
+                            "status": call.status.value,
                             "request_hash": call.request_hash,
                             "response_hash": call.response_hash,
                             "latency_ms": call.latency_ms,
@@ -369,7 +382,8 @@ class LandscapeExporter:
                 "batch_id": batch.batch_id,
                 "aggregation_node_id": batch.aggregation_node_id,
                 "attempt": batch.attempt,
-                "status": batch.status,
+                "status": batch.status.value,
+                "trigger_type": batch.trigger_type,
                 "trigger_reason": batch.trigger_reason,
                 "created_at": (batch.created_at.isoformat() if batch.created_at else None),
                 "completed_at": (batch.completed_at.isoformat() if batch.completed_at else None),
