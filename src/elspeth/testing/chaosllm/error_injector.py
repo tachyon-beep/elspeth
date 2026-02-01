@@ -31,7 +31,7 @@ class ErrorDecision:
 
     Attributes:
         error_type: The type of error to inject, or None for a successful response
-        status_code: HTTP status code (only for HTTP errors)
+        status_code: HTTP status code (HTTP errors or timeout responses)
         retry_after_sec: Value for Retry-After header (429/529 only)
         delay_sec: Delay before responding or disconnecting (timeout/slow_response/stall)
         start_delay_sec: Lead time before a connection failure or stall
@@ -73,6 +73,7 @@ class ErrorDecision:
         error_type: str,
         delay_sec: float | None = None,
         start_delay_sec: float | None = None,
+        status_code: int | None = None,
     ) -> "ErrorDecision":
         """Create a decision for a connection-level failure."""
         return cls(
@@ -80,6 +81,7 @@ class ErrorDecision:
             category=ErrorCategory.CONNECTION,
             delay_sec=delay_sec,
             start_delay_sec=start_delay_sec,
+            status_code=status_code,
         )
 
     @classmethod
@@ -229,6 +231,14 @@ class ErrorInjector:
         min_sec, max_sec = self._config.timeout_sec
         return self._rng.uniform(min_sec, max_sec)
 
+    def _build_timeout_decision(self) -> ErrorDecision:
+        """Build a timeout decision with a mix of disconnects and 504 responses."""
+        delay = self._pick_timeout_delay()
+        # 50/50 mix: some timeouts respond with 504, others drop the connection.
+        return_504 = self._should_trigger(50.0)
+        status_code = 504 if return_504 else None
+        return ErrorDecision.connection_error("timeout", delay_sec=delay, status_code=status_code)
+
     def _pick_connection_failed_lead(self) -> float:
         """Pick a lead time before a connection failure."""
         min_sec, max_sec = self._config.connection_failed_lead_sec
@@ -302,12 +312,9 @@ class ErrorInjector:
                 start_delay_sec=self._pick_connection_stall_start(),
             )
 
-        # Timeout: Accept connection but never respond
+        # Timeout: Sometimes respond with 504, sometimes drop the connection
         if self._should_trigger(self._config.timeout_pct):
-            return ErrorDecision.connection_error(
-                "timeout",
-                delay_sec=self._pick_timeout_delay(),
-            )
+            return self._build_timeout_decision()
 
         # Connection reset: RST the TCP connection
         if self._should_trigger(self._config.connection_reset_pct):
@@ -411,10 +418,7 @@ class ErrorInjector:
                 start_delay_sec=self._pick_connection_stall_start(),
             ),
         )
-        _add(
-            self._config.timeout_pct,
-            lambda: ErrorDecision.connection_error("timeout", delay_sec=self._pick_timeout_delay()),
-        )
+        _add(self._config.timeout_pct, self._build_timeout_decision)
         _add(
             self._config.connection_reset_pct,
             lambda: ErrorDecision.connection_error("connection_reset"),

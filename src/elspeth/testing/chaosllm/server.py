@@ -460,12 +460,13 @@ class ChaosLLMServer:
             raise ConnectionResetError("Connection stalled and was closed by server")
 
         if error_type == "timeout":
-            # Hang forever (or until delay expires)
+            # Delay, then either return 504 or drop the connection
             delay = decision.delay_sec if decision.delay_sec is not None else 60.0
             await asyncio.sleep(delay)
 
-            # After delay, record and return a timeout response
+            # After delay, record and then either respond or disconnect
             elapsed_ms = (time.monotonic() - start_time) * 1000
+            status_code = decision.status_code
             self._record_request(
                 request_id=request_id,
                 timestamp_utc=timestamp_utc,
@@ -473,18 +474,19 @@ class ChaosLLMServer:
                 outcome="error_injected",
                 deployment=deployment,
                 model=model,
-                status_code=None,
+                status_code=status_code,
                 error_type="timeout",
                 injection_type="timeout",
                 latency_ms=elapsed_ms,
                 injected_delay_ms=delay * 1000,
                 message_count=message_count,
             )
-            # Client will have timed out by now, but return something
-            return JSONResponse(
-                {"error": {"type": "timeout", "message": "Request timed out"}},
-                status_code=504,
-            )
+            if status_code == 504:
+                return JSONResponse(
+                    {"error": {"type": "timeout", "message": "Request timed out"}},
+                    status_code=504,
+                )
+            raise ConnectionResetError("Request timed out")
 
         elif error_type == "connection_reset":
             # Record the attempt

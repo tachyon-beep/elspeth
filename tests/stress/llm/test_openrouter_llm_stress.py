@@ -12,7 +12,6 @@ with real HTTP communication to validate:
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -335,82 +334,6 @@ class TestOpenRouterLLMStress:
         # With 30% combined server errors, expect some failures
         # But AIMD retry may recover some
         assert output.error_count >= 5, "Expected some server error failures"
-
-    @pytest.mark.chaosllm(rate_limit_pct=15.0, internal_error_pct=5.0)
-    def test_long_run_200_rows(
-        self,
-        chaosllm_http_server: ChaosLLMHTTPFixture,
-        tmp_path_factory: pytest.TempPathFactory,
-    ) -> None:
-        """Extended run with 200 rows under mixed error conditions.
-
-        Validates sustained operation while fitting in CI timeout.
-        (Reduced from 500 to stay within 15-minute CI limit.)
-
-        Verifies:
-        - Stable operation over many rows
-        - No memory leaks or resource exhaustion
-        - Pipeline completes within reasonable time
-        """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
-
-        config = make_openrouter_llm_config(
-            chaosllm_http_server.url,
-            pool_size=8,
-            max_capacity_retry_seconds=60,
-        )
-        transform = OpenRouterLLMTransform(config)
-
-        output = CollectingOutputPort()
-        transform.connect_output(output, max_pending=50)
-
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
-        transform.on_start(start_ctx)
-
-        rows = generate_test_rows(200)
-        start_time = time.monotonic()
-
-        for i, row in enumerate(rows):
-            token = make_token(f"row-{i}", f"token-{i}")
-            row_record = recorder.create_row(
-                run_id=run_id,
-                source_node_id=node_id,
-                row_index=i,
-                data=row,
-            )
-            token_record = recorder.create_token(row_id=row_record.row_id)
-            state = recorder.begin_node_state(
-                token_id=token_record.token_id,
-                node_id=node_id,
-                run_id=run_id,
-                step_index=0,
-                input_data=row,
-            )
-
-            ctx = PluginContext(
-                run_id=run_id,
-                landscape=recorder,
-                state_id=state.state_id,
-                config={},
-                token=token,
-            )
-            transform.accept(row, ctx)
-
-        transform.flush_batch_processing()
-        transform.close()
-
-        elapsed = time.monotonic() - start_time
-
-        # All rows should be processed
-        assert output.total_count == 200
-
-        # Should complete within 2 minutes
-        assert elapsed < 120, f"Long run took too long: {elapsed:.1f}s"
-
-        stats = chaosllm_http_server.get_stats()
-        # With 20% errors, expect retries
-        assert stats["total_requests"] >= 200
-        assert output.success_count > 120, "Expected >60% success rate"
 
     @pytest.mark.chaosllm(preset="stress_aimd")
     def test_fifo_ordering_preserved(

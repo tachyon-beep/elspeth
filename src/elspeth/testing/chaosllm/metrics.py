@@ -154,7 +154,7 @@ def _classify_outcome(
     is_capacity_error = status_code == 529
     is_server_error = status_code is not None and 500 <= status_code < 600 and status_code != 529
     is_client_error = status_code is not None and 400 <= status_code < 500 and status_code != 429
-    is_connection_error = error_type in (
+    is_connection_error = status_code is None and error_type in (
         "timeout",
         "connection_failed",
         "connection_stall",

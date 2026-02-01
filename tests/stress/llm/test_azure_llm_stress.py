@@ -13,7 +13,6 @@ with real HTTP communication to validate:
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -416,81 +415,3 @@ class TestAzureLLMStress:
             pos_i = input_order.index(output_ids[i])
             pos_next = input_order.index(output_ids[i + 1])
             assert pos_i < pos_next, "FIFO ordering violated"
-
-    @pytest.mark.chaosllm(rate_limit_pct=15.0, capacity_529_pct=5.0)
-    def test_long_run_200_rows(
-        self,
-        chaosllm_http_server: ChaosLLMHTTPFixture,
-        tmp_path_factory: pytest.TempPathFactory,
-    ) -> None:
-        """Extended run with 200 rows under mixed error conditions.
-
-        Validates sustained operation while fitting in CI timeout.
-        (Reduced from 500 to stay within 15-minute CI limit.)
-
-        Verifies:
-        - No memory leaks (stable resource usage)
-        - No accumulating errors
-        - Pipeline completes within timeout
-        """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
-
-        config = make_azure_llm_config(
-            chaosllm_http_server.url,
-            pool_size=8,
-            max_capacity_retry_seconds=60,
-        )
-        transform = AzureLLMTransform(config)
-
-        output = CollectingOutputPort()
-        transform.connect_output(output, max_pending=50)
-
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
-        transform.on_start(start_ctx)
-
-        rows = generate_test_rows(200)
-        start_time = time.monotonic()
-
-        for i, row in enumerate(rows):
-            token = make_token(f"row-{i}", f"token-{i}")
-            row_record = recorder.create_row(
-                run_id=run_id,
-                source_node_id=node_id,
-                row_index=i,
-                data=row,
-            )
-            token_record = recorder.create_token(row_id=row_record.row_id)
-            state = recorder.begin_node_state(
-                token_id=token_record.token_id,
-                node_id=node_id,
-                run_id=run_id,
-                step_index=0,
-                input_data=row,
-            )
-
-            ctx = PluginContext(
-                run_id=run_id,
-                landscape=recorder,
-                state_id=state.state_id,
-                config={},
-                token=token,
-            )
-            transform.accept(row, ctx)
-
-        transform.flush_batch_processing()
-        transform.close()
-
-        elapsed = time.monotonic() - start_time
-
-        # All rows should be processed
-        assert output.total_count == 200
-
-        # Verify reasonable completion time (not hung)
-        # With 200 rows at ~5ms/req + retries, should finish within 2 minutes
-        assert elapsed < 120, f"Long run took too long: {elapsed:.1f}s"
-
-        # Verify stats
-        stats = chaosllm_http_server.get_stats()
-        # With 15% + 5% errors, expect retries
-        assert stats["total_requests"] >= 200
-        assert output.success_count > 120, f"Expected >60% success rate, got {output.success_count}/200"

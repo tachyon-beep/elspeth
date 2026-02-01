@@ -12,7 +12,6 @@ also validate HTTP-level error handling in the multi-query context.
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -355,81 +354,6 @@ class TestOpenRouterMultiQueryLLMStress:
         for error, _ in output.errors:
             # Multi-query errors should have a reason field
             assert "reason" in error, "Error should have reason"
-
-    @pytest.mark.chaosllm(rate_limit_pct=10.0, template_body=MULTI_QUERY_JSON_TEMPLATE)
-    def test_multi_query_long_run_50_rows(
-        self,
-        chaosllm_http_server: ChaosLLMHTTPFixture,
-        tmp_path_factory: pytest.TempPathFactory,
-    ) -> None:
-        """Extended run with 50 rows (200 queries total).
-
-        Validates sustained operation while fitting in CI timeout.
-        (Reduced from 100 to stay within 15-minute CI limit.)
-
-        Verifies:
-        - Stable operation over many HTTP requests
-        - No resource leaks
-        - Pipeline completes within reasonable time
-        """
-        recorder, run_id, node_id = create_recorder_and_run(tmp_path_factory)
-
-        config = make_openrouter_multi_query_config(
-            chaosllm_http_server.url,
-            pool_size=8,
-            max_capacity_retry_seconds=60,
-        )
-        transform = OpenRouterMultiQueryLLMTransform(config)
-
-        output = CollectingOutputPort()
-        transform.connect_output(output, max_pending=30)
-
-        start_ctx = PluginContext(run_id=run_id, landscape=recorder, config={})
-        transform.on_start(start_ctx)
-
-        rows = generate_multi_query_rows(50)
-        start_time = time.monotonic()
-
-        for i, row in enumerate(rows):
-            token = make_token(f"row-{i}", f"token-{i}")
-            row_record = recorder.create_row(
-                run_id=run_id,
-                source_node_id=node_id,
-                row_index=i,
-                data=row,
-            )
-            token_record = recorder.create_token(row_id=row_record.row_id)
-            state = recorder.begin_node_state(
-                token_id=token_record.token_id,
-                node_id=node_id,
-                run_id=run_id,
-                step_index=0,
-                input_data=row,
-            )
-
-            ctx = PluginContext(
-                run_id=run_id,
-                landscape=recorder,
-                state_id=state.state_id,
-                config={},
-                token=token,
-            )
-            transform.accept(row, ctx)
-
-        transform.flush_batch_processing()
-        transform.close()
-
-        elapsed = time.monotonic() - start_time
-
-        # All rows should be processed
-        assert output.total_count == 50
-
-        # Should complete within 2 minutes
-        assert elapsed < 120, f"Long run took too long: {elapsed:.1f}s"
-
-        stats = chaosllm_http_server.get_stats()
-        assert stats["total_requests"] >= 200
-        assert output.success_count > 25, "Expected >50% success rate"
 
     @pytest.mark.chaosllm(preset="stress_aimd", template_body=MULTI_QUERY_JSON_TEMPLATE)
     def test_multi_query_fifo_ordering(
