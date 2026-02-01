@@ -1,5 +1,17 @@
 # Bug Report: CSVSink rejects extra fields in free/dynamic schemas
 
+## STATUS: FIXED (2026-02-02)
+
+**Resolution:** Implemented Option B - CSVSink now rejects free/dynamic schemas at initialization with a clear error message directing users to JSONSink.
+
+**Fix location:** `src/elspeth/plugins/sinks/csv_sink.py:155-161`
+
+**Test coverage:**
+- `test_rejects_free_mode_schema`
+- `test_rejects_dynamic_schema`
+
+---
+
 ## Summary
 
 - For `schema.mode=free` or dynamic schemas, extra fields are allowed by the schema contract, but CSVSink uses a fixed header and `csv.DictWriter` defaults to `extrasaction="raise"`, causing valid rows to crash when they include extra fields.
