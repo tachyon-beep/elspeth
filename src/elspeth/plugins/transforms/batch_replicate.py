@@ -77,6 +77,7 @@ class BatchReplicate(BaseTransform):
     """
 
     name = "batch_replicate"
+    plugin_version = "1.0.0"
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
     def __init__(self, config: dict[str, Any]) -> None:

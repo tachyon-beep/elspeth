@@ -67,6 +67,7 @@ class Truncate(BaseTransform):
     """
 
     name = "truncate"
+    plugin_version = "1.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

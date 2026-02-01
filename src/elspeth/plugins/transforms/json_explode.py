@@ -79,6 +79,7 @@ class JSONExplode(BaseTransform):
     """
 
     name = "json_explode"
+    plugin_version = "1.0.0"
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
     def __init__(self, config: dict[str, Any]) -> None:

@@ -147,6 +147,21 @@ class TestCSVSource:
         with pytest.raises(FileNotFoundError):
             list(source.load(ctx))
 
+    def test_has_plugin_version(self) -> None:
+        """CSVSource has explicit plugin_version for audit trail.
+
+        Per CLAUDE.md auditability standard: every decision must be traceable
+        to source data, configuration, AND code version. The plugin_version
+        attribute is recorded in the Landscape audit trail's nodes table.
+        """
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        # Class attribute check - doesn't require valid config
+        assert hasattr(CSVSource, "plugin_version")
+        assert isinstance(CSVSource.plugin_version, str)
+        assert CSVSource.plugin_version != "0.0.0"  # Must not be placeholder
+        assert CSVSource.plugin_version == "1.0.0"
+
 
 class TestCSVSourceConfigValidation:
     """Test CSVSource config validation."""

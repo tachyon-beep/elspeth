@@ -57,6 +57,7 @@ class CSVSource(BaseSource):
     """
 
     name = "csv"
+    plugin_version = "1.0.0"
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
 

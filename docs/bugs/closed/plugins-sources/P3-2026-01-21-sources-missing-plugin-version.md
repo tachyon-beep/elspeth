@@ -1,5 +1,32 @@
 # Bug Report: CSVSource and JSONSource report plugin_version as 0.0.0
 
+## RESOLUTION: 2026-02-02
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code (Opus 4.5)
+
+**Changes Made:**
+
+1. **Source file changes:**
+   - `src/elspeth/plugins/sources/csv_source.py`: Added `plugin_version = "1.0.0"` class attribute (line 60)
+   - `src/elspeth/plugins/sources/json_source.py`: Added `plugin_version = "1.0.0"` class attribute (line 73)
+
+2. **Tests added:**
+   - `tests/plugins/sources/test_csv_source.py`: Added `test_has_plugin_version()` to TestCSVSource class
+   - `tests/plugins/sources/test_json_source.py`: Added `test_has_plugin_version()` to TestJSONSource class
+   - `tests/plugins/test_builtin_plugin_metadata.py`: Created new regression test file to verify all built-in plugins have non-default plugin_version
+
+**Verification:**
+- All 101 source plugin tests pass
+- mypy type-checking passes
+- ruff linting passes
+- New tests verify CSVSource.plugin_version == "1.0.0" and JSONSource.plugin_version == "1.0.0"
+
+**Note:** During fix implementation, discovered that `PassThrough` and `FieldMapper` transforms also lack explicit plugin_version. These are tracked separately as they are out of scope for this bug report.
+
+---
+
 ## Summary
 
 - `CSVSource` and `JSONSource` do not set `plugin_version`, so they inherit the base default `"0.0.0"`.

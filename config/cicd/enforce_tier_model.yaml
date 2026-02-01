@@ -58,12 +58,12 @@ allow_hits:
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=368057f32d9f107f
+- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=170d87d85733905c
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=604a92e6e9749f9c
+- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=e3f34ad580d5587f
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -1968,12 +1968,12 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=6d7d2617647269a1
+- key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=5371f749c44a2970
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=3374534ed2852dbf
+- key: plugins/transforms/batch_stats.py:R5:BatchStats:process:fp=a199581bdd0dadd9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
@@ -1993,47 +1993,47 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=be20ae9ca05107bf
+- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=767241e2894a4d87
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=2a533a583dbb1d53
+- key: plugins/transforms/truncate.py:R5:Truncate:process:fp=dc1e25c4da82f75a
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=ee1de26652fe1661
+- key: plugins/transforms/json_explode.py:R5:JSONExplode:process:fp=71ff908610dc6040
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R6:JSONSource:_load_jsonl:fp=4af2caa99146c0d1
+- key: plugins/sources/json_source.py:R6:JSONSource:_load_jsonl:fp=ae43666a0b4a086b
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R6:JSONSource:_load_json_array:fp=d328933e329d6e62
+- key: plugins/sources/json_source.py:R6:JSONSource:_load_json_array:fp=d30fc4ac265f647a
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=308802d05608ffa0
+- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=5d2c3916e02eccfe
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=90545f6d47904dc0
+- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=cce1193f7a76aaf6
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=aeb42146bad885ba
+- key: plugins/sources/json_source.py:R5:JSONSource:_load_json_array:fp=aad06215346866ce
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/json_source.py:R6:JSONSource:_validate_and_yield:fp=919185968d41770c
+- key: plugins/sources/json_source.py:R6:JSONSource:_validate_and_yield:fp=de7308dadcd59f20
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -2048,12 +2048,12 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=8cba2c1028a96410
+- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=aaacd2efa8cf713f
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=5818a1c414530b3c
+- key: plugins/sources/csv_source.py:R6:CSVSource:load:fp=f273184bec570ed6
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
