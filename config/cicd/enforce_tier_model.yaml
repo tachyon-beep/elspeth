@@ -2613,3 +2613,49 @@ allow_hits:
   reason: Tier-3 boundary validation - external URL objects must be verified as SanitizedWebhookUrl to prevent tokens leaking to audit trail
   safety: Raises explicit TypeError with guidance; prevents security bypass via duck-typed objects
   expires: null
+# Updated fingerprints after P2-schema-config-undefined-contract-fields fix
+- key: contracts/schema.py:R5:_normalize_field_spec:fp=bf71d64da608c2a8
+  owner: bugfix
+  reason: Tier-3 boundary validation - user config field spec can be str or dict
+  safety: Raises explicit ValueError with guidance for invalid types
+  expires: null
+- key: contracts/schema.py:R5:_normalize_field_spec:fp=1ea219ceb0db6636
+  owner: bugfix
+  reason: Tier-3 boundary validation - user config field spec can be str or dict
+  safety: Raises explicit ValueError with guidance for invalid types
+  expires: null
+- key: contracts/schema.py:R5:_normalize_field_spec:fp=da22faf3b546dc50
+  owner: bugfix
+  reason: Tier-3 boundary validation - dict keys/values from user config must be strings
+  safety: Raises explicit ValueError for non-string dict entries
+  expires: null
+- key: contracts/schema.py:R5:_normalize_field_spec:fp=5ee627489e161c84
+  owner: bugfix
+  reason: Tier-3 boundary validation - dict keys/values from user config must be strings
+  safety: Raises explicit ValueError for non-string dict entries
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=7e5ead04d159d41d
+  owner: bugfix
+  reason: Tier-3 boundary - guaranteed_fields is optional user config field
+  safety: Returns None for missing keys; validates field names if present
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=55cc1e919a3c8bb1
+  owner: bugfix
+  reason: Tier-3 boundary - required_fields is optional user config field
+  safety: Returns None for missing keys; validates field names if present
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=c40079df9e9e4991
+  owner: bugfix
+  reason: Tier-3 boundary - audit_fields is optional user config field
+  safety: Returns None for missing keys; validates field names if present
+  expires: null
+- key: contracts/schema.py:R1:SchemaConfig:from_dict:fp=934625bd5d2195e8
+  owner: bugfix
+  reason: Tier-3 boundary - mode is optional user config field for serialized schemas
+  safety: Handles both original and serialized schema formats
+  expires: null
+- key: contracts/schema.py:R5:SchemaConfig:from_dict:fp=ac881fcdd98b8a48
+  owner: bugfix
+  reason: Tier-3 boundary validation - user config fields list must be list type
+  safety: Raises explicit ValueError for non-list fields value
+  expires: null

@@ -173,6 +173,37 @@ def _parse_field_names_list(value: Any, field_name: str) -> tuple[str, ...] | No
     return tuple(result)
 
 
+def _validate_contract_fields_subset(
+    contract_fields: tuple[str, ...] | None,
+    field_name: str,
+    declared_names: frozenset[str],
+) -> None:
+    """Validate that contract fields are subsets of declared fields.
+
+    For explicit schemas (mode=strict/free), contract fields like guaranteed_fields,
+    required_fields, and audit_fields must reference fields that actually exist in
+    the declared schema. Typos would otherwise create false audit claims.
+
+    Args:
+        contract_fields: The contract field tuple to validate, or None
+        field_name: Name of the field for error messages (e.g., "guaranteed_fields")
+        declared_names: Set of declared field names to validate against
+
+    Raises:
+        ValueError: If any contract field is not in declared_names
+    """
+    if contract_fields is None:
+        return
+
+    undefined = set(contract_fields) - declared_names
+    if undefined:
+        raise ValueError(
+            f"'{field_name}' contains fields not declared in schema: "
+            f"{', '.join(sorted(undefined))}. "
+            f"Declared fields are: {', '.join(sorted(declared_names))}."
+        )
+
+
 def _normalize_field_spec(spec: Any, *, index: int) -> str:
     """Normalize a field spec to string form.
 
@@ -341,6 +372,14 @@ class SchemaConfig:
         if len(names) != len(set(names)):
             duplicates = [n for n in names if names.count(n) > 1]
             raise ValueError(f"Duplicate field names in schema: {', '.join(sorted(set(duplicates)))}")
+
+        # Validate contract fields are subsets of declared fields
+        # For explicit schemas, typos in guaranteed/required/audit_fields would create
+        # false audit claims - catch them at config load time
+        declared_names = frozenset(names)
+        _validate_contract_fields_subset(guaranteed_fields, "guaranteed_fields", declared_names)
+        _validate_contract_fields_subset(required_fields, "required_fields", declared_names)
+        _validate_contract_fields_subset(audit_fields, "audit_fields", declared_names)
 
         return cls(
             mode=mode,

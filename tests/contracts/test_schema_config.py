@@ -403,3 +403,118 @@ class TestAuditFields:
 
         with pytest.raises(ValueError, match="valid Python identifier"):
             SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": ["valid", "invalid-field"]})
+
+
+class TestContractFieldSubsetValidation:
+    """Tests for validating contract fields are subsets of declared fields.
+
+    Bug: P2-2026-01-31-schema-config-undefined-contract-fields
+
+    For explicit schemas (mode=strict/free), guaranteed_fields, required_fields,
+    and audit_fields MUST be subsets of declared field names. Typos in these
+    lists would otherwise create false audit claims.
+
+    For dynamic schemas, there are no declared fields to validate against,
+    so arbitrary field names are allowed (this is the only way to express
+    contracts for dynamic schemas).
+    """
+
+    def test_guaranteed_fields_typo_in_explicit_schema_raises(self) -> None:
+        """Typo in guaranteed_fields for explicit schema raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"guaranteed_fields.*not declared.*custmer_id"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "strict",
+                    "fields": ["customer_id: str", "amount: float"],
+                    "guaranteed_fields": ["custmer_id"],  # Typo!
+                }
+            )
+
+    def test_required_fields_typo_in_explicit_schema_raises(self) -> None:
+        """Typo in required_fields for explicit schema raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"required_fields.*not declared.*custmer_id"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "strict",
+                    "fields": ["customer_id: str"],
+                    "required_fields": ["custmer_id"],  # Typo!
+                }
+            )
+
+    def test_audit_fields_typo_in_explicit_schema_raises(self) -> None:
+        """Typo in audit_fields for explicit schema raises ValueError."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"audit_fields.*not declared.*custmer_id"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "strict",
+                    "fields": ["customer_id: str"],
+                    "audit_fields": ["custmer_id"],  # Typo!
+                }
+            )
+
+    def test_multiple_undefined_fields_all_reported(self) -> None:
+        """Multiple undefined fields are all reported in error message."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"(typo1.*typo2|typo2.*typo1)"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "strict",
+                    "fields": ["customer_id: str"],
+                    "guaranteed_fields": ["typo1", "typo2"],
+                }
+            )
+
+    def test_valid_contract_fields_accepted(self) -> None:
+        """Valid contract fields (subset of declared) are accepted."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["customer_id: str", "amount: float", "timestamp: str"],
+                "guaranteed_fields": ["customer_id", "amount"],
+                "required_fields": ["customer_id"],
+                "audit_fields": ["timestamp"],
+            }
+        )
+        assert schema.guaranteed_fields == ("customer_id", "amount")
+        assert schema.required_fields == ("customer_id",)
+        assert schema.audit_fields == ("timestamp",)
+
+    def test_dynamic_schema_allows_arbitrary_contract_fields(self) -> None:
+        """Dynamic schemas allow arbitrary field names in contracts.
+
+        For dynamic schemas, there are no declared fields, so contract fields
+        are the ONLY way to express guarantees. We can't validate them.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+
+        schema = SchemaConfig.from_dict(
+            {
+                "fields": "dynamic",
+                "guaranteed_fields": ["any_field_name", "another_field"],
+                "required_fields": ["completely_arbitrary"],
+            }
+        )
+        assert schema.guaranteed_fields == ("any_field_name", "another_field")
+        assert schema.required_fields == ("completely_arbitrary",)
+
+    def test_free_mode_also_validates_contract_fields(self) -> None:
+        """Free mode schemas also validate contract field subsets."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"guaranteed_fields.*not declared"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "free",
+                    "fields": ["customer_id: str"],
+                    "guaranteed_fields": ["typo_field"],
+                }
+            )
