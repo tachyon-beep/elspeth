@@ -2542,6 +2542,227 @@ class TestSchemaValidation:
         # Should PASS: dynamic schemas are compatible with anything
         graph.validate_edge_compatibility()
 
+    def test_coalesce_rejects_mixed_dynamic_explicit_branches(self) -> None:
+        """Coalesce must reject mixed dynamic/explicit branch schemas.
+
+        BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
+
+        When one branch produces a dynamic schema and another produces an explicit
+        schema, the coalesce's effective schema becomes the first branch's schema.
+        This masks the mismatch: downstream consumers expect explicit fields that
+        dynamic-branch rows may not have, causing runtime failures.
+
+        Pre-run validation must detect and reject this mismatch.
+        """
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create a dynamic schema (no fields, accepts anything)
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create an explicit schema with specific fields
+        ExplicitSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            "ExplicitSchema",
+            allow_coercion=False,
+        )
+
+        class SourceOutput(PluginSchema):
+            id: int
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+
+        # Branch A: produces EXPLICIT schema
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="processor",
+            input_schema=SourceOutput,
+            output_schema=ExplicitSchema,
+        )
+
+        # Branch B: produces DYNAMIC schema
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            input_schema=SourceOutput,
+            output_schema=DynamicSchema,
+        )
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should FAIL: mixed dynamic/explicit branches are not allowed
+        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+            graph.validate_edge_compatibility()
+
+    def test_coalesce_rejects_mixed_none_explicit_branches(self) -> None:
+        """Coalesce must reject mixed None/explicit branch schemas.
+
+        BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
+
+        None (unspecified output_schema) is treated as dynamic. Mixed with explicit
+        schemas, this creates the same mismatch problem as dynamic schema classes.
+        """
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create an explicit schema with specific fields
+        ExplicitSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            "ExplicitSchema",
+            allow_coercion=False,
+        )
+
+        class SourceOutput(PluginSchema):
+            id: int
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
+
+        # Branch A: produces EXPLICIT schema
+        graph.add_node(
+            "transform_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="processor",
+            input_schema=SourceOutput,
+            output_schema=ExplicitSchema,
+        )
+
+        # Branch B: produces NONE (unspecified = dynamic)
+        graph.add_node(
+            "transform_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            input_schema=SourceOutput,
+            output_schema=None,
+        )
+
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should FAIL: mixed None/explicit branches are not allowed
+        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+            graph.validate_edge_compatibility()
+
+    def test_gate_rejects_mixed_dynamic_explicit_incoming_branches(self) -> None:
+        """Gate with multiple inputs must reject mixed dynamic/explicit schemas.
+
+        BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
+
+        Gates can receive inputs from multiple sources (e.g., in complex DAGs).
+        When inputs have mixed dynamic/explicit schemas, the same mismatch problem
+        occurs as with coalesce nodes.
+        """
+        from elspeth.contracts import NodeType, PluginSchema, RoutingMode
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create a dynamic schema
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create an explicit schema
+        ExplicitSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            "ExplicitSchema",
+            allow_coercion=False,
+        )
+
+        class SourceOutput(PluginSchema):
+            id: int
+
+        graph = ExecutionGraph()
+
+        # Two sources feeding into one gate
+        graph.add_node("source1", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("source2", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
+
+        # Transform 1 produces explicit schema
+        graph.add_node(
+            "transform1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="processor",
+            input_schema=SourceOutput,
+            output_schema=ExplicitSchema,
+        )
+
+        # Transform 2 produces dynamic schema
+        graph.add_node(
+            "transform2",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="llm",
+            input_schema=SourceOutput,
+            output_schema=DynamicSchema,
+        )
+
+        # Gate receives both (simulating a join-like pattern)
+        graph.add_node("merge_gate", node_type=NodeType.GATE, plugin_name="config_gate")
+
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv")
+
+        graph.add_edge("source1", "transform1", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("source2", "transform2", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform1", "merge_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform2", "merge_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("merge_gate", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should FAIL: mixed dynamic/explicit inputs to gate
+        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+            graph.validate_edge_compatibility()
+
     def test_aggregation_schema_transition_in_topology(self) -> None:
         """Aggregation with input_schema and output_schema in single topology.
 

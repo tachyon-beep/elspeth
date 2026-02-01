@@ -1032,30 +1032,74 @@ class ExecutionGraph:
                     f"this indicates a bug in graph construction"
                 )
 
-            # Get effective schema from first input (recursive for chained pass-through nodes)
-            first_edge_source = incoming[0][0]
-            first_schema = self._get_effective_producer_schema(first_edge_source)
+            # Gather all input schemas for validation
+            all_schemas: list[tuple[str, type[PluginSchema] | None]] = []
+            for from_id, _, _ in incoming:
+                schema = self._get_effective_producer_schema(from_id)
+                all_schemas.append((from_id, schema))
 
-            # For multi-input nodes, verify all inputs have structurally compatible schemas
-            # Note: Uses structural comparison, not class identity (P2-2026-01-30 fix)
-            if len(incoming) > 1:
-                for from_id, _, _ in incoming[1:]:
-                    other_schema = self._get_effective_producer_schema(from_id)
-                    compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
-                    if not compatible:
-                        # Multi-input pass-through nodes with incompatible schemas - CRASH
-                        first_name = first_schema.__name__ if first_schema else "dynamic"
-                        other_name = other_schema.__name__ if other_schema else "dynamic"
-                        raise ValueError(
-                            f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
-                            f"multiple inputs - this is a graph construction bug. "
-                            f"First input: {first_name}, other input: {other_name}. {error_msg}"
-                        )
+            # For multi-input nodes, check for mixed dynamic/explicit schemas first
+            # BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
+            # Mixed dynamic/explicit branches create semantic mismatches that cause runtime failures
+            if len(all_schemas) > 1:
+                dynamic_branches = [(nid, s) for nid, s in all_schemas if self._is_dynamic_schema(s)]
+                explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_dynamic_schema(s)]
 
-            return first_schema
+                if dynamic_branches and explicit_branches:
+                    # Mixed dynamic/explicit - reject with clear error
+                    dynamic_names = [nid for nid, _ in dynamic_branches]
+                    # Schema is guaranteed non-None here (explicit_branches filtered out dynamic/None)
+                    explicit_names = [f"{nid} ({s.__name__})" for nid, s in explicit_branches if s is not None]
+                    raise ValueError(
+                        f"{node_info.node_type.capitalize()} '{node_id}' has mixed dynamic/explicit schemas - "
+                        f"this is not allowed because dynamic branches may produce rows missing fields "
+                        f"expected by downstream consumers. "
+                        f"Dynamic branches: {dynamic_names}, explicit branches: {explicit_names}. "
+                        f"Fix: ensure all branches produce explicit schemas with compatible fields, "
+                        f"or all branches produce dynamic schemas."
+                    )
+
+                # All explicit - verify structural compatibility
+                if len(explicit_branches) > 1:
+                    _first_id, first_schema = explicit_branches[0]
+                    for _other_id, other_schema in explicit_branches[1:]:
+                        compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
+                        if not compatible:
+                            # Schemas are guaranteed non-None here (explicit_branches filtered out dynamic/None)
+                            first_name = first_schema.__name__ if first_schema is not None else "dynamic"
+                            other_name = other_schema.__name__ if other_schema is not None else "dynamic"
+                            raise ValueError(
+                                f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
+                                f"multiple inputs - this is a graph construction bug. "
+                                f"First input: {first_name}, other input: {other_name}. {error_msg}"
+                            )
+
+            # Return first schema (all are now either all-dynamic or all-explicit-compatible)
+            return all_schemas[0][1]
 
         # Not a pass-through node and no schema - return None (dynamic)
         return None
+
+    def _is_dynamic_schema(self, schema: type[PluginSchema] | None) -> bool:
+        """Check if a schema is dynamic (accepts any fields).
+
+        A schema is dynamic if:
+        - It is None (unspecified output_schema)
+        - It has no fields and allows extra fields (structural dynamic)
+
+        Args:
+            schema: Schema class or None
+
+        Returns:
+            True if schema is dynamic, False if explicit
+        """
+        if schema is None:
+            return True
+
+        # Structural dynamic: no fields + extra="allow"
+        # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+        # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+        return len(schema.model_fields) == 0 and schema.model_config["extra"] == "allow"
 
     def _schemas_structurally_compatible(
         self, schema_a: type[PluginSchema] | None, schema_b: type[PluginSchema] | None
@@ -1072,25 +1116,22 @@ class ExecutionGraph:
         Returns:
             Tuple of (is_compatible, error_message). If compatible, error_message is empty.
         """
-        # Both None (dynamic) - compatible
-        if schema_a is None and schema_b is None:
+        # Both dynamic - compatible
+        if self._is_dynamic_schema(schema_a) and self._is_dynamic_schema(schema_b):
             return True, ""
 
-        # One None, one explicit - dynamic is compatible with anything
-        if schema_a is None or schema_b is None:
+        # One dynamic, one explicit - for general compatibility, allow this
+        # (Pass-through nodes use stricter checking via _check_passthrough_schema_homogeneity)
+        if self._is_dynamic_schema(schema_a) or self._is_dynamic_schema(schema_b):
             return True, ""
 
-        # Both explicit - check if either is dynamic (no fields + extra="allow")
-        # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
-        # Direct access is correct per Tier 1 trust model - missing key would be our bug.
-        a_is_dynamic = len(schema_a.model_fields) == 0 and schema_a.model_config["extra"] == "allow"
-        b_is_dynamic = len(schema_b.model_fields) == 0 and schema_b.model_config["extra"] == "allow"
-        if a_is_dynamic or b_is_dynamic:
-            return True, ""
-
-        # Same class - trivially compatible
+        # Both explicit schemas - same class is trivially compatible
         if schema_a is schema_b:
             return True, ""
+
+        # At this point both schemas are explicit (not None, not dynamic)
+        # Type narrowing for mypy: we've already returned if either is dynamic/None
+        assert schema_a is not None and schema_b is not None
 
         # Both explicit schemas - use bidirectional structural comparison
         # For coalesce/pass-through nodes, schemas must be mutually compatible

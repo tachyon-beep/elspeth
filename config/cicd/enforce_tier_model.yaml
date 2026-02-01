@@ -1255,22 +1255,22 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=dd16e787c5da9651
+- key: core/dag.py:R1:ExecutionGraph:_get_schema_config_from_node:fp=2caaa0ed3e80c93d
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=bc85925bdc496ec1
+- key: core/dag.py:R5:ExecutionGraph:_get_schema_config_from_node:fp=4c82651700a318da
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=ede9f177f17f9ff9
+- key: core/dag.py:R1:ExecutionGraph:_get_required_fields:fp=a567787320bb6fd2
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=b02d75ff64248a0c
+- key: core/dag.py:R5:ExecutionGraph:_get_required_fields:fp=5a5eaf7c81eba810
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
