@@ -4,7 +4,7 @@
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-2. Core architecture, plugins, and audit trail are complete. Bug fixes from RC-1 have been integrated and the system is stabilizing for release.
+**Current Status:** RC-2. Core architecture, plugins, and audit trail are complete. Stabilization fixes have been integrated and the system is preparing for release.
 
 ## Auditability Standard
 

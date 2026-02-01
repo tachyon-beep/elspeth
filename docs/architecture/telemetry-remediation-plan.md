@@ -401,7 +401,7 @@ Run a full pipeline with telemetry enabled and verify:
 
 Update `docs/guides/telemetry.md` to reflect actual working state.
 
-**Note:** This is pre-RC1 - we can make breaking changes freely. No gradual rollout needed.
+**Note:** This is pre-RC-2 - we can make breaking changes freely. No gradual rollout needed.
 
 ---
 

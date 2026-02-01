@@ -286,8 +286,7 @@ This contract is versioned with the software.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| RC-1 | Jan 2026 | Initial contract |
-| RC-2 | Feb 2026 | Bug fixes, checkpoint compatibility |
+| RC-2 | Feb 2026 | Initial contract, bug fixes, checkpoint compatibility |
 
 Future versions may:
 - Add new guarantees (backward compatible)

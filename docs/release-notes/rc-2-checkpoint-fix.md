@@ -48,7 +48,7 @@ All tests pass, including critical `test_checkpoint_roundtrip`.
 ## Migration Guide
 
 **For users with existing checkpoints:**
-1. Existing checkpoints from RC-1 will fail restoration with clear error message
+1. Existing checkpoints from the prior format will fail restoration with clear error message
 2. Solution: Discard old checkpoints and rerun pipelines
 3. Checkpoints are ephemeral state, not persistent artifacts
 
