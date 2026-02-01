@@ -115,7 +115,7 @@ class TestProcessorPassthroughMode:
             if i < 2:
                 assert len(result_list) == 1
                 assert result_list[0].outcome == RowOutcome.BUFFERED
-                buffered_token_ids.append(result_list[0].token_id)
+                buffered_token_ids.append(result_list[0].token.token_id)
 
         # After 3rd row, should have:
         # - 2 BUFFERED from first 2 rows
@@ -128,7 +128,7 @@ class TestProcessorPassthroughMode:
 
         # CRITICAL: Passthrough preserves token_ids
         # The buffered tokens should reappear in completed results
-        completed_token_ids = {r.token_id for r in completed}
+        completed_token_ids = {r.token.token_id for r in completed}
         for token_id in buffered_token_ids:
             assert token_id in completed_token_ids, f"Buffered token {token_id} not found in completed results"
 
@@ -481,8 +481,8 @@ class TestProcessorTransformMode:
                 assert result.final_data["total"] == 60  # 20 + 40
 
         # Verify new token_ids created (not reusing input tokens)
-        completed_tokens = {r.token_id for r in completed}
-        consumed_tokens = {r.token_id for r in consumed}
+        completed_tokens = {r.token.token_id for r in completed}
+        consumed_tokens = {r.token.token_id for r in consumed}
         assert completed_tokens.isdisjoint(consumed_tokens), "Transform mode should create NEW tokens"
 
     def test_aggregation_transform_mode_single_row_output(self) -> None:
@@ -583,8 +583,8 @@ class TestProcessorTransformMode:
         assert completed[0].final_data["count"] == 3
 
         # Verify new token created
-        completed_token = completed[0].token_id
-        consumed_tokens = {r.token_id for r in consumed}
+        completed_token = completed[0].token.token_id
+        consumed_tokens = {r.token.token_id for r in consumed}
         assert completed_token not in consumed_tokens
 
     def test_aggregation_transform_mode_continues_to_next_transform(self) -> None:

@@ -116,7 +116,7 @@ class TestRowProcessor:
         # Note: COMPLETED token_outcomes are recorded by the orchestrator at sink level,
         # not by the processor. The processor records node_states for each transform.
         # Verify node_states for each transform
-        states = recorder.get_node_states_for_token(result.token_id)
+        states = recorder.get_node_states_for_token(result.token.token_id)
         assert len(states) == 2, "Should have 2 node_states (one per transform)"
 
         # Verify hashes for each state
@@ -190,8 +190,8 @@ class TestRowProcessor:
         assert result.final_data == {"name": "test", "enriched": True}
         assert result.outcome == RowOutcome.COMPLETED
         # Check identity preserved
-        assert result.token_id is not None
-        assert result.row_id is not None
+        assert result.token.token_id is not None
+        assert result.token.row_id is not None
 
     def test_process_no_transforms(self) -> None:
         """No transforms passes through data unchanged."""
@@ -338,14 +338,14 @@ class TestRowProcessor:
         # Audit trail verification differs by outcome
         if expected_behavior == RowOutcome.QUARANTINED:
             # QUARANTINED: Token outcome recorded immediately with error_hash
-            outcome = recorder.get_token_outcome(result.token_id)
+            outcome = recorder.get_token_outcome(result.token.token_id)
             assert outcome is not None, "Token outcome should be recorded"
             assert outcome.outcome == RowOutcome.QUARANTINED
             assert outcome.error_hash is not None, "Error hash should be recorded"
             assert outcome.is_terminal is True
 
             # Node state should be failed
-            states = recorder.get_node_states_for_token(result.token_id)
+            states = recorder.get_node_states_for_token(result.token.token_id)
             assert len(states) == 1
             assert states[0].status.value == "failed"
 
@@ -353,7 +353,7 @@ class TestRowProcessor:
             # ROUTED: Outcome recording is DEFERRED to sink_executor.write()
             # to ensure outcome is only recorded AFTER sink durability is achieved.
             assert result.sink_name == on_error_config
-            outcome = recorder.get_token_outcome(result.token_id)
+            outcome = recorder.get_token_outcome(result.token.token_id)
             assert outcome is None, "Outcome deferred to sink write"
 
 
@@ -403,10 +403,6 @@ class TestRowProcessorTokenIdentity:
         assert result.token.token_id is not None
         assert result.token.row_id is not None
         assert result.token.row_data == {"test": "data"}
-
-        # Convenience properties work
-        assert result.token_id == result.token.token_id
-        assert result.row_id == result.token.row_id
 
     def test_step_counting_correct(self) -> None:
         """Step position is tracked correctly through pipeline."""
@@ -480,7 +476,7 @@ class TestRowProcessorTokenIdentity:
         assert result.outcome == RowOutcome.COMPLETED
 
         # Verify node states recorded with correct step indices
-        states = recorder.get_node_states_for_token(result.token_id)
+        states = recorder.get_node_states_for_token(result.token.token_id)
         assert len(states) == 2
         # Steps should be 1 and 2 (source is 0, transforms start at 1)
         step_indices = {s.step_index for s in states}

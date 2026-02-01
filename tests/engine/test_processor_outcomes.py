@@ -469,7 +469,7 @@ class TestEngineIntegrationOutcomes:
         # Note: COMPLETED token_outcomes are recorded by orchestrator at sink level,
         # not by the processor. The processor records node_states for transforms.
         # We verify the node_states were recorded correctly with hashes.
-        states = recorder.get_node_states_for_token(result.token_id)
+        states = recorder.get_node_states_for_token(result.token.token_id)
         assert len(states) == 1, "Should have node_state for the transform"
         state = states[0]
         assert state.status == RunStatus.COMPLETED, "Transform should complete successfully"
@@ -551,7 +551,7 @@ class TestEngineIntegrationOutcomes:
         assert result.outcome == RowOutcome.QUARANTINED
 
         # Query the audit trail directly and verify outcome with error_hash
-        outcome = recorder.get_token_outcome(result.token_id)
+        outcome = recorder.get_token_outcome(result.token.token_id)
         assert outcome is not None, "Token outcome should be recorded by processor"
         assert outcome.outcome == RowOutcome.QUARANTINED, "Outcome should be QUARANTINED"
         assert outcome.error_hash is not None, "Error hash should be recorded for quarantine"
@@ -661,13 +661,13 @@ class TestEngineIntegrationOutcomes:
         parent = forked_results[0]
 
         # Verify FORKED outcome has fork_group_id
-        parent_outcome = recorder.get_token_outcome(parent.token_id)
+        parent_outcome = recorder.get_token_outcome(parent.token.token_id)
         assert parent_outcome is not None, "Parent token outcome should be recorded"
         assert parent_outcome.outcome == RowOutcome.FORKED, "Should be FORKED"
         assert parent_outcome.fork_group_id is not None, "Fork group ID should be set"
 
         # Verify children have parent lineage
         for child in completed_results:
-            parents = recorder.get_token_parents(child.token_id)
+            parents = recorder.get_token_parents(child.token.token_id)
             assert len(parents) == 1, "Each child should have exactly 1 parent"
-            assert parents[0].parent_token_id == parent.token_id, "Parent should be forked token"
+            assert parents[0].parent_token_id == parent.token.token_id, "Parent should be forked token"

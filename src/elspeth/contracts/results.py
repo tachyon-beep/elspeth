@@ -269,16 +269,6 @@ class RowResult:
     sink_name: str | None = None
     error: FailureInfo | None = None
 
-    @property
-    def token_id(self) -> str:
-        """Token ID for backwards compatibility."""
-        return self.token.token_id
-
-    @property
-    def row_id(self) -> str:
-        """Row ID for backwards compatibility."""
-        return self.token.row_id
-
 
 @dataclass(frozen=True)
 class ArtifactDescriptor:

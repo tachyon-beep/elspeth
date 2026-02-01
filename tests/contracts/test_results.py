@@ -254,28 +254,6 @@ class TestRowResult:
         assert result.outcome == RowOutcome.ROUTED
         assert result.sink_name == "flagged"
 
-    def test_token_id_property(self) -> None:
-        """token_id property returns token.token_id."""
-        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data={})
-        result = RowResult(
-            token=token,
-            final_data={},
-            outcome=RowOutcome.COMPLETED,
-        )
-
-        assert result.token_id == "tok-1"
-
-    def test_row_id_property(self) -> None:
-        """row_id property returns token.row_id."""
-        token = TokenInfo(row_id="row-1", token_id="tok-1", row_data={})
-        result = RowResult(
-            token=token,
-            final_data={},
-            outcome=RowOutcome.COMPLETED,
-        )
-
-        assert result.row_id == "row-1"
-
 
 class TestArtifactDescriptor:
     """Tests for ArtifactDescriptor."""

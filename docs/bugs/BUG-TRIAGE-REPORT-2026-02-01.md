@@ -9,6 +9,7 @@
 - Completed a P2 verification pass and closed 1 fixed P2 (coalesce failure recording).
 - Closed `P3-2026-01-22-engine-artifacts-legacy-shim` after removing the legacy shim and migrating imports.
 - Closed `P3-2026-01-31-payload-store-legacy-reexport` after removing the compatibility re-export and updating imports.
+- Closed `P3-2026-01-31-rowresult-legacy-accessors` after removing the compatibility accessors and updating imports.
 
 ## P1 Verification Pass (2026-02-01)
 
@@ -26,10 +27,11 @@
 
 ## P3 Verification + Priority Review (2026-02-01)
 
-- Re-verified all open P3s; closed two P3s as fixed.
+- Re-verified all open P3s; closed three P3s as fixed.
 - Added 2026-02-01 verification sections to the remaining P3s and validated that their priority remains P3.
 - Closed `docs/bugs/closed/core-config/P3-2026-01-22-engine-artifacts-legacy-shim.md` (shim removed, imports updated).
 - Closed `docs/bugs/closed/core-payload/P3-2026-01-31-payload-store-legacy-reexport.md` (compat re-export removed, imports updated).
+- Closed `docs/bugs/closed/contracts/P3-2026-01-31-rowresult-legacy-accessors.md` (compat accessors removed, imports updated).
 
 ## Already Closed (Duplicate Open Entries Removed)
 
@@ -81,7 +83,7 @@ All removed duplicates are **P1** and still correctly prioritized:
 
 - **P1:** 7
 - **P2:** 43
-- **P3:** 22
-- **Total:** 72
+- **P3:** 21
+- **Total:** 71
 
 See `docs/bugs/open/README.md` for the updated breakdown.

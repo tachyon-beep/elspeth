@@ -307,7 +307,7 @@ class TestRowProcessorGates:
 
         # === P1: Audit trail verification for FORKED ===
         # Verify FORKED outcome for parent (processor records this)
-        parent_outcome = recorder.get_token_outcome(parent.token_id)
+        parent_outcome = recorder.get_token_outcome(parent.token.token_id)
         assert parent_outcome is not None, "Parent token outcome should be recorded"
         assert parent_outcome.outcome == RowOutcome.FORKED, "Parent should be FORKED"
         assert parent_outcome.fork_group_id is not None, "Fork group ID should be set"
@@ -317,9 +317,9 @@ class TestRowProcessorGates:
         # Note: COMPLETED token_outcomes for children are recorded by orchestrator at sink,
         # but parent relationships (fork lineage) are recorded by processor via TokenManager
         for child in completed_results:
-            parents = recorder.get_token_parents(child.token_id)
+            parents = recorder.get_token_parents(child.token.token_id)
             assert len(parents) == 1, "Each child should have exactly 1 parent"
-            assert parents[0].parent_token_id == parent.token_id, "Parent should be the forked token"
+            assert parents[0].parent_token_id == parent.token.token_id, "Parent should be the forked token"
 
 
 class TestRowProcessorNestedForks:

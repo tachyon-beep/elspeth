@@ -29,6 +29,15 @@
 
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `RowResult` still exposes legacy `token_id` and `row_id` accessors. (`src/elspeth/contracts/results.py:272-280`)
+- Removed the legacy `token_id` / `row_id` accessors from `RowResult`.
+- Updated call sites to use `row_result.token.token_id` / `row_result.token.row_id`.
+
+## Closure Report (2026-02-01)
+
+**Status:** CLOSED (FIXED)
+
+### Closure Notes
+
+- Deleted the compatibility properties and migrated engine/tests to the canonical token fields.

@@ -10,7 +10,7 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 ```
 open/
 ├── cli/                      # Command-line interface (1 P1, 1 P2, 1 P3)
-├── contracts/                # Contract validation (3 P2, 3 P3)
+├── contracts/                # Contract validation (3 P2, 2 P3)
 ├── core-canonical/           # Canonicalization (1 P2)
 ├── core-checkpoint/          # Checkpointing/recovery (2 P2, 2 P3)
 ├── core-config/              # Configuration system (2 P2, 1 P3)
@@ -45,7 +45,7 @@ open/
 |-----------|---------|---------|---------|-------|-------|
 | **core-landscape** | 0 | 8 | 2 | 10 | Export + verifier gaps |
 | **engine-orchestrator** | 1 | 3 | 2 | 6 | Run lifecycle + cleanup |
-| **contracts** | 0 | 3 | 3 | 6 | Schema/contract validation |
+| **contracts** | 0 | 3 | 2 | 5 | Schema/contract validation |
 | **plugins-llm** | 0 | 5 | 1 | 6 | LLM audit + semantics |
 | **engine-coalesce** | 1 | 0 | 0 | 1 | Fork/join timeouts |
 | **core-checkpoint** | 0 | 2 | 2 | 4 | Resume + checkpoint format |
@@ -71,7 +71,7 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **7** | **43** | **22** | **72** | All bugs organized |
+| **TOTAL** | **7** | **43** | **21** | **71** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -123,7 +123,7 @@ open/
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 22 P3 = 72 total.**
+**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 21 P3 = 71 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
@@ -133,6 +133,7 @@ open/
 - Closed `P2-2026-01-22-coalesce-timeout-failures-unrecorded` (fixed coalesce failure recording).
 - Closed `P3-2026-01-22-engine-artifacts-legacy-shim` (removed legacy re-export).
 - Closed `P3-2026-01-31-payload-store-legacy-reexport` (removed legacy re-export).
+- Closed `P3-2026-01-31-rowresult-legacy-accessors` (removed legacy accessors).
 
 **Reports:**
 - Original verification: `docs/bugs/VERIFICATION-REPORT-2026-01-25.md`

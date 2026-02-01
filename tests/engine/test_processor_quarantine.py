@@ -208,7 +208,7 @@ class TestQuarantineIntegration:
         assert result.final_data == {"other_field": "some_value"}
 
         # Query the node_states table to confirm the record exists
-        states = recorder.get_node_states_for_token(result.token_id)
+        states = recorder.get_node_states_for_token(result.token.token_id)
 
         # Should have exactly 1 node_state (for the transform)
         assert len(states) == 1
@@ -217,7 +217,7 @@ class TestQuarantineIntegration:
         assert isinstance(state, NodeStateFailed)
         assert state.status.value == "failed"
         assert state.node_id == transform.node_id
-        assert state.token_id == result.token_id
+        assert state.token_id == result.token.token_id
 
         # Verify the error was recorded
         assert state.error_json is not None

@@ -420,8 +420,8 @@ class TestProcessorDeaggregation:
         assert len(completed) == 2
 
         # Children should have different token_ids but same row_id
-        assert completed[0].token_id != completed[1].token_id
-        assert completed[0].row_id == completed[1].row_id
+        assert completed[0].token.token_id != completed[1].token.token_id
+        assert completed[0].token.row_id == completed[1].token.row_id
 
         # Children should have the expanded data
         child_copies = {r.final_data["copy"] for r in completed}
