@@ -1347,21 +1347,27 @@ def _expand_template_files(
     return result
 
 
-def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _parent_key: str = "") -> Any:
+def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _in_sinks: bool = False) -> Any:
     """Lowercase dictionary keys for Pydantic schema matching, preserving user data.
 
     Dynaconf returns keys in UPPERCASE when they come from environment variables,
-    but Pydantic expects lowercase field names. However, user-defined identifiers
-    must be preserved exactly as written:
-    - 'options' dict contents (case-sensitive keys like output_mapping: {"Score": "score"})
-    - 'sinks' dict keys (user-defined sink names - validated separately for lowercase)
+    but Pydantic expects lowercase field names. User data inside 'options' dicts
+    must be preserved exactly as written - these can contain case-sensitive keys
+    like output_mapping: {"Score": "score"} where "Score" must match the LLM's
+    JSON response field name.
+
+    Sink name handling:
+    - FULLY UPPERCASE names (e.g., 'OUTPUT') are lowercased - these come from
+      env vars like ELSPETH_SINKS__OUTPUT__PLUGIN where Dynaconf uppercases
+    - Mixed-case names (e.g., 'MySink') are PRESERVED so the validator can
+      catch them and give a helpful "use lowercase" error
 
     Args:
         obj: Any value - dicts are processed recursively, lists have their
              elements processed, other types pass through unchanged.
         _preserve_nested: Internal flag - when True, stop lowercasing keys
-             (we're inside an 'options' or 'sinks' dict).
-        _parent_key: The key that led to this dict (used to detect 'sinks' entries).
+             (we're inside an 'options' dict).
+        _in_sinks: Internal flag - when True, we're processing sink name keys.
 
     Returns:
         The input with schema-level dict keys lowercased, but user data preserved.
@@ -1369,17 +1375,39 @@ def _lowercase_schema_keys(obj: Any, *, _preserve_nested: bool = False, _parent_
     if isinstance(obj, dict):
         result = {}
         for k, v in obj.items():
-            # Lowercase the key unless we're inside user data (options or sinks)
-            new_key = k if _preserve_nested else k.lower()
-            # Preserve keys inside 'options' (user data like {"Score": "score"})
-            # Preserve keys inside 'sinks' (user-defined sink names)
-            # Note: sink names are validated for lowercase separately
-            is_user_data_container = new_key in ("options", "sinks")
-            child_preserve = _preserve_nested or is_user_data_container
-            result[new_key] = _lowercase_schema_keys(v, _preserve_nested=child_preserve, _parent_key=new_key)
+            # Determine the new key
+            if _preserve_nested:
+                # Inside options: preserve all keys exactly
+                new_key = k
+            elif _in_sinks:
+                # Sink names: lowercase only if FULLY UPPERCASE (env var origin)
+                # Preserve mixed-case so validator can catch and give helpful error
+                new_key = k.lower() if k.isupper() else k
+            else:
+                # Normal schema keys: always lowercase
+                new_key = k.lower()
+
+            # Determine how to process children
+            if _preserve_nested:
+                # Already inside options: stay in preserve mode, ignore special keys
+                child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
+            elif new_key == "options":
+                # Options: preserve everything inside (user data)
+                child = _lowercase_schema_keys(v, _preserve_nested=True, _in_sinks=False)
+            elif new_key == "sinks":
+                # Entering sinks dict: next level has sink name keys
+                child = _lowercase_schema_keys(v, _preserve_nested=False, _in_sinks=True)
+            elif _in_sinks:
+                # At sink name level: value is SinkSettings, resume normal lowercasing
+                child = _lowercase_schema_keys(v, _preserve_nested=False, _in_sinks=False)
+            else:
+                # Normal recursion
+                child = _lowercase_schema_keys(v, _preserve_nested=_preserve_nested, _in_sinks=False)
+
+            result[new_key] = child
         return result
     if isinstance(obj, list):
-        return [_lowercase_schema_keys(item, _preserve_nested=_preserve_nested, _parent_key=_parent_key) for item in obj]
+        return [_lowercase_schema_keys(item, _preserve_nested=_preserve_nested, _in_sinks=_in_sinks) for item in obj]
     return obj
 
 

@@ -146,6 +146,55 @@ default_sink: "output"
         settings = load_settings(config_file)
         assert settings.source.plugin == "json"
 
+    def test_load_sink_env_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Environment variable overrides for sink settings should work.
+
+        Regression test for P2-2026-02-02: When _lowercase_schema_keys was updated
+        to preserve sink names, it incorrectly preserved ALL keys inside sinks,
+        including schema keys like 'plugin'. Dynaconf uppercases env var segments,
+        so ELSPETH_SINKS__OUTPUT__PLUGIN becomes {sinks: {OUTPUT: {PLUGIN: csv}}}.
+        If _lowercase_schema_keys doesn't lowercase PLUGIN, Pydantic sees an unknown
+        field and reports 'plugin' as missing.
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+sinks:
+  output:
+    plugin: csv
+default_sink: output
+""")
+        # Environment variable should override sink plugin
+        monkeypatch.setenv("ELSPETH_SINKS__OUTPUT__PLUGIN", "json")
+
+        settings = load_settings(config_file)
+        assert settings.sinks["output"].plugin == "json"
+
+    def test_load_sink_defined_only_via_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sinks defined entirely via environment variables should work.
+
+        Regression test for P2-2026-02-02: When a sink is defined purely from
+        env vars (not merged with YAML), Dynaconf produces uppercase keys
+        that must be lowercased for Pydantic validation.
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv
+default_sink: output
+""")
+        # Define entire sink via env vars
+        monkeypatch.setenv("ELSPETH_SINKS__OUTPUT__PLUGIN", "csv")
+
+        settings = load_settings(config_file)
+        assert "output" in settings.sinks
+        assert settings.sinks["output"].plugin == "csv"
+
     def test_load_validates_schema(self, tmp_path: Path) -> None:
         from elspeth.core.config import load_settings
 
@@ -1969,6 +2018,36 @@ default_sink: output
         assert settings.source.options["path"] == "input.csv"
         assert settings.source.options["delimiter"] == ","
 
+    def test_options_with_sinks_key_preserved(self, tmp_path: Path) -> None:
+        """Options containing a 'sinks' key should be preserved exactly.
+
+        Regression test: _lowercase_schema_keys must not apply sink name
+        handling to user data that happens to contain a 'sinks' key.
+        """
+        from elspeth.core.config import load_settings
+
+        config_file = tmp_path / "settings.yaml"
+        config_file.write_text("""
+source:
+  plugin: csv_source
+  options:
+    sinks:
+      MySink: some_value
+    CaseSensitive: preserved
+sinks:
+  output:
+    plugin: csv_sink
+default_sink: output
+""")
+
+        settings = load_settings(config_file)
+
+        # Keys inside options must be preserved exactly (case-sensitive)
+        assert "sinks" in settings.source.options
+        assert "MySink" in settings.source.options["sinks"]
+        assert settings.source.options["sinks"]["MySink"] == "some_value"
+        assert "CaseSensitive" in settings.source.options
+
     def test_row_plugin_options_preserved_at_load_time(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Secret fields in row_plugins options should be preserved for runtime."""
         from elspeth.core.config import load_settings
@@ -3042,8 +3121,8 @@ class TestSinkNameCasing:
         assert "nonexistent" in str(exc_info.value)
         assert "not found" in str(exc_info.value).lower()
 
-    def test_load_settings_preserves_sink_names(self, tmp_path: Path) -> None:
-        """Sink names from YAML are preserved (not silently lowercased)."""
+    def test_load_settings_rejects_mixed_case_sink_names(self, tmp_path: Path) -> None:
+        """Mixed-case sink names from YAML are rejected with helpful error."""
         from elspeth.core.config import load_settings
 
         config_file = tmp_path / "settings.yaml"
@@ -3055,11 +3134,12 @@ sinks:
     plugin: csv
 default_sink: MyOutput
 """)
-        # Should fail with clear error about lowercase requirement
+        # Mixed-case sink names are preserved so validator catches them
         with pytest.raises(ValidationError) as exc_info:
             load_settings(config_file)
-        assert "lowercase" in str(exc_info.value).lower()
-        assert "MyOutput" in str(exc_info.value)
+        error_msg = str(exc_info.value)
+        assert "lowercase" in error_msg.lower()
+        assert "MyOutput" in error_msg
 
 
 class TestPluginConfigSchemaValidation:
