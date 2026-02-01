@@ -217,8 +217,8 @@ class RowProcessor:
                 plugin_name=transform.name,
                 status=status,
                 duration_ms=transform_result.duration_ms or 0.0,
-                input_hash=transform_result.input_hash or "",
-                output_hash=transform_result.output_hash or "",
+                input_hash=transform_result.input_hash,
+                output_hash=transform_result.output_hash,
             )
         )
 

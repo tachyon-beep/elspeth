@@ -175,6 +175,23 @@ class TestRoutingAction:
                 mode=RoutingMode.MOVE,
             )
 
+    def test_continue_with_copy_mode_raises(self) -> None:
+        """CONTINUE kind with COPY mode raises ValueError.
+
+        Bug: P3-2026-01-31-routing-action-continue-copy-allowed
+
+        COPY mode is ONLY valid for FORK_TO_PATHS because it creates child tokens.
+        CONTINUE simply advances to the next node - no token cloning occurs.
+        """
+        from elspeth.contracts import RoutingAction, RoutingKind, RoutingMode
+
+        with pytest.raises(ValueError, match="CONTINUE must use MOVE mode"):
+            RoutingAction(
+                kind=RoutingKind.CONTINUE,
+                destinations=(),
+                mode=RoutingMode.COPY,
+            )
+
     def test_fork_to_paths_with_move_mode_raises(self) -> None:
         """FORK_TO_PATHS kind with MOVE mode raises ValueError.
 

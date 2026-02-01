@@ -155,7 +155,12 @@ class TelemetryEvent:
 
 @dataclass(frozen=True, slots=True)
 class TransformCompleted(TelemetryEvent):
-    """Emitted when a transform finishes processing a row."""
+    """Emitted when a transform finishes processing a row.
+
+    Note: input_hash and output_hash are optional because:
+    - Failed transforms may not have produced output (output_hash=None)
+    - Edge cases during error handling may not have computed input hash
+    """
 
     row_id: str
     token_id: str
@@ -163,8 +168,8 @@ class TransformCompleted(TelemetryEvent):
     plugin_name: str
     status: NodeStateStatus
     duration_ms: float
-    input_hash: str
-    output_hash: str
+    input_hash: str | None
+    output_hash: str | None
 
 
 @dataclass(frozen=True, slots=True)

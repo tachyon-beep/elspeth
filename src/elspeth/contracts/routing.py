@@ -65,6 +65,9 @@ class RoutingAction:
         if self.kind == RoutingKind.CONTINUE and self.destinations:
             raise ValueError("CONTINUE must have empty destinations")
 
+        if self.kind == RoutingKind.CONTINUE and self.mode == RoutingMode.COPY:
+            raise ValueError("CONTINUE must use MOVE mode, not COPY")
+
         if self.kind == RoutingKind.FORK_TO_PATHS and self.mode != RoutingMode.COPY:
             raise ValueError("FORK_TO_PATHS must use COPY mode")
 

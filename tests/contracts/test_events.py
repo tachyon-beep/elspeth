@@ -23,6 +23,56 @@ def test_transform_completed_in_contracts():
     assert event.run_id == "run-1"
 
 
+def test_transform_completed_allows_none_hashes():
+    """TransformCompleted accepts None for input_hash and output_hash.
+
+    Bug: P3-2026-01-31-transform-completed-output-hash-coercion
+
+    Failed transforms may not have produced output, so output_hash should
+    be None (not empty string). Semantically:
+    - output_hash="" suggests "there was output, but it was empty"
+    - output_hash=None correctly conveys "there was no output"
+    """
+    from elspeth.contracts import TransformCompleted
+    from elspeth.contracts.enums import NodeStateStatus
+
+    # Failed transform - no output hash
+    event = TransformCompleted(
+        timestamp=datetime.now(UTC),
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        node_id="node-1",
+        plugin_name="test",
+        status=NodeStateStatus.FAILED,
+        duration_ms=50.0,
+        input_hash="abc",
+        output_hash=None,  # No output was produced
+    )
+    assert event.output_hash is None
+    assert event.status == NodeStateStatus.FAILED
+
+
+def test_transform_completed_allows_none_input_hash():
+    """TransformCompleted accepts None for input_hash in edge cases."""
+    from elspeth.contracts import TransformCompleted
+    from elspeth.contracts.enums import NodeStateStatus
+
+    event = TransformCompleted(
+        timestamp=datetime.now(UTC),
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        node_id="node-1",
+        plugin_name="test",
+        status=NodeStateStatus.FAILED,
+        duration_ms=0.0,
+        input_hash=None,  # Edge case during error handling
+        output_hash=None,
+    )
+    assert event.input_hash is None
+
+
 def test_gate_evaluated_in_contracts():
     """GateEvaluated should be importable from contracts."""
     from elspeth.contracts import GateEvaluated
