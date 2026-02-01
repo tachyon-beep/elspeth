@@ -78,6 +78,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
+# ruff
+.ruff_cache/
+
 # Pyre type checker
 .pyre/
 
@@ -122,6 +125,9 @@ Thumbs.db
 # Mutation testing
 .mutmut-cache
 mutants/
+
+# uv
+.uv-cache/
 
 # Git worktrees
 .worktrees/
