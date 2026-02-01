@@ -14,7 +14,7 @@ open/
 ├── core-canonical/           # Canonicalization (1 P2)
 ├── core-checkpoint/          # Checkpointing/recovery (2 P2, 0 P3)
 ├── core-config/              # Configuration system (2 P2, 1 P3)
-├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
+├── core-dag/                 # DAG validation, graph construction (1 P1, 2 P2)
 ├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 1 P3)
 ├── core-logging/             # Logging/telemetry output (1 P2)
 ├── core-rate-limit/          # Rate limiters (1 P2)
@@ -56,7 +56,7 @@ open/
 | **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiter correctness |
 | **plugins-sinks** | 0 | 2 | 0 | 2 | Sink validation |
 | **cli** | 0 | 1 | 1 | 2 | CLI behavior |
-| **core-dag** | 1 | 1 | 0 | 2 | DAG validation |
+| **core-dag** | 1 | 2 | 0 | 3 | DAG validation |
 | **core-payload** | 0 | 0 | 0 | 0 | Payload storage (all fixed) |
 | **core-retention** | 0 | 2 | 0 | 2 | Retention |
 | **core-security** | 0 | 1 | 1 | 2 | Secret handling |
@@ -70,7 +70,7 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **2** | **43** | **15** | **60** | All bugs organized |
+| **TOTAL** | **2** | **44** | **15** | **61** | All bugs organized |
 
 ## Recommended Fix Order
 
@@ -124,7 +124,7 @@ Note: P1s closed during RC1 bug hunt:
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 2 P1, 43 P2, 15 P3 = 60 total.**
+**Open bugs (as of 2026-02-01): 2 P1, 44 P2, 15 P3 = 61 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).
