@@ -73,7 +73,7 @@ Explore lineage for any row:
 
 ```bash
 # Pick any row ID from the dataset
-elspeth explain --run latest --row 1234
+elspeth explain --run latest --row 1234 --database examples/large_scale_test/runs/audit.db
 ```
 
 Query the audit database directly:

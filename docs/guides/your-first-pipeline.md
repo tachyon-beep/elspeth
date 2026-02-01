@@ -193,7 +193,7 @@ This is where ELSPETH shines. Ask "why did row 2 (Bob) get routed to high_values
 
 ```bash
 # Launch the lineage explorer TUI
-elspeth explain --run latest --row 2
+elspeth explain --run latest --row 2 --database examples/threshold_gate/runs/audit.db
 ```
 
 This launches an interactive terminal UI where you can explore:
@@ -382,7 +382,7 @@ docker compose run --rm elspeth validate --settings /app/config/pipeline.yaml
 docker compose run --rm elspeth run --settings /app/config/pipeline.yaml --execute
 
 # Explain (interactive TUI)
-docker compose run -it --rm elspeth explain --run latest --row 2
+docker compose run -it --rm elspeth explain --run latest --row 2 --database /app/state/landscape.db
 ```
 
 ---
@@ -551,7 +551,7 @@ Now that you've built your first pipeline:
 ```bash
 elspeth validate --settings path/to/settings.yaml
 elspeth run --settings path/to/settings.yaml --execute
-elspeth explain --run latest --row <row_id>
+elspeth explain --run latest --row <row_id> --database examples/threshold_gate/runs/audit.db
 elspeth plugins list
 ```
 
@@ -571,7 +571,7 @@ docker run --rm \
 |---------|-------------|
 | `validate --settings /app/config/pipeline.yaml` | Check configuration |
 | `run --settings /app/config/pipeline.yaml --execute` | Run pipeline |
-| `explain --run latest --row N` | Explain decision (TUI) |
+| `explain --run latest --row N --database <path>` | Explain decision (TUI) |
 | `plugins list` | List available plugins |
 | `--help` | Show all commands |
 

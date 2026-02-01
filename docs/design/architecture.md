@@ -790,10 +790,10 @@ config_for_landscape = {
 
 ```bash
 # Default: redacted view
-elspeth explain --run abc123 --row xyz
+elspeth explain --run abc123 --row xyz --database <path/to/audit.db>
 
 # Full view (requires ELSPETH_AUDIT_ACCESS=full)
-elspeth explain --run abc123 --row xyz --full
+elspeth explain --run abc123 --row xyz --full --database <path/to/audit.db>
 ```
 
 ---

@@ -276,7 +276,7 @@ When an alert fires in your observability platform, follow this workflow to inve
 
    If you need to see what happened to a specific row:
    ```bash
-   elspeth explain --run run-abc123 --row row-001
+   elspeth explain --run run-abc123 --row row-001 --database ./runs/audit.db
    ```
 
    Or via MCP: `explain_token(run_id="run-abc123", row_id="row-001")`

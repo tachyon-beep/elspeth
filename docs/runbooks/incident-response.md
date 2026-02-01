@@ -115,7 +115,7 @@ Investigate and resolve production pipeline issues.
 
 2. **Trace a sample row:**
    ```bash
-   elspeth explain --run <RUN_ID> --row <ROW_ID>
+   elspeth explain --run <RUN_ID> --row <ROW_ID> --database <path/to/audit.db>
    ```
 
 3. **Check configuration:**

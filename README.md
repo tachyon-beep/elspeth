@@ -34,7 +34,7 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 ## Features
 
 - **Complete Audit Trail** - Every transform, every routing decision, every external call recorded with payload storage
-- **Explain Any Decision** - `elspeth explain --row 42` launches TUI to explore why any row reached its destination
+- **Explain Any Decision** - `elspeth explain --run latest --row 42 --database <path/to/audit.db>` launches TUI to explore why any row reached its destination
 - **Plugin Architecture** - Extensible sources, transforms, gates, and sinks via pluggy with dynamic discovery
 - **Conditional Routing** - Gates route rows to different sinks based on config-driven expressions (AST-parsed, no eval)
 - **Resilient Execution** - Checkpointing for crash recovery, retry logic with backoff, rate limiting, payload retention policies
@@ -135,8 +135,8 @@ ELSPETH records complete lineage for every row. The audit database captures:
 - Final destination and artifact hash
 
 ```bash
-# Launch lineage explorer TUI
-elspeth explain --run <run_id> --row <row_id>
+# Launch lineage explorer TUI (database path required)
+elspeth explain --run <run_id> --row <row_id> --database <path/to/audit.db>
 ```
 
 For programmatic access, query the Landscape database directly using the `LandscapeRecorder` API.

@@ -120,5 +120,5 @@ The pipeline records full audit data to `runs/audit.db`, including:
 
 Query the audit trail:
 ```bash
-uv run elspeth explain -s examples/openrouter_sentiment/settings.yaml --run latest
+uv run elspeth explain --run latest --database examples/openrouter_sentiment/runs/audit.db
 ```

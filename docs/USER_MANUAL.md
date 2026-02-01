@@ -169,33 +169,33 @@ elspeth plugins list --type sink
 
 ```bash
 # Explain the latest run
-elspeth explain --run latest
+elspeth explain --run latest --database <path/to/audit.db>
 
 # Explain a specific run
-elspeth explain --run e58480edd52a4292809928bd6425f4ed
+elspeth explain --run e58480edd52a4292809928bd6425f4ed --database <path/to/audit.db>
 ```
 
 ### Query Specific Rows
 
 ```bash
 # Explain a specific row
-elspeth explain --run latest --row 42
+elspeth explain --run latest --row 42 --database <path/to/audit.db>
 
 # Explain by token ID (for forked rows)
-elspeth explain --run latest --token abc123
+elspeth explain --run latest --token abc123 --database <path/to/audit.db>
 ```
 
 ### Output Formats
 
 ```bash
 # Interactive TUI (default)
-elspeth explain --run latest
+elspeth explain --run latest --database <path/to/audit.db>
 
 # Plain text
-elspeth explain --run latest --no-tui
+elspeth explain --run latest --no-tui --database <path/to/audit.db>
 
 # JSON output
-elspeth explain --run latest --json
+elspeth explain --run latest --json --database <path/to/audit.db>
 ```
 
 ---

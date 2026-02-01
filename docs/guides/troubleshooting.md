@@ -161,7 +161,7 @@ docker run --rm \
 
 1. Check the audit database for error details:
    ```bash
-   elspeth explain --run latest --no-tui
+   elspeth explain --run latest --no-tui --database ./runs/audit.db
    ```
 
 2. Look for quarantined rows:
@@ -385,7 +385,7 @@ If you're still stuck:
 
 2. Check the audit database for detailed error context:
    ```bash
-   elspeth explain --run latest
+   elspeth explain --run latest --database ./runs/audit.db
    ```
 
 3. Use the MCP analysis server for investigation:

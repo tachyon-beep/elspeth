@@ -78,7 +78,7 @@ Legend:
 |----------------|-------------|--------|--------|----------|
 | CLI-001 | `elspeth --settings <file>` to run pipeline | README.md:116 | ⚠️ PARTIAL | `cli.py:79-169` - runs but missing payload_store wiring (see CFG-039) |
 | CLI-002 | `elspeth --profile <name>` for profile selection | README.md:208 | ❌ DEFERRED | Profile system not integrated |
-| CLI-003 | `elspeth explain --run <id> --row <id>` | README.md:122-136 | ✅ IMPLEMENTED | `cli.py:171-236` - with `--token` enhancement |
+| CLI-003 | `elspeth explain --run <id> --row <id> --database <path>` | README.md:122-136 | ✅ IMPLEMENTED | `cli.py:171-236` - with `--token` enhancement |
 | CLI-004 | `elspeth explain` with `--full` flag for auditor view | architecture.md:765-766 | 🔀 CHANGED | Has `--json` and `--no-tui` instead (format control) |
 | CLI-005 | `elspeth validate --settings <file>` | CLAUDE.md | ✅ IMPLEMENTED | `cli.py:351-390` |
 | CLI-006 | `elspeth plugins list` | CLAUDE.md | ✅ IMPLEMENTED | `cli.py:430-464` - with `--type` filter |

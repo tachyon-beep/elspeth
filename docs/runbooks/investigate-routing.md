@@ -54,7 +54,7 @@ sqlite3 runs/audit.db "
 Launch the lineage explorer TUI:
 
 ```bash
-elspeth explain --run <RUN_ID> --row <ROW_ID>
+elspeth explain --run <RUN_ID> --row <ROW_ID> --database <path/to/audit.db>
 ```
 
 The TUI shows:
@@ -137,7 +137,7 @@ print(eval(condition))  # True
 docker run --rm \
   -v $(pwd)/state:/app/state:ro \
   ghcr.io/johnm-dta/elspeth:latest \
-  explain --run <RUN_ID> --row <ROW_ID>
+  explain --run <RUN_ID> --row <ROW_ID> --database <path/to/audit.db>
 ```
 
 ---

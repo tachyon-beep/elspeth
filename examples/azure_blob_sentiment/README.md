@@ -318,7 +318,7 @@ The pipeline records full audit data locally to `runs/audit.db`, including:
 
 Query the audit trail:
 ```bash
-uv run elspeth explain -s examples/azure_blob_sentiment/settings.yaml --run latest
+uv run elspeth explain --run latest --database examples/azure_blob_sentiment/runs/audit.db
 ```
 
 ## Troubleshooting

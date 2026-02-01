@@ -10,7 +10,7 @@
 #   uv run elspeth run -s examples/large_scale_test/settings.yaml --execute
 #
 # Explore lineage:
-#   elspeth explain --run latest --row 1234
+#   elspeth explain --run latest --row 1234 --database examples/large_scale_test/runs/audit.db
 
 source:
   plugin: csv

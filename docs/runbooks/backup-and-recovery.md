@@ -264,7 +264,7 @@ echo "OK: Backup verification passed"
 
 1. Restore backup to test environment
 2. Run `elspeth health --verbose`
-3. Run `elspeth explain --run <recent_run> --row 1`
+3. Run `elspeth explain --run <recent_run> --row 1 --database <path/to/audit.db>`
 4. Verify data integrity
 5. Document results
 

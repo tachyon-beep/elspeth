@@ -121,7 +121,7 @@ For interactive exploration, mount the state and use the TUI (requires `-it`):
 docker run -it --rm \
   -v $(pwd)/state:/app/state:ro \
   ghcr.io/johnm-dta/elspeth:v0.1.0 \
-  explain --run latest --row 42
+  explain --run latest --row 42 --database /app/state/landscape.db
 ```
 
 For non-interactive environments (CI/CD), query the audit database directly:
@@ -186,7 +186,7 @@ docker compose run --rm elspeth validate --settings /app/config/pipeline.yaml
 docker compose run --rm elspeth health --verbose
 
 # Explain a decision (interactive TUI)
-docker compose run -it --rm elspeth explain --run latest --row 42
+docker compose run -it --rm elspeth explain --run latest --row 42 --database /app/state/landscape.db
 ```
 
 ### Production docker-compose

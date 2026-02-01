@@ -299,7 +299,7 @@ def _derive_trace_id(run_id: str) -> int:
 **Workflow:**
 1. Alert fires in Datadog/Grafana for high latency
 2. Extract `run_id` from telemetry span
-3. Use `elspeth explain --run <run_id>` or Landscape MCP server to investigate full lineage
+3. Use `elspeth explain --run <run_id> --database <path/to/audit.db>` or Landscape MCP server to investigate full lineage
 
 ---
 

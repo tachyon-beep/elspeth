@@ -326,7 +326,7 @@ def explain(
         None,
         "--database",
         "-d",
-        help="Path to Landscape database file (SQLite).",
+        help="Path to Landscape database file (SQLite). Required for explain.",
     ),
     settings: str | None = typer.Option(
         None,
@@ -376,6 +376,14 @@ def explain(
         dataclass_to_dict,
     )
     from elspeth.core.landscape import explain as explain_lineage
+
+    if database is None:
+        message = "--database is required for explain."
+        if json_output:
+            typer.echo(json_module.dumps({"error": message}))
+        else:
+            typer.echo(f"Error: {message}", err=True)
+        raise typer.Exit(1) from None
 
     # Resolve database URL
     settings_path = Path(settings) if settings else None
@@ -459,6 +467,7 @@ def explain(
         from elspeth.tui.explain_app import ExplainApp
 
         tui_app = ExplainApp(
+            db=db,
             run_id=resolved_run_id,
             token_id=token,
             row_id=row,
