@@ -81,17 +81,21 @@ class PurgeManager:
 
         cutoff = as_of - timedelta(days=retention_days)
 
-        # Query rows from completed runs older than cutoff
+        # Query rows from finished runs (completed OR failed) older than cutoff
         # Only return non-null source_data_ref values
         # Use distinct() because multiple rows can reference the same payload
         # (content-addressed storage means identical content shares one blob)
+        #
+        # Note: Both completed and failed runs are eligible for purge. Only
+        # running runs (status="running") are excluded - they haven't finished
+        # and their payloads may still be needed.
         query = (
             select(rows_table.c.source_data_ref)
             .distinct()
             .select_from(rows_table.join(runs_table, rows_table.c.run_id == runs_table.c.run_id))
             .where(
                 and_(
-                    runs_table.c.status == "completed",
+                    runs_table.c.status != "running",
                     runs_table.c.completed_at.isnot(None),
                     runs_table.c.completed_at < cutoff,
                     rows_table.c.source_data_ref.isnot(None),
@@ -134,22 +138,24 @@ class PurgeManager:
 
         cutoff = as_of - timedelta(days=retention_days)
 
-        # Condition for expired runs: completed AND older than cutoff
+        # Condition for expired runs: finished (not running) AND older than cutoff
+        # Both "completed" and "failed" runs are eligible for purge once they're
+        # past the retention period. Only "running" runs are excluded.
         run_expired_condition = and_(
-            runs_table.c.status == "completed",
+            runs_table.c.status != "running",
             runs_table.c.completed_at.isnot(None),
             runs_table.c.completed_at < cutoff,
         )
 
-        # Condition for active runs: NOT expired (recent, incomplete, or failed)
+        # Condition for active runs: NOT expired (recent or still running)
         # A run is "active" if any of:
-        # - completed_at >= cutoff (recent)
-        # - completed_at IS NULL (still running)
-        # - status != "completed" (failed, paused, etc.)
+        # - completed_at >= cutoff (recent, within retention period)
+        # - completed_at IS NULL (still running, hasn't finished yet)
+        # - status == "running" (explicitly marked as running)
         run_active_condition = or_(
             runs_table.c.completed_at >= cutoff,
             runs_table.c.completed_at.is_(None),
-            runs_table.c.status != "completed",
+            runs_table.c.status == "running",
         )
 
         # === Build queries for refs from EXPIRED runs ===
@@ -391,8 +397,21 @@ class PurgeManager:
         deleted_refs: list[str] = []
 
         for ref in refs:
-            if self._payload_store.exists(ref):
-                deleted = self._payload_store.delete(ref)
+            try:
+                exists = self._payload_store.exists(ref)
+            except OSError:
+                # I/O error checking existence - record as failure, continue with others
+                failed_refs.append(ref)
+                continue
+
+            if exists:
+                try:
+                    deleted = self._payload_store.delete(ref)
+                except OSError:
+                    # I/O error during deletion - record as failure, continue with others
+                    failed_refs.append(ref)
+                    continue
+
                 if deleted:
                     deleted_count += 1
                     deleted_refs.append(ref)

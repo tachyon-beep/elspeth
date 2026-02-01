@@ -2005,3 +2005,391 @@ class TestPurgeUpdatesReproducibilityGrade:
         assert updated_grade == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, (
             f"Grade should degrade to ATTRIBUTABLE_ONLY when some payloads are deleted, but got {updated_grade}"
         )
+
+
+class TestFailedRunsIncludedInPurge:
+    """Tests for P2-2026-01-31-failed-runs-excluded-from-purge.
+
+    BUG: Purge uses status == "completed" for expired condition, so failed runs
+    are treated as "active" regardless of age. Failed runs older than retention
+    cutoff should be eligible for purge.
+    """
+
+    def test_failed_run_payloads_are_eligible_for_purge(self, landscape_db: LandscapeDB) -> None:
+        """Failed runs older than retention period should have their payloads purged.
+
+        BUG: Currently, failed runs are excluded from purge because the code
+        checks `status == "completed"`. A failed run from 60 days ago should
+        be eligible for purge with 30-day retention.
+        """
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Create a FAILED run completed 60 days ago
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+        test_ref = f"ref_for_failed_run_payload_{uuid4()}"
+
+        with db.connection() as conn:
+            _create_run(
+                conn,
+                runs_table,
+                run_id,
+                completed_at=old_completed_at,
+                status=RunStatus.FAILED,  # <-- FAILED, not COMPLETED
+            )
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=test_ref,
+                source_data_hash="hash_failed_run",
+            )
+
+        # Find payloads older than 30 days - should include FAILED run's payloads
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        assert test_ref in expired, (
+            f"BUG: Payload {test_ref} from FAILED run (60 days old) should be eligible for purge "
+            f"with 30-day retention, but was excluded. Got expired refs: {expired}"
+        )
+
+    def test_failed_run_does_not_protect_shared_refs(self, landscape_db: LandscapeDB) -> None:
+        """Failed runs should NOT protect shared payload refs from purge.
+
+        BUG: Currently, failed runs are treated as "active" which incorrectly
+        protects shared refs. If Run A (completed, expired) shares a ref with
+        Run B (failed, expired), the ref should be purged.
+        """
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Shared ref between two old runs
+        shared_ref = f"shared_ref_completed_and_failed_{uuid4()}"
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        # Run A: COMPLETED and expired
+        run_a_id = str(uuid4())
+        node_a_id = str(uuid4())
+
+        # Run B: FAILED and expired (same age)
+        run_b_id = str(uuid4())
+        node_b_id = str(uuid4())
+
+        with db.connection() as conn:
+            # Run A - completed, 60 days old
+            _create_run(conn, runs_table, run_a_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_a_id, run_a_id)
+            _create_row(
+                conn,
+                rows_table,
+                str(uuid4()),
+                run_a_id,
+                node_a_id,
+                row_index=0,
+                source_data_ref=shared_ref,
+            )
+
+            # Run B - FAILED, 60 days old
+            _create_run(conn, runs_table, run_b_id, completed_at=old_completed_at, status=RunStatus.FAILED)
+            _create_node(conn, nodes_table, node_b_id, run_b_id)
+            _create_row(
+                conn,
+                rows_table,
+                str(uuid4()),
+                run_b_id,
+                node_b_id,
+                row_index=0,
+                source_data_ref=shared_ref,
+            )
+
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        assert shared_ref in expired, (
+            f"BUG: Shared ref {shared_ref} should be eligible for purge because BOTH runs are expired "
+            f"(one completed, one failed, both 60 days old). But failed run incorrectly protects it. "
+            f"Got expired refs: {expired}"
+        )
+
+    def test_running_run_still_protects_refs(self, landscape_db: LandscapeDB) -> None:
+        """Running (incomplete) runs should still protect their payload refs.
+
+        This is a regression test - we must NOT accidentally include running runs
+        in the expired set when fixing the failed run bug.
+        """
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+        store = MockPayloadStore()
+        manager = PurgeManager(db, store)
+
+        # Create a run that is still RUNNING (no completed_at)
+        run_id = str(uuid4())
+        node_id = str(uuid4())
+        test_ref = f"ref_for_running_run_{uuid4()}"
+
+        with db.connection() as conn:
+            _create_run(
+                conn,
+                runs_table,
+                run_id,
+                completed_at=None,  # Still running
+                status=RunStatus.RUNNING,
+            )
+            _create_node(conn, nodes_table, node_id, run_id)
+            _create_row(
+                conn,
+                rows_table,
+                row_id=str(uuid4()),
+                run_id=run_id,
+                node_id=node_id,
+                row_index=0,
+                source_data_ref=test_ref,
+            )
+
+        # Find payloads - running run's refs should NOT be included
+        expired = manager.find_expired_payload_refs(retention_days=30)
+
+        assert test_ref not in expired, f"Running run's payload {test_ref} should NOT be eligible for purge. Got expired refs: {expired}"
+
+
+class TestPurgeIOErrorHandling:
+    """Tests for P2-2026-01-31-purge-aborts-on-io-error.
+
+    BUG: Calls to payload_store.exists() and delete() are not wrapped in
+    try/except. An OSError or PermissionError aborts the purge loop, leaving
+    the system in an inconsistent state.
+    """
+
+    def test_purge_continues_after_exists_raises_exception(self, landscape_db: LandscapeDB) -> None:
+        """Purge should continue processing refs after exists() throws exception.
+
+        BUG: Currently, an exception from exists() aborts the entire loop.
+        The purge should catch the exception, record it as a failure, and
+        continue with remaining refs.
+        """
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+
+        class ExistsRaisingPayloadStore:
+            """Mock that raises on exists() for specific refs."""
+
+            def __init__(self, raise_on: set[str]) -> None:
+                self._storage: dict[str, bytes] = {}
+                self._raise_on = raise_on
+                self.delete_calls: list[str] = []
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                if content_hash in self._raise_on:
+                    raise OSError(f"I/O error checking {content_hash}")
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                self.delete_calls.append(content_hash)
+                if content_hash in self._storage:
+                    del self._storage[content_hash]
+                    return True
+                return False
+
+        store = ExistsRaisingPayloadStore(raise_on=set())
+
+        # Store three payloads - middle one will raise on exists()
+        ref1 = store.store(b"content 1")
+        ref2 = store.store(b"content 2 - will raise")
+        ref3 = store.store(b"content 3")
+
+        # Mark ref2 to raise on exists()
+        store._raise_on.add(ref2)
+
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([ref1, ref2, ref3])
+
+        # ref1 and ref3 should be deleted despite ref2 raising exception
+        assert result.deleted_count == 2, f"Expected 2 deletions, got {result.deleted_count}"
+        assert ref2 in result.failed_refs, f"ref2 should be in failed_refs: {result.failed_refs}"
+        assert ref1 not in store._storage, "ref1 should be deleted"
+        assert ref3 not in store._storage, "ref3 should be deleted"
+
+    def test_purge_continues_after_delete_raises_exception(self, landscape_db: LandscapeDB) -> None:
+        """Purge should continue processing refs after delete() throws exception.
+
+        BUG: Currently, an exception from delete() aborts the entire loop.
+        """
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+
+        class DeleteRaisingPayloadStore:
+            """Mock that raises on delete() for specific refs."""
+
+            def __init__(self, raise_on: set[str]) -> None:
+                self._storage: dict[str, bytes] = {}
+                self._raise_on = raise_on
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                if content_hash in self._raise_on:
+                    raise PermissionError(f"Permission denied deleting {content_hash}")
+                if content_hash in self._storage:
+                    del self._storage[content_hash]
+                    return True
+                return False
+
+        store = DeleteRaisingPayloadStore(raise_on=set())
+
+        ref1 = store.store(b"content 1")
+        ref2 = store.store(b"content 2 - will raise on delete")
+        ref3 = store.store(b"content 3")
+
+        store._raise_on.add(ref2)
+
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([ref1, ref2, ref3])
+
+        # ref1 and ref3 should be deleted despite ref2 raising exception
+        assert result.deleted_count == 2, f"Expected 2 deletions, got {result.deleted_count}"
+        assert ref2 in result.failed_refs, f"ref2 should be in failed_refs: {result.failed_refs}"
+        assert ref1 not in store._storage, "ref1 should be deleted"
+        assert ref2 in store._storage, "ref2 should still exist (delete failed)"
+        assert ref3 not in store._storage, "ref3 should be deleted"
+
+    def test_purge_updates_grades_despite_io_errors(self, landscape_db: LandscapeDB) -> None:
+        """Grade updates should happen for successful deletions even when some fail.
+
+        BUG: Currently, an I/O error aborts the loop before grade updates.
+        Even if some refs fail, runs whose payloads WERE deleted should have
+        their grades updated.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.reproducibility import ReproducibilityGrade, set_run_grade
+        from elspeth.core.landscape.schema import nodes_table, rows_table, runs_table
+        from elspeth.core.retention.purge import PurgeManager
+
+        db = landscape_db
+
+        class PartiallyFailingPayloadStore:
+            """Mock that raises on delete() for specific refs."""
+
+            def __init__(self, raise_on: set[str]) -> None:
+                self._storage: dict[str, bytes] = {}
+                self._raise_on = raise_on
+
+            def store(self, content: bytes) -> str:
+                import hashlib
+
+                content_hash = hashlib.sha256(content).hexdigest()
+                self._storage[content_hash] = content
+                return content_hash
+
+            def exists(self, content_hash: str) -> bool:
+                return content_hash in self._storage
+
+            def delete(self, content_hash: str) -> bool:
+                if content_hash in self._raise_on:
+                    raise OSError(f"I/O error deleting {content_hash}")
+                if content_hash in self._storage:
+                    del self._storage[content_hash]
+                    return True
+                return False
+
+        store = PartiallyFailingPayloadStore(raise_on=set())
+
+        # Create two runs with different payloads
+        old_completed_at = datetime.now(UTC) - timedelta(days=60)
+
+        run_success_id = str(uuid4())
+        node_success_id = str(uuid4())
+        success_ref = store.store(b"will be deleted successfully")
+
+        run_fail_id = str(uuid4())
+        node_fail_id = str(uuid4())
+        fail_ref = store.store(b"will fail to delete")
+        store._raise_on.add(fail_ref)
+
+        with db.connection() as conn:
+            # Run with successful deletion
+            _create_run(conn, runs_table, run_success_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_success_id, run_success_id)
+            _create_row(
+                conn,
+                rows_table,
+                str(uuid4()),
+                run_success_id,
+                node_success_id,
+                row_index=0,
+                source_data_ref=success_ref,
+            )
+
+            # Run with failed deletion
+            _create_run(conn, runs_table, run_fail_id, completed_at=old_completed_at, status=RunStatus.COMPLETED)
+            _create_node(conn, nodes_table, node_fail_id, run_fail_id)
+            _create_row(
+                conn,
+                rows_table,
+                str(uuid4()),
+                run_fail_id,
+                node_fail_id,
+                row_index=0,
+                source_data_ref=fail_ref,
+            )
+
+        # Set both to REPLAY_REPRODUCIBLE
+        set_run_grade(db, run_success_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+        set_run_grade(db, run_fail_id, ReproducibilityGrade.REPLAY_REPRODUCIBLE)
+
+        # Purge both refs - one will succeed, one will raise exception
+        manager = PurgeManager(db, store)
+        result = manager.purge_payloads([success_ref, fail_ref])
+
+        assert result.deleted_count == 1
+        assert fail_ref in result.failed_refs
+
+        # Run with successful deletion should have grade updated
+        with db.connection() as conn:
+            result_success = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_success_id))
+            grade_success = result_success.scalar()
+
+            result_fail = conn.execute(select(runs_table.c.reproducibility_grade).where(runs_table.c.run_id == run_fail_id))
+            grade_fail = result_fail.scalar()
+
+        # Success run's grade should be degraded (payload deleted)
+        assert grade_success == ReproducibilityGrade.ATTRIBUTABLE_ONLY.value, (
+            f"Run with successful deletion should have grade degraded, but got {grade_success}"
+        )
+
+        # Failed run's grade should remain unchanged (payload still exists)
+        assert grade_fail == ReproducibilityGrade.REPLAY_REPRODUCIBLE.value, (
+            f"Run with failed deletion should keep its grade (payload still exists), but got {grade_fail}"
+        )

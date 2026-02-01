@@ -2835,3 +2835,13 @@ allow_hits:
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
   safety: Raises ValueError with clear field name and value - no silent recovery
   expires: null
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=2c0f051f0c37248d
+  owner: bugfix
+  reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
+  safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
+  expires: null
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=e172162bc1808ed8
+  owner: bugfix
+  reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
+  safety: Exception caught, ref added to failed_refs, loop continues - explicit failure tracking
+  expires: null
