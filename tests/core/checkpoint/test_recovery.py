@@ -32,7 +32,17 @@ class TestRecoveryProtocol:
         """Create a simple mock graph for recovery tests."""
         graph = ExecutionGraph()
         graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test")
-        graph.add_node("node-agg", node_type=NodeType.AGGREGATION, plugin_name="test")
+        graph.add_node(
+            "node-agg",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="test",
+            config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
+                "options": {"schema": {"fields": "dynamic"}},
+                "schema": {"fields": "dynamic"},
+            },
+        )
         return graph
 
     @pytest.fixture

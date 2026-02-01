@@ -35,8 +35,13 @@ class TestAggregationInputContracts:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
-                "required_input_fields": ["value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],
+                },
             },
         )
 
@@ -71,8 +76,13 @@ class TestAggregationInputContracts:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
-                "required_input_fields": ["value"],  # Source doesn't provide this!
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],  # Source doesn't provide this!
+                },
             },
         )
 
@@ -111,8 +121,13 @@ class TestAggregationInputContracts:
             node_type=NodeType.AGGREGATION,
             plugin_name="grouped_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic"},
-                "required_input_fields": ["id", "amount", "category"],  # 'category' missing!
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["id", "amount", "category"],  # 'category' missing!
+                },
             },
         )
 
@@ -150,8 +165,13 @@ class TestAggregationOutputContracts:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum", "mean"]},
-                "required_input_fields": ["value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],
+                },
             },
         )
 
@@ -188,8 +208,13 @@ class TestAggregationOutputContracts:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
-                "required_input_fields": ["value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],
+                },
             },
         )
 
@@ -235,8 +260,13 @@ class TestAggregationChainValidation:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["batch_id", "count", "sum"]},
-                "required_input_fields": ["raw_value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["raw_value"],
+                },
             },
         )
 
@@ -282,8 +312,13 @@ class TestAggregationChainValidation:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
-                "required_input_fields": ["value"],  # Source doesn't have this
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],  # Source doesn't have this
+                },
             },
         )
 
@@ -317,8 +352,13 @@ class TestAggregationChainValidation:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic", "guaranteed_fields": ["count"]},
-                "required_input_fields": ["value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],
+                },
             },
         )
 
@@ -367,7 +407,12 @@ class TestAggregationDynamicSchemas:
             "agg_1",
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
-            config={"schema": {"fields": "dynamic"}},  # No contracts
+            config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
+                "schema": {"fields": "dynamic"},  # No contracts
+                "options": {"schema": {"fields": "dynamic"}},
+            },
         )
 
         graph.add_node(
@@ -401,8 +446,13 @@ class TestAggregationDynamicSchemas:
             node_type=NodeType.AGGREGATION,
             plugin_name="batch_stats",
             config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
                 "schema": {"fields": "dynamic"},  # No guaranteed_fields - dynamic output
-                "required_input_fields": ["value"],
+                "options": {
+                    "schema": {"fields": "dynamic"},
+                    "required_input_fields": ["value"],
+                },
             },
         )
 

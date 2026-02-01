@@ -874,8 +874,14 @@ class TestAggregationRecovery:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
+        agg_config = {
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {"schema": {"fields": "dynamic"}},
+            "schema": {"fields": "dynamic"},
+        }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
-        graph.add_node("aggregator", node_type=NodeType.AGGREGATION, plugin_name="sum_agg", config=schema_config)
+        graph.add_node("aggregator", node_type=NodeType.AGGREGATION, plugin_name="sum_agg", config=agg_config)
         return graph
 
     def test_aggregation_state_recovers(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:

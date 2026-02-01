@@ -79,6 +79,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -163,6 +164,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1}), SourceRow.valid({"id": 2})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -246,6 +248,7 @@ class TestLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = FailingTransform()
         mock_sink = MagicMock()
@@ -402,6 +405,7 @@ class TestSinkLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         sink = TrackedSink()
 
@@ -490,6 +494,7 @@ class TestSinkLifecycleHooks:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
+        mock_source.get_field_resolution.return_value = None
 
         transform = FailingTransform()
         sink = TrackedSink()

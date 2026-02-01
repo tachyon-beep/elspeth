@@ -2414,7 +2414,15 @@ class TestSchemaValidation:
             plugin_name="batch_stats",
             input_schema=SourceOutput,  # Incoming edge validates against this
             output_schema=AggregationOutput,  # Outgoing edge validates against this
-            config={},
+            config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
+                "options": {
+                    "schema": {"mode": "strict", "fields": ["value: float"]},
+                    "value_field": "value",
+                },
+                "schema": {"mode": "strict", "fields": ["value: float"]},
+            },
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=AggregationOutput)
 
@@ -2452,7 +2460,15 @@ class TestSchemaValidation:
             plugin_name="batch_stats",
             input_schema=SourceOutput,
             output_schema=AggregationOutput,
-            config={},
+            config={
+                "trigger": {"count": 1},
+                "output_mode": "transform",
+                "options": {
+                    "schema": {"mode": "strict", "fields": ["value: float"]},
+                    "value_field": "value",
+                },
+                "schema": {"mode": "strict", "fields": ["value: float"]},
+            },
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
 
@@ -2580,8 +2596,9 @@ def test_validate_aggregation_dual_schema():
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
 
+    input_schema_config = {"mode": "strict", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
-        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        SchemaConfig.from_dict(input_schema_config),
         "InputSchema",
         allow_coercion=False,
     )
@@ -2600,7 +2617,15 @@ def test_validate_aggregation_dual_schema():
         plugin_name="batch_stats",
         input_schema=InputSchema,
         output_schema=OutputSchema,
-        config={},
+        config={
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {
+                "schema": dict(input_schema_config),
+                "value_field": "value",
+            },
+            "schema": dict(input_schema_config),
+        },
     )
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=OutputSchema)
 
@@ -2618,8 +2643,9 @@ def test_validate_aggregation_detects_incompatibility():
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
 
+    input_schema_config = {"mode": "strict", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
-        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        SchemaConfig.from_dict(input_schema_config),
         "InputSchema",
         allow_coercion=False,
     )
@@ -2644,7 +2670,15 @@ def test_validate_aggregation_detects_incompatibility():
         plugin_name="batch_stats",
         input_schema=InputSchema,
         output_schema=OutputSchema,
-        config={},
+        config={
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {
+                "schema": dict(input_schema_config),
+                "value_field": "value",
+            },
+            "schema": dict(input_schema_config),
+        },
     )
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkSchema)
 

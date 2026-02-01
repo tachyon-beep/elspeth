@@ -1158,6 +1158,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create large row_data to exceed 1MB when serialized
         # A single row with ~1KB of data, repeated 1500 times = ~1.5MB checkpoint
@@ -1231,6 +1232,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create very large row_data to exceed 10MB when serialized
         # A single row with ~2KB of data, repeated 6000 times = ~12MB checkpoint
@@ -1288,6 +1290,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint > 10MB
         very_large_row_data = {"data": "x" * 2000}
@@ -1347,6 +1350,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint just under 1MB
         # Target: ~900KB (safely under 1MB to account for JSON overhead)
@@ -1418,6 +1422,7 @@ class TestAggregationExecutorCheckpoint:
             run_id=run.run_id,
             aggregation_settings={node_id: settings},
         )
+        executor._batch_ids[node_id] = "batch-123"
 
         # Create checkpoint ~5MB (between 1MB and 10MB thresholds)
         # 2500 rows x 2KB data each = ~5MB

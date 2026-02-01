@@ -172,6 +172,7 @@ class TestOrchestratorOutputSinkRouting:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "value": "test"})])
+        mock_source.get_field_resolution.return_value = None
 
         # Mock sinks - track what gets written
         mock_results_sink = MagicMock()

@@ -484,6 +484,7 @@ class TestOrchestratorAcceptsGraph:
 
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([])  # Empty source
+        mock_source.get_field_resolution.return_value = None
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"

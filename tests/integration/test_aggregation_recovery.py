@@ -44,9 +44,15 @@ class TestAggregationRecoveryIntegration:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
+        agg_config = {
+            "trigger": {"count": 1},
+            "output_mode": "transform",
+            "options": {"schema": {"fields": "dynamic"}},
+            "schema": {"fields": "dynamic"},
+        }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
-        graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=schema_config)
-        graph.add_node("count_aggregator", node_type=NodeType.AGGREGATION, plugin_name="count_agg", config=schema_config)
+        graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=agg_config)
+        graph.add_node("count_aggregator", node_type=NodeType.AGGREGATION, plugin_name="count_agg", config=agg_config)
         return graph
 
     def test_full_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -460,7 +466,7 @@ class TestAggregationRecoveryIntegration:
                 }
                 for t in tokens
             ],
-            "batch_id": None,
+            "batch_id": "batch-001",
             "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
         }
         agg_state: dict[str, Any] = {
