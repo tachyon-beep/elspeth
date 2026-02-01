@@ -121,7 +121,15 @@ class TriggerEvaluator:
                 "batch_count": self._batch_count,
                 "batch_age_seconds": current_time - self._first_accept_time,
             }
-            if bool(self._condition_parser.evaluate(context)):
+            result = self._condition_parser.evaluate(context)
+            # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
+            # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
+            if not isinstance(result, bool):
+                raise TypeError(
+                    f"Trigger condition must return bool, got {type(result).__name__}: {result!r}. "
+                    f"Expression: {self._condition_parser.expression!r}"
+                )
+            if result:
                 self._condition_fire_time = current_time
 
     def should_trigger(self) -> bool:
@@ -162,7 +170,15 @@ class TriggerEvaluator:
                 "batch_count": self._batch_count,
                 "batch_age_seconds": batch_age,
             }
-            if bool(self._condition_parser.evaluate(context)):
+            result = self._condition_parser.evaluate(context)
+            # P2-2026-01-31: Defense-in-depth - reject non-boolean at runtime
+            # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
+            if not isinstance(result, bool):
+                raise TypeError(
+                    f"Trigger condition must return bool, got {type(result).__name__}: {result!r}. "
+                    f"Expression: {self._condition_parser.expression!r}"
+                )
+            if result:
                 # Condition is true now
                 if self._condition_fire_time is None:
                     # First time detecting condition is true - set fire time now.
@@ -205,6 +221,73 @@ class TriggerEvaluator:
         elif self._last_triggered == "condition":
             return TriggerType.CONDITION
         return None
+
+    # --- Checkpoint/Restore API (P2-2026-02-01) ---
+
+    def get_count_fire_offset(self) -> float | None:
+        """Get the offset from first_accept_time when count trigger fired.
+
+        Returns:
+            Seconds after first accept when count fired, or None if not fired.
+            Used by checkpoint to preserve "first to fire wins" ordering on resume.
+        """
+        if self._count_fire_time is None or self._first_accept_time is None:
+            return None
+        return self._count_fire_time - self._first_accept_time
+
+    def get_condition_fire_offset(self) -> float | None:
+        """Get the offset from first_accept_time when condition trigger fired.
+
+        Returns:
+            Seconds after first accept when condition fired, or None if not fired.
+            Used by checkpoint to preserve "first to fire wins" ordering on resume.
+        """
+        if self._condition_fire_time is None or self._first_accept_time is None:
+            return None
+        return self._condition_fire_time - self._first_accept_time
+
+    def restore_from_checkpoint(
+        self,
+        batch_count: int,
+        elapsed_age_seconds: float,
+        count_fire_offset: float | None,
+        condition_fire_offset: float | None,
+    ) -> None:
+        """Restore evaluator state from checkpoint data.
+
+        This method restores the evaluator to a state equivalent to having
+        processed batch_count rows, with the specified elapsed time and
+        trigger fire times preserved.
+
+        P2-2026-02-01: This fixes the bug where record_accept() was used
+        during restore, which set fire times to current clock time instead
+        of preserving the original ordering.
+
+        Args:
+            batch_count: Number of rows in the restored batch
+            elapsed_age_seconds: Time elapsed since first accept (for timeout)
+            count_fire_offset: Offset from first_accept when count fired, or None
+            condition_fire_offset: Offset from first_accept when condition fired, or None
+        """
+        current_time = self._clock.monotonic()
+
+        # Restore batch count
+        self._batch_count = batch_count
+
+        # Restore first_accept_time by rewinding from current time
+        # This preserves the batch_age_seconds for timeout calculation
+        self._first_accept_time = current_time - elapsed_age_seconds
+
+        # Restore fire times as absolute times (offset from restored first_accept_time)
+        if count_fire_offset is not None:
+            self._count_fire_time = self._first_accept_time + count_fire_offset
+        else:
+            self._count_fire_time = None
+
+        if condition_fire_offset is not None:
+            self._condition_fire_time = self._first_accept_time + condition_fire_offset
+        else:
+            self._condition_fire_time = None
 
     def reset(self) -> None:
         """Reset state for a new batch.

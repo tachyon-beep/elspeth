@@ -3,6 +3,18 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
+# P2-2026-01-31: Defense-in-depth for trigger condition result type
+# ExpressionParser.evaluate() returns Any; validating at this boundary before use
+- key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
+  owner: bugfix
+  reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
+  safety: TypeError raised with expression details - explicit failure, not silent coercion
+  expires: null
+- key: engine/triggers.py:R5:TriggerEvaluator:should_trigger:fp=bac17c66d1886d99
+  owner: bugfix
+  reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before use
+  safety: TypeError raised with expression details - explicit failure, not silent coercion
+  expires: null
 - key: engine/executors.py:R4:SinkExecutor:write:fp=d85d9f56ed29f9be
   owner: architecture
   reason: 'Post-durability callbacks: checkpoint callback fails after durable sink write'

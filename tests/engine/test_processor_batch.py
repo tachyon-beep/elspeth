@@ -280,8 +280,9 @@ class TestProcessorBatchTransforms:
         # Simulate restored checkpoint with 2 rows already buffered
         # Note: _version field required since Bug #12 checkpoint versioning fix
         # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
+        # Note: fire_offset fields required since P2-2026-02-01 trigger ordering fix
         restored_buffer_state = {
-            "_version": "1.0",
+            "_version": "1.1",
             sum_node.node_id: {
                 "tokens": [
                     {
@@ -299,6 +300,8 @@ class TestProcessorBatchTransforms:
                 ],
                 "batch_id": old_batch.batch_id,
                 "elapsed_age_seconds": 0.0,  # Bug #6: timeout elapsed time
+                "count_fire_offset": None,  # P2-2026-02-01: trigger ordering
+                "condition_fire_offset": None,  # P2-2026-02-01: trigger ordering
             },
         }
 

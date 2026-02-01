@@ -468,9 +468,11 @@ class TestAggregationRecoveryIntegration:
             ],
             "batch_id": "batch-001",
             "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
+            "count_fire_offset": evaluator.get_count_fire_offset(),  # P2-2026-02-01
+            "condition_fire_offset": evaluator.get_condition_fire_offset(),  # P2-2026-02-01
         }
         agg_state: dict[str, Any] = {
-            "_version": "1.0",  # Required checkpoint version
+            "_version": "1.1",  # Required checkpoint version
             "sum_aggregator": sum_agg_state,
         }
 

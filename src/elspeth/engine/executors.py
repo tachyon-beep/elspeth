@@ -1325,9 +1325,12 @@ class AggregationExecutor:
             if not tokens:  # Only include non-empty buffers
                 continue
 
-            # Get timeout elapsed time for SLA preservation (Bug #6 fix)
+            # Get trigger state for preservation (Bug #6 + P2-2026-02-01)
             evaluator = self._trigger_evaluators.get(node_id)
             elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
+            # P2-2026-02-01: Preserve fire time offsets for "first to fire wins" ordering
+            count_fire_offset = evaluator.get_count_fire_offset() if evaluator is not None else None
+            condition_fire_offset = evaluator.get_condition_fire_offset() if evaluator is not None else None
 
             if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
                 raise RuntimeError(
@@ -1354,10 +1357,15 @@ class AggregationExecutor:
                 ],
                 "batch_id": batch_id,
                 "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
+                # P2-2026-02-01: Preserve trigger fire time offsets
+                "count_fire_offset": count_fire_offset,
+                "condition_fire_offset": condition_fire_offset,
             }
 
-        # Add version field for future compatibility (Bug #12 fix)
-        state["_version"] = "1.0"
+        # Checkpoint format version
+        # v1.0: Initial format with elapsed_age_seconds
+        # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
+        state["_version"] = "1.1"
 
         # Size validation (on serialized checkpoint)
         serialized = json.dumps(state)
@@ -1399,7 +1407,7 @@ class AggregationExecutor:
             ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
-        CHECKPOINT_VERSION = "1.0"
+        CHECKPOINT_VERSION = "1.1"
         version = state.get("_version")
 
         if version != CHECKPOINT_VERSION:
@@ -1475,23 +1483,24 @@ class AggregationExecutor:
             self._batch_ids[node_id] = batch_id
             self._member_counts[batch_id] = len(reconstructed_tokens)
 
-            # Restore trigger evaluator count and timeout age (Bug #6 fix)
+            # Restore trigger evaluator state (Bug #6 + P2-2026-02-01)
             if node_id in self._trigger_evaluators:
                 evaluator = self._trigger_evaluators[node_id]
-                # Record each restored row as "accepted" to advance the count
-                for _ in reconstructed_tokens:
-                    evaluator.record_accept()
 
-                # Restore timeout age to preserve SLA (Bug #6 fix)
-                # The checkpoint stores how much time had elapsed before the crash.
-                # We adjust _first_accept_time backwards so batch_age_seconds
-                # reflects the true elapsed time (not reset to zero).
-                # NOTE: elapsed_age_seconds is REQUIRED in checkpoint format v1.0
-                # No migration needed - all v1.0 checkpoints have this field.
+                # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
+                # The old approach called record_accept() which set fire times to current time,
+                # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
+                # NOTE: All fields are required in checkpoint format v1.1 - no backwards compat
                 elapsed_seconds = node_state["elapsed_age_seconds"]
-                if elapsed_seconds > 0.0:
-                    # Adjust timer: make it think first accept was N seconds ago
-                    evaluator._first_accept_time = self._clock.monotonic() - elapsed_seconds
+                count_fire_offset = node_state["count_fire_offset"]
+                condition_fire_offset = node_state["condition_fire_offset"]
+
+                evaluator.restore_from_checkpoint(
+                    batch_count=len(reconstructed_tokens),
+                    elapsed_age_seconds=elapsed_seconds,
+                    count_fire_offset=count_fire_offset,
+                    condition_fire_offset=condition_fire_offset,
+                )
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.

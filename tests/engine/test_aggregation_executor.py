@@ -721,7 +721,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Don't buffer anything
         state = executor.get_checkpoint_state()
-        assert state == {"_version": "1.0"}  # Only version field when no buffers
+        assert state == {"_version": "1.1"}  # Only version field when no buffers
 
     def test_restore_from_checkpoint_reconstructs_full_token_info(self, real_landscape_db) -> None:
         """Restore reconstructs complete TokenInfo objects from checkpoint data."""
@@ -758,7 +758,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Checkpoint state with new format (full TokenInfo data)
         checkpoint_state = {
-            "_version": "1.0",
+            "_version": "1.1",
             node_id: {
                 "tokens": [
                     {
@@ -775,7 +775,9 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": "batch-123",
-                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
+                "elapsed_age_seconds": 0.0,  # Required in v1.1 format
+                "count_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
+                "condition_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
             },
         }
 
@@ -841,7 +843,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint state with 4 rows buffered (new format)
         checkpoint_state = {
-            "_version": "1.0",
+            "_version": "1.1",
             node_id: {
                 "tokens": [
                     {
@@ -853,7 +855,9 @@ class TestAggregationExecutorCheckpoint:
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
-                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
+                "elapsed_age_seconds": 0.0,  # Required in v1.1 format
+                "count_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
+                "condition_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
             },
         }
 
@@ -993,7 +997,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
         checkpoint_state: dict[str, Any] = {
-            "_version": "1.0",
+            "_version": "1.1",
             node_id: {
                 "tokens": [
                     {
@@ -1010,7 +1014,9 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": batch.batch_id,
-                "elapsed_age_seconds": 0.0,  # Required in v1.0 format
+                "elapsed_age_seconds": 0.0,  # Required in v1.1 format
+                "count_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
+                "condition_fire_offset": None,  # P2-2026-02-01: Required in v1.1 format
             },
         }
 
@@ -1494,7 +1500,7 @@ class TestAggregationExecutorCheckpoint:
         )
 
         # Restore from empty checkpoint (only version, no aggregation buffers)
-        executor.restore_from_checkpoint({"_version": "1.0"})
+        executor.restore_from_checkpoint({"_version": "1.1"})
 
         # VERIFY: No errors, buffers remain empty (but initialized for the node)
         assert node_id in executor._buffers
@@ -1589,7 +1595,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Build invalid checkpoint with the parameterized node data
         invalid_checkpoint = {
-            "_version": "1.0",
+            "_version": "1.1",
             node_id: checkpoint_node_data,
         }
 

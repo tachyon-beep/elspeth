@@ -392,3 +392,200 @@ class TestTriggerFirstToFireWins:
         assert evaluator.which_triggered() == "timeout", (
             "Timeout fired at t=1.0s, condition fired at t=1.5s. Per 'first to fire wins' contract, should report 'timeout'."
         )
+
+
+class TestTriggerConditionBooleanValidation:
+    """Tests for P2-2026-01-31: Trigger condition must return boolean.
+
+    Per CLAUDE.md Three-Tier Trust Model: trigger config is "our data" (Tier 1).
+    Non-boolean results should be rejected, not silently coerced with bool().
+    """
+
+    def test_non_boolean_condition_rejected_at_config_time(self) -> None:
+        """Non-boolean expressions should be rejected at config validation.
+
+        A condition like 'row["batch_count"]' (returns int) or
+        'row["batch_count"] + 1' (returns int) should fail validation.
+        """
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+
+        # Integer expression - should be rejected
+        with pytest.raises(ValueError, match="boolean"):
+            TriggerConfig(condition="row['batch_count']")
+
+        # Arithmetic expression - should be rejected
+        with pytest.raises(ValueError, match="boolean"):
+            TriggerConfig(condition="row['batch_count'] + 1")
+
+    def test_boolean_condition_accepted(self) -> None:
+        """Boolean expressions should pass validation."""
+        from elspeth.core.config import TriggerConfig
+
+        # Comparison - returns bool
+        config = TriggerConfig(condition="row['batch_count'] >= 50")
+        assert config.condition == "row['batch_count'] >= 50"
+
+        # Boolean operator - returns bool
+        config = TriggerConfig(condition="row['batch_count'] >= 10 and row['batch_age_seconds'] > 1.0")
+        assert config.condition is not None
+
+        # Unary not - returns bool
+        config = TriggerConfig(condition="not row['batch_count'] >= 100")
+        assert config.condition is not None
+
+    def test_ternary_with_boolean_branches_accepted(self) -> None:
+        """Ternary expressions returning booleans should pass."""
+        from elspeth.core.config import TriggerConfig
+
+        config = TriggerConfig(condition="True if row['batch_count'] > 10 else False")
+        assert config.condition is not None
+
+    def test_non_boolean_runtime_raises(self) -> None:
+        """If a non-boolean somehow reaches runtime, it should raise.
+
+        This is defense-in-depth: even if config validation is bypassed,
+        the runtime should reject non-boolean results instead of coercing.
+        """
+        import pytest
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        # Bypass config validation by constructing directly
+        # (simulates a bug in validation or manual construction)
+        config = TriggerConfig.__new__(TriggerConfig)
+        object.__setattr__(config, "count", None)
+        object.__setattr__(config, "timeout_seconds", None)
+        object.__setattr__(config, "condition", "row['batch_count']")  # Returns int
+
+        evaluator = TriggerEvaluator(config)
+
+        # Should raise on first condition evaluation (in record_accept or should_trigger)
+        # The condition is first evaluated in record_accept() when tracking fire times
+        with pytest.raises(TypeError, match="condition must return bool"):
+            evaluator.record_accept()
+
+
+class TestTriggerCheckpointRestore:
+    """Tests for P2-2026-02-01: Trigger fire times must be preserved on resume.
+
+    When checkpoint restore reconstructs batches, the "first to fire wins"
+    ordering must be preserved from before the crash.
+    """
+
+    def test_count_fire_time_preserved_on_restore(self) -> None:
+        """Count trigger fire time offset should be restored from checkpoint.
+
+        Scenario:
+        - Pre-crash: First accept at t=0, count fires at t=2s (5 rows, offset=2s)
+        - Checkpoint stores: elapsed_age_seconds=5s, count_fire_offset=2s
+        - Resume at t=100s
+        - Expected: count fire time should have offset 2s from restored first_accept
+
+        Bug behavior: count_fire_time = current time during restore (loses ordering)
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=5, timeout_seconds=10.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # First accept at t=0
+        evaluator.record_accept()
+        assert evaluator._first_accept_time == 0.0
+
+        # Accept 4 more rows at t=2s - count fires
+        clock.advance(2.0)
+        for _ in range(4):
+            evaluator.record_accept()
+
+        # Verify count fired at t=2s (offset 2s from first accept)
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "count"
+
+        # Get fire time offset for checkpoint
+        count_fire_offset = evaluator.get_count_fire_offset()
+        assert count_fire_offset == 2.0  # Fired 2s after first accept at t=0
+
+        # Simulate time passing and crash at t=5s
+        clock.advance(3.0)  # Now at t=5s
+        elapsed_age = evaluator.get_age_seconds()
+        assert elapsed_age == 5.0
+
+        # --- CRASH AND RESUME ---
+        # Create new evaluator at t=100s
+        clock2 = MockClock(start=100.0)
+        evaluator2 = TriggerEvaluator(config, clock=clock2)
+
+        # Restore using the new API that preserves fire times
+        evaluator2.restore_from_checkpoint(
+            batch_count=5,
+            elapsed_age_seconds=elapsed_age,
+            count_fire_offset=count_fire_offset,
+            condition_fire_offset=None,
+        )
+
+        # Count should still be reported as firing first
+        # (count fired at offset 2s, timeout would fire at offset 10s)
+        assert evaluator2.should_trigger() is True
+        assert evaluator2.which_triggered() == "count", (
+            "Count fired at offset 2s, timeout would fire at offset 10s. After restore, should still report 'count' not 'timeout'."
+        )
+
+    def test_timeout_wins_over_count_after_restore(self) -> None:
+        """When timeout fired before count pre-crash, restore preserves ordering.
+
+        Scenario:
+        - Pre-crash at t=0: Accept 99 rows (count=100 not reached)
+        - At t=1.5s: timeout fires (timeout_seconds=1.0, fired at t=1.0s)
+        - At t=1.5s: Accept row 100 (count fires at t=1.5s)
+        - Checkpoint: elapsed=1.5s, count_fire_offset=1.5s (but timeout offset=1.0s)
+        - Resume: Should report timeout, not count
+        """
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        clock = MockClock(start=0.0)
+        config = TriggerConfig(count=100, timeout_seconds=1.0)
+        evaluator = TriggerEvaluator(config, clock=clock)
+
+        # Accept 99 rows at t=0
+        for _ in range(99):
+            evaluator.record_accept()
+
+        # Time passes, timeout fires at t=1.0s
+        clock.advance(1.5)  # Now at t=1.5s
+
+        # Accept row 100 - count fires now
+        evaluator.record_accept()
+
+        # Both have fired, timeout was first
+        assert evaluator.should_trigger() is True
+        assert evaluator.which_triggered() == "timeout"
+
+        # Get checkpoint state
+        elapsed_age = evaluator.get_age_seconds()
+        count_fire_offset = evaluator.get_count_fire_offset()
+        # Note: timeout fire time is computed, not stored
+
+        # --- CRASH AND RESUME ---
+        clock2 = MockClock(start=100.0)
+        evaluator2 = TriggerEvaluator(config, clock=clock2)
+
+        evaluator2.restore_from_checkpoint(
+            batch_count=100,
+            elapsed_age_seconds=elapsed_age,
+            count_fire_offset=count_fire_offset,
+            condition_fire_offset=None,
+        )
+
+        # Timeout should still win (it fired at offset 1.0s, count at 1.5s)
+        assert evaluator2.should_trigger() is True
+        assert evaluator2.which_triggered() == "timeout", (
+            "Timeout fired at 1.0s offset, count at 1.5s offset. After restore, should still report 'timeout' not 'count'."
+        )

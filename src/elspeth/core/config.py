@@ -84,7 +84,11 @@ class TriggerConfig(BaseModel):
     @field_validator("condition")
     @classmethod
     def validate_condition_expression(cls, v: str | None) -> str | None:
-        """Validate condition is a valid expression at config time."""
+        """Validate condition is a valid boolean expression at config time.
+
+        Per CLAUDE.md Three-Tier Trust Model: trigger config is "our data" (Tier 1).
+        Non-boolean expressions must be rejected at config time, not silently coerced.
+        """
         if v is None:
             return v
 
@@ -95,11 +99,21 @@ class TriggerConfig(BaseModel):
         )
 
         try:
-            ExpressionParser(v)
+            parser = ExpressionParser(v)
         except ExpressionSyntaxError as e:
             raise ValueError(f"Invalid condition syntax: {e}") from e
         except ExpressionSecurityError as e:
             raise ValueError(f"Forbidden construct in condition: {e}") from e
+
+        # P2-2026-01-31: Reject non-boolean expressions
+        # Per CLAUDE.md: "if bool(result)" coercion is forbidden for our data
+        if not parser.is_boolean_expression():
+            raise ValueError(
+                f"Trigger condition must be a boolean expression that returns True/False. "
+                f"Got: {v!r} which returns a non-boolean value. "
+                f"Use comparisons (>=, ==, etc.) or boolean operators (and, or, not) "
+                f"to create conditions like: row['batch_count'] >= 100"
+            )
         return v
 
     @model_validator(mode="after")

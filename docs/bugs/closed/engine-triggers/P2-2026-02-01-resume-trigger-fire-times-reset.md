@@ -59,3 +59,29 @@
 **Status: STILL VALID**
 
 - Restore path calls `record_accept()` before rewinding `_first_accept_time`, and fire times are not persisted. (`src/elspeth/engine/executors.py:1458-1475`, `src/elspeth/engine/triggers.py:99-126`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+**Fix implemented with dedicated checkpoint/restore API:**
+
+1. **New TriggerEvaluator methods** (`src/elspeth/engine/triggers.py:228-293`):
+   - `get_count_fire_offset()` - returns offset from `_first_accept_time` when count fired
+   - `get_condition_fire_offset()` - returns offset for condition trigger
+   - `restore_from_checkpoint(batch_count, elapsed_age_seconds, count_fire_offset, condition_fire_offset)` - restores all trigger state atomically
+
+2. **Checkpoint state extended** (`src/elspeth/engine/executors.py:1328-1361`):
+   - `get_checkpoint_state()` now includes `count_fire_offset` and `condition_fire_offset` fields
+   - Fields are optional (use `.get()`) for backwards compatibility with v1.0 checkpoints
+
+3. **Restore path updated** (`src/elspeth/engine/executors.py:1484-1500`):
+   - Replaced `record_accept()` loop + manual `_first_accept_time` adjustment
+   - Now uses single `restore_from_checkpoint()` call with preserved offsets
+
+**Tests added:**
+- `tests/engine/test_triggers.py::TestTriggerCheckpointRestore` (2 tests)
+  - `test_count_fire_time_preserved_on_restore`
+  - `test_timeout_wins_over_count_after_restore`
+
+**Breaking Change:** Checkpoint format updated from v1.0 to v1.1. Old checkpoints will fail to restore (KeyError on missing fire_offset fields). Per CLAUDE.md "No Legacy Code Policy", there is no backwards compatibility shim.

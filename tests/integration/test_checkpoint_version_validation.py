@@ -23,7 +23,7 @@ class TestCheckpointVersionValidation:
         Scenario:
         1. Create AggregationExecutor
         2. Get checkpoint state
-        3. Verify: State contains "_version" field with value "1.0"
+        3. Verify: State contains "_version" field with value "1.1"
 
         This is Bug #12 fix: checkpoint state must include version for
         future compatibility when checkpoint format changes.
@@ -40,7 +40,7 @@ class TestCheckpointVersionValidation:
 
         # Verify version field exists
         assert "_version" in state, "Checkpoint state must include _version field (Bug #12 fix)"
-        assert state["_version"] == "1.0", f"Expected version '1.0', got {state['_version']!r}"
+        assert state["_version"] == "1.1", f"Expected version '1.1', got {state['_version']!r}"
 
     def test_restore_requires_matching_version(self) -> None:
         """Verify restore fails with incompatible checkpoint version.
@@ -76,7 +76,7 @@ class TestCheckpointVersionValidation:
         error_msg = str(exc_info.value)
         assert "Incompatible checkpoint version" in error_msg
         assert "2.0" in error_msg
-        assert "1.0" in error_msg
+        assert "1.1" in error_msg
         assert "Cannot resume" in error_msg
 
     def test_restore_fails_without_version(self) -> None:
@@ -132,7 +132,7 @@ class TestCheckpointVersionValidation:
 
         # Valid checkpoint state with matching version
         valid_state = {
-            "_version": "1.0",  # Matching version
+            "_version": "1.1",  # Matching version
             "test_node": {
                 "tokens": [
                     {
@@ -144,6 +144,8 @@ class TestCheckpointVersionValidation:
                 ],
                 "batch_id": "batch-001",
                 "elapsed_age_seconds": 0.0,
+                "count_fire_offset": None,  # P2-2026-02-01: Required in v1.1
+                "condition_fire_offset": None,  # P2-2026-02-01: Required in v1.1
             },
         }
 
