@@ -54,22 +54,23 @@ class TestDatadogExporterConfiguration:
 
     def test_default_configuration(self) -> None:
         """Default configuration uses sensible defaults."""
-        mock_module, mock_tracer, _ = create_mock_ddtrace_module()
+        mock_module, _mock_tracer, _ = create_mock_ddtrace_module()
 
-        with patch.dict(sys.modules, {"ddtrace": mock_module}):
+        with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", {}, clear=False):
             exporter = DatadogExporter()
             exporter.configure({})
 
-            mock_tracer.configure.assert_called_once_with(
-                hostname="localhost",
-                port=8126,
-            )
+            # ddtrace 4.x uses environment variables instead of tracer.configure()
+            import os
+
+            assert os.environ.get("DD_AGENT_HOST") == "localhost"
+            assert os.environ.get("DD_TRACE_AGENT_PORT") == "8126"
 
     def test_custom_agent_host_and_port(self) -> None:
-        """Custom agent host and port are passed to tracer."""
-        mock_module, mock_tracer, _ = create_mock_ddtrace_module()
+        """Custom agent host and port are set via environment variables."""
+        mock_module, _mock_tracer, _ = create_mock_ddtrace_module()
 
-        with patch.dict(sys.modules, {"ddtrace": mock_module}):
+        with patch.dict(sys.modules, {"ddtrace": mock_module}), patch.dict("os.environ", {}, clear=False):
             exporter = DatadogExporter()
             exporter.configure(
                 {
@@ -78,10 +79,11 @@ class TestDatadogExporterConfiguration:
                 }
             )
 
-            mock_tracer.configure.assert_called_once_with(
-                hostname="datadog-agent.internal",
-                port=9126,
-            )
+            # ddtrace 4.x uses environment variables
+            import os
+
+            assert os.environ.get("DD_AGENT_HOST") == "datadog-agent.internal"
+            assert os.environ.get("DD_TRACE_AGENT_PORT") == "9126"
 
     def test_invalid_port_zero_raises(self) -> None:
         """Port 0 raises TelemetryExporterError."""
@@ -228,9 +230,12 @@ class TestDatadogExporterSpanCreation:
         This is critical for buffered/async export scenarios where the event
         may be created at time T but exported at time T+10s. The span should
         reflect when the event actually occurred, not when it was exported.
+
+        ddtrace 4.x API: start_ns is set directly on the span after creation.
         """
         mock_module, mock_tracer, mock_span = create_mock_ddtrace_module()
         mock_tracer.start_span.return_value = mock_span
+        mock_span.start_ns = 0  # Initialize so we can check it was set
 
         with patch.dict(sys.modules, {"ddtrace": mock_module}):
             exporter = DatadogExporter()
@@ -239,6 +244,7 @@ class TestDatadogExporterSpanCreation:
         # Create event with a known timestamp in the past
         event_timestamp = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
         expected_unix_seconds = event_timestamp.timestamp()
+        expected_ns = int(expected_unix_seconds * 1_000_000_000)
 
         event = RunStarted(
             timestamp=event_timestamp,
@@ -248,12 +254,14 @@ class TestDatadogExporterSpanCreation:
         )
         exporter.export(event)
 
-        # Verify start_span was called with explicit start time
+        # Verify start_span was called (ddtrace 4.x: no 'start' parameter)
         mock_tracer.start_span.assert_called_once()
         call_kwargs = mock_tracer.start_span.call_args[1]
-        assert "start" in call_kwargs, "start_span must be called with explicit 'start' parameter"
-        assert call_kwargs["start"] == expected_unix_seconds, (
-            f"Span start time should be event timestamp ({expected_unix_seconds}), not export time. Got: {call_kwargs.get('start')}"
+        assert "start" not in call_kwargs, "ddtrace 4.x: start_span no longer accepts 'start' parameter"
+
+        # Verify start_ns was set directly on the span (ddtrace 4.x API)
+        assert mock_span.start_ns == expected_ns, (
+            f"Span start_ns should be event timestamp ({expected_ns}), not auto-generated. Got: {mock_span.start_ns}"
         )
 
         # Verify span was finished with the same timestamp (instant span)

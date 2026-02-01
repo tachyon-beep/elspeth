@@ -20,7 +20,7 @@ import structlog
 from elspeth.telemetry.errors import TelemetryExporterError
 
 if TYPE_CHECKING:
-    from ddtrace import Tracer
+    from ddtrace._trace.tracer import Tracer
 
     from elspeth.contracts.events import TelemetryEvent
 
@@ -136,18 +136,22 @@ class DatadogExporter:
             )
 
         # Import and configure the tracer
+        # ddtrace 4.x uses environment variables for agent configuration
         try:
-            from ddtrace import tracer
+            import os
 
-            tracer.configure(
-                hostname=agent_host,
-                port=agent_port,
-            )
+            from ddtrace import tracer  # type: ignore[attr-defined]
+
+            # Set agent connection via environment variables (ddtrace 4.x API)
+            # These must be set before the tracer sends any spans
+            os.environ["DD_AGENT_HOST"] = agent_host
+            os.environ["DD_TRACE_AGENT_PORT"] = str(agent_port)
+
             self._tracer = tracer
         except ImportError as e:
             raise TelemetryExporterError(
                 self._name,
-                f"ddtrace not installed: {e}. Install with: uv pip install 'elspeth[telemetry]'",
+                f"ddtrace not installed: {e}. Install with: uv pip install ddtrace",
             ) from e
 
         self._configured = True
@@ -209,18 +213,21 @@ class DatadogExporter:
 
         event_type = type(event).__name__
 
-        # Convert event timestamp to Unix seconds for ddtrace
-        # ddtrace expects start/finish times in Unix epoch seconds (float)
+        # Convert event timestamp to Unix seconds and nanoseconds
+        # ddtrace finish() expects seconds, but start_ns is in nanoseconds
         event_unix_seconds = event.timestamp.timestamp()
+        event_ns = int(event_unix_seconds * 1_000_000_000)
 
-        # Create span with explicit start time from event.timestamp
-        # This ensures span timing reflects when the event occurred, not export time
+        # Create span (ddtrace 4.x removed 'start' parameter from start_span)
         span = self._tracer.start_span(
             name=event_type,
             service=self._service_name,
             resource=event_type,
-            start=event_unix_seconds,
         )
+
+        # Set explicit start time from event.timestamp (ddtrace 4.x API)
+        # This ensures span timing reflects when the event occurred, not export time
+        span.start_ns = event_ns
 
         try:
             # Set standard Datadog tags
@@ -294,7 +301,7 @@ class DatadogExporter:
 
         try:
             # ddtrace tracer has a flush method that sends pending spans
-            self._tracer.flush()
+            self._tracer.flush()  # type: ignore[no-untyped-call]
         except Exception as e:
             logger.warning(
                 "Failed to flush Datadog exporter",
@@ -313,7 +320,7 @@ class DatadogExporter:
         if self._tracer:
             try:
                 # Shutdown the tracer
-                self._tracer.shutdown()
+                self._tracer.shutdown()  # type: ignore[no-untyped-call]
             except Exception as e:
                 logger.warning(
                     "Failed to shutdown Datadog tracer",
