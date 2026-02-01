@@ -72,6 +72,7 @@ dev = [
     "pytest-cov>=4.1,<6",  # Coverage plugin
     "pytest-asyncio>=1.0,<2",  # Async test support
     "pytest-dotenv>=0.5,<1",  # Load .env for integration tests
+    "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
     "ruff>=0.14,<1",  # Linting and formatting
@@ -106,7 +107,30 @@ mcp = [
 ]
 
 all = [
-    "elspeth[dev,llm,azure,mcp]",
+    # dev dependencies
+    "pytest>=9.0,<10",
+    "pytest-cov>=4.1,<6",
+    "pytest-asyncio>=1.0,<2",
+    "pytest-dotenv>=0.5,<1",
+    "pytest-timeout>=2.3,<3",
+    "hypothesis>=6.98,<7",
+    "mypy>=1.19,<2",
+    "ruff>=0.14,<1",
+    "pre-commit>=3.6,<4",
+    "pandas-stubs>=2.2,<3",
+    "types-networkx>=3.2,<4",
+    "types-PyYAML>=6.0,<7",
+    "mutmut>=2.4,<3",
+    # llm dependencies
+    "jinja2>=3.1,<4",
+    "openai>=2.15,<3",
+    "litellm>=1.81,<2",
+    # azure dependencies
+    "azure-storage-blob>=12.28,<13",
+    "azure-identity>=1.25,<2",
+    "azure-keyvault-secrets>=4.10,<5",
+    # mcp dependencies
+    "mcp>=1.0,<2",
 ]
 
 [project.scripts]
@@ -235,7 +259,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "-m", "not stress",  # Skip stress tests by default (run with: pytest -m stress)
+    "-m", "not slow and not stress",  # Skip slow/stress tests by default
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

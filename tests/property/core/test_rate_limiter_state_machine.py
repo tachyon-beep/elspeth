@@ -262,7 +262,7 @@ class TestRateLimiterQuotaInvariants:
             # Next acquire should fail
             assert limiter.try_acquire() is False
 
-    @pytest.mark.skip(reason="Per-minute window requires 60s wait for replenishment, not practical in tests")
+    @pytest.mark.slow
     @given(limit=st.integers(min_value=2, max_value=5))
     @settings(max_examples=10, deadline=None)
     def test_replenishment_after_wait(self, limit: int) -> None:
@@ -309,7 +309,7 @@ class TestRateLimiterQuotaInvariants:
             assert successful >= expected_acquires
             assert successful <= expected_acquires + 1
 
-    @pytest.mark.skip(reason="Per-minute window requires 60s wait for replenishment, not practical in tests")
+    @pytest.mark.slow
     @given(limit=st.integers(min_value=1, max_value=10))
     @settings(max_examples=10, deadline=None)
     def test_multiple_rejection_attempts_dont_consume_with_replenish(self, limit: int) -> None:

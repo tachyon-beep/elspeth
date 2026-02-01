@@ -117,7 +117,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[all]"
 
       - name: Enforce contract alignment
         run: |
@@ -171,7 +171,7 @@ jobs:
             --cov-report=term-missing \
             --cov-fail-under=80 \
             -v \
-            -m "not stress" \
+            -m "not slow and not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Run tests without coverage
@@ -180,7 +180,7 @@ jobs:
           source .venv/bin/activate
           pytest tests/ \
             -v \
-            -m "not stress" \
+            -m "not slow and not stress" \
             --ignore=tests/examples/test_llm_examples.py
 
       - name: Upload coverage report
