@@ -133,6 +133,36 @@ allow_hits:
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: cli.py:R3:validate:fp=d46c784c8c3128fb
+  owner: architecture
+  reason: 'External library boundary: YAML parser exceptions may or may not have problem attr'
+  safety: Graceful fallback to empty details list - error still displayed
+  expires: null
+- key: cli.py:R1:health:fp=fbd09b89f83375a2
+  owner: architecture
+  reason: 'Environment variable access: GIT_COMMIT_SHA is optional at runtime'
+  safety: Falls back to empty string - health check reports unavailable
+  expires: null
+- key: cli.py:R4:health:fp=746e0b757fe14dbc
+  owner: architecture
+  reason: 'Trust boundary: git subprocess may fail for many reasons'
+  safety: Graceful fallback - health check reports git as unavailable
+  expires: null
+- key: cli.py:R1:health:fp=f5b38d901d163284
+  owner: architecture
+  reason: 'Environment variable access: DATABASE_URL is optional at runtime'
+  safety: Falls back to empty string - health check reports database as unavailable
+  expires: null
+- key: cli.py:R4:health:fp=8dfc49078e9edf36
+  owner: architecture
+  reason: 'Trust boundary: database connection may fail for many reasons'
+  safety: Graceful fallback - health check reports database as unavailable
+  expires: null
+- key: cli.py:R4:health:fp=5882f96929ea13c1
+  owner: architecture
+  reason: 'Trust boundary: health check components may fail independently'
+  safety: Individual component failure reported - overall health status returned
+  expires: null
 - key: engine/batch_adapter.py:R9:RowWaiter:wait:fp=bc381d6f3c2f5d86
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios

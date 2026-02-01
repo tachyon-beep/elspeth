@@ -1062,6 +1062,42 @@ def _execute_pipeline_with_instances(
         db.close()
 
 
+def _format_validation_error(
+    title: str,
+    message: str,
+    hint: str | None = None,
+    details: list[str] | None = None,
+) -> None:
+    """Display a formatted validation error with optional hint and details."""
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.text import Text
+
+    console = Console(stderr=True)
+
+    # Build error content
+    content = Text()
+    content.append(message, style="white")
+
+    if details:
+        content.append("\n\n")
+        for detail in details:
+            content.append(f"  • {detail}\n", style="dim")
+
+    if hint:
+        content.append("\n")
+        content.append("Hint: ", style="yellow bold")
+        content.append(hint, style="yellow")
+
+    panel = Panel(
+        content,
+        title=f"[red bold]❌ {title}[/]",
+        border_style="red",
+        padding=(0, 1),
+    )
+    console.print(panel)
+
+
 @app.command()
 def validate(
     settings: str = typer.Option(
@@ -1081,27 +1117,75 @@ def validate(
         config = load_settings(settings_path)
     except (YamlParserError, YamlScannerError) as e:
         # YAML syntax errors (malformed YAML) - show helpful message
-        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
-        typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
+        _format_validation_error(
+            title="YAML Syntax Error",
+            message=f"Failed to parse {settings_path.name}",
+            details=[str(e.problem)] if hasattr(e, "problem") else None,
+            hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
+        )
         raise typer.Exit(1) from None
     except FileNotFoundError:
-        typer.echo(f"Error: Settings file not found: {settings}", err=True)
+        _format_validation_error(
+            title="File Not Found",
+            message=f"Settings file does not exist: {settings}",
+            hint="Check the path and ensure the file exists.",
+        )
         raise typer.Exit(1) from None
     except ValidationError as e:
-        typer.echo("Configuration errors:", err=True)
+        # Pydantic validation errors (must be before ValueError - ValidationError inherits from it!)
+        details = []
         for error in e.errors():
             loc = ".".join(str(x) for x in error["loc"])
-            typer.echo(f"  - {loc}: {error['msg']}", err=True)
+            details.append(f"{loc}: {error['msg']}")
+        _format_validation_error(
+            title="Configuration Validation Failed",
+            message=f"Invalid settings in {settings_path.name}",
+            details=details,
+            hint="Check field names, types, and required values.",
+        )
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        # Environment variable expansion errors (must be AFTER ValidationError!)
+        error_msg = str(e)
+        if "environment variable" in error_msg.lower():
+            # Extract variable name from error message if possible
+            import re
+
+            match = re.search(r"'(\w+)'", error_msg)
+            var_name = match.group(1) if match else "VARIABLE"
+            _format_validation_error(
+                title="Missing Environment Variable",
+                message=error_msg,
+                hint=f'Set the variable: export {var_name}="your-value"\n         Or use optional syntax: ${{{var_name}:-default}}',
+            )
+        else:
+            _format_validation_error(
+                title="Configuration Error",
+                message=error_msg,
+            )
         raise typer.Exit(1) from None
 
-    # NEW: Instantiate plugins BEFORE graph construction
+    # Instantiate plugins BEFORE graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
+    except ValueError as e:
+        # Plugin configuration errors (e.g., invalid schema for sink type)
+        error_msg = str(e)
+        _format_validation_error(
+            title="Plugin Configuration Error",
+            message=error_msg,
+            hint="Check plugin options match the plugin's requirements.",
+        )
+        raise typer.Exit(1) from None
     except Exception as e:
-        typer.echo(f"Error instantiating plugins: {e}", err=True)
+        _format_validation_error(
+            title="Plugin Instantiation Failed",
+            message=str(e),
+            hint="Check that all plugin options are valid and dependencies are available.",
+        )
         raise typer.Exit(1) from None
 
-    # NEW: Build and validate graph from plugin instances
+    # Build and validate graph from plugin instances
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins["source"],
@@ -1114,12 +1198,19 @@ def validate(
         )
         graph.validate()
     except ValueError as e:
-        # Schema compatibility errors raised during graph construction (PHASE 2)
-        # Updated for Task 4: Schema validation moved to construction time
-        typer.echo(f"Schema validation error: {e}", err=True)
+        # Schema compatibility errors raised during graph construction
+        _format_validation_error(
+            title="Schema Validation Error",
+            message=str(e),
+            hint="Ensure upstream nodes provide fields required by downstream nodes.",
+        )
         raise typer.Exit(1) from None
     except GraphValidationError as e:
-        typer.echo(f"Pipeline graph error: {e}", err=True)
+        _format_validation_error(
+            title="Pipeline Graph Error",
+            message=str(e),
+            hint="Check for cycles, missing sinks, or invalid routing.",
+        )
         raise typer.Exit(1) from None
 
     typer.echo("✅ Pipeline configuration valid!")
