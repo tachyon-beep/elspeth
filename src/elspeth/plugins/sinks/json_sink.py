@@ -17,15 +17,18 @@ from elspeth.contracts import ArtifactDescriptor, PluginSchema
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import PathConfig
+from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
-class JSONSinkConfig(PathConfig):
+class JSONSinkConfig(SinkPathConfig):
     """Configuration for JSON sink plugin.
 
-    Inherits from PathConfig, which requires schema configuration.
+    Inherits from SinkPathConfig, which provides:
+    - Path handling (from PathConfig)
+    - Schema configuration (from DataPluginConfig)
+    - Display header options (display_headers, restore_source_headers)
     """
 
     format: Literal["json", "jsonl"] | None = None
@@ -166,6 +169,12 @@ class JSONSink(BaseSink):
         self._indent = cfg.indent
         self._validate_input = cfg.validate_input
 
+        # Display header configuration
+        self._display_headers = cfg.display_headers
+        self._restore_source_headers = cfg.restore_source_headers
+        # Populated in on_start() if restore_source_headers=True
+        self._resolved_display_headers: dict[str, str] | None = None
+
         # Auto-detect format from extension if not specified
         fmt = cfg.format
         if fmt is None:
@@ -223,11 +232,14 @@ class JSONSink(BaseSink):
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
 
+        # Apply display header mapping to row keys if configured
+        output_rows = self._apply_display_headers(rows)
+
         if self._format == "jsonl":
-            self._write_jsonl_batch(rows)
+            self._write_jsonl_batch(output_rows)
         else:
             # Buffer rows for JSON array format
-            self._rows.extend(rows)
+            self._rows.extend(output_rows)
             # Write immediately (file is rewritten on each write for JSON format)
             self._write_json_array()
 
@@ -298,11 +310,66 @@ class JSONSink(BaseSink):
             self._file = None
             self._rows = []
 
+    # === Display Header Support ===
+
+    def _get_effective_display_headers(self) -> dict[str, str] | None:
+        """Get the effective display header mapping.
+
+        Returns:
+            Dict mapping normalized field name -> display name, or None if no
+            display headers are configured.
+        """
+        if self._display_headers is not None:
+            return self._display_headers
+        if self._resolved_display_headers is not None:
+            return self._resolved_display_headers
+        return None
+
+    def _apply_display_headers(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Apply display header mapping to row keys.
+
+        Args:
+            rows: List of row dicts with normalized field names
+
+        Returns:
+            List of row dicts with display names as keys. If no display headers
+            are configured, returns the original rows unchanged.
+        """
+        display_map = self._get_effective_display_headers()
+        if display_map is None:
+            return rows
+
+        # Transform each row's keys to display names
+        # Fields not in the mapping keep their original names (transform-added fields)
+        return [{display_map.get(k, k): v for k, v in row.items()} for row in rows]
+
     # === Lifecycle Hooks ===
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Called before processing begins."""
-        pass
+        """Called before processing begins.
+
+        If restore_source_headers=True, fetches the source field resolution
+        from the Landscape audit trail and builds the reverse mapping.
+        """
+        if not self._restore_source_headers:
+            return
+
+        # Fetch source field resolution from Landscape
+        if ctx.landscape is None:
+            raise ValueError(
+                "restore_source_headers=True requires Landscape to be available. "
+                "This is a framework bug - context should have landscape set."
+            )
+
+        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
+        if resolution_mapping is None:
+            raise ValueError(
+                "restore_source_headers=True but source did not record field resolution. "
+                "Ensure source uses normalize_fields: true to enable header restoration."
+            )
+
+        # Build reverse mapping: final (normalized) -> original
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
 
     def on_complete(self, ctx: PluginContext) -> None:
         """Called after processing completes."""

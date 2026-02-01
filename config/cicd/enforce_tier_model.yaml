@@ -3065,3 +3065,71 @@ allow_hits:
   reason: Error reason dict structure varies between error sources - fallback chain for compatibility
   safety: Falls back to "unknown" - error message extraction only
   expires: '2026-05-02'
+# Display headers feature: Tier 1 validation in Landscape recorder
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=2c7c43eefc2b77b2
+  owner: feature
+  reason: Tier 1 trust validation - crash on corruption from our own audit database
+  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  expires: null
+- key: core/landscape/recorder.py:R1:LandscapeRecorder:get_source_field_resolution:fp=b8612595082740a2
+  owner: feature
+  reason: Tier 1 trust validation - resolution_mapping may legitimately be absent
+  safety: Returns None if absent, crashes on wrong type - no silent coercion
+  expires: null
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=aa918a3847425cd7
+  owner: feature
+  reason: Tier 1 trust validation - crash on corruption from our own audit database
+  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  expires: null
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=fe1dac3e36d1d03a
+  owner: feature
+  reason: Tier 1 trust validation - crash on corruption from our own audit database
+  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  expires: null
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=15b291048b0b909f
+  owner: feature
+  reason: Tier 1 trust validation - crash on corruption from our own audit database
+  safety: ValueError raised on corrupt data - explicit failure, not silent coercion
+  expires: null
+# Display headers feature: Intentional fallback for transform-added fields
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=5f779299cce1156b
+  owner: feature
+  reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
+  safety: Falls back to original field name - correct behavior for fields not in source
+  expires: null
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=595e191e0a2bae44
+  owner: feature
+  reason: Intentional fallback - display mapping may not contain all fields (transform-added)
+  safety: Falls back to normalized field name - correct behavior for fields not in source
+  expires: null
+- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=6dea97781b7483c2
+  owner: feature
+  reason: Intentional fallback - display mapping may not contain all fields (transform-added)
+  safety: Falls back to normalized field name - correct behavior for fields not in source
+  expires: null
+# Updated fingerprints after formatting (pre-existing allowlisted patterns)
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=c15d9a4cbbc237b5
+  owner: architecture
+  reason: Defense-in-depth - NodeStateOpen result type check for state machine logic
+  safety: Crashes on unexpected type - explicit failure path
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=3e159072db015edc
+  owner: architecture
+  reason: Payload loading failure is graceful degradation for explain output
+  safety: Returns explanation with missing payload info - not silent, explicitly noted
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=b162094ec5e769fe
+  owner: architecture
+  reason: Tier 3 data validation - non-serializable external data fallback
+  safety: Falls back to repr() hash with explicit logging - audit trail preserved
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=22c768e3d88caab9
+  owner: architecture
+  reason: Response data may not exist for failed calls - returns None
+  safety: Returns None on KeyError - explicit absence, not silent coercion
+  expires: null
+- key: plugins/config_base.py:R5:TransformDataConfig:validate_required_input_fields:fp=24668a5f306e9f94
+  owner: architecture
+  reason: Pydantic field validator - input comes from YAML which may have wrong types
+  safety: ValueError raised with position info - explicit validation failure
+  expires: null

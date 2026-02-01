@@ -18,15 +18,18 @@ from elspeth.contracts import ArtifactDescriptor, PluginSchema
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import PathConfig
+from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
-class CSVSinkConfig(PathConfig):
+class CSVSinkConfig(SinkPathConfig):
     """Configuration for CSV sink plugin.
 
-    Inherits from PathConfig, which requires schema configuration.
+    Inherits from SinkPathConfig, which provides:
+    - Path handling (from PathConfig)
+    - Schema configuration (from DataPluginConfig)
+    - Display header options (display_headers, restore_source_headers)
     """
 
     delimiter: str = ","
@@ -148,6 +151,12 @@ class CSVSink(BaseSink):
         self._validate_input = cfg.validate_input
         self._mode = cfg.mode
 
+        # Display header configuration
+        self._display_headers = cfg.display_headers
+        self._restore_source_headers = cfg.restore_source_headers
+        # Populated in on_start() if restore_source_headers=True
+        self._resolved_display_headers: dict[str, str] | None = None
+
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config
@@ -230,7 +239,7 @@ class CSVSink(BaseSink):
         )
 
     def _open_file(self, rows: list[dict[str, Any]]) -> None:
-        """Open file for writing, handling append mode.
+        """Open file for writing, handling append mode and display headers.
 
         In append mode:
         - If file exists with headers: read headers from it, open in append mode
@@ -244,6 +253,12 @@ class CSVSink(BaseSink):
         are present in the CSV header.
 
         When schema is dynamic, fieldnames are inferred from the first row's keys.
+
+        Display Headers:
+        When display_headers or restore_source_headers is configured, the CSV header
+        row uses display names but row data uses normalized field names. This is
+        handled by writing the header manually and configuring the DictWriter with
+        the original data field names.
 
         Args:
             rows: First batch of rows (used to determine fieldnames if dynamic schema)
@@ -270,8 +285,17 @@ class CSVSink(BaseSink):
                             msg_parts.append("Fields present but in wrong order (strict mode)")
                         raise ValueError(". ".join(msg_parts))
 
-                # Use existing headers, append mode (no header write)
-                self._fieldnames = list(existing_fieldnames)
+                # In append mode with display headers, we need to map existing file headers
+                # back to data field names for the DictWriter
+                display_map = self._get_effective_display_headers()
+                if display_map is not None:
+                    # Reverse the display map to get display_name -> data_field
+                    reverse_map = {v: k for k, v in display_map.items()}
+                    # Map existing headers (display names) back to data field names
+                    self._fieldnames = [reverse_map.get(h, h) for h in existing_fieldnames]
+                else:
+                    self._fieldnames = list(existing_fieldnames)
+
                 self._file = open(  # noqa: SIM115 - handle kept open for streaming writes, closed in close()
                     self._path, "a", encoding=self._encoding, newline=""
                 )
@@ -284,8 +308,12 @@ class CSVSink(BaseSink):
                 return
 
         # Write mode OR append to non-existent/empty file
-        # Determine fieldnames from schema (if explicit) or first row (if dynamic)
-        self._fieldnames = self._get_fieldnames_from_schema_or_row(rows[0])
+        # Get data field names (for DictWriter row lookup) and display names (for header)
+        data_fields, display_fields = self._get_field_names_and_display(rows[0])
+
+        # Store data field names for DictWriter
+        self._fieldnames = data_fields
+
         self._file = open(  # noqa: SIM115 - handle kept open for streaming writes, closed in close()
             self._path, "w", encoding=self._encoding, newline=""
         )
@@ -294,22 +322,59 @@ class CSVSink(BaseSink):
             fieldnames=self._fieldnames,
             delimiter=self._delimiter,
         )
-        self._writer.writeheader()
 
-    def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
-        """Get fieldnames from schema or row keys.
+        # Write header row using display names if configured
+        if display_fields != data_fields:
+            # Write display headers manually
+            self._file.write(self._delimiter.join(display_fields) + "\n")
+        else:
+            # No display mapping - use standard writeheader()
+            self._writer.writeheader()
 
-        When schema is explicit, returns field names from schema definition.
-        This ensures optional fields are present in the header.
+    def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:
+        """Get data field names and display names for CSV output.
+
+        When schema is explicit, field names come from schema definition.
+        This ensures all defined fields (including optional ones) are present.
 
         When schema is dynamic, falls back to inferring from row keys.
+
+        Returns:
+            Tuple of (data_fields, display_fields):
+            - data_fields: Field names matching row dict keys (for DictWriter)
+            - display_fields: Display names for CSV header row
+            When no display headers are configured, both lists are identical.
         """
+        # Get base field names from schema or row
         if not self._schema_config.is_dynamic and self._schema_config.fields:
             # Explicit schema: use field names from schema definition
-            return [field_def.name for field_def in self._schema_config.fields]
+            data_fields = [field_def.name for field_def in self._schema_config.fields]
         else:
             # Dynamic schema: infer from row keys
-            return list(row.keys())
+            data_fields = list(row.keys())
+
+        # Apply display header mapping if configured
+        display_map = self._get_effective_display_headers()
+        if display_map is None:
+            return data_fields, data_fields
+
+        # Map field names to display names, falling back to original if not mapped
+        # This handles transform-added fields that have no original header
+        display_fields = [display_map.get(field, field) for field in data_fields]
+        return data_fields, display_fields
+
+    def _get_effective_display_headers(self) -> dict[str, str] | None:
+        """Get the effective display header mapping.
+
+        Returns:
+            Dict mapping normalized field name -> display name, or None if no
+            display headers are configured.
+        """
+        if self._display_headers is not None:
+            return self._display_headers
+        if self._resolved_display_headers is not None:
+            return self._resolved_display_headers
+        return None
 
     def _compute_file_hash(self) -> str:
         """Compute SHA-256 hash of the file contents."""
@@ -344,8 +409,30 @@ class CSVSink(BaseSink):
     # === Lifecycle Hooks ===
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Called before processing begins."""
-        pass
+        """Called before processing begins.
+
+        If restore_source_headers=True, fetches the source field resolution
+        from the Landscape audit trail and builds the reverse mapping.
+        """
+        if not self._restore_source_headers:
+            return
+
+        # Fetch source field resolution from Landscape
+        if ctx.landscape is None:
+            raise ValueError(
+                "restore_source_headers=True requires Landscape to be available. "
+                "This is a framework bug - context should have landscape set."
+            )
+
+        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
+        if resolution_mapping is None:
+            raise ValueError(
+                "restore_source_headers=True but source did not record field resolution. "
+                "Ensure source uses normalize_fields: true to enable header restoration."
+            )
+
+        # Build reverse mapping: final (normalized) -> original
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
 
     def on_complete(self, ctx: PluginContext) -> None:
         """Called after processing completes."""

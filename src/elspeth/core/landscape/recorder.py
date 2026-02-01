@@ -334,6 +334,60 @@ class LandscapeRecorder:
             runs_table.update().where(runs_table.c.run_id == run_id).values(source_field_resolution_json=resolution_json)
         )
 
+    def get_source_field_resolution(self, run_id: str) -> dict[str, str] | None:
+        """Get source field resolution mapping for a run.
+
+        Returns the mapping from original header names to final (normalized) field names.
+        Used by sinks with restore_source_headers=True to restore original headers.
+
+        Args:
+            run_id: Run to query
+
+        Returns:
+            Dict mapping original header name -> final field name, or None if no
+            field resolution was recorded (source didn't use normalize_fields).
+
+        Note:
+            For reverse lookup (final -> original), callers should invert this dict:
+            `{v: k for k, v in mapping.items()}`
+        """
+        import json
+
+        query = select(runs_table.c.source_field_resolution_json).where(runs_table.c.run_id == run_id)
+        result = self._ops.execute_fetchone(query)
+
+        if result is None:
+            raise ValueError(f"Run {run_id} not found in database")
+
+        resolution_json = result.source_field_resolution_json
+        if resolution_json is None:
+            return None
+
+        # Parse the stored JSON structure
+        # This is Tier 1 (our data) - crash on any anomaly
+        resolution_data = json.loads(resolution_json)
+        if not isinstance(resolution_data, dict):
+            raise ValueError(f"Corrupt field resolution data for run {run_id}: expected dict, got {type(resolution_data).__name__}")
+
+        resolution_mapping = resolution_data.get("resolution_mapping")
+        if resolution_mapping is None:
+            return None
+
+        if not isinstance(resolution_mapping, dict):
+            raise ValueError(f"Corrupt resolution_mapping for run {run_id}: expected dict, got {type(resolution_mapping).__name__}")
+
+        # Verify all keys and values are strings (Tier 1 - crash on corruption)
+        validated_mapping: dict[str, str] = {}
+        for key, value in resolution_mapping.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ValueError(
+                    f"Corrupt resolution_mapping entry for run {run_id}: "
+                    f"expected str->str, got {type(key).__name__}->{type(value).__name__}"
+                )
+            validated_mapping[key] = value
+
+        return validated_mapping
+
     def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
         """Get edge mapping for a run (from_node_id, label) -> edge_id.
 

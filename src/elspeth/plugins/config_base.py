@@ -197,6 +197,51 @@ class TabularSourceDataConfig(SourceDataConfig):
         return self
 
 
+class SinkPathConfig(PathConfig):
+    """Base config for file-based sink plugins with display header options.
+
+    Extends PathConfig to add optional display header configuration
+    for output formatting. Sinks own their output format - display headers
+    are resolved at sink level, not carried through the pipeline.
+
+    Display Header Options:
+        display_headers: Explicit mapping from normalized field names to
+            display names. Use for full control over output headers.
+        restore_source_headers: Convenience flag to automatically restore
+            original source headers. Requires source to have used field
+            normalization (normalize_fields: true).
+
+    These options are mutually exclusive - use one or the other, not both.
+    """
+
+    display_headers: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Explicit mapping from normalized field names to display names. Example: {'user_id': 'User ID', 'amount': 'Transaction Amount'}"
+        ),
+    )
+
+    restore_source_headers: bool = Field(
+        default=False,
+        description=(
+            "Automatically restore original source headers from field normalization. "
+            "Requires source to have used normalize_fields: true. "
+            "Transform-added fields use their normalized names (no original exists)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_display_options(self) -> Self:
+        """Validate display header option interactions."""
+        if self.display_headers is not None and self.restore_source_headers:
+            raise ValueError(
+                "Cannot use both display_headers and restore_source_headers. "
+                "Use display_headers for explicit control, or restore_source_headers "
+                "to automatically restore source field names."
+            )
+        return self
+
+
 class TransformDataConfig(DataPluginConfig):
     """Base config for transform plugins with error routing.
 
