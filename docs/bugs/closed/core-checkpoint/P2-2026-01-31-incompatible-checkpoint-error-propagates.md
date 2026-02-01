@@ -38,3 +38,12 @@
 **Status: STILL VALID**
 
 - `can_resume()` still calls `get_latest_checkpoint()` without catching `IncompatibleCheckpointError`. (`src/elspeth/core/checkpoint/recovery.py:93-99`, `src/elspeth/core/checkpoint/manager.py:122-160`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+**Fix:** Added try/except block in `RecoveryManager.can_resume()` to catch `IncompatibleCheckpointError` and return `ResumeCheck(can_resume=False, reason=str(e))` instead of propagating the exception.
+
+**Test added:**
+- `test_can_resume_returns_check_for_incompatible_checkpoint` - verifies can_resume() returns ResumeCheck for incompatible checkpoints, maintaining API contract

@@ -15,7 +15,7 @@ from sqlalchemy.engine import Row
 
 from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
-from elspeth.core.checkpoint.manager import CheckpointManager
+from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
     rows_table,
@@ -89,7 +89,11 @@ class RecoveryManager:
         if run.status == RunStatus.RUNNING:
             return ResumeCheck(can_resume=False, reason="Run is still in progress")
 
-        checkpoint = self._checkpoint_manager.get_latest_checkpoint(run_id)
+        try:
+            checkpoint = self._checkpoint_manager.get_latest_checkpoint(run_id)
+        except IncompatibleCheckpointError as e:
+            # Return ResumeCheck instead of propagating exception (API contract)
+            return ResumeCheck(can_resume=False, reason=str(e))
         if checkpoint is None:
             return ResumeCheck(can_resume=False, reason="No checkpoint found for recovery")
 

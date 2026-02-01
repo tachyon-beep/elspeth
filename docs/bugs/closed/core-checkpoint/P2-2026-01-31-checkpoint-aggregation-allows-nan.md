@@ -38,3 +38,15 @@
 **Status: STILL VALID**
 
 - Checkpoint aggregation state is still serialized with plain `json.dumps()` (NaN/Infinity allowed). (`src/elspeth/core/checkpoint/manager.py:82`)
+
+## Resolution (2026-02-02)
+
+**Status: FIXED**
+
+**Fix:** Changed `json.dumps(aggregation_state)` to `json.dumps(aggregation_state, allow_nan=False)` in `CheckpointManager.create_checkpoint()`.
+
+**Note:** We used `json.dumps(allow_nan=False)` rather than `canonical_json()` because canonical JSON (RFC 8785) normalizes floats that are exact integers to integers, which would break type fidelity for aggregation state (e.g., `3.58e+16` → `35800000000000000` as int). This preserves round-trip behavior while still rejecting NaN/Infinity.
+
+**Tests added:**
+- `test_checkpoint_rejects_nan_in_aggregation_state`
+- `test_checkpoint_rejects_infinity_in_aggregation_state`

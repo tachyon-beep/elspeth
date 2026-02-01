@@ -282,6 +282,56 @@ class TestAggregationStateRoundTripProperties:
         finally:
             db.close()
 
+    def test_checkpoint_rejects_nan_in_aggregation_state(self) -> None:
+        """Property: NaN in aggregation state raises ValueError.
+
+        Per CLAUDE.md, NaN and Infinity are strictly rejected for audit integrity.
+        Checkpoints use json.dumps(allow_nan=False) which enforces this policy.
+        """
+        db, _ = create_test_db()
+        try:
+            manager = CheckpointManager(db)
+            graph = create_test_graph()
+
+            setup_checkpoint_prerequisites(db, "test-nan", token_id="token-nan")
+
+            with pytest.raises(ValueError, match="Out of range float values are not JSON compliant"):
+                manager.create_checkpoint(
+                    run_id="test-nan",
+                    token_id="token-nan",
+                    node_id="transform_0",
+                    sequence_number=1,
+                    graph=graph,
+                    aggregation_state={"count": 0, "avg": float("nan")},
+                )
+        finally:
+            db.close()
+
+    def test_checkpoint_rejects_infinity_in_aggregation_state(self) -> None:
+        """Property: Infinity in aggregation state raises ValueError.
+
+        Per CLAUDE.md, NaN and Infinity are strictly rejected for audit integrity.
+        Checkpoints use json.dumps(allow_nan=False) which enforces this policy.
+        """
+        db, _ = create_test_db()
+        try:
+            manager = CheckpointManager(db)
+            graph = create_test_graph()
+
+            setup_checkpoint_prerequisites(db, "test-inf", token_id="token-inf")
+
+            with pytest.raises(ValueError, match="Out of range float values are not JSON compliant"):
+                manager.create_checkpoint(
+                    run_id="test-inf",
+                    token_id="token-inf",
+                    node_id="transform_0",
+                    sequence_number=1,
+                    graph=graph,
+                    aggregation_state={"value": float("inf")},
+                )
+        finally:
+            db.close()
+
 
 # =============================================================================
 # Format Version Validation Properties

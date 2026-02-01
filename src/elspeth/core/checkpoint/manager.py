@@ -79,7 +79,10 @@ class CheckpointManager:
             created_at = datetime.now(UTC)
 
             # Prepare aggregation state JSON
-            agg_json = json.dumps(aggregation_state) if aggregation_state is not None else None
+            # allow_nan=False rejects NaN/Infinity per CLAUDE.md audit integrity requirements
+            # Note: We use json.dumps instead of canonical_json to preserve type fidelity
+            # (canonical_json normalizes floats to integers, breaking round-trip for aggregation state)
+            agg_json = json.dumps(aggregation_state, allow_nan=False) if aggregation_state is not None else None
 
             # Compute topology hashes INSIDE transaction (Bug #1 fix)
             # This ensures hash matches graph state at exact moment of checkpoint creation

@@ -641,3 +641,100 @@ class TestResumeCheckpointCleanup:
             f"Expected 0 checkpoints after _delete_checkpoints(), found {len(checkpoints_after)}. "
             f"Bug #8 fix: Early-exit path must call _delete_checkpoints(run_id) to clean up."
         )
+
+
+class TestCanResumeErrorHandling:
+    """Tests for can_resume() error handling (Bug: incompatible-checkpoint-error-propagates).
+
+    Verifies that can_resume() returns ResumeCheck for all error cases,
+    never propagating exceptions that violate its API contract.
+    """
+
+    @pytest.fixture
+    def test_env(self, tmp_path: Path) -> dict[str, Any]:
+        """Set up test environment."""
+        from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+
+        db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
+        checkpoint_mgr = CheckpointManager(db)
+        recovery_mgr = RecoveryManager(db, checkpoint_mgr)
+        return {"db": db, "checkpoint_manager": checkpoint_mgr, "recovery_manager": recovery_mgr}
+
+    def test_can_resume_returns_check_for_incompatible_checkpoint(self, test_env: dict[str, Any]) -> None:
+        """can_resume() returns ResumeCheck for incompatible checkpoints, not exception.
+
+        Bug fix: IncompatibleCheckpointError was propagating from get_latest_checkpoint()
+        instead of being caught and converted to a ResumeCheck with can_resume=False.
+
+        This test verifies the API contract: can_resume() always returns ResumeCheck.
+        """
+        from sqlalchemy import update
+
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        db = test_env["db"]
+        checkpoint_mgr = test_env["checkpoint_manager"]
+        recovery_mgr = test_env["recovery_manager"]
+        recorder = LandscapeRecorder(db)
+
+        # Create graph
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+        graph.add_edge("source", "transform", label="continue")
+
+        # Create run with FAILED status (required for resume eligibility)
+        run = recorder.begin_run(config={}, canonical_version="test-v1")
+
+        # Register nodes
+        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="source",
+            plugin_name="test",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=schema_config,
+        )
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="transform",
+            plugin_name="test",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            determinism=Determinism.DETERMINISTIC,
+            schema_config=schema_config,
+        )
+
+        # Create row/token
+        row = recorder.create_row(run_id=run.run_id, source_node_id="source", row_index=0, data={})
+        token = recorder.create_token(row_id=row.row_id)
+
+        # Mark run as failed
+        recorder.update_run_status(run.run_id, status=RunStatus.FAILED)
+
+        # Create checkpoint
+        checkpoint_mgr.create_checkpoint(
+            run_id=run.run_id,
+            token_id=token.token_id,
+            node_id="transform",
+            sequence_number=1,
+            graph=graph,
+        )
+
+        # Corrupt the checkpoint's format_version to trigger IncompatibleCheckpointError
+        with db.engine.begin() as conn:
+            conn.execute(update(checkpoints_table).where(checkpoints_table.c.run_id == run.run_id).values(format_version=None))
+
+        # Before the fix, this would raise IncompatibleCheckpointError
+        # After the fix, it should return a ResumeCheck with can_resume=False
+        result = recovery_mgr.can_resume(run.run_id, graph)
+
+        # Verify API contract: returns ResumeCheck, not exception
+        assert result.can_resume is False
+        assert "format_version" in result.reason.lower() or "incompatible" in result.reason.lower()
