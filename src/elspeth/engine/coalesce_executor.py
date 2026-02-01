@@ -579,6 +579,49 @@ class CoalesceExecutor:
                         )
                     )
 
+            # For require_all, timeout means incomplete - record failure
+            # (Bug P1-2026-01-30 fix: require_all was missing from check_timeouts)
+            elif settings.policy == "require_all":
+                # require_all never does partial merge - timeout is always a failure
+                consumed_tokens = list(pending.arrived.values())
+                error_msg = "incomplete_branches"
+                error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+                failure_time = self._clock.monotonic()
+
+                # Complete pending node states with failure
+                for branch_name, token in pending.arrived.items():
+                    state_id = pending.pending_state_ids[branch_name]
+                    self._recorder.complete_node_state(
+                        state_id=state_id,
+                        status=NodeStateStatus.FAILED,
+                        error={"failure_reason": "incomplete_branches"},
+                        duration_ms=(failure_time - pending.arrival_times[branch_name]) * 1000,
+                    )
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=token.token_id,
+                        outcome=RowOutcome.FAILED,
+                        error_hash=error_hash,
+                    )
+
+                del self._pending[key]
+                self._mark_completed(key)
+                results.append(
+                    CoalesceOutcome(
+                        held=False,
+                        failure_reason="incomplete_branches",
+                        consumed_tokens=consumed_tokens,
+                        coalesce_metadata={
+                            "policy": settings.policy,
+                            "expected_branches": settings.branches,
+                            "branches_arrived": list(pending.arrived.keys()),
+                            "timeout_seconds": settings.timeout_seconds,
+                        },
+                        coalesce_name=coalesce_name,
+                        outcomes_recorded=True,
+                    )
+                )
+
         return results
 
     def flush_pending(

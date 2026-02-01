@@ -1716,6 +1716,141 @@ class TestTimeoutFailureRecording:
             "Bug 6tb: Pending entry not cleaned up after timeout failure. Token would be stranded indefinitely."
         )
 
+    def test_check_timeouts_records_failure_for_require_all(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When timeout fires for require_all policy, must record FAILED outcomes.
+
+        Bug P1-2026-01-30: check_timeouts() has no handling for require_all policy,
+        so timeout_seconds is silently ignored and pending coalesces persist
+        indefinitely until flush_pending() at end-of-source.
+
+        For streaming sources that never end, tokens are stranded indefinitely.
+
+        Expected: Record failure with "incomplete_branches" like flush_pending() does.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.contracts.enums import RowOutcome
+        from elspeth.engine.clock import MockClock
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        clock = MockClock(start=100.0)
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="require_all_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="require_all_merge",
+            branches=["model_a", "model_b", "model_c"],
+            policy="require_all",  # Requires ALL branches
+            merge="nested",
+            timeout_seconds=0.1,
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+            clock=clock,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={},
+        )
+        children, _fork_group_id = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["model_a", "model_b", "model_c"],
+            step_in_pipeline=1,
+            run_id=run.run_id,
+        )
+
+        # Accept only TWO tokens (require_all needs all 3)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"score": 0.9},
+            branch_name="model_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"score": 0.8},
+            branch_name="model_b",
+        )
+
+        outcome_a = executor.accept(token_a, "require_all_merge", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        outcome_b = executor.accept(token_b, "require_all_merge", step_in_pipeline=2)
+        assert outcome_b.held is True
+
+        # Advance clock past timeout
+        clock.advance(0.15)
+
+        # check_timeouts should record failure and return outcome
+        timed_out = executor.check_timeouts("require_all_merge", step_in_pipeline=2)
+
+        # Should return ONE failure outcome (for the pending coalesce)
+        assert len(timed_out) == 1, (
+            f"Bug P1-2026-01-30: check_timeouts() returned {len(timed_out)} outcomes, expected 1. "
+            f"require_all policy ignores timeout_seconds - tokens stranded indefinitely."
+        )
+
+        failure_outcome = timed_out[0]
+        assert failure_outcome.failure_reason == "incomplete_branches", (
+            f"Expected failure_reason='incomplete_branches', got {failure_outcome.failure_reason}"
+        )
+
+        # Verify both consumed tokens were returned
+        assert len(failure_outcome.consumed_tokens) == 2
+        consumed_ids = {t.token_id for t in failure_outcome.consumed_tokens}
+        assert token_a.token_id in consumed_ids
+        assert token_b.token_id in consumed_ids
+
+        # Verify FAILED outcomes recorded in audit trail
+        for token in [token_a, token_b]:
+            token_outcome = recorder.get_token_outcome(token.token_id)
+            assert token_outcome is not None, (
+                f"Token {token.token_id} has no outcome recorded. check_timeouts() should record FAILED outcome like flush_pending()."
+            )
+            assert token_outcome.outcome == RowOutcome.FAILED
+
+        # Verify pending entry was cleaned up
+        key = ("require_all_merge", token_a.row_id)
+        assert key not in executor._pending, "Pending entry not cleaned up after timeout failure."
+
+        # Verify coalesce_metadata includes expected info
+        assert failure_outcome.coalesce_metadata is not None
+        assert failure_outcome.coalesce_metadata["policy"] == "require_all"
+        assert set(failure_outcome.coalesce_metadata["branches_arrived"]) == {"model_a", "model_b"}
+        assert set(failure_outcome.coalesce_metadata["expected_branches"]) == {"model_a", "model_b", "model_c"}
+
 
 class TestSelectBranchValidation:
     """Tests for bug 2ho: Select merge must fail when select_branch not arrived.

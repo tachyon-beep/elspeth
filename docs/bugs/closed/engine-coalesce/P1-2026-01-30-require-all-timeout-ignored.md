@@ -88,16 +88,42 @@
 
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `check_timeouts()` still lacks `require_all` handling; only `flush_pending()` produces the `require_all` failure path. (`src/elspeth/engine/coalesce_executor.py:469-719`)
+## Fix Implementation
 
-## Tests
+**Changes made:**
 
-- Suggested tests to run: `pytest tests/engine/test_coalesce_executor.py -k require_all_timeout`
-- New tests required: yes, timeout failure recording for `require_all`
+1. **Added `require_all` handling in `check_timeouts()`** (`src/elspeth/engine/coalesce_executor.py`):
+   - Added `elif settings.policy == "require_all":` branch after the `quorum` handling
+   - Mirrors the failure logic from `flush_pending()` (lines 690-739)
+   - Records `incomplete_branches` failure reason
+   - Completes pending node states with FAILED status
+   - Records FAILED token outcomes with error_hash
+   - Cleans up pending entry and marks as completed
+   - Returns CoalesceOutcome with failure metadata
 
-## Notes / Links
+2. **Added test `test_check_timeouts_records_failure_for_require_all`**:
+   - Creates require_all coalesce with timeout_seconds=0.1
+   - Accepts only 2 of 3 required branches
+   - Advances clock past timeout
+   - Verifies check_timeouts() returns failure outcome
+   - Verifies FAILED outcomes recorded in audit trail
+   - Verifies pending entry cleaned up
+   - Verifies coalesce_metadata includes expected/arrived branches
 
-- Related issues/PRs: N/A
-- Related design docs: `docs/reference/configuration.md`
+**Files modified:**
+- `src/elspeth/engine/coalesce_executor.py` - Added require_all timeout handling
+- `tests/engine/test_coalesce_executor.py` - Added timeout test
+
+**Test results:**
+- 23 coalesce executor unit tests pass
+- 19 coalesce integration tests pass
+- mypy: no issues
+- ruff: all checks pass
+
+## Closure
+
+- **Closed by:** Claude (systematic debugging fix)
+- **Closure date:** 2026-02-01
+- **Resolution:** Added require_all branch to check_timeouts() mirroring flush_pending() logic
