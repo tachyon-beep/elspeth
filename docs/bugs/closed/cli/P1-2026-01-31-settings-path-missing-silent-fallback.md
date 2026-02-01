@@ -45,6 +45,17 @@
 
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: ALREADY FIXED**
 
-- Verified `resolve_database_url()` still ignores a missing explicit `settings_path` and falls back to `settings.yaml` if present. (`src/elspeth/cli_helpers.py:108-124`)
+- Bug was filed 2026-01-31, but fix was merged 2026-01-29 in commit `8ab8fb36` ("feat(cli): add database resolution helpers")
+- Commit message explicitly states: "Fail fast if database file doesn't exist"
+- Current code at `src/elspeth/cli_helpers.py:109-111` raises `ValueError("Settings file not found: {settings_path}")` when explicit path doesn't exist
+- Test `test_raises_when_explicit_settings_path_missing` in `tests/cli/test_cli_helpers_db.py` verifies this behavior
+- All 13 tests in test file pass, confirming fix is in place
+- Previous verification was incorrect - likely examined stale line numbers
+
+## Closure
+
+- **Closed by:** Claude (systematic debugging investigation)
+- **Closure date:** 2026-02-01
+- **Resolution:** Already fixed prior to bug filing

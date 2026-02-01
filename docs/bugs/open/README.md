@@ -9,7 +9,7 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── cli/                      # Command-line interface (1 P1, 1 P2, 1 P3)
+├── cli/                      # Command-line interface (0 P1, 1 P2, 1 P3)
 ├── contracts/                # Contract validation (3 P2, 2 P3)
 ├── core-canonical/           # Canonicalization (1 P2)
 ├── core-checkpoint/          # Checkpointing/recovery (2 P2, 2 P3)
@@ -17,7 +17,6 @@ open/
 ├── core-dag/                 # DAG validation, graph construction (1 P1, 1 P2)
 ├── core-landscape/           # Audit trail, recovery, verifier (8 P2, 2 P3)
 ├── core-logging/             # Logging/telemetry output (1 P2)
-├── core-payload/             # Payload storage (1 P1)
 ├── core-rate-limit/          # Rate limiters (1 P2)
 ├── core-retention/           # Retention/purge (2 P2)
 ├── core-security/            # Secret handling (1 P2, 1 P3)
@@ -56,9 +55,9 @@ open/
 | **engine-spans** | 0 | 2 | 1 | 3 | Tracing |
 | **core-rate-limit** | 0 | 1 | 0 | 1 | Rate limiter correctness |
 | **plugins-sinks** | 0 | 2 | 1 | 3 | Sink validation |
-| **cli** | 1 | 1 | 1 | 3 | CLI behavior |
+| **cli** | 0 | 1 | 1 | 2 | CLI behavior |
 | **core-dag** | 1 | 1 | 0 | 2 | DAG validation |
-| **core-payload** | 1 | 0 | 0 | 1 | Payload storage |
+| **core-payload** | 0 | 0 | 0 | 0 | Payload storage (all fixed) |
 | **core-retention** | 0 | 2 | 0 | 2 | Retention |
 | **core-security** | 0 | 1 | 1 | 2 | Secret handling |
 | **engine-executors** | 0 | 1 | 0 | 1 | Executor failures |
@@ -71,18 +70,20 @@ open/
 | **engine-triggers** | 0 | 1 | 0 | 1 | Trigger conditions |
 | **plugins-sources** | 0 | 0 | 1 | 1 | Source validation |
 | **plugins-transforms** | 1 | 0 | 0 | 1 | Transform audit |
-| **TOTAL** | **7** | **43** | **21** | **71** | All bugs organized |
+| **TOTAL** | **3** | **43** | **21** | **67** | All bugs organized |
 
 ## Recommended Fix Order
 
 ### Phase 1: Critical Data Integrity (P1 - Fix This Sprint)
-1. **core-payload/P1-2026-01-31-payload-store-path-traversal** - Security + data integrity breach
-2. **engine-coalesce/P1-2026-01-30-require-all-timeout-ignored** - Non-terminal rows in streaming
-3. **engine-orchestrator/P1-2026-01-31-quarantine-outcome-before-durability** - Audit ordering violation
-4. **engine-expression-parser/P1-2026-01-31-expression-errors-bubble-raw** - Hard crash + opaque errors
-5. **core-dag/P1-2026-01-31-gate-drops-computed-schema-guarantees** - Schema contract break
-6. **plugins-transforms/P1-2026-01-31-context-record-call-bypasses-allocator** - call_index collisions
-7. **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Hidden config drift
+1. **engine-coalesce/P1-2026-01-30-require-all-timeout-ignored** - Non-terminal rows in streaming
+2. **engine-expression-parser/P1-2026-01-31-expression-errors-bubble-raw** - Hard crash + opaque errors
+3. **plugins-transforms/P1-2026-01-31-context-record-call-bypasses-allocator** - call_index collisions
+
+Note: P1s closed during RC1 bug hunt:
+- **core-payload/P1-2026-01-31-payload-store-path-traversal** - Fixed with hash validation + containment
+- **cli/P1-2026-01-31-settings-path-missing-silent-fallback** - Already fixed in commit 8ab8fb36
+- **engine-orchestrator/P1-2026-01-31-quarantine-outcome-before-durability** - Fixed in commit e039498b
+- **core-dag/P1-2026-01-31-gate-drops-computed-schema-guarantees** - Fixed in commit 08cec258
 
 ### Phase 2: Audit Trail Completeness (Fix This Sprint/Next)
 - **core-landscape/** - Exporter completeness, verifier correctness
@@ -123,7 +124,7 @@ open/
 
 ## Verification Status
 
-**Open bugs (as of 2026-02-01): 7 P1, 43 P2, 21 P3 = 71 total.**
+**Open bugs (as of 2026-02-01): 3 P1, 43 P2, 21 P3 = 67 total.**
 
 **Triage updates (2026-02-01):**
 - Removed 17 open entries that already existed under `docs/bugs/closed/` (duplicates).

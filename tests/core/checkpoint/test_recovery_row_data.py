@@ -263,7 +263,7 @@ class TestRecoveryManagerRowData:
                     source_node_id="node",
                     row_index=1,
                     source_data_hash="h",
-                    source_data_ref="also_nonexistent",
+                    source_data_ref="d" * 64,  # Valid hex format, but doesn't exist in store
                     created_at=now,
                 )
             )

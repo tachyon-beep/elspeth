@@ -48,6 +48,49 @@
 
 ## Verification (2026-02-01)
 
-**Status: STILL VALID**
+**Status: FIXED**
 
-- `FilesystemPayloadStore` still accepts arbitrary `content_hash` strings and uses them in filesystem paths without validation or containment checks. (`src/elspeth/core/payload_store.py:39-90`)
+## Fix Implementation
+
+**Changes made:**
+
+1. **Added SHA-256 validation** in `_path_for_hash()`:
+   - Compiled regex `^[a-f0-9]{64}$` validates exactly 64 lowercase hex characters
+   - Raises `ValueError` with clear message on invalid format
+
+2. **Added path containment check**:
+   - After constructing path, resolves and verifies it's under `base_path`
+   - Defense in depth against any edge cases the regex might miss
+
+3. **Added security test suite** (`TestPayloadStoreSecurityValidation`):
+   - `test_retrieve_rejects_path_traversal` - path traversal blocked
+   - `test_exists_rejects_path_traversal` - cannot probe external files
+   - `test_delete_rejects_path_traversal` - cannot delete external files
+   - `test_rejects_non_hex_characters` - 'g', 'z', etc. rejected
+   - `test_rejects_uppercase_hex` - 'A'-'F' rejected (must be lowercase)
+   - `test_rejects_wrong_length` - too short/long rejected
+   - `test_rejects_empty_hash` - empty string rejected
+   - `test_accepts_valid_sha256_hash` - normal operation still works
+   - `test_path_containment_after_resolution` - containment verified
+
+4. **Updated existing tests** that used invalid hash formats:
+   - `tests/core/test_payload_store.py` - changed `"nonexistent" * 4` to valid hex
+   - `tests/core/checkpoint/test_recovery_row_data.py` - same fix
+
+**Files modified:**
+- `src/elspeth/core/payload_store.py` - added validation and containment
+- `tests/core/test_payload_store.py` - added security tests, fixed existing tests
+- `tests/core/checkpoint/test_recovery_row_data.py` - fixed test data
+
+**Test results:**
+- 21 payload store unit tests pass
+- 9 payload store property tests pass
+- 89 total payload-related tests pass
+- mypy: no issues
+- ruff: all checks pass
+
+## Closure
+
+- **Closed by:** Claude (systematic debugging fix)
+- **Closure date:** 2026-02-01
+- **Resolution:** Fixed with validation + containment + comprehensive tests

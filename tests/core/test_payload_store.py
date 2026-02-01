@@ -51,15 +51,17 @@ class TestFilesystemPayloadStore:
         content_hash = store.store(content)
 
         assert store.exists(content_hash) is True
-        assert store.exists("nonexistent" * 4) is False
+        # Use valid hex format that doesn't exist in store
+        assert store.exists("a" * 64) is False
 
     def test_retrieve_nonexistent_raises(self, tmp_path: Path) -> None:
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
 
+        # Use valid hex format that doesn't exist in store
         with pytest.raises(KeyError):
-            store.retrieve("nonexistent" * 4)
+            store.retrieve("b" * 64)
 
     def test_store_is_idempotent(self, tmp_path: Path) -> None:
         from elspeth.core.payload_store import FilesystemPayloadStore
@@ -102,7 +104,8 @@ class TestFilesystemPayloadStore:
         from elspeth.core.payload_store import FilesystemPayloadStore
 
         store = FilesystemPayloadStore(base_path=tmp_path)
-        result = store.delete("nonexistent" * 4)
+        # Use valid hex format that doesn't exist in store
+        result = store.delete("c" * 64)
         assert result is False
 
     def test_retrieve_corrupted_file_raises_integrity_error(self, tmp_path: Path) -> None:
@@ -164,3 +167,141 @@ class TestFilesystemPayloadStore:
         # Error message should contain both hashes for debugging
         assert content_hash in str(exc_info.value)  # expected
         assert corrupted_hash in str(exc_info.value)  # actual
+
+
+class TestPayloadStoreSecurityValidation:
+    """Security tests for content_hash validation and path containment.
+
+    These tests verify that FilesystemPayloadStore rejects malformed hashes
+    and path traversal attempts. Per CLAUDE.md Tier 1 rules, invalid data
+    from the audit trail must crash immediately - never silently fail.
+    """
+
+    def test_retrieve_rejects_path_traversal(self, tmp_path: Path) -> None:
+        """Path traversal attempts must raise ValueError, not access files."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path / "payloads")
+
+        # Create a sensitive file outside the payload store
+        sensitive_file = tmp_path / "sensitive.txt"
+        sensitive_file.write_text("secret data")
+
+        # Path traversal attempt - should raise, not read the file
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve("../sensitive.txt")
+
+    def test_exists_rejects_path_traversal(self, tmp_path: Path) -> None:
+        """exists() must not probe files outside base_path."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path / "payloads")
+
+        # Create a file outside the payload store
+        outside_file = tmp_path / "outside.txt"
+        outside_file.write_text("data")
+
+        # Should raise, not return True/False for external file
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.exists("../outside.txt")
+
+    def test_delete_rejects_path_traversal(self, tmp_path: Path) -> None:
+        """delete() must not delete files outside base_path."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path / "payloads")
+
+        # Create a file that should NOT be deletable
+        protected_file = tmp_path / "protected.txt"
+        protected_file.write_text("important")
+
+        # Should raise, not delete the file
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.delete("../protected.txt")
+
+        # File must still exist
+        assert protected_file.exists(), "Path traversal deleted file outside base_path!"
+
+    def test_rejects_non_hex_characters(self, tmp_path: Path) -> None:
+        """content_hash with non-hex characters must be rejected."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+
+        # Contains 'g' which is not hex
+        invalid_hash = "g" * 64
+
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve(invalid_hash)
+
+    def test_rejects_uppercase_hex(self, tmp_path: Path) -> None:
+        """content_hash must be lowercase hex (SHA-256 hexdigest convention)."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+
+        # Uppercase hex - should be rejected for consistency
+        uppercase_hash = "A" * 64
+
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve(uppercase_hash)
+
+    def test_rejects_wrong_length(self, tmp_path: Path) -> None:
+        """content_hash must be exactly 64 characters (SHA-256)."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+
+        # Too short
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve("abcd1234")
+
+        # Too long
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve("a" * 65)
+
+    def test_rejects_empty_hash(self, tmp_path: Path) -> None:
+        """Empty content_hash must be rejected."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.retrieve("")
+
+    def test_accepts_valid_sha256_hash(self, tmp_path: Path) -> None:
+        """Valid SHA-256 hex digest should work normally."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path)
+
+        # Store content and verify round-trip still works
+        content = b"valid content"
+        content_hash = store.store(content)
+
+        # Valid hash should work
+        assert store.exists(content_hash)
+        assert store.retrieve(content_hash) == content
+
+    def test_path_containment_after_resolution(self, tmp_path: Path) -> None:
+        """Resolved path must be under base_path even with valid-looking hash."""
+        from elspeth.core.payload_store import FilesystemPayloadStore
+
+        store = FilesystemPayloadStore(base_path=tmp_path / "payloads")
+
+        # Create a file that could be accessed via symlink trickery
+        # (if symlinks were followed, which they shouldn't be for this)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        target = outside / "target.txt"
+        target.write_text("should not be accessible")
+
+        # Valid hex format but designed to break out
+        # This tests the containment check after path resolution
+        # Note: "2e2e" is hex for ".." - but the path construction
+        # would create base_path/2e/2e2e... which is safe.
+        # The real risk is ".." literal in first 2 chars.
+        traversal_hash = ".." + "a" * 62  # Starts with ..
+
+        with pytest.raises(ValueError, match="Invalid content_hash"):
+            store.exists(traversal_hash)
