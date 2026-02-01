@@ -2741,3 +2741,50 @@ allow_hits:
   reason: Configuration validation - checking if route label exists in route_resolution_map
   safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
   expires: null
+# RuntimeRetryConfig.from_policy() type validation (P2-2026-01-21 fix)
+# Plugin config is Tier 3 external data - isinstance checks validate then raise clear errors
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=144b982455015cdd
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=eadbd60f34631b56
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=be81cd93cb344eb8
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_int_field:fp=78786e1b624bdeaa
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=972c4cb5cfe0ab58
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=88448fd740364e24
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=e93fecfe027866a4
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=b735272e46d7837b
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null
+- key: contracts/config/runtime.py:R5:_validate_float_field:fp=0a516787233a14be
+  owner: bugfix
+  reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
+  safety: Raises ValueError with clear field name and value - no silent recovery
+  expires: null

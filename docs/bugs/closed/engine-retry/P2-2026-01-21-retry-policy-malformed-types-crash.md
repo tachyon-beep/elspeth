@@ -1,5 +1,7 @@
 # Bug Report: RetryConfig.from_policy crashes on malformed types despite "graceful" contract
 
+**STATUS: RESOLVED** (2026-02-02)
+
 ## Summary
 
 - `RetryConfig.from_policy()` claims to handle malformed policy values gracefully, but non-numeric values (e.g., strings or None) raise `TypeError` when passed through `max()`.
@@ -168,3 +170,55 @@ This violates the Three-Tier Trust Model stated in CLAUDE.md:
 5. Consider whether to raise `PluginConfigError` with clear message vs. silent fallback to defaults
 
 The bug has moderate impact (crashes on misconfigured plugins) but is unlikely to occur in production with validated configuration. However, it represents a gap between contract (docstring) and implementation.
+
+---
+
+## RESOLUTION: 2026-02-02
+
+**Status:** FIXED
+
+**Fixed By:** Claude Code (Opus 4.5)
+
+**Root Cause:**
+
+The `from_policy()` method in `RuntimeRetryConfig` used `int()` and `float()` conversions directly on policy values without type validation. When policy dict values were `None` or non-numeric strings, these conversions raised raw `TypeError` or `ValueError` with unhelpful messages.
+
+The underlying issue was the merge operation `{**POLICY_DEFAULTS, **policy}` — explicit `None` values in policy override the numeric defaults, so `int(None)` was being called.
+
+**Fix Applied:**
+
+1. Added `_validate_int_field()` and `_validate_float_field()` helper functions that:
+   - Reject `None` with clear error: `"Invalid retry policy: {field} must be numeric, got None"`
+   - Reject non-numeric strings with clear error: `"Invalid retry policy: {field} must be numeric, got 'abc'"`
+   - Reject non-numeric types (list, dict) with clear error: `"Invalid retry policy: {field} must be numeric, got list"`
+   - Accept and coerce numeric strings (`"3"` → `3`, `"2.5"` → `2.5`)
+
+2. Updated `from_policy()` to use these validators before clamping values
+
+3. Updated docstring to clarify behavior:
+   - Missing fields use defaults (unchanged)
+   - Malformed fields raise `ValueError` with actionable message (explicit rejection, not silent fallback)
+
+**Files Changed:**
+
+- `src/elspeth/contracts/config/runtime.py` — Added validation helpers, updated `from_policy()`
+- `tests/contracts/config/test_runtime_retry.py` — Added `TestFromPolicyTypeValidation` class with 8 test cases
+
+**Test Coverage:**
+
+New tests verify:
+- `None` values raise `ValueError` with field name and "None" in message
+- Non-numeric strings raise `ValueError` with field name and value in message
+- List/dict values raise `ValueError` with field name and type name
+- Numeric strings (`"3"`, `"2.5"`) are correctly coerced
+- Multiple invalid fields report at least one clearly
+
+**Verification:**
+
+```bash
+.venv/bin/python -m pytest tests/contracts/config/test_runtime_retry.py -v  # 23 passed
+.venv/bin/python -m pytest tests/engine/test_retry_policy.py -v              # 13 passed
+.venv/bin/python -m pytest tests/engine/test_retry.py -v                     # 9 passed
+.venv/bin/python -m mypy src/elspeth/contracts/config/runtime.py             # clean
+.venv/bin/python -m ruff check src/elspeth/contracts/config/runtime.py       # clean
+```

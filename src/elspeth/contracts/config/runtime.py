@@ -49,6 +49,80 @@ def _merge_policy_with_defaults(policy: RetryPolicy) -> dict[str, Any]:
     return {**POLICY_DEFAULTS, **policy}
 
 
+def _validate_int_field(field_name: str, value: Any) -> int:
+    """Validate and convert a policy field to int.
+
+    Args:
+        field_name: Name of the field (for error messages)
+        value: The value to validate and convert
+
+    Returns:
+        The value converted to int
+
+    Raises:
+        ValueError: If value is None, non-numeric, or cannot be converted
+    """
+    # Explicit None check - common misconfiguration
+    if value is None:
+        raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got None")
+
+    # Already int - pass through (but not bool, which is a subclass of int)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+
+    # Float - convert to int
+    if isinstance(value, float):
+        return int(value)
+
+    # String - attempt numeric coercion
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+
+    # Non-numeric type (list, dict, bool, etc.)
+    type_name = type(value).__name__
+    raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {type_name}")
+
+
+def _validate_float_field(field_name: str, value: Any) -> float:
+    """Validate and convert a policy field to float.
+
+    Args:
+        field_name: Name of the field (for error messages)
+        value: The value to validate and convert
+
+    Returns:
+        The value converted to float
+
+    Raises:
+        ValueError: If value is None, non-numeric, or cannot be converted
+    """
+    # Explicit None check - common misconfiguration
+    if value is None:
+        raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got None")
+
+    # Already float - pass through
+    if isinstance(value, float) and not isinstance(value, bool):
+        return value
+
+    # Int - convert to float (but not bool)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return float(value)
+
+    # String - attempt numeric coercion
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {value!r}") from None
+
+    # Non-numeric type (list, dict, bool, etc.)
+    type_name = type(value).__name__
+    raise ValueError(f"Invalid retry policy: {field_name} must be numeric, got {type_name}")
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeRetryConfig:
     """Runtime configuration for retry behavior.
@@ -144,7 +218,9 @@ class RuntimeRetryConfig:
         partial overrides. Missing fields use POLICY_DEFAULTS.
 
         This is a trust boundary - plugin config (user YAML) may have invalid
-        values that need clamping to safe minimums.
+        values. Numeric values are clamped to safe minimums. Non-numeric values
+        (None, non-numeric strings, lists, dicts) raise ValueError with a clear
+        message indicating which field is invalid.
 
         Args:
             policy: Optional RetryPolicy dict from plugin configuration.
@@ -152,6 +228,10 @@ class RuntimeRetryConfig:
 
         Returns:
             RuntimeRetryConfig with policy values (or defaults for missing fields)
+
+        Raises:
+            ValueError: If any policy value is non-numeric (None, invalid string, etc.)
+                       Error message includes field name and the invalid value.
 
         Note: We deliberately avoid .get() here. If a field exists in RuntimeRetryConfig
         but not in POLICY_DEFAULTS, the direct access below will crash. This is
@@ -163,21 +243,21 @@ class RuntimeRetryConfig:
         # Merge explicit defaults with provided policy - policy values override
         full = _merge_policy_with_defaults(policy)
 
-        # Direct access - crashes if POLICY_DEFAULTS is missing a field
-        # Clamp values to safe minimums (user config may have invalid values)
-        # Type narrowing: values are int|float from POLICY_DEFAULTS or policy
-        max_attempts = full["max_attempts"]
-        base_delay = full["base_delay"]
-        max_delay_val = full["max_delay"]
-        jitter = full["jitter"]
-        exponential_base = full["exponential_base"]
+        # Validate and convert each field - raises ValueError with clear message
+        # if any field has invalid type (None, non-numeric string, list, dict, etc.)
+        max_attempts = _validate_int_field("max_attempts", full["max_attempts"])
+        base_delay = _validate_float_field("base_delay", full["base_delay"])
+        max_delay_val = _validate_float_field("max_delay", full["max_delay"])
+        jitter = _validate_float_field("jitter", full["jitter"])
+        exponential_base = _validate_float_field("exponential_base", full["exponential_base"])
 
+        # Clamp to safe minimums (handles valid but out-of-range values like -5 or 0)
         return cls(
-            max_attempts=max(1, int(max_attempts)),
-            base_delay=max(0.01, float(base_delay)),
-            max_delay=max(0.1, float(max_delay_val)),
-            jitter=max(0.0, float(jitter)),
-            exponential_base=max(1.01, float(exponential_base)),
+            max_attempts=max(1, max_attempts),
+            base_delay=max(0.01, base_delay),
+            max_delay=max(0.1, max_delay_val),
+            jitter=max(0.0, jitter),
+            exponential_base=max(1.01, exponential_base),
         )
 
 
