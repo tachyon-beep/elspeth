@@ -81,7 +81,10 @@ sinks:
     options:
       path: "{output_file}"
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: str"
+          - "value: str"
 
 transforms:
   - plugin: passthrough
@@ -138,7 +141,10 @@ sinks:
     options:
       path: "{output_file}"
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: str"
+          - "new_name: str"
 
 transforms:
   - plugin: field_mapper
@@ -622,7 +628,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 default_sink: output
 """)
 
@@ -693,7 +701,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 default_sink: output
 """)
 
@@ -813,7 +823,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 default_sink: output
 """)
 

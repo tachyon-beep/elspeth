@@ -30,7 +30,7 @@ from elspeth.core.landscape.schema import (
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig, RunResult
-from elspeth.plugins.sinks.csv_sink import CSVSink
+from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
 
@@ -259,9 +259,9 @@ class TestOrchestratorResumeRowProcessing:
         """Create test pipeline config with real plugins.
 
         Returns:
-            Tuple of (PipelineConfig, output_csv_path)
+            Tuple of (PipelineConfig, output_json_path)
         """
-        output_path = tmp_path / "output.csv"
+        output_path = tmp_path / "output.json"
 
         # Use NullSource - resume gets data from payload store
         source = NullSource({})
@@ -269,12 +269,13 @@ class TestOrchestratorResumeRowProcessing:
         # Use PassThrough - simple transform
         transform = PassThrough({"schema": {"fields": "dynamic"}})
 
-        # Use CSVSink in append mode
-        sink = CSVSink(
+        # Use JSONSink in append mode (JSONSink accepts dynamic schemas)
+        sink = JSONSink(
             {
                 "path": str(output_path),
                 "schema": {"fields": "dynamic"},
                 "mode": "append",
+                "format": "jsonl",
             }
         )
 
@@ -360,8 +361,8 @@ class TestOrchestratorResumeRowProcessing:
         assert output_path.exists()
         content = output_path.read_text()
         lines = content.strip().split("\n")
-        # Header + 2 data rows
-        assert len(lines) == 3, f"Expected 3 lines (header + 2 rows), got {len(lines)}"
+        # JSONL has no header - just 2 data rows
+        assert len(lines) == 2, f"Expected 2 lines (JSONL rows), got {len(lines)}"
 
         # Verify data content (rows 3 and 4)
         assert "data-3" in content
@@ -708,7 +709,7 @@ class TestOrchestratorResumeCleanup:
         assert resume_point is not None
 
         # Create config with tracking transform
-        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sinks.json_sink import JSONSink
         from elspeth.plugins.sources.null_source import NullSource
 
         output_path = tmp_path / "output.csv"
@@ -717,7 +718,11 @@ class TestOrchestratorResumeCleanup:
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[tracking_transform],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            sinks={
+                "default": JSONSink(
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                )
+            },
         )
 
         # Act: Resume the run
@@ -902,16 +907,20 @@ class TestOrchestratorResumeCleanup:
         resume_point = recovery_manager.get_resume_point(run_id, graph=graph)
         assert resume_point is not None
 
-        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sinks.json_sink import JSONSink
         from elspeth.plugins.sources.null_source import NullSource
 
-        output_path = tmp_path / "output_fail.csv"
+        output_path = tmp_path / "output_fail.json"
         failing_transform = FailingOnCompleteTransform()
 
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[failing_transform],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            sinks={
+                "default": JSONSink(
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                )
+            },
         )
 
         # Resume should raise because on_complete failed (cleanup errors are fatal)

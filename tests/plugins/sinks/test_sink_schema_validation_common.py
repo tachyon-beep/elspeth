@@ -131,6 +131,16 @@ def sink_factory(
     return factories[request.param]
 
 
+@pytest.fixture
+def json_only_sink_factory(json_sink_factory: SinkFactory) -> SinkFactory:
+    """Fixture for tests that only apply to JSONSink (dynamic/free schemas).
+
+    CSVSink and DatabaseSink reject dynamic/free schemas at initialization
+    because they require fixed-column structure.
+    """
+    return json_sink_factory
+
+
 # =============================================================================
 # Common Schema Validation Tests
 # =============================================================================
@@ -156,12 +166,16 @@ class TestSinkSchemaValidationCommon:
             sink.close()
 
     # -------------------------------------------------------------------------
-    # Dynamic Schema Tests
+    # Dynamic Schema Tests (JSONSink only - CSV/Database reject dynamic schemas)
     # -------------------------------------------------------------------------
 
-    def test_validate_dynamic_schema_skips_validation(self, sink_factory: SinkFactory):
-        """Dynamic schema should always pass validation."""
-        sink = sink_factory(
+    def test_validate_dynamic_schema_skips_validation(self, json_only_sink_factory: SinkFactory):
+        """Dynamic schema should always pass validation (JSONSink only).
+
+        Note: CSVSink and DatabaseSink reject dynamic schemas at initialization
+        because they require fixed-column structure.
+        """
+        sink = json_only_sink_factory(
             target_fields=["wrong", "fields", "entirely"],
             schema_config={"fields": "dynamic"},
         )
@@ -218,12 +232,16 @@ class TestSinkSchemaValidationCommon:
             sink.close()
 
     # -------------------------------------------------------------------------
-    # Free Mode Tests
+    # Free Mode Tests (JSONSink only - CSV/Database reject free schemas)
     # -------------------------------------------------------------------------
 
-    def test_validate_free_mode_exact_match(self, sink_factory: SinkFactory):
-        """Free mode should pass when fields match exactly."""
-        sink = sink_factory(
+    def test_validate_free_mode_exact_match(self, json_only_sink_factory: SinkFactory):
+        """Free mode should pass when fields match exactly (JSONSink only).
+
+        Note: CSVSink and DatabaseSink reject free schemas at initialization
+        because they require fixed-column structure.
+        """
+        sink = json_only_sink_factory(
             target_fields=["id", "name"],
             schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
         )
@@ -233,9 +251,9 @@ class TestSinkSchemaValidationCommon:
         finally:
             sink.close()
 
-    def test_validate_free_mode_missing_field(self, sink_factory: SinkFactory):
-        """Free mode should fail when required schema field is missing."""
-        sink = sink_factory(
+    def test_validate_free_mode_missing_field(self, json_only_sink_factory: SinkFactory):
+        """Free mode should fail when required schema field is missing (JSONSink only)."""
+        sink = json_only_sink_factory(
             target_fields=["id"],  # Missing 'name'
             schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
         )
@@ -247,9 +265,9 @@ class TestSinkSchemaValidationCommon:
         finally:
             sink.close()
 
-    def test_validate_free_mode_extra_field_allowed(self, sink_factory: SinkFactory):
-        """Free mode should pass when target has extra fields."""
-        sink = sink_factory(
+    def test_validate_free_mode_extra_field_allowed(self, json_only_sink_factory: SinkFactory):
+        """Free mode should pass when target has extra fields (JSONSink only)."""
+        sink = json_only_sink_factory(
             target_fields=["id", "name", "extra", "another"],
             schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
         )
@@ -291,20 +309,6 @@ class TestCSVSinkOrderValidation:
         # No missing or extra fields - just order wrong
         assert len(result.missing_fields) == 0
         assert len(result.extra_fields) == 0
-
-    def test_validate_free_mode_order_independent(self, tmp_csv_path: Path):
-        """Free mode should pass regardless of column order."""
-        _create_csv_with_headers(tmp_csv_path, ["name", "id"])  # Reversed order
-        sink = CSVSink(
-            {
-                "path": str(tmp_csv_path),
-                "schema": {"mode": "free", "fields": ["id: int", "name: str"]},
-            }
-        )
-
-        result = sink.validate_output_target()
-
-        assert result.valid is True
 
     def test_validate_empty_file_returns_success(self, tmp_csv_path: Path):
         """When file exists but is empty, validation should pass."""

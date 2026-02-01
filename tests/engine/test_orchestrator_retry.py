@@ -109,7 +109,7 @@ class TestOrchestratorRetry:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"fields": "dynamic"}})},
             default_sink="default",
             retry=RetrySettings(
                 max_attempts=3,
@@ -216,7 +216,7 @@ class TestOrchestratorRetry:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"fields": "dynamic"}})},
             default_sink="default",
             retry=RetrySettings(
                 max_attempts=2,  # Will try twice then fail

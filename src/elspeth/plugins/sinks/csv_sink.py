@@ -152,6 +152,14 @@ class CSVSink(BaseSink):
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config
 
+        # CSV requires fixed-column structure - reject schemas that allow extra fields
+        if self._schema_config.allows_extra_fields:
+            raise ValueError(
+                f"CSVSink requires fixed-column structure but schema allows_extra_fields=True "
+                f"(mode={self._schema_config.mode!r}, is_dynamic={self._schema_config.is_dynamic}). "
+                f"Use JSONSink for flexible schemas, or use mode='strict' for CSV output."
+            )
+
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)
         self._schema_class: type[PluginSchema] = create_schema_from_config(

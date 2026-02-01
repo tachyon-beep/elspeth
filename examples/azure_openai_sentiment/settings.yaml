@@ -16,7 +16,7 @@ source:
   options:
     path: examples/azure_openai_sentiment/input.csv
     schema:
-      mode: free
+      mode: strict
       fields:
         - "id: int"
         - "text: str"
@@ -43,9 +43,10 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: examples/azure_openai_sentiment/output/results.csv
+      path: examples/azure_openai_sentiment/output/results.json
+      format: jsonl
       schema:
         fields: dynamic
 

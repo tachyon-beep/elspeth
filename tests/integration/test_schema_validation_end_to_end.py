@@ -99,10 +99,11 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: test_output.csv
+      path: test_output.json
       schema: {fields: dynamic}
+      format: jsonl
 
 default_sink: output
 """
@@ -200,10 +201,11 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: test_output.csv
+      path: test_output.json
       schema: {fields: dynamic}
+      format: jsonl
 
 default_sink: output
 """
@@ -250,10 +252,11 @@ aggregations:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: out.csv
+      path: out.json
       schema: {fields: dynamic}
+      format: jsonl
 
 default_sink: output
 """
@@ -375,8 +378,8 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
         ],
         "sinks": {
             "out": {
-                "plugin": "csv",
-                "options": {"path": "out.csv", "schema": {"fields": "dynamic"}},
+                "plugin": "json",
+                "options": {"path": "out.json", "schema": {"fields": "dynamic"}, "format": "jsonl"},
             }
         },
         "default_sink": "out",

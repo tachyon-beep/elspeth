@@ -397,8 +397,8 @@ class TestPluginConfigAccess:
         """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        # CSVSink requires schema_config
-        config = {"path": "/tmp/output.csv", "schema": {"fields": "dynamic"}}
+        # CSVSink requires strict schema (fixed columns, no dynamic)
+        config = {"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "strict"}}
         sink = CSVSink(config)
 
         # Direct access works
@@ -497,7 +497,7 @@ class TestJsonSafeConfig:
 
         # Create real plugin instances and extract their configs
         sinks = [
-            CSVSink({"path": "/tmp/output.csv", "schema": {"fields": "dynamic"}}),
+            CSVSink({"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "strict"}}),
             JSONSink({"path": "/tmp/output.json", "schema": {"fields": "dynamic"}}),
         ]
 

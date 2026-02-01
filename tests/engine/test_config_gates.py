@@ -361,8 +361,8 @@ class TestConfigGateIntegration:
                 },
             ),
             sinks={
-                "a_sink": SinkSettings(plugin="csv", options={"path": "a.csv", "schema": {"fields": "dynamic"}}),
-                "b_sink": SinkSettings(plugin="csv", options={"path": "b.csv", "schema": {"fields": "dynamic"}}),
+                "a_sink": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"fields": "dynamic"}}),
+                "b_sink": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="a_sink",
             gates=[
@@ -462,8 +462,8 @@ class TestConfigGateIntegration:
                 },
             ),
             sinks={
-                "priority_1": SinkSettings(plugin="csv", options={"path": "priority_1.csv", "schema": {"fields": "dynamic"}}),
-                "priority_2": SinkSettings(plugin="csv", options={"path": "priority_2.csv", "schema": {"fields": "dynamic"}}),
+                "priority_1": SinkSettings(plugin="json", options={"path": "priority_1.json", "schema": {"fields": "dynamic"}}),
+                "priority_2": SinkSettings(plugin="json", options={"path": "priority_2.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="priority_1",
             gates=[
@@ -601,8 +601,8 @@ class TestConfigGateFromSettings:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "review": SinkSettings(plugin="csv", options={"path": "review.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "review": SinkSettings(plugin="json", options={"path": "review.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -659,7 +659,7 @@ class TestConfigGateFromSettings:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -704,7 +704,7 @@ class TestConfigGateFromSettings:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             transforms=[
                 TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),

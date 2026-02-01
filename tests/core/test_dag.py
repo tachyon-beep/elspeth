@@ -531,7 +531,7 @@ class TestExecutionGraphFromConfig:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
         )
 
@@ -570,7 +570,7 @@ class TestExecutionGraphFromConfig:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
         )
 
@@ -608,7 +608,7 @@ class TestExecutionGraphFromConfig:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             transforms=[
                 TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
                 TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
@@ -663,8 +663,8 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -713,7 +713,7 @@ class TestExecutionGraphFromConfig:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="bad_gate",
@@ -758,8 +758,8 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="results",
         )
@@ -800,7 +800,7 @@ class TestExecutionGraphFromConfig:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             transforms=[
                 TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
                 TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
@@ -844,8 +844,8 @@ class TestExecutionGraphFromConfig:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="results",
         )
@@ -888,8 +888,8 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -940,7 +940,7 @@ class TestExecutionGraphRouteMapping:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="gate",
@@ -992,8 +992,8 @@ class TestExecutionGraphRouteMapping:
                 },
             ),
             sinks={
-                "output-sink": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "quarantine-bucket": SinkSettings(plugin="csv", options={"path": "quarantine.csv", "schema": {"fields": "dynamic"}}),
+                "output-sink": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -1138,9 +1138,9 @@ class TestMultiEdgeScenarios:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -1228,7 +1228,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1293,7 +1293,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1355,8 +1355,8 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1505,8 +1505,8 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "path_c": SinkSettings(plugin="csv", options={"path": "path_c.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1578,7 +1578,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1651,7 +1651,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1719,7 +1719,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1785,7 +1785,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1848,7 +1848,7 @@ class TestCoalesceNodes:
                     },
                 ),
                 sinks={
-                    "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                    "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
                 },
                 default_sink="output",
                 coalesce=[
@@ -1883,8 +1883,8 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -1946,7 +1946,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             transforms=[
@@ -2043,7 +2043,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -2109,7 +2109,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -2179,7 +2179,7 @@ class TestCoalesceNodes:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -2830,7 +2830,7 @@ class TestDeterministicNodeIDs:
                     options={"schema": {"fields": "dynamic"}},
                 )
             ],
-            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
             default_sink="out",
         )
 
@@ -2881,7 +2881,7 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
             default_sink="out",
         )
 
@@ -2895,7 +2895,7 @@ class TestDeterministicNodeIDs:
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
             default_sink="out",
         )
 

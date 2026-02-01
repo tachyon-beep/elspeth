@@ -34,6 +34,7 @@ from elspeth.core.landscape.schema import (
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.sinks.csv_sink import CSVSink
+from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
 from elspeth.plugins.transforms.passthrough import PassThrough
 
@@ -239,15 +240,17 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
+        strict_schema = {"mode": "strict", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            transforms=[PassThrough({"schema": strict_schema})],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
         # Build graph manually
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": strict_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -345,14 +348,16 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
+        strict_schema = {"mode": "strict", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            transforms=[PassThrough({"schema": strict_schema})],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": strict_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -536,14 +541,17 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        # Use CSVSink with strict schema matching the data: {"id": int, "timestamp": datetime}
+        # CSVSink stringifies datetime values automatically
+        strict_schema = {"mode": "strict", "fields": ["id: int", "timestamp: str"]}
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            transforms=[PassThrough({"schema": strict_schema})],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": strict_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -726,14 +734,17 @@ class TestResumeComprehensive:
 
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
+        # Use CSVSink with strict schema matching the data: {"id": int, "amount": Decimal}
+        # CSVSink stringifies Decimal values automatically
+        strict_schema = {"mode": "strict", "fields": ["id: int", "amount: str"]}
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            transforms=[PassThrough({"schema": strict_schema})],
+            sinks={"default": CSVSink({"path": str(output_path), "schema": strict_schema, "mode": "append"})},
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": strict_schema}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -915,7 +926,11 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            sinks={
+                "default": JSONSink(
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                )
+            },
         )
 
         resume_graph = ExecutionGraph()
@@ -1101,7 +1116,11 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": str(output_path), "schema": {"fields": "dynamic"}, "mode": "append"})},
+            sinks={
+                "default": JSONSink(
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                )
+            },
         )
 
         resume_graph = ExecutionGraph()
@@ -1272,14 +1291,14 @@ class TestResumeComprehensive:
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": CSVSink({"path": "/tmp/dummy.csv", "schema": {"fields": "dynamic"}, "mode": "write"})},
+            sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"fields": "dynamic"}, "mode": "write", "format": "jsonl"})},
         )
 
         resume_graph = ExecutionGraph()
         schema_config = {"schema": {"fields": "dynamic"}}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
-        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json", config=schema_config)
         resume_graph.add_edge("src", "xform", label="continue")
         resume_graph.add_edge("xform", "sink", label="continue")
         resume_graph._sink_id_map = {SinkName("default"): NodeID("sink")}

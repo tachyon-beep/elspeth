@@ -11,10 +11,12 @@ source:
   options:
     path: examples/threshold_gate/input.csv
     schema:
-      mode: free  # Require these fields, allow others
+      mode: strict
       fields:
         - "id: int"
+        - "name: str"
         - "amount: int"  # Coerce to int for numeric comparisons
+        - "category: str"
     on_validation_failure: discard  # or a sink name for quarantine
 
 # Config-driven gate: route based on amount threshold
@@ -33,13 +35,23 @@ sinks:
     options:
       path: examples/threshold_gate/output/normal.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "name: str"
+          - "amount: int"
+          - "category: str"
   high_values:
     plugin: csv
     options:
       path: examples/threshold_gate/output/high_values.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "name: str"
+          - "amount: int"
+          - "category: str"
 
 default_sink: output
 

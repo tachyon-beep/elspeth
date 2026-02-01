@@ -246,8 +246,8 @@ class TestOrchestratorLandscapeExport:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -375,8 +375,8 @@ class TestOrchestratorLandscapeExport:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -502,8 +502,8 @@ class TestOrchestratorLandscapeExport:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -619,8 +619,8 @@ class TestOrchestratorLandscapeExport:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "audit": SinkSettings(plugin="csv", options={"path": "audit.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "audit": SinkSettings(plugin="json", options={"path": "audit.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(

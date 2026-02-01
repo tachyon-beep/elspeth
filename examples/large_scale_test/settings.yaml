@@ -17,7 +17,7 @@ source:
   options:
     path: examples/large_scale_test/input.csv
     schema:
-      mode: free  # Require these fields, allow others
+      mode: strict
       fields:
         - "id: int"
         - "value: float"
@@ -43,7 +43,13 @@ sinks:
     options:
       path: examples/large_scale_test/output/normal.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "value: float"
+          - "category: str"
+          - "priority: int"
+          - "timestamp: str"
 
   # High-value transactions sink
   high_value:
@@ -51,7 +57,13 @@ sinks:
     options:
       path: examples/large_scale_test/output/high_value.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "value: float"
+          - "category: str"
+          - "priority: int"
+          - "timestamp: str"
 
 default_sink: output
 

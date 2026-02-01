@@ -152,7 +152,9 @@ sinks:
     options:
       path: /data/output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 
 gates:
   - name: my_gate
@@ -188,13 +190,17 @@ sinks:
     options:
       path: /data/results.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
   flagged:
     plugin: csv
     options:
       path: /data/flagged.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 
 gates:
   - name: classifier

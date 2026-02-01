@@ -68,28 +68,6 @@ class TestCSVSinkResumeSchemaValidation:
 
         assert validation.valid is True
 
-    def test_resume_csv_dynamic_schema_no_validation(self, tmp_path: Path):
-        """CLI resume should proceed for dynamic schema CSV (no validation)."""
-        csv_path = tmp_path / "output.csv"
-
-        # Create CSV with any headers
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["anything", "goes", "here"])
-            writer.writeheader()
-
-        sink = CSVSink(
-            {
-                "path": str(csv_path),
-                "schema": {"fields": "dynamic"},
-            }
-        )
-
-        sink.configure_for_resume()
-        validation = sink.validate_output_target()
-
-        # Dynamic schema always passes
-        assert validation.valid is True
-
 
 class TestDatabaseSinkResumeSchemaValidation:
     """Tests for database sink resume schema validation."""

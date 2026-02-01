@@ -2,6 +2,9 @@
 
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
+# Strict schema for tests - CSVSink requires fixed columns
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
+
 
 def test_csv_sink_supports_resume():
     """CSVSink should declare supports_resume=True."""
@@ -13,7 +16,7 @@ def test_csv_sink_configure_for_resume_sets_append_mode():
     sink = CSVSink(
         {
             "path": "/tmp/test.csv",
-            "schema": {"fields": "dynamic"},
+            "schema": STRICT_SCHEMA,
             "mode": "write",  # Explicit write mode
         }
     )
@@ -30,7 +33,7 @@ def test_csv_sink_configure_for_resume_idempotent():
     sink = CSVSink(
         {
             "path": "/tmp/test.csv",
-            "schema": {"fields": "dynamic"},
+            "schema": STRICT_SCHEMA,
         }
     )
 

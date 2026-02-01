@@ -52,10 +52,11 @@ class TestLandscapeExport:
             },
             "sinks": {
                 "output": {
-                    "plugin": "csv",
+                    "plugin": "json",
                     "options": {
-                        "path": str(output_csv),
+                        "path": str(output_csv.with_suffix(".json")),
                         "schema": {"fields": "dynamic"},
+                        "format": "jsonl",
                     },
                 },
                 "audit_export": {
@@ -167,10 +168,11 @@ class TestLandscapeExport:
             },
             "sinks": {
                 "output": {
-                    "plugin": "csv",
+                    "plugin": "json",
                     "options": {
-                        "path": str(output_csv),
+                        "path": str(output_csv.with_suffix(".json")),
                         "schema": {"fields": "dynamic"},
+                        "format": "jsonl",
                     },
                 },
                 "audit_export": {
@@ -316,10 +318,11 @@ class TestSignedExportDeterminism:
             },
             "sinks": {
                 "output": {
-                    "plugin": "csv",
+                    "plugin": "json",
                     "options": {
-                        "path": str(output_csv),
+                        "path": str(output_csv.with_suffix(".json")),
                         "schema": {"fields": "dynamic"},
+                        "format": "jsonl",
                     },
                 },
                 "audit_export": {
@@ -388,10 +391,11 @@ class TestSignedExportDeterminism:
                 },
                 "sinks": {
                     "output": {
-                        "plugin": "csv",
+                        "plugin": "json",
                         "options": {
-                            "path": str(output_csv),
+                            "path": str(output_csv.with_suffix(".json")),
                             "schema": {"fields": "dynamic"},
+                            "format": "jsonl",
                         },
                     },
                     "audit_export": {

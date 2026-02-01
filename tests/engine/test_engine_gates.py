@@ -515,9 +515,9 @@ class TestRouteLabelResolution:
                 },
             ),
             sinks={
-                "main_output": SinkSettings(plugin="csv", options={"path": "main_output.csv", "schema": {"fields": "dynamic"}}),
-                "review_queue": SinkSettings(plugin="csv", options={"path": "review_queue.csv", "schema": {"fields": "dynamic"}}),
-                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
+                "main_output": SinkSettings(plugin="json", options={"path": "main_output.json", "schema": {"fields": "dynamic"}}),
+                "review_queue": SinkSettings(plugin="json", options={"path": "review_queue.json", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="main_output",
             gates=[
@@ -583,8 +583,8 @@ class TestRouteLabelResolution:
                 },
             ),
             sinks={
-                "premium_sink": SinkSettings(plugin="csv", options={"path": "premium.csv", "schema": {"fields": "dynamic"}}),
-                "standard_sink": SinkSettings(plugin="csv", options={"path": "standard.csv", "schema": {"fields": "dynamic"}}),
+                "premium_sink": SinkSettings(plugin="json", options={"path": "premium.json", "schema": {"fields": "dynamic"}}),
+                "standard_sink": SinkSettings(plugin="json", options={"path": "standard.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="standard_sink",
             gates=[
@@ -716,9 +716,9 @@ class TestForkCreatesChildTokens:
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
-                "analysis_a": SinkSettings(plugin="csv", options={"path": "analysis_a.csv", "schema": {"fields": "dynamic"}}),
-                "analysis_b": SinkSettings(plugin="csv", options={"path": "analysis_b.csv", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "analysis_a": SinkSettings(plugin="json", options={"path": "analysis_a.json", "schema": {"fields": "dynamic"}}),
+                "analysis_b": SinkSettings(plugin="json", options={"path": "analysis_b.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="output",
             gates=[
@@ -781,8 +781,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
             sinks={
-                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -866,8 +866,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
             sinks={
-                "analysis": SinkSettings(plugin="csv", options={"path": "analysis.csv", "schema": {"fields": "dynamic"}}),
-                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
+                "analysis": SinkSettings(plugin="json", options={"path": "analysis.json", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -1663,7 +1663,7 @@ class TestErrorHandling:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
             gates=[
                 GateSettingsConfig(

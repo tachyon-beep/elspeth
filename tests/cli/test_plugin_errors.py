@@ -27,7 +27,10 @@ sinks:
     plugin: csv
     options:
       path: out.csv
-      schema: {fields: dynamic}
+      schema:
+        mode: strict
+        fields:
+          - "data: str"
 
 default_sink: output
 """
@@ -55,7 +58,7 @@ def test_unknown_transform_plugin_error():
             "options": {"path": "test.csv", "schema": {"fields": "dynamic"}, "on_validation_failure": "discard"},
         },
         "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"fields": "dynamic"}}}},
+        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "strict", "fields": ["data: str"]}}}},
         "default_sink": "out",
     }
 
@@ -87,7 +90,10 @@ sinks:
     plugin: csv
     options:
       path: out.csv
-      schema: {fields: dynamic}
+      schema:
+        mode: strict
+        fields:
+          - "data: str"
 
 default_sink: output
 """
@@ -191,7 +197,10 @@ sinks:
     plugin: csv
     options:
       path: low.csv
-      schema: {fields: dynamic}
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
 
 default_sink: output
 """
@@ -264,7 +273,10 @@ sinks:
     plugin: csv
     options:
       path: output.csv
-      schema: {fields: dynamic}
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
 
 default_sink: output
 """

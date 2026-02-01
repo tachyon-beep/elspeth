@@ -143,8 +143,8 @@ class TestOrchestratorOutputSinkRouting:
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
-                "errors": SinkSettings(plugin="csv", options={"path": "errors.csv", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "errors.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="results",
         )

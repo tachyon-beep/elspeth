@@ -387,8 +387,8 @@ class TestNodeTypeMetadata:
                 options={"schema": {"fields": "dynamic"}},
             ),
             sinks={
-                "high": SinkSettings(plugin="csv", options={"path": "high.csv", "schema": {"fields": "dynamic"}}),
-                "low": SinkSettings(plugin="csv", options={"path": "low.csv", "schema": {"fields": "dynamic"}}),
+                "high": SinkSettings(plugin="json", options={"path": "high.json", "schema": {"fields": "dynamic"}}),
+                "low": SinkSettings(plugin="json", options={"path": "low.json", "schema": {"fields": "dynamic"}}),
             },
             default_sink="low",
             gates=[

@@ -454,7 +454,7 @@ class TestOrchestratorAcceptsGraph:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
             default_sink="output",
         )
         plugins = instantiate_plugins_from_config(settings)

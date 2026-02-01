@@ -10,7 +10,7 @@ source:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
     schema:
-      mode: free
+      mode: strict
       fields:
         - "ticket_id: str"
         - "category_id: str"
@@ -20,11 +20,12 @@ source:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: examples/template_lookups/output/results.csv
+      path: examples/template_lookups/output/results.json
       schema:
         fields: dynamic
+      format: jsonl
 
 default_sink: output
 

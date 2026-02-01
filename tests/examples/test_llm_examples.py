@@ -63,6 +63,16 @@ def _read_csv(path: Path) -> list[dict[str, Any]]:
         return list(reader)
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read JSONL file and return list of row dicts."""
+    rows = []
+    with open(path) as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
 def _clean_output_dir(output_dir: Path) -> None:
     """Remove all files in output directory."""
     if output_dir.exists():
@@ -83,17 +93,17 @@ def _clean_runs_dir(runs_dir: Path) -> None:
 SENTIMENT_EXAMPLES = [
     pytest.param(
         "settings.yaml",
-        "output/results.csv",
+        "output/results.json",
         id="basic",
     ),
     pytest.param(
         "settings_pooled.yaml",
-        "output/results_pooled.csv",
+        "output/results_pooled.json",
         id="pooled",
     ),
     pytest.param(
         "settings_batched.yaml",
-        "output/results_batched.csv",
+        "output/results_batched.json",
         id="batched",
     ),
 ]
@@ -131,8 +141,8 @@ class TestOpenRouterSentiment:
         # Verify output exists
         assert output_path.exists(), f"Output file not created: {output_path}"
 
-        # Read and verify content
-        rows = _read_csv(output_path)
+        # Read and verify content (JSONL format - sentiment_analysis is already parsed)
+        rows = _read_jsonl(output_path)
         assert len(rows) == 5, f"Expected 5 rows, got {len(rows)}"
 
         # Verify required fields and sentiment structure
@@ -141,14 +151,23 @@ class TestOpenRouterSentiment:
             assert "text" in row, "Missing text field"
             assert "sentiment_analysis" in row, "Missing sentiment_analysis field"
 
-            analysis = json.loads(row["sentiment_analysis"])
+            # sentiment_analysis may be a dict or JSON string depending on transform output
+            analysis = row["sentiment_analysis"]
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
             assert "sentiment" in analysis, "Missing sentiment field in analysis"
             assert analysis["sentiment"] in ["positive", "negative", "neutral"]
             assert "confidence" in analysis, "Missing confidence field in analysis"
             assert 0 <= analysis["confidence"] <= 1, "Confidence out of range"
 
         # Verify expected sentiments
-        sentiments = {int(row["id"]): json.loads(row["sentiment_analysis"])["sentiment"] for row in rows}
+        def get_sentiment(row: dict) -> str:
+            analysis = row["sentiment_analysis"]
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            return analysis["sentiment"]
+
+        sentiments = {int(row["id"]): get_sentiment(row) for row in rows}
         for row_id, expected in EXPECTED_SENTIMENTS.items():
             assert sentiments[row_id] == expected, f"Row {row_id}: expected {expected}, got {sentiments[row_id]}"
 
@@ -157,12 +176,12 @@ class TestOpenRouterSentiment:
 TEMPLATE_LOOKUP_EXAMPLES = [
     pytest.param(
         "settings.yaml",
-        "output/results.csv",
+        "output/results.json",
         id="basic",
     ),
     pytest.param(
         "settings_batched.yaml",
-        "output/results_batched.csv",
+        "output/results_batched.json",
         id="batched",
     ),
 ]
@@ -191,8 +210,8 @@ class TestTemplateLookups:
         # Verify output exists
         assert output_path.exists(), f"Output file not created: {output_path}"
 
-        # Read and verify content
-        rows = _read_csv(output_path)
+        # Read and verify content (JSONL format)
+        rows = _read_jsonl(output_path)
         assert len(rows) == 5, f"Expected 5 rows, got {len(rows)}"
 
         # Verify classification field and hash tracking

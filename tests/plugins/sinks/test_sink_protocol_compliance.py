@@ -12,26 +12,29 @@ import pytest
 
 from elspeth.plugins.protocols import SinkProtocol
 
-# Dynamic schema config for tests
+# Schema configs for tests
+# CSV and Database sinks require fixed columns (strict mode)
+# JSON sink accepts dynamic schemas
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
 DYNAMIC_SCHEMA = {"fields": "dynamic"}
 
 # Sink configurations for parametrized testing
 SINK_CONFIGS = [
     pytest.param(
         "elspeth.plugins.sinks.csv_sink.CSVSink",
-        {"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA},
+        {"path": "/tmp/test.csv", "schema": STRICT_SCHEMA},  # CSV requires strict
         "csv",
         id="csv",
     ),
     pytest.param(
         "elspeth.plugins.sinks.json_sink.JSONSink",
-        {"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA},
+        {"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA},  # JSON accepts dynamic
         "json",
         id="json",
     ),
     pytest.param(
         "elspeth.plugins.sinks.database_sink.DatabaseSink",
-        {"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA},
+        {"url": "sqlite:///:memory:", "table": "test", "schema": STRICT_SCHEMA},  # Database requires strict
         "database",
         id="database",
     ),

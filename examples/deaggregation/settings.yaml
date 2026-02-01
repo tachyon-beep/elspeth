@@ -24,10 +24,12 @@ source:
   options:
     path: examples/deaggregation/input.csv
     schema:
-      mode: free
+      mode: strict
       fields:
         - "id: int"
+        - "name: str"
         - "copies: int"
+        - "category: str"
     on_validation_failure: discard
 
 # Aggregation with output_mode: transform creates new tokens for outputs
@@ -51,7 +53,13 @@ sinks:
     options:
       path: examples/deaggregation/output/replicated.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "name: str"
+          - "copies: int"
+          - "category: str"
+          - "copy_index: int"  # Added by batch_replicate
 
 default_sink: output
 

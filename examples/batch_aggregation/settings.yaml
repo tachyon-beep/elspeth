@@ -12,10 +12,13 @@ source:
   options:
     path: examples/batch_aggregation/input.csv
     schema:
-      mode: free
+      mode: strict
       fields:
         - "id: int"
+        - "date: str"
+        - "category: str"
         - "amount: int"  # Coerce to int for numeric aggregation
+        - "region: str"
     on_validation_failure: discard
 
 # Aggregation batches rows and computes statistics
@@ -40,7 +43,13 @@ sinks:
     options:
       path: examples/batch_aggregation/output/batch_summaries.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "count: int"
+          - "sum: float"
+          - "batch_size: int"
+          - "mean: float"
+          - "category: str"
 
 default_sink: output
 

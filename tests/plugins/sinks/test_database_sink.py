@@ -11,8 +11,10 @@ from sqlalchemy import MetaData, Table, create_engine, select
 
 from elspeth.plugins.context import PluginContext
 
-# Dynamic schema config for tests - DataPluginConfig now requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+# Strict schema config for tests - DataPluginConfig now requires schema
+# DatabaseSink requires fixed-column structure, so we use strict mode
+# Tests that need specific fields define their own schema
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int", "name: str"]}
 
 
 class TestDatabaseSink:
@@ -32,7 +34,7 @@ class TestDatabaseSink:
         """write() creates table and inserts rows."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.write([{"id": 2, "name": "bob"}], ctx)
@@ -54,7 +56,7 @@ class TestDatabaseSink:
         """Multiple batches can be written to the same table."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         # Write rows in multiple batches (batching now handled by caller)
         sink.write([{"id": 0, "value": "val0"}, {"id": 1, "value": "val1"}], ctx)
@@ -75,7 +77,7 @@ class TestDatabaseSink:
         """close() can be called multiple times."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         sink.write([{"id": 1}], ctx)
         sink.close()
@@ -85,7 +87,7 @@ class TestDatabaseSink:
         """Works with in-memory SQLite."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": STRICT_SCHEMA})
 
         sink.write([{"col": "value"}], ctx)
         # Can't verify in-memory after close, but should not raise
@@ -96,7 +98,7 @@ class TestDatabaseSink:
         from elspeth.contracts import ArtifactDescriptor
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write([{"id": 1, "name": "alice"}], ctx)
         sink.close()
@@ -112,7 +114,7 @@ class TestDatabaseSink:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write(rows, ctx)
         sink.close()
@@ -126,7 +128,7 @@ class TestDatabaseSink:
         """ArtifactDescriptor metadata includes row_count."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write([{"id": 1}, {"id": 2}, {"id": 3}], ctx)
         sink.close()
@@ -140,7 +142,7 @@ class TestDatabaseSink:
         from elspeth.core.canonical import canonical_json, stable_hash
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write([], ctx)
         sink.close()
@@ -154,7 +156,7 @@ class TestDatabaseSink:
         """DatabaseSink has plugin_version attribute."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": STRICT_SCHEMA})
         assert sink.plugin_version == "1.0.0"
 
     def test_has_determinism(self) -> None:
@@ -162,7 +164,7 @@ class TestDatabaseSink:
         from elspeth.contracts import Determinism
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": "sqlite:///:memory:", "table": "test", "schema": STRICT_SCHEMA})
         assert sink.determinism == Determinism.IO_WRITE
 
     def test_explicit_schema_creates_all_columns_including_optional(self, db_url: str, ctx: PluginContext) -> None:
@@ -174,9 +176,9 @@ class TestDatabaseSink:
         """
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        # Explicit schema with optional field 'score'
+        # Strict schema with optional field 'score'
         explicit_schema = {
-            "mode": "free",
+            "mode": "strict",
             "fields": ["id: int", "score: float?"],
         }
 
@@ -245,30 +247,6 @@ class TestDatabaseSink:
         # SQLite stores booleans as integers, so check for either
         assert isinstance(columns_by_name["active"].type, (Boolean, Integer))
 
-    def test_dynamic_schema_still_infers_from_row(self, db_url: str, ctx: PluginContext) -> None:
-        """Dynamic schema should continue to infer columns from first row."""
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        sink = DatabaseSink(
-            {
-                "url": db_url,
-                "table": "dynamic_output",
-                "schema": DYNAMIC_SCHEMA,
-            }
-        )
-
-        # First row defines columns
-        sink.write([{"a": 1, "b": 2}], ctx)
-        sink.close()
-
-        # Verify columns match first row (not schema)
-        engine = create_engine(db_url)
-        metadata = MetaData()
-        table = Table("dynamic_output", metadata, autoload_with=engine)
-
-        column_names = [c.name for c in table.columns]
-        assert sorted(column_names) == ["a", "b"]
-
 
 class TestDatabaseSinkIfExistsReplace:
     """Regression tests for if_exists='replace' behavior.
@@ -312,7 +290,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "output",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "append",
             }
         )
@@ -326,7 +304,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "output",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "replace",
             }
         )
@@ -349,7 +327,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "output",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "replace",
             }
         )
@@ -372,7 +350,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "output",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "append",  # Explicit, but also the default
             }
         )
@@ -384,7 +362,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "output",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "append",
             }
         )
@@ -405,7 +383,7 @@ class TestDatabaseSinkIfExistsReplace:
             {
                 "url": db_url,
                 "table": "new_table",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "if_exists": "replace",
             }
         )
@@ -443,7 +421,7 @@ class TestDatabaseSinkSecretHandling:
             {
                 "url": "postgresql://user:secret@localhost/db",
                 "table": "test",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
 
@@ -471,7 +449,7 @@ class TestDatabaseSinkSecretHandling:
                 {
                     "url": "postgresql://user:secret@localhost/db",
                     "table": "test",
-                    "schema": DYNAMIC_SCHEMA,
+                    "schema": STRICT_SCHEMA,
                 }
             )
 
@@ -487,7 +465,7 @@ class TestDatabaseSinkSecretHandling:
             {
                 "url": "postgresql://user@localhost/db",
                 "table": "test",
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
 
@@ -528,7 +506,7 @@ class TestDatabaseSinkCanonicalHashing:
 
         # Unicode that json.dumps escapes but RFC 8785 keeps literal
         rows = [{"emoji": "😀", "text": "café"}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write(rows, ctx)
         sink.close()
@@ -548,7 +526,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"value": float("nan")}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         # canonical_json raises ValueError for NaN
         with pytest.raises(ValueError, match="non-finite float"):
@@ -564,7 +542,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"value": float("inf")}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         # canonical_json raises ValueError for Infinity
         with pytest.raises(ValueError, match="non-finite float"):
@@ -584,7 +562,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"id": np.int64(42), "score": np.float64(3.14)}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         # Should not raise - canonical_json normalizes numpy types
         artifact = sink.write(rows, ctx)
@@ -605,7 +583,7 @@ class TestDatabaseSinkCanonicalHashing:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         rows = [{"emoji": "😀"}]
-        sink = DatabaseSink({"url": db_url, "table": "output", "schema": DYNAMIC_SCHEMA})
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": STRICT_SCHEMA})
 
         artifact = sink.write(rows, ctx)
         sink.close()
@@ -615,3 +593,57 @@ class TestDatabaseSinkCanonicalHashing:
         assert artifact.size_bytes == expected_size, (
             f"payload_size must use canonical JSON bytes. Got {artifact.size_bytes}, expected {expected_size}"
         )
+
+
+class TestDatabaseSinkSchemaValidation:
+    """Tests for DatabaseSink schema compatibility validation.
+
+    DatabaseSink requires fixed-column structure. Schemas that allow extra fields
+    (free mode, dynamic mode) are incompatible because:
+    - Table columns are fixed at table creation
+    - Extra fields would either be silently dropped (audit violation) or cause errors
+    """
+
+    @pytest.fixture
+    def db_url(self, tmp_path: Path) -> str:
+        """Create a SQLite database URL."""
+        return f"sqlite:///{tmp_path / 'test.db'}"
+
+    def test_rejects_free_mode_schema(self, db_url: str) -> None:
+        """DatabaseSink should reject free mode schemas at initialization.
+
+        Free mode allows extra fields, but database requires fixed columns.
+        This would cause silent data loss or runtime errors.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        free_schema = {"mode": "free", "fields": ["id: int"]}
+
+        with pytest.raises(ValueError, match="allows_extra_fields"):
+            DatabaseSink({"url": db_url, "table": "output", "schema": free_schema})
+
+    def test_rejects_dynamic_schema(self, db_url: str) -> None:
+        """DatabaseSink should reject dynamic schemas at initialization.
+
+        Dynamic schemas allow any fields, but database requires fixed columns.
+        This would cause silent data loss or runtime errors.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        dynamic_schema = {"fields": "dynamic"}
+
+        with pytest.raises(ValueError, match="allows_extra_fields"):
+            DatabaseSink({"url": db_url, "table": "output", "schema": dynamic_schema})
+
+    def test_accepts_strict_mode_schema(self, db_url: str) -> None:
+        """DatabaseSink should accept strict mode schemas.
+
+        Strict mode has fixed fields - compatible with database structure.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
+
+        # Should not raise
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": strict_schema})
+        assert sink is not None

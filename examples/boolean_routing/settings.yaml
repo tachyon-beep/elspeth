@@ -10,7 +10,11 @@ source:
   options:
     path: examples/boolean_routing/input.csv
     schema:
-      fields: dynamic  # Accept any fields from CSV
+      mode: strict
+      fields:
+        - "id: int"
+        - "message: str"
+        - "approved: str"
     on_validation_failure: discard  # or a sink name for quarantine
 
 # Config-driven gate: route based on approved field
@@ -29,13 +33,21 @@ sinks:
     options:
       path: examples/boolean_routing/output/approved.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "message: str"
+          - "approved: str"
   rejected:
     plugin: csv
     options:
       path: examples/boolean_routing/output/rejected.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "message: str"
+          - "approved: str"
 
 default_sink: rejected
 

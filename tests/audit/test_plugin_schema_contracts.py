@@ -96,14 +96,18 @@ TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
 
 
 # Sinks: require path (or equivalent) + schema
+# Note: CSVSink requires strict schema (fixed columns), JSONSink allows dynamic
+# Each config includes a test_row that matches the schema for validation testing
 SINK_CONFIGS: dict[str, dict[str, Any] | None] = {
     "csv": {
         "path": "/tmp/output.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+        "test_row": {"id": 1, "name": "test"},  # Matches strict schema
     },
     "json": {
         "path": "/tmp/output.json",
         "schema": {"fields": "dynamic"},
+        "test_row": {"test_field": "test_value"},  # Dynamic accepts any fields
     },
     # Database sink requires valid database URL
     "database": None,
@@ -316,8 +320,12 @@ class TestSinkSchemaContracts:
         3. input_schema is a PluginSchema subclass with model_validate method
         """
         plugin_cls = manager.get_sink_by_name(sink_name)
-        config = SINK_CONFIGS[sink_name]
-        assert config is not None  # Guaranteed by parametrize filter
+        full_config = SINK_CONFIGS[sink_name]
+        assert full_config is not None  # Guaranteed by parametrize filter
+
+        # Extract test_row before passing config to plugin
+        test_row = full_config.get("test_row", {"test_field": "test_value"})
+        config = {k: v for k, v in full_config.items() if k != "test_row"}
 
         # Instantiate plugin
         instance = plugin_cls(config)
@@ -331,8 +339,8 @@ class TestSinkSchemaContracts:
         # Behavioral validation
         assert hasattr(schema, "model_validate"), f"Sink '{sink_name}' input_schema is not a Pydantic model."
 
-        # Actually validate a row
-        schema.model_validate({"test_field": "test_value"})
+        # Actually validate a row (using test_row that matches the schema)
+        schema.model_validate(test_row)
 
     @pytest.mark.parametrize(
         "sink_name,reason",
@@ -410,16 +418,18 @@ class TestPluginInitSafety:
 
         csv_sink_cls = manager.get_sink_by_name("csv")
 
+        # CSVSink requires strict schema (fixed columns)
         instance = csv_sink_cls(
             {
                 "path": "/nonexistent/directory/that/does/not/exist/output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
             }
         )
 
         schema = instance.input_schema
         assert schema is not None
-        schema.model_validate({"test": "value"})
+        # Validate with row matching the strict schema
+        schema.model_validate({"id": 1, "name": "test"})
 
     def test_json_sink_does_not_perform_io_in_init(self) -> None:
         """JSONSink __init__() should not try to create the file."""

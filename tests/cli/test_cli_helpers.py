@@ -32,7 +32,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 
 default_sink: output
 """
@@ -126,7 +128,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 
 default_sink: output
 """
@@ -176,7 +180,9 @@ sinks:
     options:
       path: output.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "data: str"
 
 default_sink: output
 """

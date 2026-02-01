@@ -53,10 +53,11 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
         ],
         sinks={
             "output": SinkSettings(
-                plugin="csv",
+                plugin="json",
                 options={
-                    "path": str(tmp_path / "output.csv"),
+                    "path": str(tmp_path / "output.json"),
                     "schema": {"fields": "dynamic"},
+                    "format": "jsonl",
                 },
             ),
         },

@@ -20,7 +20,7 @@ source:
   options:
     path: examples/openrouter_sentiment/input.csv
     schema:
-      mode: free
+      mode: strict
       fields:
         - "id: int"
         - "text: str"
@@ -54,11 +54,12 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: examples/openrouter_sentiment/output/results_pooled.csv
+      path: examples/openrouter_sentiment/output/results_pooled.json
       schema:
         fields: dynamic
+      format: jsonl
 
 default_sink: output
 

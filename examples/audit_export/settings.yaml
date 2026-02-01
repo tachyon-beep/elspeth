@@ -21,7 +21,12 @@ source:
   options:
     path: examples/audit_export/input.csv
     schema:
-      fields: dynamic  # Accept any fields from CSV
+      mode: strict
+      fields:
+        - "id: int"
+        - "name: str"
+        - "amount: int"
+        - "category: str"
     on_validation_failure: discard  # or a sink name for quarantine
 
 # Config-driven gate: Route corporate submissions to a dedicated sink.
@@ -39,14 +44,24 @@ sinks:
     options:
       path: examples/audit_export/output/non_corporate.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "name: str"
+          - "amount: int"
+          - "category: str"
 
   corporate:
     plugin: csv
     options:
       path: examples/audit_export/output/corporate.csv
       schema:
-        fields: dynamic
+        mode: strict
+        fields:
+          - "id: int"
+          - "name: str"
+          - "amount: int"
+          - "category: str"
 
   # Export sink for compliance audit trail (uses JSON for heterogeneous records)
   audit_export:

@@ -244,7 +244,8 @@ class TransformExecutor:
         has_accept = hasattr(transform, "accept") and callable(getattr(transform, "accept", None))
 
         # Execute with timing and span
-        with self._spans.transform_span(transform.name, input_hash=input_hash):
+        # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
+        with self._spans.transform_span(transform.name, input_hash=input_hash, token_id=token.token_id):
             start = time.perf_counter()
             try:
                 if has_accept:
@@ -519,7 +520,8 @@ class GateExecutor:
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
         # Execute with timing and span
-        with self._spans.gate_span(gate.name, input_hash=input_hash):
+        # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
+        with self._spans.gate_span(gate.name, input_hash=input_hash, token_id=token.token_id):
             start = time.perf_counter()
             try:
                 result = gate.evaluate(token.row_data, ctx)
@@ -689,7 +691,8 @@ class GateExecutor:
         )
 
         # Create parser and evaluate condition
-        with self._spans.gate_span(gate_config.name, input_hash=input_hash):
+        # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
+        with self._spans.gate_span(gate_config.name, input_hash=input_hash, token_id=token.token_id):
             start = time.perf_counter()
             try:
                 parser = ExpressionParser(gate_config.condition)
@@ -1112,7 +1115,9 @@ class AggregationExecutor:
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
 
         # Step 3: Execute with timing and span
-        with self._spans.transform_span(transform.name, input_hash=input_hash):
+        # P2-2026-01-21: Pass all token_ids in the batch for accurate attribution
+        batch_token_ids = [t.token_id for t in buffered_tokens]
+        with self._spans.transform_span(transform.name, input_hash=input_hash, token_ids=batch_token_ids):
             start = time.perf_counter()
             try:
                 result = transform.process(buffered_rows, ctx)  # type: ignore[arg-type]
@@ -1730,7 +1735,9 @@ class SinkExecutor:
             input_data={"sink_plugin": sink.name, "row_count": len(tokens)},
         ) as handle:
             # Execute sink write with timing and span
-            with self._spans.sink_span(sink.name):
+            # P2-2026-01-21: Pass all token_ids being written for accurate attribution
+            sink_token_ids = [t.token_id for t in tokens]
+            with self._spans.sink_span(sink.name, token_ids=sink_token_ids):
                 start = time.perf_counter()
                 try:
                     artifact_info = sink.write(rows, ctx)

@@ -604,8 +604,10 @@ all = [
     { name = "pytest-dotenv" },
     { name = "pytest-timeout" },
     { name = "ruff" },
+    { name = "starlette" },
     { name = "types-networkx" },
     { name = "types-pyyaml" },
+    { name = "uvicorn" },
 ]
 azure = [
     { name = "azure-identity" },
@@ -626,8 +628,10 @@ dev = [
     { name = "pytest-dotenv" },
     { name = "pytest-timeout" },
     { name = "ruff" },
+    { name = "starlette" },
     { name = "types-networkx" },
     { name = "types-pyyaml" },
+    { name = "uvicorn" },
 ]
 llm = [
     { name = "httpx" },
@@ -697,6 +701,8 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'all'", specifier = ">=0.14,<1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14,<1" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
+    { name = "starlette", marker = "extra == 'all'", specifier = ">=0.45,<1" },
+    { name = "starlette", marker = "extra == 'dev'", specifier = ">=0.45,<1" },
     { name = "structlog", specifier = ">=25.0,<26" },
     { name = "tenacity", specifier = ">=9.0,<10" },
     { name = "textual", specifier = ">=7.2,<8" },
@@ -705,6 +711,8 @@ requires-dist = [
     { name = "types-networkx", marker = "extra == 'dev'", specifier = ">=3.2,<4" },
     { name = "types-pyyaml", marker = "extra == 'all'", specifier = ">=6.0,<7" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0,<7" },
+    { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.34,<1" },
+    { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.34,<1" },
 ]
 provides-extras = ["dev", "llm", "azure", "mcp", "all"]
 

@@ -12,8 +12,10 @@ import pytest
 
 from elspeth.plugins.context import PluginContext
 
-# Dynamic schema config for tests - PathConfig now requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+# Strict schema config for tests - PathConfig now requires schema
+# CSVSink requires fixed-column structure, so we use strict mode
+# Tests that need specific fields define their own schema
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: str", "name: str"]}
 
 
 class TestCSVSink:
@@ -29,7 +31,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.flush()
@@ -49,7 +51,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.write([{"id": "2", "name": "bob"}], ctx)
@@ -69,7 +71,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "delimiter": ";", "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "delimiter": ";", "schema": STRICT_SCHEMA})
 
         sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.flush()
@@ -84,7 +86,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         sink.write([{"id": "1"}], ctx)
         sink.close()
@@ -95,7 +97,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         sink.write([{"id": "1"}], ctx)
         sink.flush()
@@ -113,7 +115,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         artifact = sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.close()
@@ -128,7 +130,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         artifact = sink.write([{"id": "1", "name": "alice"}], ctx)
         sink.close()
@@ -144,7 +146,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         rows = [
             {"id": "1", "name": "alice"},
@@ -168,7 +170,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         artifact = sink.write([], ctx)
         sink.close()
@@ -182,7 +184,7 @@ class TestCSVSink:
         """CSVSink has plugin_version attribute."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        sink = CSVSink({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": "/tmp/test.csv", "schema": STRICT_SCHEMA})
         assert hasattr(sink, "plugin_version")
         assert sink.plugin_version == "1.0.0"
 
@@ -191,7 +193,7 @@ class TestCSVSink:
         from elspeth.contracts import Determinism
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        sink = CSVSink({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": "/tmp/test.csv", "schema": STRICT_SCHEMA})
         assert sink.determinism == Determinism.IO_WRITE
 
     def test_cumulative_hash_after_multiple_writes(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -203,7 +205,7 @@ class TestCSVSink:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
-        sink = CSVSink({"path": str(output_file), "schema": DYNAMIC_SCHEMA})
+        sink = CSVSink({"path": str(output_file), "schema": STRICT_SCHEMA})
 
         # First write
         artifact1 = sink.write([{"id": "1", "name": "alice"}], ctx)
@@ -247,9 +249,9 @@ class TestCSVSink:
         """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        # Explicit schema with optional field 'score'
+        # Strict schema with optional field 'score'
         explicit_schema = {
-            "mode": "free",
+            "mode": "strict",
             "fields": ["id: int", "score: float?"],
         }
 
@@ -282,30 +284,6 @@ class TestCSVSink:
 
         assert len(rows) == 2
 
-    def test_dynamic_schema_still_infers_from_row(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Dynamic schema should continue to infer headers from first row."""
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-
-        output_file = tmp_path / "dynamic_output.csv"
-        sink = CSVSink(
-            {
-                "path": str(output_file),
-                "schema": DYNAMIC_SCHEMA,
-            }
-        )
-
-        # First row defines headers
-        sink.write([{"a": 1, "b": 2}], ctx)
-        sink.close()
-
-        # Verify headers match first row
-        with open(output_file) as f:
-            reader = csv.DictReader(f)
-            fieldnames = reader.fieldnames
-
-        assert fieldnames is not None
-        assert sorted(fieldnames) == ["a", "b"]
-
     def test_invalid_mode_rejected(self, tmp_path: Path) -> None:
         """Invalid mode values should be rejected at config time.
 
@@ -318,7 +296,7 @@ class TestCSVSink:
             CSVSinkConfig.from_dict(
                 {
                     "path": str(tmp_path / "output.csv"),
-                    "schema": DYNAMIC_SCHEMA,
+                    "schema": STRICT_SCHEMA,
                     "mode": "apend",  # Typo - should be "append"
                 }
             )
@@ -331,7 +309,7 @@ class TestCSVSink:
         write_config = CSVSinkConfig.from_dict(
             {
                 "path": str(tmp_path / "write_output.csv"),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "write",
             }
         )
@@ -340,8 +318,57 @@ class TestCSVSink:
         append_config = CSVSinkConfig.from_dict(
             {
                 "path": str(tmp_path / "append_output.csv"),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
         assert append_config.mode == "append"
+
+
+class TestCSVSinkSchemaValidation:
+    """Tests for CSVSink schema compatibility validation.
+
+    CSVSink requires fixed-column structure. Schemas that allow extra fields
+    (free mode, dynamic mode) are incompatible because:
+    - CSV headers are fixed at file creation
+    - Extra fields would either be silently dropped (audit violation) or cause errors
+    """
+
+    def test_rejects_free_mode_schema(self, tmp_path: Path) -> None:
+        """CSVSink should reject free mode schemas at initialization.
+
+        Free mode allows extra fields, but CSV requires fixed columns.
+        This would cause silent data loss or runtime errors.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        free_schema = {"mode": "free", "fields": ["id: int"]}
+
+        with pytest.raises(ValueError, match="allows_extra_fields"):
+            CSVSink({"path": str(tmp_path / "output.csv"), "schema": free_schema})
+
+    def test_rejects_dynamic_schema(self, tmp_path: Path) -> None:
+        """CSVSink should reject dynamic schemas at initialization.
+
+        Dynamic schemas allow any fields, but CSV requires fixed columns.
+        This would cause silent data loss or runtime errors.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        dynamic_schema = {"fields": "dynamic"}
+
+        with pytest.raises(ValueError, match="allows_extra_fields"):
+            CSVSink({"path": str(tmp_path / "output.csv"), "schema": dynamic_schema})
+
+    def test_accepts_strict_mode_schema(self, tmp_path: Path) -> None:
+        """CSVSink should accept strict mode schemas.
+
+        Strict mode has fixed fields - compatible with CSV structure.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
+
+        # Should not raise
+        sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": strict_schema})
+        assert sink is not None

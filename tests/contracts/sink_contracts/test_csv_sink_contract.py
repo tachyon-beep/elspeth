@@ -37,7 +37,7 @@ class TestCSVSinkContract(SinkContractTestBase):
             return CSVSink(
                 {
                     "path": str(tmp_path / f"output_{counter[0]}.csv"),
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "strict", "fields": ["id: int", "name: str", "score: float"]},
                 }
             )
 
@@ -66,7 +66,7 @@ class TestCSVSinkDeterminism(SinkDeterminismContractTestBase):
             return CSVSink(
                 {
                     "path": str(tmp_path / f"output_{counter[0]}.csv"),
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 }
             )
 
@@ -90,7 +90,7 @@ class TestCSVSinkHashVerification:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "name: str"]}})
         result = sink.write(rows, ctx)
         sink.close()
 
@@ -105,7 +105,7 @@ class TestCSVSinkHashVerification:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "name: str"]}})
         result = sink.write(rows, ctx)
         sink.close()
 
@@ -126,7 +126,7 @@ class TestCSVSinkAppendMode:
         sink1 = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "mode": "write",
             }
         )
@@ -136,7 +136,7 @@ class TestCSVSinkAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "mode": "append",
             }
         )
@@ -160,7 +160,7 @@ class TestCSVSinkAppendMode:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "mode": "append",
             }
         )
@@ -202,7 +202,7 @@ class TestCSVSinkPropertyBased:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str", "value: int"]},
             }
         )
         ctx = PluginContext(run_id="test", config={})
@@ -236,11 +236,11 @@ class TestCSVSinkPropertyBased:
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
         path2 = tmp_path / f"test2_{uuid.uuid4().hex[:8]}.csv"
 
-        sink1 = CSVSink({"path": str(path1), "schema": {"fields": "dynamic"}})
+        sink1 = CSVSink({"path": str(path1), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         result1 = sink1.write(rows, ctx)
         sink1.close()
 
-        sink2 = CSVSink({"path": str(path2), "schema": {"fields": "dynamic"}})
+        sink2 = CSVSink({"path": str(path2), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         result2 = sink2.write(rows, ctx)
         sink2.close()
 
@@ -258,7 +258,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "data": "value with, comma"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         sink.write(rows, ctx)
         sink.close()
 
@@ -277,7 +277,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "data": 'value with "quotes"'}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         sink.write(rows, ctx)
         sink.close()
 
@@ -296,7 +296,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "data": "value with\nnewline"}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         sink.write(rows, ctx)
         sink.close()
 
@@ -315,7 +315,7 @@ class TestCSVSinkQuotingCharacters:
         ctx = PluginContext(run_id="test", config={})
 
         rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
-        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": str(csv_path), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         sink.write(rows, ctx)
         sink.close()
 
@@ -338,11 +338,11 @@ class TestCSVSinkQuotingCharacters:
         path1 = tmp_path / "roundtrip1.csv"
         path2 = tmp_path / "roundtrip2.csv"
 
-        sink1 = CSVSink({"path": str(path1), "schema": {"fields": "dynamic"}})
+        sink1 = CSVSink({"path": str(path1), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         result1 = sink1.write(rows, ctx)
         sink1.close()
 
-        sink2 = CSVSink({"path": str(path2), "schema": {"fields": "dynamic"}})
+        sink2 = CSVSink({"path": str(path2), "schema": {"mode": "strict", "fields": ["id: int", "data: str"]}})
         result2 = sink2.write(rows, ctx)
         sink2.close()
 

@@ -6,6 +6,9 @@ import pytest
 
 from elspeth.plugins.sinks.database_sink import DatabaseSink
 
+# Strict schema for tests - DatabaseSink requires fixed columns
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
+
 
 @pytest.fixture(autouse=True)
 def allow_raw_secrets():
@@ -26,7 +29,7 @@ def test_database_sink_configure_for_resume_sets_append():
         {
             "url": "sqlite:///:memory:",
             "table": "test_table",
-            "schema": {"fields": "dynamic"},
+            "schema": STRICT_SCHEMA,
             "if_exists": "replace",  # Explicit replace mode
         }
     )
@@ -44,7 +47,7 @@ def test_database_sink_configure_for_resume_idempotent():
         {
             "url": "sqlite:///:memory:",
             "table": "test_table",
-            "schema": {"fields": "dynamic"},
+            "schema": STRICT_SCHEMA,
         }
     )
 

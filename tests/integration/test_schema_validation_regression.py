@@ -108,13 +108,14 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: output.csv
+      path: output.json
       schema:
         mode: free
         fields:
           - "field_a: str"  # Compatible: subset of producer schema
+      format: jsonl
 
 default_sink: output
 """

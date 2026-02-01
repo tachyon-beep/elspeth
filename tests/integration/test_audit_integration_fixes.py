@@ -195,11 +195,11 @@ class TestIntegrationAuditFixes:
         # Test gate - SKIPPED: Gate plugins removed in WP-02
         # Protocol/base class still supports node_id, but no concrete implementations exist
 
-        # Test sink
-        csv_sink_cls = manager.get_sink_by_name("csv")
-        assert csv_sink_cls is not None
+        # Test sink (use JSONSink which accepts dynamic schemas)
+        json_sink_cls = manager.get_sink_by_name("json")
+        assert json_sink_cls is not None
         # Protocols don't define __init__ but concrete classes do
-        sink = csv_sink_cls({"path": "/tmp/test.csv", "schema": DYNAMIC_SCHEMA})  # type: ignore[call-arg]
+        sink = json_sink_cls({"path": "/tmp/test.json", "schema": DYNAMIC_SCHEMA, "format": "jsonl"})  # type: ignore[call-arg]
         assert hasattr(sink, "node_id")
         sink.node_id = "sink-001"
         assert sink.node_id == "sink-001"

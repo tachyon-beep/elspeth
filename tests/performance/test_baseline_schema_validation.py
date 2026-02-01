@@ -44,11 +44,12 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: output.csv
+      path: output.json
       schema:
         fields: dynamic
+      format: jsonl
 
 default_sink: output
 """
@@ -95,11 +96,12 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: output.csv
+      path: output.json
       schema:
         fields: dynamic
+      format: jsonl
 
 default_sink: output
 """
@@ -158,11 +160,12 @@ transforms:
 
 sinks:
   output:
-    plugin: csv
+    plugin: json
     options:
-      path: output.csv
+      path: output.json
       schema:
         fields: dynamic
+      format: jsonl
 
 default_sink: output
 """

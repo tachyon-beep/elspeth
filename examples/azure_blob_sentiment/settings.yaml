@@ -36,7 +36,7 @@ source:
       has_header: true
       encoding: utf-8
     schema:
-      mode: free
+      mode: strict
       fields:
         - "id: int"
         - "text: str"

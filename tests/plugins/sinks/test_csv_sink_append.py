@@ -7,8 +7,8 @@ import pytest
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
-# Dynamic schema config for tests
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+# Strict schema config for tests - CSVSink requires fixed columns
+STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int", "value: str"]}
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ class TestCSVSinkAppendMode:
         sink1 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
         sink1.write([{"id": 1, "value": "a"}], ctx)
@@ -45,7 +45,7 @@ class TestCSVSinkAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
@@ -62,11 +62,14 @@ class TestCSVSinkAppendMode:
         """Append mode should use headers from existing file."""
         output_path = tmp_path / "output.csv"
 
+        # Use a schema matching the test data
+        name_age_schema = {"mode": "strict", "fields": ["name: str", "age: int"]}
+
         # First write with specific column order
         sink1 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": name_age_schema,
             }
         )
         sink1.write([{"name": "Alice", "age": 30}], ctx)
@@ -81,7 +84,7 @@ class TestCSVSinkAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": name_age_schema,
                 "mode": "append",
             }
         )
@@ -105,7 +108,7 @@ class TestCSVSinkAppendMode:
         sink = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
@@ -127,7 +130,7 @@ class TestCSVSinkAppendMode:
         sink1 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
         sink1.write([{"id": 1}], ctx)
@@ -138,7 +141,7 @@ class TestCSVSinkAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
         sink2.write([{"id": 2}], ctx)
@@ -160,7 +163,7 @@ class TestCSVSinkAppendMode:
         sink = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
@@ -182,7 +185,7 @@ class TestCSVSinkAppendMode:
         sink1 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
             }
         )
         sink1.write([{"id": 1}], ctx)
@@ -193,7 +196,7 @@ class TestCSVSinkAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
@@ -205,7 +208,7 @@ class TestCSVSinkAppendMode:
         sink3 = CSVSink(
             {
                 "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
+                "schema": STRICT_SCHEMA,
                 "mode": "append",
             }
         )
@@ -230,7 +233,7 @@ class TestCSVSinkAppendExplicitSchema:
     def test_append_explicit_schema_rejects_missing_fields(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Append mode should fail fast when file headers are missing schema fields.
 
-        When schema is explicit (not dynamic), append mode must validate that
+        When schema is explicit (strict mode), append mode must validate that
         existing file headers contain all required schema fields. Missing fields
         should raise a clear error at file open time, not during write.
         """
@@ -244,23 +247,23 @@ class TestCSVSinkAppendExplicitSchema:
             writer.writeheader()
             writer.writerow({"id": 1})
 
-        # Explicit schema requires both 'id' and 'score'
-        explicit_schema = {
-            "mode": "free",
+        # Strict schema requires both 'id' and 'score'
+        strict_schema = {
+            "mode": "strict",
             "fields": ["id: int", "score: float?"],
         }
 
         sink = CSVSink(
             {
                 "path": str(output_path),
-                "schema": explicit_schema,
+                "schema": strict_schema,
                 "mode": "append",
             }
         )
 
         # Should fail fast at write time (when _open_file is called)
         # with a clear error about schema mismatch
-        with pytest.raises(ValueError, match=r"schema.*mismatch|missing.*field"):
+        with pytest.raises(ValueError, match=r"schema.*mismatch|missing.*field|Missing"):
             sink.write([{"id": 2, "score": 1.5}], ctx)
 
     def test_append_explicit_schema_rejects_wrong_order_strict(self, tmp_path: Path, ctx: PluginContext) -> None:
@@ -308,16 +311,16 @@ class TestCSVSinkAppendExplicitSchema:
             writer.writeheader()
             writer.writerow({"id": 1, "score": 1.0})
 
-        # Explicit schema matches file headers
-        explicit_schema = {
-            "mode": "free",
+        # Strict schema matches file headers
+        strict_schema = {
+            "mode": "strict",
             "fields": ["id: int", "score: float"],
         }
 
         sink = CSVSink(
             {
                 "path": str(output_path),
-                "schema": explicit_schema,
+                "schema": strict_schema,
                 "mode": "append",
             }
         )
@@ -329,39 +332,6 @@ class TestCSVSinkAppendExplicitSchema:
         assert artifact.size_bytes > 0
 
         # Verify both rows present
-        content = output_path.read_text()
-        lines = content.strip().split("\n")
-        assert len(lines) == 3  # header + 2 rows
-
-    def test_append_dynamic_schema_still_uses_file_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
-        """Append mode with dynamic schema should continue to use file headers.
-
-        Dynamic schema = no validation. File headers are authoritative.
-        This is existing behavior and should remain unchanged.
-        """
-        import csv
-
-        output_path = tmp_path / "output.csv"
-
-        # Create file with 'id' column only
-        with open(output_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["id"])
-            writer.writeheader()
-            writer.writerow({"id": 1})
-
-        sink = CSVSink(
-            {
-                "path": str(output_path),
-                "schema": DYNAMIC_SCHEMA,
-                "mode": "append",
-            }
-        )
-
-        # Dynamic schema: no validation, uses file headers
-        # Extra fields in row are ignored by DictWriter
-        sink.write([{"id": 2}], ctx)
-        sink.close()
-
         content = output_path.read_text()
         lines = content.strip().split("\n")
         assert len(lines) == 3  # header + 2 rows

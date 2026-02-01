@@ -25,7 +25,7 @@ class TestCLIResumeCallsConfigureForResume:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "mode": "write",
             }
         )
@@ -79,7 +79,7 @@ class TestDatabaseSinkResumeCapability:
             {
                 "url": "sqlite:///:memory:",
                 "table": "test_output",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "if_exists": "replace",
             }
         )
@@ -92,7 +92,7 @@ class TestDatabaseSinkResumeCapability:
             {
                 "url": "sqlite:///:memory:",
                 "table": "test_output",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "if_exists": "replace",
             }
         )
@@ -112,7 +112,7 @@ class TestCSVSinkResumeCapability:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -123,7 +123,7 @@ class TestCSVSinkResumeCapability:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
                 "mode": "write",
             }
         )

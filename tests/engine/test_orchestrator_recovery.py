@@ -64,7 +64,7 @@ class TestOrchestratorResume:
         }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=agg_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json", config=schema_config)
         graph.add_edge("source", "agg_node", label="continue")
         graph.add_edge("agg_node", "sink", label="continue")
         return graph
@@ -252,11 +252,11 @@ class TestOrchestratorResume:
 
         Uses real plugin types for proper protocol compliance.
         """
-        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sinks.json_sink import JSONSink
         from elspeth.plugins.sources.null_source import NullSource
 
         source = NullSource({"schema": {"fields": "dynamic"}})
-        sink = CSVSink({"path": "/tmp/test_recovery.csv", "schema": {"fields": "dynamic"}, "mode": "write"})
+        sink = JSONSink({"path": "/tmp/test_recovery.json", "schema": {"fields": "dynamic"}, "mode": "write"})
 
         return PipelineConfig(
             source=source,
@@ -284,7 +284,7 @@ class TestOrchestratorResume:
         # Must match the node IDs registered in failed_run_with_batch
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=agg_config)
-        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json", config=schema_config)
         graph.add_edge("source", "agg_node", label="continue")
         graph.add_edge("agg_node", "sink", label="continue")
 
