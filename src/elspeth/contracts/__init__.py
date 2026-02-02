@@ -103,9 +103,14 @@ from elspeth.contracts.errors import (
     BatchPendingError,
     CoalesceFailureReason,
     ConfigGateReason,
+    # Schema contract violations
+    ContractMergeError,
+    ContractViolation,
     ErrorDetail,
     ExecutionError,
+    ExtraFieldViolation,
     FrameworkBugError,
+    MissingFieldViolation,
     PluginContractViolation,
     PluginGateReason,
     QueryFailureDetail,
@@ -116,6 +121,7 @@ from elspeth.contracts.errors import (
     TransformErrorCategory,
     TransformErrorReason,
     TransformSuccessReason,
+    TypeMismatchViolation,
     UsageStats,
 )
 from elspeth.contracts.events import (
@@ -143,7 +149,15 @@ from elspeth.contracts.results import (
     TransformResult,
 )
 from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+
+# Schema contracts (Phase 1: Core Contracts)
+from elspeth.contracts.schema_contract import (
+    FieldContract,
+    PipelineRow,
+    SchemaContract,
+)
 from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.type_normalization import normalize_type_for_contract
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -180,6 +194,12 @@ __all__ = [  # Grouped by category for readability
     "TransformErrorReason",
     "TransformSuccessReason",
     "UsageStats",
+    # schema contract violations
+    "ContractMergeError",
+    "ContractViolation",
+    "ExtraFieldViolation",
+    "MissingFieldViolation",
+    "TypeMismatchViolation",
     "Batch",
     "BatchMember",
     "BatchOutput",
@@ -295,4 +315,9 @@ __all__ = [  # Grouped by category for readability
     "SanitizedWebhookUrl",
     # sink
     "OutputValidationResult",
+    # schema contracts
+    "FieldContract",
+    "PipelineRow",
+    "SchemaContract",
+    "normalize_type_for_contract",
 ]
