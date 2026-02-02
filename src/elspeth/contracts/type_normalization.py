@@ -15,6 +15,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+# Types that can be serialized in checkpoint and restored in from_checkpoint()
+# Must match type_map in SchemaContract.from_checkpoint()
+ALLOWED_CONTRACT_TYPES: frozenset[type] = frozenset(
+    {
+        int,
+        str,
+        float,
+        bool,
+        type(None),
+        datetime,
+    }
+)
+
 
 def normalize_type_for_contract(value: Any) -> type:
     """Convert value's type to Python primitive for contract storage.
@@ -54,4 +67,13 @@ def normalize_type_for_contract(value: Any) -> type:
     if isinstance(value, (np.str_, np.bytes_)):
         return str
 
-    return type(value)
+    # Reject unsupported types immediately (fail-fast for checkpoint compatibility)
+    # Per CLAUDE.md: Silent failures corrupt audit trail - crash early with clear error
+    final_type = type(value)
+    if final_type not in ALLOWED_CONTRACT_TYPES:
+        raise TypeError(
+            f"Unsupported type '{final_type.__name__}' for schema contract. "
+            f"Allowed types: {', '.join(sorted(t.__name__ for t in ALLOWED_CONTRACT_TYPES))}. "
+            f"Use 'any' type declaration for fields with complex/dynamic types."
+        )
+    return final_type

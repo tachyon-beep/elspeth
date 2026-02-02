@@ -75,7 +75,7 @@ After running, use these MCP tools to explore the contract:
 | File | Purpose |
 |------|---------|
 | `input.csv` | CSV with intentionally crazy headers |
-| `suite.yaml` | Pipeline configuration with `normalize_fields: true` |
+| `suite.yaml` | Pipeline with `normalize_fields: true` and typed schema |
 | `output/processed.csv` | Regular transactions (< $500) |
 | `output/high_value.csv` | High-value transactions (>= $500) |
 | `runs/audit.db` | Landscape audit trail with contract records |

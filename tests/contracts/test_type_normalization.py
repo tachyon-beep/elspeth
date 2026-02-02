@@ -170,47 +170,50 @@ class TestNormalizeTypeForContract:
             normalize_type_for_contract(np.float64("inf"))
 
     # -------------------------------------------------------------------------
-    # Unknown types pass through
+    # Unknown types are rejected (fail-fast for checkpoint compatibility)
     # -------------------------------------------------------------------------
 
-    def test_list_returns_list(self) -> None:
-        """[1, 2, 3] -> list."""
+    def test_decimal_raises_typeerror(self) -> None:
+        """Decimal raises TypeError - not serializable in checkpoint."""
+        from decimal import Decimal
+
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
-        result = normalize_type_for_contract([1, 2, 3])
-        assert result is list
+        with pytest.raises(TypeError, match=r"Unsupported type.*Decimal"):
+            normalize_type_for_contract(Decimal("100.50"))
 
-    def test_dict_returns_dict(self) -> None:
-        """{'a': 1} -> dict."""
+    def test_list_raises_typeerror(self) -> None:
+        """list raises TypeError - use 'any' type for complex fields."""
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
-        result = normalize_type_for_contract({"a": 1})
-        assert result is dict
+        with pytest.raises(TypeError, match=r"Unsupported type.*list"):
+            normalize_type_for_contract([1, 2, 3])
 
-    def test_tuple_returns_tuple(self) -> None:
-        """(1, 2, 3) -> tuple."""
+    def test_dict_raises_typeerror(self) -> None:
+        """dict raises TypeError - use 'any' type for complex fields."""
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
-        result = normalize_type_for_contract((1, 2, 3))
-        assert result is tuple
+        with pytest.raises(TypeError, match=r"Unsupported type.*dict"):
+            normalize_type_for_contract({"a": 1})
 
-    def test_set_returns_set(self) -> None:
-        """{1, 2, 3} -> set."""
+    def test_uuid_raises_typeerror(self) -> None:
+        """UUID raises TypeError - not serializable in checkpoint."""
+        from uuid import UUID
+
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
-        result = normalize_type_for_contract({1, 2, 3})
-        assert result is set
+        with pytest.raises(TypeError, match=r"Unsupported type.*UUID"):
+            normalize_type_for_contract(UUID("12345678-1234-5678-1234-567812345678"))
 
-    def test_custom_class_returns_class_type(self) -> None:
-        """Custom class instance returns its type."""
+    def test_custom_class_raises_typeerror(self) -> None:
+        """Custom class raises TypeError - not serializable in checkpoint."""
         from elspeth.contracts.type_normalization import normalize_type_for_contract
 
         class CustomClass:
             pass
 
-        obj = CustomClass()
-        result = normalize_type_for_contract(obj)
-        assert result is CustomClass
+        with pytest.raises(TypeError, match=r"Unsupported type.*CustomClass"):
+            normalize_type_for_contract(CustomClass())
 
 
 class TestEdgeCases:

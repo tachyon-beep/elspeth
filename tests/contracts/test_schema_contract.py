@@ -310,21 +310,33 @@ class TestSchemaContractMutation:
             original.with_field("bad", "Bad", float("nan"))
 
     def test_with_field_locked_rejects_existing(self) -> None:
-        """with_field() raises if field already exists and contract is locked."""
+        """with_field() raises if field already exists (locked contract)."""
         fc = FieldContract("amount", "'Amount'", int, True, "declared")
         locked = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=True)
 
-        with pytest.raises(TypeError, match="already locked"):
+        with pytest.raises(TypeError, match="already exists"):
             locked.with_field("amount", "'Amount'", 200)
 
-    def test_with_field_unlocked_allows_update(self) -> None:
-        """with_field() allows adding fields when not locked."""
+    def test_with_field_unlocked_allows_new_field(self) -> None:
+        """with_field() allows adding NEW fields when not locked."""
         fc = FieldContract("a", "A", int, True, "declared")
         unlocked = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=False)
 
         # Can add new field
         updated = unlocked.with_field("b", "B", "hello")
         assert len(updated.fields) == 2
+
+    def test_with_field_unlocked_rejects_duplicate(self) -> None:
+        """with_field() rejects duplicate field even when unlocked.
+
+        Per CLAUDE.md: Adding duplicate is a bug in caller code.
+        Prevents broken O(1) lookup invariant from duplicate fields.
+        """
+        fc = FieldContract("amount", "'Amount'", int, True, "declared")
+        unlocked = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=False)
+
+        with pytest.raises(TypeError, match="already exists"):
+            unlocked.with_field("amount", "'Amount'", 200)
 
     def test_with_field_updates_indices(self) -> None:
         """with_field() updates name resolution indices."""

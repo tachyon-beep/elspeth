@@ -143,11 +143,13 @@ class SchemaContract:
             New SchemaContract with field added
 
         Raises:
-            TypeError: If field exists and contract is locked
+            TypeError: If field already exists (duplicate prevention)
             ValueError: If value is NaN or Infinity
         """
-        if self.locked and normalized in self._by_normalized:
-            raise TypeError(f"Field '{original}' ({normalized}) already locked")
+        # Always check for duplicates - prevents broken O(1) lookup invariant
+        # Per CLAUDE.md: Adding duplicate is a bug in caller code
+        if normalized in self._by_normalized:
+            raise TypeError(f"Field '{original}' ({normalized}) already exists in contract")
 
         new_field = FieldContract(
             normalized_name=normalized,
