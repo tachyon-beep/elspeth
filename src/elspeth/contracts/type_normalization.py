@@ -12,8 +12,10 @@ import math
 from datetime import datetime
 from typing import Any
 
-import numpy as np
-import pandas as pd
+# NOTE: numpy and pandas are imported LAZILY inside normalize_type_for_contract()
+# to avoid breaking the contracts leaf module boundary. Importing them at module
+# level pulls in 400+ modules just for type normalization.
+# FIX: P2-2026-01-30-6fp (regression from type_normalization.py addition)
 
 # Types that can be serialized in checkpoint and restored in from_checkpoint()
 # Must match type_map in SchemaContract.from_checkpoint()
@@ -40,7 +42,15 @@ def normalize_type_for_contract(value: Any) -> type:
 
     Raises:
         ValueError: If value is NaN or Infinity (invalid for audit trail)
+
+    Note:
+        numpy and pandas are imported lazily inside this function to avoid
+        pulling in heavy dependencies when the contracts package is imported.
     """
+    # Lazy imports to maintain contracts as a leaf module
+    import numpy as np
+    import pandas as pd
+
     if value is None:
         return type(None)
 
