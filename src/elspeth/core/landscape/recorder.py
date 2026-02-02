@@ -369,10 +369,16 @@ class LandscapeRecorder:
         if not isinstance(resolution_data, dict):
             raise ValueError(f"Corrupt field resolution data for run {run_id}: expected dict, got {type(resolution_data).__name__}")
 
-        resolution_mapping = resolution_data.get("resolution_mapping")
-        if resolution_mapping is None:
-            return None
+        # Tier 1: resolution_mapping MUST exist if JSON is stored
+        # record_source_field_resolution() always stores this key, so missing = corruption
+        if "resolution_mapping" not in resolution_data:
+            raise ValueError(
+                f"Corrupt field resolution data for run {run_id}: "
+                f"missing required key 'resolution_mapping'. "
+                f"This indicates database corruption - record_source_field_resolution() always stores this key."
+            )
 
+        resolution_mapping = resolution_data["resolution_mapping"]
         if not isinstance(resolution_mapping, dict):
             raise ValueError(f"Corrupt resolution_mapping for run {run_id}: expected dict, got {type(resolution_mapping).__name__}")
 
