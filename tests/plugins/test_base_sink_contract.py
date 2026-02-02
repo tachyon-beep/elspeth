@@ -1,0 +1,85 @@
+# tests/plugins/test_base_sink_contract.py
+"""Tests for BaseSink output contract tracking."""
+
+from typing import Any
+
+from elspeth.contracts import ArtifactDescriptor
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+from elspeth.plugins.base import BaseSink
+from elspeth.plugins.context import PluginContext
+
+
+class StubSink(BaseSink):
+    """Stub sink implementation for testing."""
+
+    name = "stub"
+    input_schema = None  # type: ignore
+
+    def write(
+        self,
+        rows: list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> ArtifactDescriptor:
+        return ArtifactDescriptor(
+            content_hash="abc123",
+            size_bytes=0,
+        )
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+class TestBaseSinkContract:
+    """Test contract tracking on BaseSink."""
+
+    def test_get_output_contract_returns_none_initially(self) -> None:
+        """get_output_contract() returns None when not set."""
+        sink = StubSink({})
+        assert sink.get_output_contract() is None
+
+    def test_set_output_contract(self) -> None:
+        """set_output_contract() stores contract for retrieval."""
+        sink = StubSink({})
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "id", int, True, "declared"),),
+            locked=True,
+        )
+
+        sink.set_output_contract(contract)
+
+        assert sink.get_output_contract() is contract
+
+    def test_update_output_contract(self) -> None:
+        """Contract can be updated."""
+        sink = StubSink({})
+
+        # Initial contract
+        initial = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "id", int, True, "declared"),),
+            locked=True,
+        )
+        sink.set_output_contract(initial)
+
+        # Update with different contract
+        updated = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract("id", "id", int, True, "declared"),
+                FieldContract("name", "name", str, True, "declared"),
+            ),
+            locked=True,
+        )
+        sink.set_output_contract(updated)
+
+        retrieved = sink.get_output_contract()
+        assert retrieved is updated
+        assert retrieved is not initial
+
+    def test_class_attribute_default_is_none(self) -> None:
+        """Class attribute _output_contract defaults to None."""
+        assert BaseSink._output_contract is None

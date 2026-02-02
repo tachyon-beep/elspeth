@@ -308,6 +308,9 @@ class BaseSink(ABC):
         # Intentional no-op - most sinks don't use restore_source_headers
         _ = resolution_mapping  # Explicitly consume the argument
 
+    # Output contract for schema-aware sinks (Phase 3)
+    _output_contract: "SchemaContract | None" = None
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -315,6 +318,7 @@ class BaseSink(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self._output_contract = None
 
     @abstractmethod
     def write(
@@ -342,6 +346,27 @@ class BaseSink(ABC):
     def close(self) -> None:
         """Close and release resources."""
         ...
+
+    # === Output Contract Support (Phase 3) ===
+
+    def get_output_contract(self) -> "SchemaContract | None":
+        """Get the current output contract.
+
+        Returns:
+            SchemaContract if set, None otherwise
+        """
+        return self._output_contract
+
+    def set_output_contract(self, contract: "SchemaContract") -> None:
+        """Set or update the output contract.
+
+        Used for schema-aware sinks that need field metadata (e.g., for
+        restoring original header names in CSV output).
+
+        Args:
+            contract: The schema contract to use for output operations
+        """
+        self._output_contract = contract
 
     # === Lifecycle Hooks (Phase 3) ===
 
