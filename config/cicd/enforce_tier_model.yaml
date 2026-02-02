@@ -502,6 +502,11 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
+- key: contracts/transform_contract.py:R5:_is_union_type:fp=a9ba219b5d0e0a54
+  owner: architecture
+  reason: Type annotation introspection - required to detect Union/Optional types
+  safety: Code reviewed - same pattern as data.py:_is_union_type
+  expires: '2026-05-02'
 - key: contracts/audit.py:R5:_validate_enum:fp=f48a15b1272c5363
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions

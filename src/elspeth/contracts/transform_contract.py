@@ -1,0 +1,137 @@
+"""Contract utilities for transform input/output validation.
+
+Transforms have explicit schemas (PluginSchema subclasses) that define
+their input and output contracts. This module bridges PluginSchema
+(Pydantic) with SchemaContract (frozen dataclass).
+"""
+
+from __future__ import annotations
+
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
+
+from elspeth.contracts.data import PluginSchema
+from elspeth.contracts.errors import ContractViolation
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+# Map Python types to contract types
+_TYPE_MAP: dict[type, type] = {
+    int: int,
+    str: str,
+    float: float,
+    bool: bool,
+    type(None): type(None),
+}
+
+
+def _is_union_type(t: Any) -> bool:
+    """Check if type is a Union (typing.Union or types.UnionType)."""
+    origin = get_origin(t)
+    return origin is Union or isinstance(t, UnionType)
+
+
+def _get_python_type(annotation: Any) -> type:
+    """Extract Python type from type annotation.
+
+    Handles Optional, Union, etc. by taking the first non-None type.
+    Unknown types return `object` (the 'any' type in contracts).
+
+    Args:
+        annotation: Type annotation from schema
+
+    Returns:
+        Python primitive type, or object for unknown types
+    """
+    # Handle Optional[X] which is Union[X, None] or X | None
+    if _is_union_type(annotation):
+        # Union type - get first non-None arg
+        args = get_args(annotation)
+        for arg in args:
+            if arg is not type(None):
+                # Return mapped type, or 'object' for unknown types (allows 'any')
+                if arg in _TYPE_MAP:
+                    return _TYPE_MAP[arg]
+                return object
+        return type(None)
+
+    # Simple type - return mapped type, or 'object' for unknown types
+    if annotation in _TYPE_MAP:
+        return _TYPE_MAP[annotation]
+    return object
+
+
+def create_output_contract_from_schema(
+    schema_class: type[PluginSchema],
+) -> SchemaContract:
+    """Create SchemaContract from PluginSchema class.
+
+    Extracts field types from schema annotations. The contract is
+    always locked since transform schemas are static.
+
+    Args:
+        schema_class: PluginSchema subclass
+
+    Returns:
+        Locked SchemaContract with declared fields
+    """
+    # Check if schema allows extra fields
+    # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
+    # Direct access is correct per Tier 1 trust model - missing key would be our bug.
+    extra = schema_class.model_config["extra"]
+
+    if extra == "allow":
+        mode = "FLEXIBLE"
+    elif extra == "forbid":
+        mode = "FIXED"
+    else:
+        mode = "FIXED"  # Default: transforms have fixed output (extra="ignore")
+
+    # Get field information from Pydantic model_fields
+    # This gives us accurate required/optional info
+    model_fields = schema_class.model_fields
+
+    # Build FieldContracts
+    fields: list[FieldContract] = []
+
+    for name, field_info in model_fields.items():
+        if name.startswith("_"):
+            continue  # Skip private fields
+
+        # Get the annotation from field_info
+        annotation = field_info.annotation
+        python_type = _get_python_type(annotation)
+
+        # Field is required if no default and not Optional
+        required = field_info.is_required()
+
+        fields.append(
+            FieldContract(
+                normalized_name=name,
+                original_name=name,  # No resolution for transform outputs
+                python_type=python_type,
+                required=required,
+                source="declared",
+            )
+        )
+
+    return SchemaContract(
+        mode=mode,  # type: ignore[arg-type]
+        fields=tuple(fields),
+        locked=True,  # Transform schemas are static
+    )
+
+
+def validate_output_against_contract(
+    output: dict[str, Any],
+    contract: SchemaContract,
+) -> list[ContractViolation]:
+    """Validate transform output against output contract.
+
+    Args:
+        output: Transform output row
+        contract: Output schema contract
+
+    Returns:
+        List of violations (empty if valid)
+    """
+    return contract.validate(output)
