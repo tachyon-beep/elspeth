@@ -31,36 +31,28 @@ class TestContractAwareRow:
             "simple": "value",
         }
 
-    def test_access_by_normalized_name(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_access_by_normalized_name(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Access by normalized name works."""
         row = ContractAwareRow(data, contract)
 
         assert row["amount_usd"] == 100
         assert row["customer_id"] == "C001"
 
-    def test_access_by_original_name(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_access_by_original_name(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Access by original name works."""
         row = ContractAwareRow(data, contract)
 
         assert row["'Amount USD'"] == 100
         assert row["Customer ID"] == "C001"
 
-    def test_access_by_attribute(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_access_by_attribute(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Dot notation access works for normalized names."""
         row = ContractAwareRow(data, contract)
 
         assert row.amount_usd == 100
         assert row.customer_id == "C001"
 
-    def test_contains_normalized(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_contains_normalized(self, data: dict[str, object], contract: SchemaContract) -> None:
         """'in' operator works with normalized names."""
         row = ContractAwareRow(data, contract)
 
@@ -68,18 +60,14 @@ class TestContractAwareRow:
         assert "customer_id" in row
         assert "nonexistent" not in row
 
-    def test_contains_original(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_contains_original(self, data: dict[str, object], contract: SchemaContract) -> None:
         """'in' operator works with original names."""
         row = ContractAwareRow(data, contract)
 
         assert "'Amount USD'" in row
         assert "Customer ID" in row
 
-    def test_keys_returns_normalized(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_keys_returns_normalized(self, data: dict[str, object], contract: SchemaContract) -> None:
         """keys() returns normalized names for iteration."""
         row = ContractAwareRow(data, contract)
 
@@ -88,36 +76,28 @@ class TestContractAwareRow:
         assert "amount_usd" in keys
         assert "'Amount USD'" not in keys  # Normalized only
 
-    def test_missing_field_raises_keyerror(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_missing_field_raises_keyerror(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Unknown field raises KeyError."""
         row = ContractAwareRow(data, contract)
 
         with pytest.raises(KeyError, match="nonexistent"):
             _ = row["nonexistent"]
 
-    def test_missing_attr_raises_attributeerror(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_missing_attr_raises_attributeerror(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Unknown attribute raises AttributeError."""
         row = ContractAwareRow(data, contract)
 
         with pytest.raises(AttributeError, match="nonexistent"):
             _ = row.nonexistent
 
-    def test_private_attr_raises_attributeerror(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_private_attr_raises_attributeerror(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Private attributes raise AttributeError (not delegated)."""
         row = ContractAwareRow(data, contract)
 
         with pytest.raises(AttributeError):
             _ = row._private
 
-    def test_get_with_default(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_get_with_default(self, data: dict[str, object], contract: SchemaContract) -> None:
         """get() method supports default values."""
         row = ContractAwareRow(data, contract)
 
@@ -126,9 +106,7 @@ class TestContractAwareRow:
         assert row.get("nonexistent", "default") == "default"
         assert row.get("nonexistent") is None
 
-    def test_iteration_yields_normalized_keys(
-        self, data: dict[str, object], contract: SchemaContract
-    ) -> None:
+    def test_iteration_yields_normalized_keys(self, data: dict[str, object], contract: SchemaContract) -> None:
         """Iteration yields normalized keys."""
         row = ContractAwareRow(data, contract)
 
