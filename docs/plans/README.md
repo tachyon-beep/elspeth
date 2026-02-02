@@ -17,7 +17,7 @@ docs/plans/
 └── README.md                    # This file
 ```
 
-## In-Progress Plans (3)
+## In-Progress Plans (4)
 
 Plans actively being worked on:
 
@@ -26,6 +26,7 @@ Plans actively being worked on:
 | `in-progress/2026-01-26-recorder-refactoring.md` | Landscape recorder refactor into repository modules |
 | `in-progress/2026-01-30-tier2-tracing-implementation.md` | Tier 2 plugin tracing (Azure AI + Langfuse) |
 | `in-progress/RC2-remediation.md` | RC-2 remediation and phased hardening roadmap |
+| `in-progress/2026-02-02-whitelist-reduction.md` | Tier model whitelist reduction - fix bug-hiding patterns |
 
 ## Root-Level Plans (1)
 

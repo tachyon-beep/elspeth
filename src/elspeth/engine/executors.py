@@ -975,13 +975,26 @@ class AggregationExecutor:
         Args:
             node_id: Aggregation node ID
             token: Token with row data to buffer
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
+                This prevents silent data loss where rows are buffered but no
+                trigger evaluator exists to determine when to flush.
         """
-        if node_id not in self._buffers:
-            self._buffers[node_id] = []
-            self._buffer_tokens[node_id] = []
+        # Validate node is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        # Without this check, rows could be buffered without a trigger evaluator,
+        # meaning they'd sit in the buffer forever with no way to flush.
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"buffer_row called for node '{node_id}' which is not in aggregation_settings. "
+                f"Only configured aggregation nodes can buffer rows. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
 
         # Create batch on first row if needed
-        if self._batch_ids.get(node_id) is None:
+        # Note: We use node_id directly since we've validated it exists in aggregation_settings,
+        # which means it was initialized in __init__ with buffers and trigger evaluator.
+        if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
             batch = self._recorder.create_batch(
                 run_id=self._run_id,
                 aggregation_node_id=node_id,
@@ -1005,10 +1018,9 @@ class AggregationExecutor:
         )
         self._member_counts[batch_id] = ordinal + 1
 
-        # Update trigger evaluator
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is not None:
-            evaluator.record_accept()
+        # Update trigger evaluator - direct access since we validated node_id exists
+        # in aggregation_settings, which guarantees a trigger evaluator was created
+        self._trigger_evaluators[node_id].record_accept()
 
     def get_buffered_rows(self, node_id: NodeID) -> list[dict[str, Any]]:
         """Get currently buffered rows (does not clear buffer).
@@ -1084,9 +1096,17 @@ class AggregationExecutor:
         if batch_id is None:
             raise RuntimeError(f"No batch exists for node {node_id} - cannot flush")
 
-        # Get buffered data
-        buffered_rows = list(self._buffers.get(node_id, []))
-        buffered_tokens = list(self._buffer_tokens.get(node_id, []))
+        # Get buffered data - use direct access since batch existence implies buffers exist
+        # (batches are created on first row buffered, so if batch_id exists, buffers must too)
+        # If KeyError here, that indicates internal state corruption in buffer_row.
+        try:
+            buffered_rows = list(self._buffers[node_id])
+            buffered_tokens = list(self._buffer_tokens[node_id])
+        except KeyError as e:
+            raise RuntimeError(
+                f"Internal state corruption: batch_id exists for node '{node_id}' "
+                f"but buffer is missing. batch_id={batch_id}, missing_key={e}"
+            ) from e
 
         if not buffered_rows:
             raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
@@ -1285,9 +1305,9 @@ class AggregationExecutor:
         self._buffer_tokens[node_id] = []
 
         # Reset trigger evaluator for next batch
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is not None:
-            evaluator.reset()
+        # Direct access since buffer_row validates node_id is in aggregation_settings,
+        # which guarantees a trigger evaluator exists
+        self._trigger_evaluators[node_id].reset()
 
         return result, buffered_tokens, flushed_batch_id
 

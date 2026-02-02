@@ -332,16 +332,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:fp=9485b76d310ca217
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:buffer_row:fp=10f1fdfd567ef624
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=ca339dc4c3e28cb0
   owner: architecture
   reason: Optional field access at trust boundary
@@ -363,21 +353,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=bfa25063e4e9f79d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=51b7273eb3864027
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=d6cb5b6bdb3e3108
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=e0ac020c5c8ee19f
   owner: architecture
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
@@ -1805,31 +1780,6 @@ allow_hits:
 - key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:fp=695415b2ec4d8fee
   owner: architecture
   reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:fp=390d961f78a41f00
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=2868a6b1cd26476e
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=ef56dfbd76a36932
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_load_jsonl:fp=3d0ceaddc6984041
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_validate_and_yield:fp=4e443e5ac77a7550
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: plugins/transforms/azure/content_safety.py:R9:AzureContentSafety:_process_row:fp=5555041200ea3e5a
