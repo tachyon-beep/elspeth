@@ -61,9 +61,11 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sinks/database_sink.py:DatabaseSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._open_file:rows (list)"
-  - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_fieldnames_from_schema_or_row:row"
+  - "src/elspeth/plugins/sinks/csv_sink.py:CSVSink._get_field_names_and_display:row"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink.write:rows (list)"
   - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._write_jsonl_batch:rows (list)"
+  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:rows (list)"
+  - "src/elspeth/plugins/sinks/json_sink.py:JSONSink._apply_display_headers:return (list)"
 
   # Transform plugins - row processing
   - "src/elspeth/plugins/transforms/passthrough.py:PassThrough.process:row"
@@ -358,6 +360,14 @@ allowed_dict_patterns:
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter.configure:config"
   - "src/elspeth/telemetry/exporters/console.py:ConsoleExporter._serialize_event:return"
   - "src/elspeth/telemetry/exporters/datadog.py:DatadogExporter.configure:config"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # STRUCTLOG PROCESSORS - Framework boundary
+  # Structlog defines the event_dict type as dict[str, Any]. Processors receive
+  # and return this type as part of structlog's processing pipeline.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - "src/elspeth/core/logging.py:_remove_internal_fields:event_dict"
+  - "src/elspeth/core/logging.py:_remove_internal_fields:return"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # MCP SERVER - External tooling trust boundary
