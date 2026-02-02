@@ -20,11 +20,13 @@ import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts import CallStatus, CallType, PluginSchema, SourceRow
+from elspeth.core.identifiers import validate_field_names
 from elspeth.plugins.azure.auth import AzureAuthConfig
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
+from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
@@ -148,6 +150,18 @@ class AzureBlobSourceConfig(DataPluginConfig):
         default_factory=JSONOptions,
         description="JSON parsing options (encoding, data_key)",
     )
+    columns: list[str] | None = Field(
+        default=None,
+        description="Explicit column names for headerless CSV blobs",
+    )
+    normalize_fields: bool = Field(
+        default=False,
+        description="Normalize CSV headers to valid identifiers (only for CSV format)",
+    )
+    field_mapping: dict[str, str] | None = Field(
+        default=None,
+        description="Override specific normalized field names (requires normalize_fields or columns)",
+    )
     on_validation_failure: str = Field(
         ...,
         description="Sink name for non-conformant rows, or 'discard' for explicit drop",
@@ -171,6 +185,34 @@ class AzureBlobSourceConfig(DataPluginConfig):
             client_id=self.client_id,
             client_secret=self.client_secret,
         )
+        return self
+
+    @model_validator(mode="after")
+    def validate_field_normalization_options(self) -> Self:
+        """Validate field normalization options for CSV format."""
+        if self.format != "csv":
+            if self.normalize_fields or self.columns is not None or self.field_mapping is not None:
+                raise ValueError("normalize_fields, columns, and field_mapping are only supported for CSV format")
+            return self
+
+        if not self.csv_options.has_header and self.normalize_fields:
+            raise ValueError("normalize_fields requires csv_options.has_header: true. Use columns for headerless CSV blobs.")
+
+        if self.csv_options.has_header and self.columns is not None:
+            raise ValueError("columns requires csv_options.has_header: false for headerless CSV blobs.")
+
+        if self.columns is not None and self.normalize_fields:
+            raise ValueError("normalize_fields cannot be used with columns config. The columns config already provides clean names.")
+
+        if self.field_mapping is not None and not self.normalize_fields and self.columns is None:
+            raise ValueError("field_mapping requires normalize_fields: true or columns config")
+
+        if self.columns is not None:
+            validate_field_names(self.columns, "columns")
+
+        if self.field_mapping is not None and self.field_mapping:
+            validate_field_names(list(self.field_mapping.values()), "field_mapping values")
+
         return self
 
     def get_auth_config(self) -> AzureAuthConfig:
@@ -262,6 +304,10 @@ class AzureBlobSource(BaseSource):
         self._format = cfg.format
         self._csv_options = cfg.csv_options
         self._json_options = cfg.json_options
+        self._columns = cfg.columns
+        self._normalize_fields = cfg.normalize_fields
+        self._field_mapping = cfg.field_mapping
+        self._field_resolution: FieldResolution | None = None
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -417,8 +463,11 @@ class AzureBlobSource(BaseSource):
 
             # When headerless CSV with explicit schema, use schema field names
             names_arg = None
-            if not has_header and not self._schema_config.is_dynamic and self._schema_config.fields:
-                names_arg = [field_def.name for field_def in self._schema_config.fields]
+            if not has_header:
+                if self._columns is not None:
+                    names_arg = self._columns
+                elif not self._schema_config.is_dynamic and self._schema_config.fields:
+                    names_arg = [field_def.name for field_def in self._schema_config.fields]
 
             df = pd.read_csv(
                 io.StringIO(text_data),
@@ -449,6 +498,28 @@ class AzureBlobSource(BaseSource):
                     destination=self._on_validation_failure,
                 )
             return  # No rows to process if file is completely unparseable
+
+        if has_header:
+            raw_headers = [str(header) for header in df.columns]
+            self._field_resolution = resolve_field_names(
+                raw_headers=raw_headers,
+                normalize_fields=self._normalize_fields,
+                field_mapping=self._field_mapping,
+                columns=None,
+            )
+            final_headers = self._field_resolution.final_headers
+            if final_headers != raw_headers:
+                df.columns = final_headers
+        elif self._columns is not None:
+            self._field_resolution = resolve_field_names(
+                raw_headers=None,
+                normalize_fields=self._normalize_fields,
+                field_mapping=self._field_mapping,
+                columns=self._columns,
+            )
+            final_headers = self._field_resolution.final_headers
+            if list(df.columns) != final_headers:
+                df.columns = final_headers
 
         # Log row count for operator visibility
         row_count = len(df)
@@ -592,3 +663,13 @@ class AzureBlobSource(BaseSource):
     def close(self) -> None:
         """Release resources (no-op for Azure Blob source)."""
         self._blob_client = None
+
+    def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
+        """Return field resolution mapping for audit trail (CSV only)."""
+        if self._field_resolution is None:
+            return None
+
+        return (
+            self._field_resolution.resolution_mapping,
+            self._field_resolution.normalization_version,
+        )
