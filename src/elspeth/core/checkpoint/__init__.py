@@ -10,7 +10,14 @@ Provides:
 
 from elspeth.contracts import ResumeCheck, ResumePoint
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
-from elspeth.core.checkpoint.manager import CheckpointManager
+from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager
 from elspeth.core.checkpoint.recovery import RecoveryManager
 
-__all__ = ["CheckpointCompatibilityValidator", "CheckpointManager", "RecoveryManager", "ResumeCheck", "ResumePoint"]
+__all__ = [
+    "CheckpointCompatibilityValidator",
+    "CheckpointCorruptionError",
+    "CheckpointManager",
+    "RecoveryManager",
+    "ResumeCheck",
+    "ResumePoint",
+]
