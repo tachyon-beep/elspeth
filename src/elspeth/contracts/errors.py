@@ -550,3 +550,161 @@ class PluginContractViolation(RuntimeError):
     """
 
     pass
+
+
+# =============================================================================
+# Schema Contract Violation Types (Tier 3 - External Data)
+# =============================================================================
+# These exceptions represent validation failures on external/user data.
+# They result in row quarantine, NOT crashes. Per CLAUDE.md Three-Tier Trust Model,
+# Tier 3 data (external) can be "literal trash" and must be handled gracefully.
+#
+# Error messages follow "'original' (normalized)" format for debuggability:
+#   "Required field 'Customer ID' (customer_id) is missing"
+# This shows both what the user sees (original) and what code uses (normalized).
+# =============================================================================
+
+
+class ContractViolation(Exception):
+    """Base exception for schema contract violations.
+
+    All schema contract violations track both the normalized field name
+    (used internally by code) and the original field name (from user's
+    perspective, e.g., CSV column headers).
+
+    Attributes:
+        normalized_name: Internal field name used by code (e.g., "customer_id")
+        original_name: Original field name from external data (e.g., "Customer ID")
+    """
+
+    def __init__(self, *, normalized_name: str, original_name: str) -> None:
+        """Initialize ContractViolation.
+
+        Args:
+            normalized_name: Internal field name used by code
+            original_name: Original field name from external data
+        """
+        self.normalized_name = normalized_name
+        self.original_name = original_name
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format the error message. Override in subclasses for specific messages."""
+        return f"Contract violation on field '{self.original_name}' ({self.normalized_name})"
+
+
+class MissingFieldViolation(ContractViolation):
+    """Raised when a required field is missing from the data.
+
+    This is a Tier 3 data violation - the external data is missing a field
+    that the schema declares as required. Results in row quarantine.
+
+    Example:
+        >>> raise MissingFieldViolation(normalized_name="customer_id", original_name="Customer ID")
+        MissingFieldViolation: Required field 'Customer ID' (customer_id) is missing
+    """
+
+    def _format_message(self) -> str:
+        """Format message showing required field is missing."""
+        return f"Required field '{self.original_name}' ({self.normalized_name}) is missing"
+
+
+class TypeMismatchViolation(ContractViolation):
+    """Raised when a field value has the wrong type.
+
+    This is a Tier 3 data violation - the external data has a value that
+    doesn't match the expected type. Results in row quarantine.
+
+    Attributes:
+        expected_type: The type that was expected (e.g., "int")
+        actual_type: The type that was received (e.g., "str")
+        actual_value: The actual value received (for debugging)
+
+    Example:
+        >>> raise TypeMismatchViolation(
+        ...     normalized_name="amount",
+        ...     original_name="Amount",
+        ...     expected_type="int",
+        ...     actual_type="str",
+        ...     actual_value="not_a_number"
+        ... )
+        TypeMismatchViolation: Field 'Amount' (amount) expected type 'int', got 'str'
+    """
+
+    def __init__(
+        self,
+        *,
+        normalized_name: str,
+        original_name: str,
+        expected_type: str,
+        actual_type: str,
+        actual_value: Any,
+    ) -> None:
+        """Initialize TypeMismatchViolation.
+
+        Args:
+            normalized_name: Internal field name used by code
+            original_name: Original field name from external data
+            expected_type: The type that was expected
+            actual_type: The type that was received
+            actual_value: The actual value received
+        """
+        self.expected_type = expected_type
+        self.actual_type = actual_type
+        self.actual_value = actual_value
+        super().__init__(normalized_name=normalized_name, original_name=original_name)
+
+    def _format_message(self) -> str:
+        """Format message showing type mismatch."""
+        return f"Field '{self.original_name}' ({self.normalized_name}) expected type '{self.expected_type}', got '{self.actual_type}'"
+
+
+class ExtraFieldViolation(ContractViolation):
+    """Raised when an unexpected field is present in FIXED schema mode.
+
+    This is a Tier 3 data violation - the external data contains a field
+    that is not declared in the schema, and the schema is in FIXED mode
+    (no extra fields allowed). Results in row quarantine.
+
+    Example:
+        >>> raise ExtraFieldViolation(normalized_name="unknown_col", original_name="Unknown Col")
+        ExtraFieldViolation: Extra field 'Unknown Col' (unknown_col) not allowed in FIXED mode
+    """
+
+    def _format_message(self) -> str:
+        """Format message showing extra field not allowed."""
+        return f"Extra field '{self.original_name}' ({self.normalized_name}) not allowed in FIXED mode"
+
+
+class ContractMergeError(ValueError):
+    """Raised when schema contracts cannot be merged due to type conflicts.
+
+    This occurs during fork/join (coalesce) operations when parallel paths
+    produce incompatible types for the same field. This is a configuration
+    error (pipeline design issue), not a data error.
+
+    Inherits from ValueError because it represents an invalid combination
+    of schema contracts, not an external data issue.
+
+    Attributes:
+        field: The field name with conflicting types
+        type_a: The type from one path
+        type_b: The type from another path
+
+    Example:
+        >>> raise ContractMergeError(field="amount", type_a="int", type_b="str")
+        ContractMergeError: Cannot merge contracts: field 'amount' has conflicting types 'int' and 'str'
+    """
+
+    def __init__(self, *, field: str, type_a: str, type_b: str) -> None:
+        """Initialize ContractMergeError.
+
+        Args:
+            field: The field name with conflicting types
+            type_a: The type from one path
+            type_b: The type from another path
+        """
+        self.field = field
+        self.type_a = type_a
+        self.type_b = type_b
+        super().__init__(f"Cannot merge contracts: field '{field}' has conflicting types '{type_a}' and '{type_b}'")
