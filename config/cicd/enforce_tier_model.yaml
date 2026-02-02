@@ -612,15 +612,20 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/templates.py:R8:extract_jinja2_fields_with_details:walk:fp=fb8e050ff0d06070
+- key: core/templates.py:R8:extract_jinja2_fields_with_details:walk:fp=735ac69d4aadbe9f
   owner: architecture
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/templates.py:R8:extract_jinja2_fields_with_details:walk:fp=878ae620aa6be2f2
+- key: core/templates.py:R8:extract_jinja2_fields_with_details:walk:fp=136394dfb22a90ee
   owner: architecture
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
+  expires: '2026-05-02'
+- key: core/templates.py:R6:extract_jinja2_fields_with_names:fp=f6a3eb1805fd5f66
+  owner: architecture
+  reason: Contract resolution attempt - KeyError means field not in contract, handled as unresolved
+  safety: Returns explicit resolved=False state, never silently drops - legitimate boundary handling
   expires: '2026-05-02'
 - key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:fp=1126623845d43665
   owner: architecture

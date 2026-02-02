@@ -12,6 +12,7 @@ Plugins are accessed via PluginManager, not direct imports:
 For testing or advanced usage, import directly from module paths:
     from elspeth.plugins.llm.azure import AzureLLMTransform
     from elspeth.plugins.llm.templates import PromptTemplate
+    from elspeth.plugins.llm import ContractAwareRow
 
 Metadata Field Categories
 =========================
@@ -33,6 +34,8 @@ WARNING: Do not build production logic that depends on audit_fields.
 These fields exist for audit trail reconstruction (explain() queries)
 and may change between versions without notice.
 """
+
+from elspeth.plugins.llm.contract_aware_row import ContractAwareRow
 
 # Metadata field suffixes for contract-stable fields (downstream can depend on these)
 LLM_GUARANTEED_SUFFIXES: tuple[str, ...] = (
@@ -131,6 +134,7 @@ __all__ = [
     "LLM_AUDIT_SUFFIXES",
     "LLM_GUARANTEED_SUFFIXES",
     "MULTI_QUERY_GUARANTEED_SUFFIXES",
+    "ContractAwareRow",
     "get_llm_audit_fields",
     "get_llm_guaranteed_fields",
     "get_multi_query_guaranteed_fields",

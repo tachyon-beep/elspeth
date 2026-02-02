@@ -38,6 +38,12 @@ from jinja2.nodes import Const, Getattr, Getitem, Name, Node
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
 
+__all__ = [
+    "extract_jinja2_fields",
+    "extract_jinja2_fields_with_details",
+    "extract_jinja2_fields_with_names",
+]
+
 
 def extract_jinja2_fields(
     template_string: str,
