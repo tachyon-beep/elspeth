@@ -1661,12 +1661,12 @@ allow_hits:
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=5f779299cce1156b
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=529df26a8624a42d
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=595e191e0a2bae44
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=688e26cbcb3aa309
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
@@ -1696,7 +1696,7 @@ allow_hits:
   reason: Pydantic field validator - input comes from YAML which may have wrong types
   safety: ValueError raised with position info - explicit validation failure
   expires: null
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=05865d01c165d3a4
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=4f8918e243e34a1a
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding

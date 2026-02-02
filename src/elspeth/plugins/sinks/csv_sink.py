@@ -7,6 +7,8 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
+from __future__ import annotations
+
 import csv
 import hashlib
 import os
@@ -16,7 +18,9 @@ from typing import IO, TYPE_CHECKING, Any, Literal
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.header_modes import HeaderMode, resolve_headers
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
@@ -80,7 +84,7 @@ class CSVSink(BaseSink):
         """
         self._mode = "append"
 
-    def validate_output_target(self) -> "OutputValidationResult":
+    def validate_output_target(self) -> OutputValidationResult:
         """Validate existing CSV file headers against configured schema.
 
         Checks that:
@@ -167,7 +171,7 @@ class CSVSink(BaseSink):
         self._validate_input = cfg.validate_input
         self._mode = cfg.mode
 
-        # Display header configuration
+        # Display header configuration (legacy options)
         self._display_headers = cfg.display_headers
         self._restore_source_headers = cfg.restore_source_headers
         # Populated lazily on first write if restore_source_headers=True
@@ -175,6 +179,13 @@ class CSVSink(BaseSink):
         # which happens after on_start() is called.
         self._resolved_display_headers: dict[str, str] | None = None
         self._display_headers_resolved: bool = False  # Track if we've attempted resolution
+
+        # New header mode configuration (takes precedence over legacy options)
+        self._headers_mode: HeaderMode = cfg.headers_mode
+        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
+
+        # Output contract for header resolution (set via set_output_contract)
+        self._output_contract: SchemaContract | None = None
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
@@ -391,15 +402,65 @@ class CSVSink(BaseSink):
     def _get_effective_display_headers(self) -> dict[str, str] | None:
         """Get the effective display header mapping.
 
+        Priority order:
+        1. CUSTOM mode with custom mapping from 'headers' config
+        2. ORIGINAL mode with contract - use resolve_headers()
+        3. Legacy display_headers config (explicit mapping)
+        4. Legacy restore_source_headers - resolved display headers
+        5. None (no mapping - use normalized names)
+
         Returns:
             Dict mapping normalized field name -> display name, or None if no
-            display headers are configured.
+            display headers are configured or if using NORMALIZED mode.
         """
-        if self._display_headers is not None:
-            return self._display_headers
+        # NORMALIZED mode = no display mapping
+        if self._headers_mode == HeaderMode.NORMALIZED:
+            return None
+
+        # CUSTOM mode - use custom mapping from config
+        if self._headers_mode == HeaderMode.CUSTOM:
+            if self._headers_custom_mapping is not None:
+                return self._headers_custom_mapping
+            # Fall through to legacy display_headers if custom mapping not set
+            if self._display_headers is not None:
+                return self._display_headers
+            return None
+
+        # ORIGINAL mode - use contract to resolve headers
+        # (mypy knows this is the only remaining case since HeaderMode has exactly 3 values)
+        if self._output_contract is not None:
+            # Use resolve_headers() to build mapping from contract
+            return resolve_headers(
+                contract=self._output_contract,
+                mode=HeaderMode.ORIGINAL,
+                custom_mapping=None,
+            )
+        # Fall through to legacy resolved_display_headers if no contract
         if self._resolved_display_headers is not None:
             return self._resolved_display_headers
+        # No contract and no legacy resolution - return None (fallback to normalized)
         return None
+
+    # === Contract Support ===
+
+    def set_output_contract(self, contract: SchemaContract) -> None:
+        """Set output contract for header resolution.
+
+        When headers mode is ORIGINAL, this contract is used to map
+        normalized field names back to their original source header names.
+
+        Args:
+            contract: Schema contract with field metadata including original names
+        """
+        self._output_contract = contract
+
+    def get_output_contract(self) -> SchemaContract | None:
+        """Get the output contract.
+
+        Returns:
+            The SchemaContract if set, None otherwise
+        """
+        return self._output_contract
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
