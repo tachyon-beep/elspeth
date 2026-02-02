@@ -5,13 +5,17 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import StrictUndefined, TemplateSyntaxError, UndefinedError
 from jinja2.exceptions import SecurityError
 from jinja2.sandbox import SandboxedEnvironment
 
 from elspeth.core.canonical import canonical_json
+from elspeth.plugins.llm.contract_aware_row import ContractAwareRow
+
+if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
 
 
 class TemplateError(Exception):
@@ -30,6 +34,7 @@ class RenderedPrompt:
     template_source: str | None = None  # File path or None if inline
     lookup_hash: str | None = None  # Hash of lookup data or None
     lookup_source: str | None = None  # File path or None
+    contract_hash: str | None = None  # Hash of schema contract or None
 
 
 def _sha256(content: str) -> str:
@@ -133,11 +138,19 @@ class PromptTemplate:
         """File path for lookup data, or None."""
         return self._lookup_source
 
-    def render(self, row: dict[str, Any]) -> str:
+    def render(
+        self,
+        row: dict[str, Any],
+        *,
+        contract: SchemaContract | None = None,
+    ) -> str:
         """Render template with row data.
 
         Args:
             row: Row data (accessed as row.* in template)
+            contract: Optional schema contract for dual-name resolution.
+                If provided, templates can use original names like
+                {{ row["'Amount USD'"] }} in addition to normalized names.
 
         Returns:
             Rendered prompt string
@@ -145,9 +158,15 @@ class PromptTemplate:
         Raises:
             TemplateError: If rendering fails (undefined variable, sandbox violation, etc.)
         """
+        # Wrap row for dual-name access if contract provided
+        if contract is not None:
+            row_context: Any = ContractAwareRow(row, contract)
+        else:
+            row_context = row
+
         # Build context with namespaced data
         context: dict[str, Any] = {
-            "row": row,
+            "row": row_context,
             "lookup": self._lookup_data,
         }
 
@@ -160,11 +179,19 @@ class PromptTemplate:
         except Exception as e:
             raise TemplateError(f"Template rendering failed: {e}") from e
 
-    def render_with_metadata(self, row: dict[str, Any]) -> RenderedPrompt:
+    def render_with_metadata(
+        self,
+        row: dict[str, Any],
+        *,
+        contract: SchemaContract | None = None,
+    ) -> RenderedPrompt:
         """Render template and return with audit metadata.
 
         Args:
             row: Row data (accessed as row.* in template)
+            contract: Optional schema contract for dual-name resolution.
+                If provided, templates can use original names and the
+                contract hash will be included in the returned metadata.
 
         Returns:
             RenderedPrompt with prompt string and all hashes
@@ -173,9 +200,10 @@ class PromptTemplate:
             TemplateError: If rendering fails or row contains non-canonicalizable values
                 (e.g., NaN, Infinity)
         """
-        prompt = self.render(row)
+        prompt = self.render(row, contract=contract)
 
         # Compute variables hash using canonical JSON (row data only)
+        # Always hash the raw row data (normalized keys) for determinism
         # Wrap ValueError/TypeError from canonical_json (NaN/Infinity rejection, non-serializable types)
         # This ensures row-scoped failures don't crash the entire run (Tier 2 trust model)
         try:
@@ -186,6 +214,25 @@ class PromptTemplate:
         # Compute rendered prompt hash
         rendered_hash = _sha256(prompt)
 
+        # Compute contract hash if provided
+        contract_hash: str | None = None
+        if contract is not None:
+            contract_hash = _sha256(
+                canonical_json(
+                    {
+                        "mode": contract.mode,
+                        "fields": [
+                            {
+                                "n": fc.normalized_name,
+                                "o": fc.original_name,
+                                "t": fc.python_type.__name__,
+                            }
+                            for fc in sorted(contract.fields, key=lambda f: f.normalized_name)
+                        ],
+                    }
+                )
+            )
+
         return RenderedPrompt(
             prompt=prompt,
             template_hash=self._template_hash,
@@ -194,4 +241,5 @@ class PromptTemplate:
             template_source=self._template_source,
             lookup_hash=self._lookup_hash,
             lookup_source=self._lookup_source,
+            contract_hash=contract_hash,
         )
