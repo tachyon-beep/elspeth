@@ -1190,6 +1190,11 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Modify: `src/elspeth/plugins/llm/base.py`
 - Test: `tests/plugins/llm/test_llm_transform_contract.py` (create new)
 
+**Architecture Note:** `BaseLLMTransform.process()` is **synchronous**. The abstract method
+`_get_llm_client(ctx)` returns an `AuditedLLMClient`, and `process()` calls
+`llm_client.chat_completion()` directly. Tests must mock `_get_llm_client()` to return
+a mock client with `chat_completion()` returning an `LLMResponse`.
+
 **Step 5.1: Write failing tests for LLM transform with contract**
 
 ```python
@@ -1197,30 +1202,41 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 """Tests for LLM transform contract integration."""
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.plugins.clients.llm import LLMResponse
 from elspeth.plugins.llm.base import BaseLLMTransform
 
 
 class MockLLMTransform(BaseLLMTransform):
-    """Test LLM transform."""
+    """Test LLM transform that returns a mock LLM client.
+
+    Overrides _get_llm_client to return a controllable mock client.
+    The mock_response attribute controls what chat_completion() returns.
+    """
 
     name = "mock_llm"
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        self._mock_response = "mocked response"
+        self.mock_response_content = "mocked response"
+        self._mock_client: MagicMock | None = None
 
-    async def _execute_llm_call(
-        self,
-        prompt: str,
-        ctx: Any,
-    ) -> str:
-        return self._mock_response
+    def _get_llm_client(self, ctx: Any) -> MagicMock:
+        """Return a mock LLM client with chat_completion() configured."""
+        if self._mock_client is None:
+            self._mock_client = MagicMock()
+            self._mock_client.chat_completion.return_value = LLMResponse(
+                content=self.mock_response_content,
+                model="mock-model",
+                usage={"prompt_tokens": 10, "completion_tokens": 20},
+                latency_ms=100.0,
+            )
+        return self._mock_client
 
 
 class TestLLMTransformContract:
@@ -1248,50 +1264,58 @@ class TestLLMTransformContract:
 
     @pytest.fixture
     def mock_context(self) -> MagicMock:
-        """Mock plugin context."""
+        """Mock plugin context with required attributes."""
         ctx = MagicMock()
         ctx.run_id = "test-run"
+        ctx.state_id = "test-state"
+        ctx.landscape = MagicMock()
         return ctx
 
-    @pytest.mark.asyncio
-    async def test_process_with_pipeline_row(
+    def test_process_with_pipeline_row(
         self,
         data: dict[str, object],
         contract: SchemaContract,
         mock_context: MagicMock,
     ) -> None:
         """Process accepts PipelineRow and uses contract for template."""
+        # Template uses ORIGINAL name "Product Name" which should resolve
         transform = MockLLMTransform({
             "model": "test-model",
-            "template": "Analyze: {{ row[\"Product Name\"] }}",
+            "template": 'Analyze: {{ row["Product Name"] }}',
+            "schema": {"fields": "dynamic"},
             "required_input_fields": ["product_name"],
         })
 
         pipeline_row = PipelineRow(data, contract)
-        result = await transform.process(pipeline_row, mock_context)
+        result = transform.process(pipeline_row, mock_context)
 
-        assert result.is_success
-        # Template should have resolved "Product Name" to "product_name"
+        assert result.status == "success"
+        # Verify the template actually rendered (contract resolved the name)
+        assert transform._mock_client is not None
+        call_args = transform._mock_client.chat_completion.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+        user_message = next(m for m in messages if m["role"] == "user")
+        assert "Analyze: Widget" in user_message["content"]
 
-    @pytest.mark.asyncio
-    async def test_process_with_dict_no_contract(
+    def test_process_with_dict_no_contract(
         self,
         data: dict[str, object],
         mock_context: MagicMock,
     ) -> None:
         """Process with plain dict works (backwards compatible)."""
+        # Template uses NORMALIZED name (plain dict has normalized keys)
         transform = MockLLMTransform({
             "model": "test-model",
             "template": "Analyze: {{ row.product_name }}",
+            "schema": {"fields": "dynamic"},
             "required_input_fields": ["product_name"],
         })
 
-        result = await transform.process(data, mock_context)
+        result = transform.process(data, mock_context)
 
-        assert result.is_success
+        assert result.status == "success"
 
-    @pytest.mark.asyncio
-    async def test_result_has_contract_when_input_has_contract(
+    def test_result_has_contract_when_input_has_contract(
         self,
         data: dict[str, object],
         contract: SchemaContract,
@@ -1301,16 +1325,88 @@ class TestLLMTransformContract:
         transform = MockLLMTransform({
             "model": "test-model",
             "template": "{{ row.product_name }}",
+            "schema": {"fields": "dynamic"},
             "required_input_fields": ["product_name"],
             "response_field": "llm_result",
         })
 
         pipeline_row = PipelineRow(data, contract)
-        result = await transform.process(pipeline_row, mock_context)
+        result = transform.process(pipeline_row, mock_context)
 
-        assert result.is_success
-        # Result should have a contract (propagated/updated)
+        assert result.status == "success"
+        # Result should have a contract (propagated with new fields)
         assert result.contract is not None
+        # Contract should include the new llm_result field
+        assert result.contract.get_field("llm_result") is not None
+
+    def test_result_no_contract_when_input_is_dict(
+        self,
+        data: dict[str, object],
+        mock_context: MagicMock,
+    ) -> None:
+        """TransformResult has no contract when input is plain dict."""
+        transform = MockLLMTransform({
+            "model": "test-model",
+            "template": "{{ row.product_name }}",
+            "schema": {"fields": "dynamic"},
+            "required_input_fields": ["product_name"],
+        })
+
+        result = transform.process(data, mock_context)
+
+        assert result.status == "success"
+        assert result.contract is None  # No input contract = no output contract
+
+    def test_template_error_with_original_name_no_contract(
+        self,
+        data: dict[str, object],
+        mock_context: MagicMock,
+    ) -> None:
+        """Template using original name fails without contract (expected behavior)."""
+        # Template uses original name but no contract to resolve it
+        transform = MockLLMTransform({
+            "model": "test-model",
+            "template": 'Analyze: {{ row["Product Name"] }}',
+            "schema": {"fields": "dynamic"},
+            "required_input_fields": [],  # Opt-out of field checking
+        })
+
+        result = transform.process(data, mock_context)
+
+        # Should fail because "Product Name" is not a key in plain dict
+        assert result.status == "error"
+        assert result.reason is not None
+        assert "template" in str(result.reason.get("reason", "")).lower()
+
+    def test_contract_propagation_adds_new_fields(
+        self,
+        data: dict[str, object],
+        contract: SchemaContract,
+        mock_context: MagicMock,
+    ) -> None:
+        """Contract propagation infers types for new fields added by transform."""
+        transform = MockLLMTransform({
+            "model": "test-model",
+            "template": "{{ row.product_name }}",
+            "schema": {"fields": "dynamic"},
+            "required_input_fields": ["product_name"],
+            "response_field": "analysis",
+        })
+
+        pipeline_row = PipelineRow(data, contract)
+        result = transform.process(pipeline_row, mock_context)
+
+        assert result.status == "success"
+        assert result.contract is not None
+
+        # New field should be in contract with inferred type
+        analysis_field = result.contract.get_field("analysis")
+        assert analysis_field is not None
+        assert analysis_field.python_type is str  # Inferred from string response
+        assert analysis_field.source == "inferred"
+
+        # Original fields should still be present
+        assert result.contract.get_field("product_name") is not None
 ```
 
 **Step 5.2: Run tests to verify they fail**
@@ -1323,33 +1419,34 @@ Expected: FAIL (process doesn't handle PipelineRow or propagate contracts)
 
 **Step 5.3: Update BaseLLMTransform to support contracts**
 
-In `src/elspeth/plugins/llm/base.py`, update the `process` method:
+In `src/elspeth/plugins/llm/base.py`, make the following changes:
 
-First, add imports:
+**First, add imports** (near existing imports):
 
 ```python
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.contract_propagation import propagate_contract
 ```
 
-Then update the `process` method signature and implementation:
+**Then update the `process` method** - minimal changes to preserve existing logic:
 
 ```python
-async def process(
-    self,
-    row: dict[str, Any] | PipelineRow,
-    ctx: PluginContext,
-) -> TransformResult:
-    """Process a row through the LLM transform.
+def process(self, row: dict[str, Any] | PipelineRow, ctx: PluginContext) -> TransformResult:
+    """Process a row through the LLM.
+
+    Error handling follows Three-Tier Trust Model:
+    1. Template rendering (THEIR DATA) - catch TemplateError, return error
+    2. LLM call (EXTERNAL) - catch LLMClientError, return error
+    3. Internal logic (OUR CODE) - let it crash
 
     Args:
-        row: Input row (dict or PipelineRow with contract)
-        ctx: Plugin context
+        row: Input row (dict or PipelineRow with contract for dual-name access)
+        ctx: Plugin context with landscape and state_id
 
     Returns:
-        TransformResult with LLM response added to row
+        TransformResult with processed row or error
     """
-    # Extract contract if input is PipelineRow
+    # Extract contract and row data if input is PipelineRow
     input_contract: SchemaContract | None = None
     if isinstance(row, PipelineRow):
         input_contract = row.contract
@@ -1357,49 +1454,76 @@ async def process(
     else:
         row_data = row
 
-    # Render template with contract for dual-name access
+    # 1. Render template with row data (and contract for dual-name access)
+    # This operates on THEIR DATA - wrap in try/catch
     try:
-        rendered = self._template.render_with_metadata(
-            row_data,
-            contract=input_contract,
-        )
+        rendered = self._template.render_with_metadata(row_data, contract=input_contract)
     except TemplateError as e:
         return TransformResult.error(
-            reason={"error": "template_error", "message": str(e)},
+            {
+                "reason": "template_rendering_failed",
+                "error": str(e),
+                "template_hash": self._template.template_hash,
+            }
+        )
+
+    # 2. Build messages
+    messages: list[dict[str, str]] = []
+    if self._system_prompt:
+        messages.append({"role": "system", "content": self._system_prompt})
+    messages.append({"role": "user", "content": rendered.prompt})
+
+    # 3. Get LLM client from subclass (self-contained pattern)
+    llm_client = self._get_llm_client(ctx)
+
+    # 4. Call LLM via audited client
+    # This is an EXTERNAL SYSTEM - wrap in try/catch
+    # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
+    # to let the engine's RetryManager handle them. Non-retryable errors
+    # (ContentPolicyError, ContextLengthError) return TransformResult.error().
+    try:
+        response = llm_client.chat_completion(
+            model=self._model,
+            messages=messages,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+        )
+    except LLMClientError as e:
+        if e.retryable:
+            # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
+            raise
+        # Non-retryable error - return error result
+        return TransformResult.error(
+            {"reason": "llm_call_failed", "error": str(e)},
             retryable=False,
         )
 
-    # Execute LLM call
-    try:
-        response = await self._execute_llm_call(rendered.prompt, ctx)
-    except Exception as e:
-        return TransformResult.error(
-            reason={"error": "llm_error", "message": str(e)},
-            retryable=True,
-        )
+    # 5. Build output row (OUR CODE - let exceptions crash)
+    output = dict(row_data)
+    output[self._response_field] = response.content
+    output[f"{self._response_field}_model"] = response.model
+    output[f"{self._response_field}_usage"] = response.usage
 
-    # Build output row
-    output_row = dict(row_data)
-    output_row[self._response_field] = response
+    # 6. Add audit metadata for template traceability
+    output[f"{self._response_field}_template_hash"] = rendered.template_hash
+    output[f"{self._response_field}_variables_hash"] = rendered.variables_hash
+    output[f"{self._response_field}_template_source"] = rendered.template_source
+    output[f"{self._response_field}_lookup_hash"] = rendered.lookup_hash
+    output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
+    output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
 
-    # Add audit metadata
-    output_row[f"{self._response_field}_template_hash"] = rendered.template_hash
-    output_row[f"{self._response_field}_variables_hash"] = rendered.variables_hash
-    if rendered.template_source:
-        output_row[f"{self._response_field}_template_source"] = rendered.template_source
-
-    # Propagate contract if present
+    # 7. Propagate contract if present (Phase 4 feature)
     output_contract: SchemaContract | None = None
     if input_contract is not None:
         output_contract = propagate_contract(
             input_contract=input_contract,
-            output_row=output_row,
-            transform_adds_fields=True,  # LLM transforms add response field
+            output_row=output,
+            transform_adds_fields=True,  # LLM transforms add response field + metadata
         )
 
     return TransformResult.success(
-        row=output_row,
-        success_reason={"action": "llm_processed", "model": self._model},
+        output,
+        success_reason={"action": "enriched", "fields_added": [self._response_field]},
         contract=output_contract,
     )
 ```
