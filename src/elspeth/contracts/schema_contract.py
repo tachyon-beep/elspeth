@@ -11,10 +11,7 @@ Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
-
-if TYPE_CHECKING:
-    pass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
