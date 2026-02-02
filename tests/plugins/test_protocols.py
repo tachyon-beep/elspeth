@@ -505,6 +505,9 @@ class TestSinkProtocol:
             def validate_output_target(self) -> OutputValidationResult:
                 return OutputValidationResult.success()
 
+            def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+                pass  # Not needed for this test sink
+
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
@@ -567,6 +570,9 @@ class TestSinkProtocol:
 
             def validate_output_target(self) -> OutputValidationResult:
                 return OutputValidationResult.success()
+
+            def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+                pass  # Not needed for this test sink
 
         sink = MemorySink({})
 

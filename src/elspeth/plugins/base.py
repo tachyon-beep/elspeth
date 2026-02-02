@@ -295,6 +295,18 @@ class BaseSink(ABC):
 
         return OutputValidationResult.success()
 
+    def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+        """Set field resolution mapping for resume validation.
+
+        Default is a no-op. Only sinks that support restore_source_headers
+        (CSVSink, JSONSink) override this to use the mapping for validation.
+
+        Args:
+            resolution_mapping: Dict mapping original header name -> normalized field name.
+        """
+        # Intentional no-op - most sinks don't use restore_source_headers
+        _ = resolution_mapping  # Explicitly consume the argument
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 

@@ -202,7 +202,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         schema_mock.model_json_schema.return_value = {"type": "object"}
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
-        mock_source.get_field_resolution.return_value = (None, None)
+        mock_source.get_field_resolution.return_value = None
 
         # Create mock sink
         mock_sink = MagicMock()

@@ -29,6 +29,7 @@ Usage:
         RunStarted,
         RunFinished,
         PhaseChanged,
+        FieldResolutionApplied,
         RowCreated,
         ExternalCallCompleted,
         # Buffer
@@ -49,6 +50,7 @@ from elspeth.telemetry.buffer import BoundedBuffer
 from elspeth.telemetry.errors import TelemetryExporterError
 from elspeth.telemetry.events import (
     ExternalCallCompleted,
+    FieldResolutionApplied,
     PhaseChanged,
     RowCreated,
     RunFinished,
@@ -65,6 +67,7 @@ __all__ = [
     "ConsoleExporter",
     "ExporterProtocol",
     "ExternalCallCompleted",
+    "FieldResolutionApplied",
     "PhaseChanged",
     "RowCreated",
     "RunFinished",

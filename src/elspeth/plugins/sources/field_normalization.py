@@ -166,6 +166,22 @@ class FieldResolution:
     resolution_mapping: dict[str, str]
     normalization_version: str | None
 
+    @property
+    def reverse_mapping(self) -> dict[str, str]:
+        """Get mapping from final names back to original names.
+
+        Used by sinks with restore_source_headers=True to restore
+        original header names in output files.
+
+        Returns:
+            Dict mapping final field name -> original field name
+
+        Note:
+            This is a computed property. For hot paths, callers should
+            cache the result rather than calling repeatedly.
+        """
+        return {final: original for original, final in self.resolution_mapping.items()}
+
 
 def resolve_field_names(
     *,

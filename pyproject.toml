@@ -267,7 +267,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "-m", "not slow and not stress",  # Skip slow/stress tests by default
+    "-m", "not slow and not stress and not performance",  # Skip slow/stress/performance tests by default
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

@@ -258,6 +258,55 @@ landscape:
   url: sqlite:///./audit.db
 ```
 
+### Field Normalization
+
+ELSPETH handles messy external headers through source-side normalization and sink-side display restoration.
+
+#### Source Normalization
+
+Normalize messy headers (e.g., `"User ID"`, `"CaSE Study1 !!!! xx!"`) to valid Python identifiers at the source boundary:
+
+```yaml
+source:
+  plugin: csv
+  options:
+    path: data/input.csv
+
+    # Auto-normalize messy headers to valid Python identifiers
+    normalize_fields: true  # "User ID" → "user_id"
+
+    # Optional: Override specific normalized names
+    field_mapping:
+      case_study1_xx: cs1  # After normalization, rename to cs1
+```
+
+#### Sink Display Headers
+
+Restore original header names in output files while keeping the internal data layer clean:
+
+```yaml
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output/results.csv
+
+      # Option 1: Explicit mapping (full control)
+      display_headers:
+        user_id: "User ID"
+        amount: "Transaction Amount"
+
+      # Option 2: Auto-restore from source (convenience)
+      # restore_source_headers: true
+```
+
+| Option | Use When |
+|--------|----------|
+| `display_headers` | You need custom output names or don't want source coupling |
+| `restore_source_headers` | You want to restore exact original headers from normalized source |
+
+Transform-added fields (not in source) use their normalized names when restoring.
+
 ### Environment Variables
 
 ```bash

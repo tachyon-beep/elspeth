@@ -17,15 +17,18 @@ from elspeth.contracts import ArtifactDescriptor, PluginSchema
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.base import BaseSink
-from elspeth.plugins.config_base import PathConfig
+from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
-class JSONSinkConfig(PathConfig):
+class JSONSinkConfig(SinkPathConfig):
     """Configuration for JSON sink plugin.
 
-    Inherits from PathConfig, which requires schema configuration.
+    Inherits from SinkPathConfig, which provides:
+    - Path handling (from PathConfig)
+    - Schema configuration (from DataPluginConfig)
+    - Display header options (display_headers, restore_source_headers)
     """
 
     format: Literal["json", "jsonl"] | None = None
@@ -91,6 +94,10 @@ class JSONSink(BaseSink):
         - Free mode: All schema fields present (extras allowed)
         - Dynamic mode: No validation (schema adapts to existing structure)
 
+        When display headers are configured (display_headers or restore_source_headers),
+        the existing file keys are display names, so we map expected schema fields
+        to their display equivalents before comparison.
+
         Note: Only JSONL format supports resume. JSON array returns valid=True
         (it will overwrite anyway).
 
@@ -131,7 +138,19 @@ class JSONSink(BaseSink):
         fields = self._schema_config.fields
         if fields is None:
             return OutputValidationResult.success(target_fields=existing)
-        expected = [f.name for f in fields]
+
+        # Base expected fields are normalized schema names
+        expected_normalized = [f.name for f in fields]
+
+        # When display headers are configured, the file contains display names
+        # Map expected fields to their display equivalents for comparison
+        display_map = self._get_effective_display_headers()
+        if display_map is not None:
+            # Map normalized -> display for comparison against file keys
+            expected = [display_map.get(f, f) for f in expected_normalized]
+        else:
+            expected = expected_normalized
+
         existing_set, expected_set = set(existing), set(expected)
 
         if self._schema_config.mode == "strict":
@@ -165,6 +184,15 @@ class JSONSink(BaseSink):
         self._encoding = cfg.encoding
         self._indent = cfg.indent
         self._validate_input = cfg.validate_input
+
+        # Display header configuration
+        self._display_headers = cfg.display_headers
+        self._restore_source_headers = cfg.restore_source_headers
+        # Populated lazily on first write if restore_source_headers=True
+        # Must be lazy because field resolution is only recorded AFTER first source iteration,
+        # which happens after on_start() is called.
+        self._resolved_display_headers: dict[str, str] | None = None
+        self._display_headers_resolved: bool = False  # Track if we've attempted resolution
 
         # Auto-detect format from extension if not specified
         fmt = cfg.format
@@ -223,11 +251,18 @@ class JSONSink(BaseSink):
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
 
+        # Lazy resolution of display headers from Landscape
+        # Must happen AFTER source iteration begins (when field resolution is recorded)
+        self._resolve_display_headers_if_needed(ctx)
+
+        # Apply display header mapping to row keys if configured
+        output_rows = self._apply_display_headers(rows)
+
         if self._format == "jsonl":
-            self._write_jsonl_batch(rows)
+            self._write_jsonl_batch(output_rows)
         else:
             # Buffer rows for JSON array format
-            self._rows.extend(rows)
+            self._rows.extend(output_rows)
             # Write immediately (file is rewritten on each write for JSON format)
             self._write_json_array()
 
@@ -298,10 +333,109 @@ class JSONSink(BaseSink):
             self._file = None
             self._rows = []
 
+    # === Display Header Support ===
+
+    def _get_effective_display_headers(self) -> dict[str, str] | None:
+        """Get the effective display header mapping.
+
+        Returns:
+            Dict mapping normalized field name -> display name, or None if no
+            display headers are configured.
+        """
+        if self._display_headers is not None:
+            return self._display_headers
+        if self._resolved_display_headers is not None:
+            return self._resolved_display_headers
+        return None
+
+    def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+        """Set field resolution mapping for resume validation.
+
+        Called by CLI during `elspeth resume` to provide the source field resolution
+        mapping BEFORE calling validate_output_target(). This allows validation to
+        correctly compare expected display names against existing file keys when
+        restore_source_headers=True.
+
+        Args:
+            resolution_mapping: Dict mapping original header name -> normalized field name.
+                This is the same format returned by Landscape.get_source_field_resolution().
+
+        Note:
+            This only has effect when restore_source_headers=True. For explicit
+            display_headers, the mapping is already available from config.
+        """
+        if not self._restore_source_headers:
+            return  # No-op if not using restore_source_headers
+
+        # Build reverse mapping: normalized -> original (display name)
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+        self._display_headers_resolved = True
+
+    def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve display headers from Landscape if restore_source_headers=True.
+
+        Called on first write() to fetch field resolution mapping. This MUST be lazy
+        because the orchestrator calls sink.on_start() BEFORE source.load() iterates,
+        and record_source_field_resolution() only happens after the first source row.
+
+        Args:
+            ctx: Plugin context with Landscape access.
+
+        Raises:
+            ValueError: If Landscape is unavailable or source didn't record resolution.
+        """
+        if self._display_headers_resolved:
+            return  # Already resolved (or not needed)
+
+        self._display_headers_resolved = True
+
+        if not self._restore_source_headers:
+            return  # Nothing to resolve
+
+        # Fetch source field resolution from Landscape
+        if ctx.landscape is None:
+            raise ValueError(
+                "restore_source_headers=True requires Landscape to be available. "
+                "This is a framework bug - context should have landscape set."
+            )
+
+        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
+        if resolution_mapping is None:
+            raise ValueError(
+                "restore_source_headers=True but source did not record field resolution. "
+                "Ensure source uses normalize_fields: true to enable header restoration."
+            )
+
+        # Build reverse mapping: final (normalized) -> original
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+
+    def _apply_display_headers(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Apply display header mapping to row keys.
+
+        Args:
+            rows: List of row dicts with normalized field names
+
+        Returns:
+            List of row dicts with display names as keys. If no display headers
+            are configured, returns the original rows unchanged.
+        """
+        display_map = self._get_effective_display_headers()
+        if display_map is None:
+            return rows
+
+        # Transform each row's keys to display names
+        # Fields not in the mapping keep their original names (transform-added fields)
+        return [{display_map.get(k, k): v for k, v in row.items()} for row in rows]
+
     # === Lifecycle Hooks ===
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Called before processing begins."""
+        """Called before processing begins.
+
+        Note: restore_source_headers resolution is done lazily in write() because
+        the field resolution mapping is only recorded AFTER source iteration begins,
+        which happens after on_start() is called.
+        """
         pass
 
     def on_complete(self, ctx: PluginContext) -> None:

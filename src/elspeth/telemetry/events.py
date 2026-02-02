@@ -76,6 +76,27 @@ class PhaseChanged(TelemetryEvent):
     action: PhaseAction
 
 
+@dataclass(frozen=True, slots=True)
+class FieldResolutionApplied(TelemetryEvent):
+    """Emitted when source field normalization is applied.
+
+    Captures the mapping from original external headers to normalized
+    field names. Useful for debugging field name issues and monitoring
+    normalization patterns across runs.
+
+    Attributes:
+        source_plugin: Name of the source plugin
+        field_count: Number of fields in the mapping
+        normalization_version: Algorithm version used (None if no normalization)
+        resolution_mapping: Complete original→normalized mapping
+    """
+
+    source_plugin: str
+    field_count: int
+    normalization_version: str | None
+    resolution_mapping: dict[str, str]
+
+
 # =============================================================================
 # Row-Level Events
 # =============================================================================

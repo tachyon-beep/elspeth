@@ -807,6 +807,7 @@ class Orchestrator:
 
         # Local imports for telemetry events - consolidated here to avoid repeated imports
         from elspeth.telemetry import (
+            FieldResolutionApplied,
             PhaseChanged,
             RowCreated,
         )
@@ -1185,6 +1186,17 @@ class Orchestrator:
                                     run_id=run_id,
                                     resolution_mapping=resolution_mapping,
                                     normalization_version=normalization_version,
+                                )
+                                # Emit telemetry AFTER Landscape succeeds
+                                self._emit_telemetry(
+                                    FieldResolutionApplied(
+                                        timestamp=datetime.now(UTC),
+                                        run_id=run_id,
+                                        source_plugin=config.source.name,
+                                        field_count=len(resolution_mapping),
+                                        normalization_version=normalization_version,
+                                        resolution_mapping=resolution_mapping,
+                                    )
                                 )
 
                         # Handle quarantined source rows - route directly to sink
@@ -1581,6 +1593,17 @@ class Orchestrator:
                                 run_id=run_id,
                                 resolution_mapping=resolution_mapping,
                                 normalization_version=normalization_version,
+                            )
+                            # Emit telemetry AFTER Landscape succeeds
+                            self._emit_telemetry(
+                                FieldResolutionApplied(
+                                    timestamp=datetime.now(UTC),
+                                    run_id=run_id,
+                                    source_plugin=config.source.name,
+                                    field_count=len(resolution_mapping),
+                                    normalization_version=normalization_version,
+                                    resolution_mapping=resolution_mapping,
+                                )
                             )
                             field_resolution_recorded = True
 

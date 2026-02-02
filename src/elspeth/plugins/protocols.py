@@ -530,3 +530,21 @@ class SinkProtocol(Protocol):
             OutputValidationResult indicating compatibility.
         """
         ...
+
+    def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+        """Set field resolution mapping for resume validation.
+
+        Called by CLI during `elspeth resume` to provide the source field resolution
+        mapping BEFORE calling validate_output_target(). This allows sinks using
+        restore_source_headers=True to correctly compare expected display names
+        against existing file headers.
+
+        Args:
+            resolution_mapping: Dict mapping original header name -> normalized field name.
+                This is the same format returned by Landscape.get_source_field_resolution().
+
+        Note:
+            Default is a no-op. Only sinks that support restore_source_headers need
+            to override this (CSVSink, JSONSink).
+        """
+        ...

@@ -1896,6 +1896,17 @@ def resume(
                 typer.echo(f"Error: {e}", err=True)
                 raise typer.Exit(1) from None
 
+            # For sinks with restore_source_headers=True, provide field resolution
+            # mapping BEFORE validation so they can correctly compare display names
+            restore_source_headers = "restore_source_headers" in sink_options and sink_options["restore_source_headers"]
+            if restore_source_headers:
+                from elspeth.core.landscape import LandscapeRecorder
+
+                recorder = LandscapeRecorder(db)
+                field_resolution = recorder.get_source_field_resolution(run_id)
+                if field_resolution is not None:
+                    sink.set_resume_field_resolution(field_resolution)
+
             # Validate output target schema compatibility
             validation = sink.validate_output_target()
             if not validation.valid:
