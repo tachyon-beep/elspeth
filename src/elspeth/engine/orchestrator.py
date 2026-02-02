@@ -198,7 +198,13 @@ class Orchestrator:
         if self._telemetry is not None:
             self._telemetry.flush()
 
-    def _maybe_checkpoint(self, run_id: str, token_id: str, node_id: str) -> None:
+    def _maybe_checkpoint(
+        self,
+        run_id: str,
+        token_id: str,
+        node_id: str,
+        aggregation_state: dict[str, Any] | None = None,
+    ) -> None:
         """Create checkpoint if configured.
 
         Called after a token has been durably written to its terminal sink.
@@ -213,6 +219,7 @@ class Orchestrator:
             run_id: Current run ID
             token_id: Token that was just written to sink
             node_id: Sink node that received the token
+            aggregation_state: Current aggregation buffer/trigger state for crash recovery
         """
         if not self._checkpoint_config or not self._checkpoint_config.enabled:
             return
@@ -243,6 +250,7 @@ class Orchestrator:
                 node_id=node_id,
                 sequence_number=self._sequence_number,
                 graph=self._current_graph,
+                aggregation_state=aggregation_state,
             )
 
     def _delete_checkpoints(self, run_id: str) -> None:
@@ -1631,12 +1639,15 @@ class Orchestrator:
             step = len(config.transforms) + len(config.gates) + 1
 
             # Create checkpoint callback for post-sink checkpointing
+            # Captures processor to get aggregation state for crash recovery
             def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
                 def callback(token: TokenInfo) -> None:
+                    agg_state = processor.get_aggregation_checkpoint_state()
                     self._maybe_checkpoint(
                         run_id=run_id,
                         token_id=token.token_id,
                         node_id=sink_node_id,
+                        aggregation_state=agg_state,
                     )
 
                 return callback
@@ -3002,10 +3013,12 @@ class Orchestrator:
 
                     # Checkpoint if enabled
                     if checkpoint and last_node_id is not None:
+                        agg_state = processor.get_aggregation_checkpoint_state()
                         self._maybe_checkpoint(
                             run_id=run_id,
                             token_id=result.token.token_id,
                             node_id=last_node_id,
+                            aggregation_state=agg_state,
                         )
 
             # Process work items through remaining transforms
@@ -3039,10 +3052,12 @@ class Orchestrator:
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
+                            agg_state = processor.get_aggregation_checkpoint_state()
                             self._maybe_checkpoint(
                                 run_id=run_id,
                                 token_id=result.token.token_id,
                                 node_id=last_node_id,
+                                aggregation_state=agg_state,
                             )
                     elif result.outcome == RowOutcome.ROUTED:
                         # Gate routed to named sink - MUST enqueue or row is lost
@@ -3054,10 +3069,12 @@ class Orchestrator:
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
+                            agg_state = processor.get_aggregation_checkpoint_state()
                             self._maybe_checkpoint(
                                 run_id=run_id,
                                 token_id=result.token.token_id,
                                 node_id=last_node_id,
+                                aggregation_state=agg_state,
                             )
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
@@ -3071,10 +3088,12 @@ class Orchestrator:
 
                         # Checkpoint if enabled
                         if checkpoint and last_node_id is not None:
+                            agg_state = processor.get_aggregation_checkpoint_state()
                             self._maybe_checkpoint(
                                 run_id=run_id,
                                 token_id=result.token.token_id,
                                 node_id=last_node_id,
+                                aggregation_state=agg_state,
                             )
                     elif result.outcome == RowOutcome.FORKED:
                         # Parent token split into multiple paths - children counted separately

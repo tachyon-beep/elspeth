@@ -530,42 +530,42 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=bd8ab2f94db8fcdf
+- key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=f9f576369fb2a80c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=23f38857ea5a601d
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=74da7278f2cb1c0e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=a63927ed95423d53
+- key: engine/processor.py:R5:RowProcessor:_execute_transform_with_retry:is_retryable:fp=48f4f3c8fff819bf
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_row:fp=f2d91710a1e84757
+- key: engine/processor.py:R5:RowProcessor:process_row:fp=49d443d12e1962a7
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_existing_row:fp=49d443d12e1962a7
+- key: engine/processor.py:R5:RowProcessor:process_existing_row:fp=40cddc7a1550b030
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:process_token:fp=20027cfc932c8f77
+- key: engine/processor.py:R5:RowProcessor:process_token:fp=a88725b377a478cc
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=d550b68ec5079c6e
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=574df1063b332b31
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=34d5f87462f2d5c1
+- key: engine/processor.py:R5:RowProcessor:_process_single_token:fp=58948623baba0d2d
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
