@@ -43,7 +43,7 @@ class TestContractViolationBase:
         exc = ContractViolation(normalized_name="customer_id", original_name="Customer ID")
         msg = str(exc)
         # Base class message should mention both names
-        assert "customer_id" in msg or "Customer ID" in msg
+        assert "customer_id" in msg and "Customer ID" in msg
 
 
 class TestMissingFieldViolation:

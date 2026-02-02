@@ -620,6 +620,13 @@ class TypeMismatchViolation(ContractViolation):
         actual_type: The type that was received (e.g., "str")
         actual_value: The actual value received (for debugging)
 
+    Note:
+        The `actual_value` attribute is accessible programmatically for debugging
+        purposes, but is intentionally excluded from the error message (str/repr).
+        This prevents potentially sensitive user data from being exposed in logs,
+        audit trails, or error reports. Callers needing the value for investigation
+        should access the attribute directly.
+
     Example:
         >>> raise TypeMismatchViolation(
         ...     normalized_name="amount",
