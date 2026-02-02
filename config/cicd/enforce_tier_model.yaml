@@ -2,11 +2,60 @@ version: 1
 defaults:
   fail_on_stale: true
   fail_on_expired: true
+per_file_rules:
+- pattern: contracts/type_normalization.py
+  rules:
+  - R5
+  reason: Type normalization requires isinstance() for polymorphic serialization of
+    numeric types
+  expires: null
+- pattern: mcp/server.py
+  rules:
+  - R1
+  reason: MCP tool arguments are external client data (Tier 3) - defensive access
+    is correct
+  expires: null
+- pattern: plugins/llm/*
+  rules:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  reason: LLM API responses are external data (Tier 3) - all defensive patterns legitimate
+  expires: null
+- pattern: plugins/azure/*
+  rules:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  reason: Azure API responses are external data (Tier 3) - all defensive patterns
+    legitimate
+  expires: null
+- pattern: telemetry/exporters/*
+  rules:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  reason: Telemetry services are external (Tier 3) - all defensive patterns legitimate
+  expires: null
 allow_hits:
 - key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=460065a513661e29
   owner: architecture
-  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for strict lookup'
-  safety: Code reviewed - legitimate API pattern; resolve_name() raises KeyError for strict lookups
+  reason: 'Optional lookup API: get_field() intentionally returns None for missing
+    fields - callers use resolve_name() for strict lookup'
+  safety: Code reviewed - legitimate API pattern; resolve_name() raises KeyError for
+    strict lookups
   expires: null
 - key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
   owner: bugfix
@@ -28,12 +77,6 @@ allow_hits:
     write'
   safety: Logged with error - sink artifact exists but checkpoint failed, resume will
     replay
-  expires: null
-- key: plugins/llm/openrouter_batch.py:R6:OpenRouterBatchLLMTransform:_process_batch:fp=ae90a15b5c6592b0
-  owner: architecture
-  reason: 'External API boundary: HTTP errors from OpenRouter API are Tier 3 data
-    - caught and converted to TransformResult.error()'
-  safety: Returns explicit error result with full error context for audit trail
   expires: null
 - key: core/config.py:R6:_fingerprint_secrets:fp=05dc877f42c80ab9
   owner: architecture
@@ -67,11 +110,6 @@ allow_hits:
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: mcp/server.py:R6:_prompt_for_database:fp=511662d2990c72af
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R6:_module_:fp=c7e4fec673cd9370
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
@@ -337,52 +375,47 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-# P2-2026-02-02: Whitelist reduction - remaining legitimate .get() patterns
-# These methods NOW validate node_id first, then use .get() only for legitimate cases
-# (e.g., "valid node, no rows buffered yet" vs "invalid node")
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=1b78bdc47d772749
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case
-    of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate
+    case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=c1ffb2e357312212
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case
-    of valid node with no tokens buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate
+    case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=7149093de61a26a6
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case
-    of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate
+    case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=0565939bc65a5330
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case
-    of valid node with no tokens buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate
+    case of valid node with no tokens buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=848f158a657b45ed
   owner: P2-2026-02-02
-  reason: After validation against aggregation_settings, .get() handles legitimate case
-    of valid node with no rows buffered yet
+  reason: After validation against aggregation_settings, .get() handles legitimate
+    case of valid node with no rows buffered yet
   safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
   expires: null
-# execute_flush uses .get() followed by explicit None check and RuntimeError
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=bfa25063e4e9f79d
   owner: P2-2026-02-02
   reason: Pattern is .get() followed by explicit None check raising RuntimeError
-  safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
+  safety: RuntimeError raised immediately if batch_id is None - explicit failure,
+    not silent
   expires: null
-# restore_from_checkpoint version check - missing _version is invalid checkpoint
 - key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=44de9b3e54172856
   owner: P2-2026-02-02
   reason: Version check for checkpoint format - None from missing key triggers ValueError
   safety: ValueError raised for missing or wrong version - explicit validation pattern
   expires: null
-# Testing/inspection methods - do not validate against aggregation_settings
 - key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=b4c52a40eff695df
   owner: P2-2026-02-02
   reason: Testing/inspection method that needs to work with partial setups; returns
@@ -392,9 +425,9 @@ allow_hits:
 - key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=6e71afd1d2337fdf
   owner: P2-2026-02-02
   reason: Checkpoint recovery lookup - returns None if no state was restored for node
-  safety: Designed API contract - None is valid return for nodes without restored state
+  safety: Designed API contract - None is valid return for nodes without restored
+    state
   expires: null
-# R5 isinstance check remains valid
 - key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=d005edf49465263c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -1025,121 +1058,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_performance_report:fp=c7e57bf562b9dc29
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=d27613d5304398ba
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:describe_schema:fp=6f2d02735f901eb6
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:LandscapeAnalyzer:get_recent_activity:fp=8c457255e2933476
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=b0b7906d22437683
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=3bf0be1812a90be4
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=ef52ed0e5b5aef3d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=65cff42471890af7
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=9b1c747d983bcd40
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=cc1a288b8bac6cd6
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=9e58a3b0547d3104
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=346cb40a79657283
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=0c45c41e9d666dbb
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=64dc6e251ddabe13
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=cdd24235cb6cfb10
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=9a27977497180129
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=81b02afd980c2c77
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=697651e3b0540c42
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=5e6b243dd7891d24
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=7f639523183b0e46
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=d3caef07c438cee9
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=862c765728101671
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=941f0604f1cf5676
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: mcp/server.py:R4:create_server:call_tool:fp=9387de44a997b269
   owner: architecture
   reason: Broad exception handling at external boundary with logging
@@ -1153,11 +1071,6 @@ allow_hits:
 - key: mcp/server.py:R6:_prompt_for_database:fp=7eb937bd5e55ab72
   owner: architecture
   reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: mcp/server.py:R1:create_server:call_tool:fp=8967c15a5d62945b
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: testing/chaosllm/server.py:R1:ChaosLLMServer:_handle_completion_request:fp=799383f3318c92d0
@@ -1400,166 +1313,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/llm/multi_query.py:R5:MultiQueryConfig:parse_output_mapping:fp=675341d83daee1ab
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R5:AzureBatchLLMTransform:process:fp=28aef14e8648f105
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_get_checkpoint:fp=81c2f17b4e75b742
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_update_checkpoint:fp=2fbe061fb71628c7
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_clear_checkpoint:fp=12fc15e2cdc4ea77
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R6:AzureBatchLLMTransform:_submit_batch:fp=096b3029c907d756
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:fp=df56c52f8175dea8
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_submit_batch:fp=96ad46e2b10498a7
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R2:AzureBatchLLMTransform:_check_batch_status:fp=0869c967b8908c10
-  owner: architecture
-  reason: getattr for optional attribute access
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_check_batch_status:fp=a6c6303602e5bfab
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R3:AzureBatchLLMTransform:_check_batch_status:fp=cc40aed919bc8a34
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R4:AzureBatchLLMTransform:_download_results:fp=a7f2c3e854147fc8
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R6:AzureBatchLLMTransform:_download_results:fp=a2a90dff4b2f2d90
-  owner: architecture
-  reason: Silent recovery with explicit error handling path
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=017a4a193d5b397d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=9ad8e39240bec41d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=bd8f44baec572b84
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=1bfedfa1d1b51424
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=73774cb158f03b40
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R1:AzureBatchLLMTransform:_download_results:fp=845b632e3d490679
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:process:fp=2368e65319b7368d
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_batch:fp=394c1ea7a1fa932f
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_single_row:fp=45babdf819831c0a
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R5:OpenRouterBatchLLMTransform:_process_single_row:fp=37b626e8dbabb45a
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:fp=963e11d662938841
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_batch.py:R1:OpenRouterBatchLLMTransform:_process_single_row:fp=4d8878f640750a71
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=746f7769b0a1300f
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter.py:R5:OpenRouterLLMTransform:_process_row:fp=3f734747401fabce
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=2d82352308d8d406
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_row:fp=c4b32a5c4cdbf60f
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter.py:R9:OpenRouterLLMTransform:_process_row:fp=7d7cdcfe60423439
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/azure.py:R9:AzureLLMTransform:_process_row:fp=4a52c48d0f6ae8a6
-  owner: architecture
-  reason: Cleanup/pop with default - key may not exist in race or optional scenarios
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/validation.py:R5:validate_json_object_response:fp=32b113a84ce41ccd
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: plugins/transforms/batch_replicate.py:R5:BatchReplicate:process:fp=5371f749c44a2970
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
@@ -1750,292 +1503,6 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=1022356048ea0c99
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=1b1eafd5fe128144
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=792d92c54546f271
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=f8945e242d939c22
-  owner: architecture
-  reason: Optional field access at trust boundary (service_name from user config)
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=d0f9f61fb8ca36b4
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=2c2f502ecdbb09eb
-  owner: architecture
-  reason: Optional field access at trust boundary (service_version from user config)
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=2dab84922a954e5b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R1:AzureMonitorExporter:configure:fp=0e956ff0da7c5be4
-  owner: architecture
-  reason: Optional field access at trust boundary (deployment_environment from user
-    config)
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:configure:fp=7e06a415b1ef7350
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:export:fp=e9e0e9f016c30c80
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:_flush_batch:fp=6eaab4af078bcd81
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:_serialize_event_attributes:fp=2b6fee5fce3cf3a3
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:_serialize_event_attributes:fp=df5eb519226d9920
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:_serialize_event_attributes:fp=9d41b6fa9f5d939b
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R5:AzureMonitorExporter:_serialize_event_attributes:fp=9361ad41467fecf4
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:flush:fp=5b465c3b21e3c8f5
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/azure_monitor.py:R4:AzureMonitorExporter:close:fp=5462f6815beb1d2c
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R3:_derive_span_id:fp=8d6d0a8d0c8fa03a
-  owner: architecture
-  reason: hasattr for feature detection
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=76fabe90399c155e
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=ee40dec0d59a5c44
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R1:OTLPExporter:configure:fp=a30f047f0130725d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:export:fp=f58cfd54c2536a9c
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:_flush_batch:fp=e3a316b85e1254aa
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R5:OTLPExporter:_serialize_event_attributes:fp=c1c61fb6a8e98b6c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R5:OTLPExporter:_serialize_event_attributes:fp=f936aba8b494d2ab
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R5:OTLPExporter:_serialize_event_attributes:fp=b09437b77ed278af
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R5:OTLPExporter:_serialize_event_attributes:fp=1a94073ac4340673
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:flush:fp=46d7ad030be54d04
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/otlp.py:R4:OTLPExporter:close:fp=12b9e81e35d5554d
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:fp=15a53be18902ccc7
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:configure:fp=a8683f627229ae83
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R1:ConsoleExporter:configure:fp=77633fafbb19e7f8
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:configure:fp=b2ed7821908ee849
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:export:fp=305515ababbd9709
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:_serialize_event:fp=794ebf952b871130
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:_serialize_event:fp=d1904e6070c2fbb8
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:_extract_pretty_details:fp=c300117875962496
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:_extract_pretty_details:fp=2ea7f251b984e3e7
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R5:ConsoleExporter:_extract_pretty_details:fp=9ee0c82ac0b505b9
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/console.py:R4:ConsoleExporter:flush:fp=accadc998c5163fc
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=183a944901202691
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:configure:fp=b4dc22ebc60503b1
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=0bf03c31227a3cae
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:configure:fp=1bdc75924599e5bf
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=835509f9d0db5ada
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:configure:fp=18771707e462f11a
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=0163976f33d04180
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:configure:fp=46703749057a3e8c
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R1:DatadogExporter:configure:fp=4126ea580e01ba30
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:configure:fp=c882690fad04e5af
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:export:fp=c8c12088b2901c28
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:_set_tag_value:fp=a6799a1acce818f7
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:_set_tag_value:fp=7bea3b981a9041e0
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:_set_tag_value:fp=966167b708dc6e7d
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R5:DatadogExporter:_set_tag_value:fp=450d0cd75603af69
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:flush:fp=123f56a94859bc04
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: telemetry/exporters/datadog.py:R4:DatadogExporter:close:fp=0d991472a33b8573
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
 - key: tui/screens/explain_screen.py:R6:ExplainScreen:_load_node_state:fp=ea0af175990905a8
   owner: architecture
   reason: Silent recovery with explicit error handling path
@@ -2156,13 +1623,6 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/llm/azure_batch.py:R5:AzureBatchLLMTransform:_download_results:fp=b460f2168f2a65be
-  owner: bugfix
-  reason: Tier-3 boundary validation - Azure batch API response is external data requiring
-    type validation
-  safety: Malformed response is recorded in malformed_lines and batch fails gracefully
-    with audit trail
-  expires: '2026-05-02'
 - key: plugins/config_base.py:R5:PluginConfig:from_dict:fp=424af2ed9bbafb71
   owner: bugfix
   reason: Tier-3 boundary validation - user config 'schema' field is external data
@@ -2229,8 +1689,6 @@ allow_hits:
   reason: Tier-3 boundary validation - user config fields list must be list type
   safety: Raises explicit ValueError for non-list fields value
   expires: null
-# P2-2026-02-02: Removed stale restore_from_checkpoint .get() entries
-# These patterns were fixed to use direct [] access with explicit required_fields validation
 - key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=43784a01ff8211a5
   owner: bugfix
   reason: Tier-3 boundary - ELSPETH_FINGERPRINT_KEY is optional env var for direct
@@ -2345,163 +1803,6 @@ allow_hits:
   safety: Exception caught, ref added to failed_refs, loop continues - explicit failure
     tracking
   expires: null
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryConfig:parse_output_mapping:fp=2b8dde2ec6798ba0
-  owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=039eec1cb7c4e678
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=8c87442482ab3458
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=29a3917e355e9c46
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=968863ecb5f1cadc
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=1dfc1d63e78aaf10
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=2ed34d4583975ae7
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=8959b675e773fe47
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=455f3255c0ee0f4f
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=9b9efbb5e4f6f57a
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=05dd82b8fe3e4ae0
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=bf769a0ddee7b909
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=a987e8f48bf176f2
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=8110ee1b402ee402
-  owner: architecture
-  reason: Optional field access - Azure OpenAI usage response may have missing fields
-  safety: Defaults to 0 - safe for metrics, not audit critical
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_query:fp=909745d538b68471
-  owner: architecture
-  reason: Optional field access - Azure OpenAI usage response may have missing fields
-  safety: Defaults to 0 - safe for metrics, not audit critical
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_process_single_query:fp=350225b0762703bf
-  owner: architecture
-  reason: AST/type checking - discriminated union result validation
-  safety: Returns error result on validation failure
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R9:AzureMultiQueryLLMTransform:_process_row:fp=90a7d49f630e8b48
-  owner: architecture
-  reason: Cleanup/pop with default - client may not exist if row processing failed
-    early
-  safety: Safe cleanup pattern, no-op if key missing
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R6:AzureMultiQueryLLMTransform:_execute_queries_sequential:fp=22922f2188c27dae
-  owner: architecture
-  reason: CapacityError handled - re-raised after adding to results
-  safety: Error propagates correctly via result list
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=5b8e2c83a5486bd9
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_validate_field_type:fp=6e72a0ab7d61abdd
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=80048896a95550ac
-  owner: architecture
-  reason: Optional field access - HTTP response headers may be missing
-  safety: Defaults to unknown - safe for audit context
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=1de7fdda88870e63
-  owner: architecture
-  reason: Defensive check for malformed response data
-  safety: Logs actual keys when response is not a dict
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=c8d2bafafbee0416
-  owner: architecture
-  reason: Optional field access - usage may not be present in response
-  safety: Defaults to empty dict - safe for metrics
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=50004002d9e5742f
-  owner: architecture
-  reason: Optional field access - completion_tokens may be missing
-  safety: Defaults to 0 - safe for metrics
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=3b03c0a326990ff1
-  owner: architecture
-  reason: Optional field access - prompt_tokens may be missing
-  safety: Defaults to 0 - safe for metrics
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R5:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=5fa270f1e99a0e0f
-  owner: architecture
-  reason: Tier-3 boundary validation - JSON response must be dict
-  safety: Returns error result if not dict
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_query:fp=70a60b60cc456f3e
-  owner: architecture
-  reason: Optional field - actual model may differ from requested
-  safety: Falls back to configured model - safe for audit
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R9:OpenRouterMultiQueryLLMTransform:_process_row:fp=8627ed431a9edfed
-  owner: architecture
-  reason: Cleanup/pop with default - client may not exist if row processing failed
-    early
-  safety: Safe cleanup pattern, no-op if key missing
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R6:OpenRouterMultiQueryLLMTransform:_execute_queries_sequential:fp=e46e7c2f8c38d4db
-  owner: architecture
-  reason: CapacityError handled - re-raised after adding to results
-  safety: Error propagates correctly via result list
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=07c1d40e9afeb88f
-  owner: architecture
-  reason: AST/type checking - bool is subclass of int check
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R5:AzureMultiQueryLLMTransform:_validate_field_type:fp=a04fbcb4f9c16682
-  owner: architecture
-  reason: AST/type checking - LLM response validation at Tier-3 boundary
-  safety: Returns validation error if type doesn't match
-  expires: '2026-05-02'
 - key: plugins/clients/http.py:R1:AuditedHTTPClient:post:fp=f37263f44eba825f
   owner: architecture
   reason: HTTP response headers - external system boundary, content-type may be missing
@@ -2531,30 +1832,6 @@ allow_hits:
   owner: architecture
   reason: Telemetry emission failure - must not crash main LLM call flow
   safety: Logged and continues - telemetry is non-critical to LLM processing
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_row_internal:fp=20fb8985c1297073
-  owner: architecture
-  reason: Error reason dict structure varies between error sources - fallback chain
-    for compatibility
-  safety: Falls back to "reason" key or "unknown" - error message extraction only
-  expires: '2026-05-02'
-- key: plugins/llm/azure_multi_query.py:R1:AzureMultiQueryLLMTransform:_process_single_row_internal:fp=fe9137aa2cdb4f12
-  owner: architecture
-  reason: Error reason dict structure varies between error sources - fallback chain
-    for compatibility
-  safety: Falls back to "unknown" - error message extraction only
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_row_internal:fp=78c9975dcfc2dc8f
-  owner: architecture
-  reason: Error reason dict structure varies between error sources - fallback chain
-    for compatibility
-  safety: Falls back to "reason" key or "unknown" - error message extraction only
-  expires: '2026-05-02'
-- key: plugins/llm/openrouter_multi_query.py:R1:OpenRouterMultiQueryLLMTransform:_process_single_row_internal:fp=96490e137b1c3aff
-  owner: architecture
-  reason: Error reason dict structure varies between error sources - fallback chain
-    for compatibility
-  safety: Falls back to "unknown" - error message extraction only
   expires: '2026-05-02'
 - key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=2c7c43eefc2b77b2
   owner: feature
@@ -2630,66 +1907,6 @@ allow_hits:
     fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:fp=03c24bba772bb01a
-  owner: plugins
-  reason: External CSV parsing boundary - pandas can raise multiple exception types
-  safety: Records validation error and yields quarantined row or stops on unparseable file
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=07890795b89ac2ba
-  owner: plugins
-  reason: External JSON boundary - ensure data_key lookup only on dict payloads
-  safety: Raises ValueError with context for audit trail
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=be167c469ac90c06
-  owner: plugins
-  reason: External JSON boundary - enforce array payloads for row iteration
-  safety: Raises ValueError with context for audit trail
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_load_jsonl:fp=40400e88b9b491de
-  owner: plugins
-  reason: External JSONL boundary - malformed lines quarantined per Tier 3 policy
-  safety: Records validation errors and yields quarantined rows, continues safely
-  expires: '2026-05-02'
-- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_validate_and_yield:fp=d134c56423d55f53
-  owner: plugins
-  reason: External data validation - schema errors quarantined instead of crashing
-  safety: Records validation errors and yields quarantined rows for routing
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=7c73c8316bba0990
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=46da55f37bbc126a
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=7d1117034a44fd20
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=c3fbc8bf81f68b7f
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=c65b0c2993cc03b9
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=775087621040bda3
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
-- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=13c52ef2cbcda91c
-  owner: architecture
-  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
-  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
-  expires: '2026-05-02'
 - key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=3b85560d6ac41d4a
   owner: architecture
   reason: Python __contains__ protocol - must return bool for 'in' operator, not re-raise
