@@ -654,3 +654,193 @@ class TestJSONLDisplayHeadersAppendMode:
         # Validation happens lazily, trigger it by calling validate_output_target
         result = sink.validate_output_target()
         assert result.valid, f"Validation failed: {result.error_message}"
+
+
+class TestResumeValidationWithRestoreSourceHeaders:
+    """Tests for resume validation when restore_source_headers is enabled.
+
+    This tests the scenario where:
+    1. A run completes with restore_source_headers=True (output has display names)
+    2. User runs `elspeth resume` on the same run
+    3. validate_output_target() must correctly compare existing display names
+       against expected display names (not normalized schema names)
+
+    The fix requires providing the field resolution mapping to sinks BEFORE
+    calling validate_output_target() during resume.
+    """
+
+    def test_csv_resume_validation_with_restore_source_headers(self, tmp_path: Path) -> None:
+        """CSV resume validation succeeds when restore_source_headers mapping is provided."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+
+        # Pre-create CSV file with display headers (as if previous run used restore_source_headers)
+        with open(output_file, "w", newline="") as f:
+            import csv
+
+            writer = csv.writer(f)
+            writer.writerow(["User ID", "Amount (USD)"])  # Display names
+            writer.writerow(["u1", "100.0"])
+
+        # Create sink with restore_source_headers (resume scenario)
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        # Simulate resume: provide the field resolution mapping BEFORE validation
+        # This is what the CLI will do during `elspeth resume`
+        field_resolution = {
+            "User ID": "user_id",
+            "Amount (USD)": "amount_usd",
+        }
+        sink.set_resume_field_resolution(field_resolution)
+
+        # Now validation should succeed - it can map schema fields to display names
+        result = sink.validate_output_target()
+        assert result.valid, f"Validation failed: {result.error_message}"
+
+    def test_csv_resume_validation_without_resolution_fails(self, tmp_path: Path) -> None:
+        """CSV resume validation fails when restore_source_headers but no resolution provided.
+
+        This documents the current broken behavior that will be fixed.
+        Without the field resolution, validation compares normalized schema names
+        (user_id, amount_usd) against display names (User ID, Amount (USD)) and fails.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+
+        # Pre-create CSV file with display headers
+        with open(output_file, "w", newline="") as f:
+            import csv
+
+            writer = csv.writer(f)
+            writer.writerow(["User ID", "Amount (USD)"])
+            writer.writerow(["u1", "100.0"])
+
+        # Create sink with restore_source_headers but don't provide resolution
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        # Without resolution, validation SHOULD fail (compares wrong field names)
+        # After fix: this test verifies the error is clear
+        result = sink.validate_output_target()
+        # The validation compares ["user_id", "amount_usd"] against ["User ID", "Amount (USD)"]
+        assert not result.valid, "Should fail when restore_source_headers but no resolution"
+        assert result.missing_fields is not None
+
+    def test_jsonl_resume_validation_with_restore_source_headers(self, tmp_path: Path) -> None:
+        """JSONL resume validation succeeds when restore_source_headers mapping is provided."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # Pre-create JSONL file with display headers
+        with open(output_file, "w") as f:
+            f.write(json.dumps({"User ID": "u1", "Amount (USD)": 100.0}) + "\n")
+
+        # Create sink with restore_source_headers
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        # Provide field resolution for resume
+        field_resolution = {
+            "User ID": "user_id",
+            "Amount (USD)": "amount_usd",
+        }
+        sink.set_resume_field_resolution(field_resolution)
+
+        # Now validation should succeed
+        result = sink.validate_output_target()
+        assert result.valid, f"Validation failed: {result.error_message}"
+
+    def test_jsonl_resume_validation_without_resolution_fails(self, tmp_path: Path) -> None:
+        """JSONL resume validation fails when restore_source_headers but no resolution."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # Pre-create JSONL file with display headers
+        with open(output_file, "w") as f:
+            f.write(json.dumps({"User ID": "u1", "Amount (USD)": 100.0}) + "\n")
+
+        # Create sink with restore_source_headers but no resolution
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        # Without resolution, validation should fail
+        result = sink.validate_output_target()
+        assert not result.valid, "Should fail when restore_source_headers but no resolution"
+
+    def test_csv_resume_validation_free_mode_with_restore_source_headers(self, tmp_path: Path) -> None:
+        """Free mode resume validation works with restore_source_headers."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+
+        # CSV requires strict mode (rejects free mode with allows_extra_fields)
+        # This test uses strict mode but verifies field subset matching works
+        with open(output_file, "w", newline="") as f:
+            import csv
+
+            writer = csv.writer(f)
+            writer.writerow(["User ID", "Status"])
+            writer.writerow(["u1", "active"])
+
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "status: str"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        field_resolution = {"User ID": "user_id", "Status": "status"}
+        sink.set_resume_field_resolution(field_resolution)
+
+        result = sink.validate_output_target()
+        assert result.valid, f"Validation failed: {result.error_message}"
+
+    def test_jsonl_resume_validation_free_mode_with_restore_source_headers(self, tmp_path: Path) -> None:
+        """Free mode resume validation works with restore_source_headers for JSONL."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # File has extra field not in schema (free mode allows this)
+        with open(output_file, "w") as f:
+            f.write(json.dumps({"User ID": "u1", "Amount": 100.0, "Extra Field": "extra"}) + "\n")
+
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "free", "fields": ["user_id: str", "amount: float"]},
+                "restore_source_headers": True,
+            }
+        )
+
+        field_resolution = {"User ID": "user_id", "Amount": "amount"}
+        sink.set_resume_field_resolution(field_resolution)
+
+        result = sink.validate_output_target()
+        assert result.valid, f"Validation failed: {result.error_message}"

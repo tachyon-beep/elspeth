@@ -348,6 +348,29 @@ class JSONSink(BaseSink):
             return self._resolved_display_headers
         return None
 
+    def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
+        """Set field resolution mapping for resume validation.
+
+        Called by CLI during `elspeth resume` to provide the source field resolution
+        mapping BEFORE calling validate_output_target(). This allows validation to
+        correctly compare expected display names against existing file keys when
+        restore_source_headers=True.
+
+        Args:
+            resolution_mapping: Dict mapping original header name -> normalized field name.
+                This is the same format returned by Landscape.get_source_field_resolution().
+
+        Note:
+            This only has effect when restore_source_headers=True. For explicit
+            display_headers, the mapping is already available from config.
+        """
+        if not self._restore_source_headers:
+            return  # No-op if not using restore_source_headers
+
+        # Build reverse mapping: normalized -> original (display name)
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+        self._display_headers_resolved = True
+
     def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
         """Lazily resolve display headers from Landscape if restore_source_headers=True.
 

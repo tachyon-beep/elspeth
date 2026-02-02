@@ -3149,3 +3149,9 @@ allow_hits:
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
+# Updated fingerprint after adding set_resume_field_resolution method
+- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=510963cfd7439b4b
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+  expires: null
