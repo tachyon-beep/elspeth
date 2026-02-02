@@ -229,25 +229,17 @@ class SinkPathConfig(PathConfig):
 
     headers: str | dict[str, str] | None = Field(
         default=None,
-        description=(
-            "Header output mode: 'normalized', 'original', or {field: header} mapping"
-        ),
+        description=("Header output mode: 'normalized', 'original', or {field: header} mapping"),
     )
 
     display_headers: dict[str, str] | None = Field(
         default=None,
-        description=(
-            "LEGACY: Explicit mapping from normalized field names to display names. "
-            "Prefer 'headers: {mapping}' instead."
-        ),
+        description=("LEGACY: Explicit mapping from normalized field names to display names. Prefer 'headers: {mapping}' instead."),
     )
 
     restore_source_headers: bool = Field(
         default=False,
-        description=(
-            "LEGACY: Automatically restore original source headers. "
-            "Prefer 'headers: original' instead."
-        ),
+        description=("LEGACY: Automatically restore original source headers. Prefer 'headers: original' instead."),
     )
 
     @field_validator("headers")
@@ -265,14 +257,10 @@ class SinkPathConfig(PathConfig):
 
         if isinstance(v, str):
             if v not in ("normalized", "original"):
-                raise ValueError(
-                    f"Invalid header mode '{v}'. Expected 'normalized', 'original', or mapping dict."
-                )
+                raise ValueError(f"Invalid header mode '{v}'. Expected 'normalized', 'original', or mapping dict.")
             return v
 
-        raise ValueError(
-            f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}"
-        )
+        raise ValueError(f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}")
 
     @model_validator(mode="after")
     def _validate_display_options(self) -> Self:
