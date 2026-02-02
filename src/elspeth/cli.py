@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
+import yaml
 from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
 from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
@@ -25,11 +26,13 @@ from elspeth.contracts.events import (
 )
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 from elspeth.testing.chaosllm.cli import app as chaosllm_app
 from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
+    from elspeth.core.config import SecretsConfig
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
@@ -161,6 +164,31 @@ def main(
 # === Subcommand stubs (to be implemented in later tasks) ===
 
 
+def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
+    """Load YAML without environment variable resolution.
+
+    This is used to extract the secrets config before loading secrets.
+    The secrets config MUST use literal values (no ${VAR}) because
+    secrets are loaded before environment variable resolution.
+    """
+    with open(config_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _extract_secrets_config(raw_config: dict[str, Any]) -> SecretsConfig:
+    """Extract and validate secrets config from raw YAML.
+
+    Returns SecretsConfig with defaults if not specified.
+
+    Raises:
+        ValidationError: If secrets config is invalid
+    """
+    from elspeth.core.config import SecretsConfig
+
+    secrets_dict = raw_config.get("secrets", {})
+    return SecretsConfig(**secrets_dict)
+
+
 @app.command()
 def run(
     settings: str = typer.Option(
@@ -204,15 +232,41 @@ def run(
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
+    # Two-phase loading: extract secrets config first, then full resolution
+    try:
+        # Phase 1: Parse YAML to extract secrets config (no ${VAR} resolution yet)
+        # NOTE: vault_url must be literal per design - ${VAR} not supported
+        raw_config = _load_raw_yaml(settings_path)
+    except FileNotFoundError:
+        typer.echo(f"Error: Settings file not found: {settings}", err=True)
+        raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Extract and validate secrets config
+    try:
+        secrets_config = _extract_secrets_config(raw_config)
+    except ValidationError as e:
+        typer.echo("Secrets configuration errors:", err=True)
+        for error in e.errors():
+            loc = ".".join(str(x) for x in error["loc"])
+            typer.echo(f"  - secrets.{loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+
+    # Phase 2: Load secrets from Key Vault if configured
+    # Returns resolution records for later audit recording
+    try:
+        secret_resolutions = load_secrets_from_config(secrets_config)
+    except SecretLoadError as e:
+        typer.echo(f"Error loading secrets: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Phase 3: Full config loading with Dynaconf (resolves ${VAR})
     try:
         config = load_settings(settings_path)
     except (YamlParserError, YamlScannerError) as e:
-        # YAML syntax errors (malformed YAML) - show helpful message
-        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
         typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
-        raise typer.Exit(1) from None
-    except FileNotFoundError:
-        typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
     except ValidationError as e:
         typer.echo("Configuration errors:", err=True)
@@ -220,6 +274,10 @@ def run(
             loc = ".".join(str(x) for x in error["loc"])
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
+
+    # NOTE: secret_resolutions will be passed to orchestrator in Task 7 for deferred audit recording
+    # For now, the variable is captured but not yet used
+    _ = secret_resolutions  # Silence unused variable warning until Task 7
 
     # NEW: Instantiate plugins BEFORE graph construction
     try:

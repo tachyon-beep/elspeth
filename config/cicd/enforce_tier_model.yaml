@@ -1736,3 +1736,8 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
+- key: cli.py:R1:_extract_secrets_config:fp=c6597edf28bc5ebd
+  owner: feature
+  reason: Raw YAML config is Tier 3 external data - secrets section is optional in user config
+  safety: Missing 'secrets' key defaults to empty dict, then Pydantic validates with SecretsConfig()
+  expires: null
