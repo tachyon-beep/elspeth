@@ -11,6 +11,7 @@ Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 from __future__ import annotations
 
 import hashlib
+import types
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -24,6 +25,20 @@ from elspeth.contracts.errors import (
 )
 from elspeth.contracts.type_normalization import normalize_type_for_contract
 
+# Types that can be serialized in checkpoint and restored in from_checkpoint()
+# Must match type_map in SchemaContract.from_checkpoint()
+VALID_FIELD_TYPES: frozenset[type] = frozenset(
+    {
+        int,
+        str,
+        float,
+        bool,
+        type(None),
+        datetime,
+        object,  # 'any' type for fields that accept any value
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FieldContract:
@@ -35,7 +50,7 @@ class FieldContract:
     Attributes:
         normalized_name: Dict key / Python identifier (e.g., "important_data")
         original_name: Display name from source (e.g., "'Important - Data !!'")
-        python_type: Python primitive type (int, str, float, bool, datetime, type(None))
+        python_type: Python primitive type (int, str, float, bool, datetime, type(None), object)
         required: Whether field must be present in row
         source: "declared" (from config) or "inferred" (from first row observation)
     """
@@ -45,6 +60,18 @@ class FieldContract:
     python_type: type
     required: bool
     source: Literal["declared", "inferred"]
+
+    def __post_init__(self) -> None:
+        """Validate python_type is checkpoint-serializable.
+
+        Raises:
+            TypeError: If python_type is not in VALID_FIELD_TYPES
+        """
+        if self.python_type not in VALID_FIELD_TYPES:
+            raise TypeError(
+                f"Invalid python_type '{self.python_type.__name__}' for FieldContract. "
+                f"Valid types: {', '.join(sorted(t.__name__ for t in VALID_FIELD_TYPES))}."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +98,18 @@ class SchemaContract:
     _by_original: dict[str, str] = field(default_factory=dict, repr=False, compare=False, hash=False)
 
     def __post_init__(self) -> None:
-        """Build O(1) lookup indices after initialization."""
+        """Build O(1) lookup indices after initialization.
+
+        Raises:
+            ValueError: If duplicate normalized_name found in fields
+        """
+        # Defense-in-depth: validate uniqueness before building indices
+        # (with_field() also checks, but direct construction must be safe)
+        normalized_names = [fc.normalized_name for fc in self.fields]
+        if len(normalized_names) != len(set(normalized_names)):
+            duplicates = [n for n in normalized_names if normalized_names.count(n) > 1]
+            raise ValueError(f"Duplicate normalized_name in fields: {set(duplicates)}")
+
         by_norm = {fc.normalized_name: fc for fc in self.fields}
         by_orig = {fc.original_name: fc.normalized_name for fc in self.fields}
         object.__setattr__(self, "_by_normalized", by_norm)
@@ -437,8 +475,22 @@ class PipelineRow:
             data: Row data with normalized field names as keys
             contract: Schema contract for name resolution and validation
         """
-        self._data = data
+        # Store as immutable view to prevent mutation after audit recording
+        # Per CLAUDE.md Tier 1: audit data must not be modified
+        self._data = types.MappingProxyType(dict(data))
         self._contract = contract
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Raise TypeError - PipelineRow is immutable.
+
+        Args:
+            key: Field name
+            value: Value to set
+
+        Raises:
+            TypeError: Always - PipelineRow is immutable for audit integrity
+        """
+        raise TypeError("PipelineRow is immutable - cannot modify audit data")
 
     def __getitem__(self, key: str) -> Any:
         """Access field by original OR normalized name.
@@ -517,7 +569,7 @@ class PipelineRow:
             Checkpoint-serializable dict
         """
         return {
-            "data": self._data,
+            "data": dict(self._data),  # Convert MappingProxyType to dict for serialization
             "contract_version": self._contract.version_hash(),
         }
 

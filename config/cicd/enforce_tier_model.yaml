@@ -1721,11 +1721,16 @@ allow_hits:
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
-- key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=3b85560d6ac41d4a
+- key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=39649339395b274b
   owner: architecture
   reason: Python __contains__ protocol - must return bool for 'in' operator, not re-raise
   safety: Returns explicit True/False as required by Python data model
   expires: '2026-05-02'
+- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=0007cf52084b1578
+  owner: architecture
+  reason: Optional lookup API - returns None if field not found, caller decides how to handle
+  safety: Explicit Optional[FieldContract] return type - caller must handle None case
+  expires: null
 - key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
   owner: feature
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict

@@ -40,6 +40,47 @@ def sample_fields() -> tuple[FieldContract, ...]:
     )
 
 
+# --- FieldContract Tests ---
+
+
+class TestFieldContract:
+    """Tests for FieldContract validation."""
+
+    def test_valid_primitive_types_accepted(self) -> None:
+        """FieldContract accepts all valid primitive types."""
+        from datetime import datetime
+
+        # All these should succeed
+        FieldContract("a", "A", int, True, "declared")
+        FieldContract("b", "B", str, True, "declared")
+        FieldContract("c", "C", float, True, "declared")
+        FieldContract("d", "D", bool, True, "declared")
+        FieldContract("e", "E", datetime, True, "declared")
+        FieldContract("f", "F", type(None), True, "declared")
+        FieldContract("g", "G", object, True, "declared")  # 'any' type
+
+    def test_invalid_type_raises_typeerror(self) -> None:
+        """FieldContract rejects types not supported by checkpoint serialization."""
+        with pytest.raises(TypeError, match=r"Invalid python_type.*list"):
+            FieldContract("bad", "Bad", list, True, "declared")
+
+    def test_decimal_type_raises_typeerror(self) -> None:
+        """FieldContract rejects Decimal - not serializable in checkpoint."""
+        from decimal import Decimal
+
+        with pytest.raises(TypeError, match=r"Invalid python_type.*Decimal"):
+            FieldContract("bad", "Bad", Decimal, True, "declared")
+
+    def test_custom_class_raises_typeerror(self) -> None:
+        """FieldContract rejects custom classes - not serializable."""
+
+        class CustomClass:
+            pass
+
+        with pytest.raises(TypeError, match=r"Invalid python_type.*CustomClass"):
+            FieldContract("bad", "Bad", CustomClass, True, "declared")
+
+
 # --- Creation Tests ---
 
 
@@ -81,6 +122,18 @@ class TestSchemaContractCreation:
         assert contract.mode == "OBSERVED"
         assert contract.fields == ()
         assert contract.locked is False
+
+    def test_duplicate_normalized_name_raises_valueerror(self) -> None:
+        """Duplicate normalized_name in fields raises ValueError.
+
+        Defense-in-depth: even if with_field() prevents dynamic duplicates,
+        direct construction must also reject duplicates.
+        """
+        fc1 = FieldContract("amount", "'Amount'", int, True, "declared")
+        fc2 = FieldContract("amount", "'AMOUNT'", float, False, "declared")  # Same normalized!
+
+        with pytest.raises(ValueError, match="Duplicate normalized_name"):
+            SchemaContract(mode="FIXED", fields=(fc1, fc2), locked=True)
 
     def test_frozen_immutable_raises_attribute_error(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """Frozen dataclass - assigning raises AttributeError."""

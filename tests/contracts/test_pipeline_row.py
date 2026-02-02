@@ -142,3 +142,51 @@ class TestPipelineRowSlots:
 
         with pytest.raises(AttributeError):
             row.new_attr = "value"  # type: ignore[attr-defined]
+
+
+class TestPipelineRowImmutability:
+    """Test PipelineRow data immutability for audit integrity."""
+
+    def test_setitem_raises_typeerror(self) -> None:
+        """Cannot mutate row via bracket notation (Tier 1 integrity)."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("amount", "Amount", int, True, "declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"amount": 100}, contract)
+
+        with pytest.raises(TypeError, match=r"immutable.*audit"):
+            row["amount"] = 200
+
+    def test_original_dict_mutation_does_not_affect_row(self) -> None:
+        """Mutating original dict does not affect PipelineRow (defensive copy)."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("amount", "Amount", int, True, "declared"),),
+            locked=True,
+        )
+        original_data = {"amount": 100}
+        row = PipelineRow(original_data, contract)
+
+        # Mutate original dict
+        original_data["amount"] = 999
+
+        # Row should still have original value
+        assert row["amount"] == 100
+
+    def test_to_dict_mutation_does_not_affect_row(self) -> None:
+        """Mutating to_dict() result does not affect PipelineRow."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("amount", "Amount", int, True, "declared"),),
+            locked=True,
+        )
+        row = PipelineRow({"amount": 100}, contract)
+
+        # Get dict and mutate it
+        d = row.to_dict()
+        d["amount"] = 999
+
+        # Row should still have original value
+        assert row["amount"] == 100
