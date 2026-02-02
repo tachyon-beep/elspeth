@@ -1681,22 +1681,22 @@ allow_hits:
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
   expires: null
-- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=c15d9a4cbbc237b5
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=1eba64720b38bf49
   owner: architecture
   reason: Defense-in-depth - NodeStateOpen result type check for state machine logic
   safety: Crashes on unexpected type - explicit failure path
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=3e159072db015edc
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=ec88fcc9ee15ac65
   owner: architecture
   reason: Payload loading failure is graceful degradation for explain output
   safety: Returns explanation with missing payload info - not silent, explicitly noted
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=b162094ec5e769fe
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=925374eff2bd4b75
   owner: architecture
   reason: Tier 3 data validation - non-serializable external data fallback
   safety: Falls back to repr() hash with explicit logging - audit trail preserved
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=22c768e3d88caab9
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=3891920d476734a7
   owner: architecture
   reason: Response data may not exist for failed calls - returns None
   safety: Returns None on KeyError - explicit absence, not silent coercion
