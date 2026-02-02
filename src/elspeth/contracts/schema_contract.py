@@ -13,6 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from elspeth.contracts.errors import (
+    ContractViolation,
+    ExtraFieldViolation,
+    MissingFieldViolation,
+    TypeMismatchViolation,
+)
 from elspeth.contracts.type_normalization import normalize_type_for_contract
 
 
@@ -152,3 +158,59 @@ class SchemaContract:
             fields=(*self.fields, new_field),
             locked=self.locked,
         )
+
+    def validate(self, row: dict[str, Any]) -> list[ContractViolation]:
+        """Validate row data against contract.
+
+        Checks:
+        1. Required fields are present
+        2. Field types match (with numpy/pandas normalization)
+        3. FIXED mode: No extra fields allowed
+
+        Args:
+            row: Row data with normalized field names as keys
+
+        Returns:
+            List of ContractViolation instances (empty if valid)
+        """
+        violations: list[ContractViolation] = []
+
+        # Check declared fields
+        for fc in self.fields:
+            if fc.required and fc.normalized_name not in row:
+                violations.append(
+                    MissingFieldViolation(
+                        normalized_name=fc.normalized_name,
+                        original_name=fc.original_name,
+                    )
+                )
+            elif fc.normalized_name in row:
+                value = row[fc.normalized_name]
+                # Normalize runtime type for comparison
+                # (handles numpy.int64 matching int, etc.)
+                actual_type = normalize_type_for_contract(value)
+                # type(None) matches None values
+                if actual_type != fc.python_type:
+                    violations.append(
+                        TypeMismatchViolation(
+                            normalized_name=fc.normalized_name,
+                            original_name=fc.original_name,
+                            expected_type=fc.python_type,
+                            actual_type=actual_type,
+                            actual_value=value,
+                        )
+                    )
+
+        # FIXED mode: reject extra fields
+        if self.mode == "FIXED":
+            declared_names = {fc.normalized_name for fc in self.fields}
+            for key in row:
+                if key not in declared_names:
+                    violations.append(
+                        ExtraFieldViolation(
+                            normalized_name=key,
+                            original_name=key,  # We don't know original for extras
+                        )
+                    )
+
+        return violations

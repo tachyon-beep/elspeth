@@ -334,3 +334,137 @@ class TestSchemaContractMutation:
         # Both names should resolve
         assert updated.resolve_name("amount") == "amount"
         assert updated.resolve_name("'Amount USD'") == "amount"
+
+
+# --- Validation Tests ---
+
+
+class TestSchemaContractValidation:
+    """Test contract validation."""
+
+    def test_validate_valid_row_returns_empty(self) -> None:
+        """Valid row returns empty violations list."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "ID", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"id": 42})
+        assert violations == []
+
+    def test_validate_missing_required_field(self) -> None:
+        """Missing required field returns MissingFieldViolation."""
+        from elspeth.contracts.errors import MissingFieldViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "ID", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({})
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], MissingFieldViolation)
+        assert violations[0].normalized_name == "id"
+
+    def test_validate_optional_field_can_be_missing(self) -> None:
+        """Optional field (required=False) can be missing."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("note", "Note", str, False, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({})
+        assert violations == []
+
+    def test_validate_type_mismatch(self) -> None:
+        """Wrong type returns TypeMismatchViolation."""
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "ID", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"id": "not_an_int"})
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].expected_type is int
+        assert violations[0].actual_type is str
+
+    def test_validate_numpy_type_matches_primitive(self) -> None:
+        """numpy.int64 value matches int contract type."""
+        import numpy as np
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("count", "Count", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"count": np.int64(42)})
+        assert violations == []  # np.int64 normalizes to int
+
+    def test_validate_none_matches_nonetype(self) -> None:
+        """None value matches type(None) contract."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract("x", "X", type(None), False, "inferred"),),
+            locked=True,
+        )
+        violations = contract.validate({"x": None})
+        assert violations == []
+
+    def test_validate_fixed_rejects_extras(self) -> None:
+        """FIXED mode rejects extra fields."""
+        from elspeth.contracts.errors import ExtraFieldViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("id", "ID", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"id": 1, "extra": "field"})
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], ExtraFieldViolation)
+        assert violations[0].normalized_name == "extra"
+
+    def test_validate_flexible_allows_extras(self) -> None:
+        """FLEXIBLE mode allows extra fields (returns no violation)."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("id", "ID", int, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"id": 1, "extra": "field"})
+        assert violations == []
+
+    def test_validate_observed_allows_extras(self) -> None:
+        """OBSERVED mode allows extra fields."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(),
+            locked=True,
+        )
+        violations = contract.validate({"anything": "goes"})
+        assert violations == []
+
+    def test_validate_multiple_violations(self) -> None:
+        """Multiple problems return multiple violations."""
+        from elspeth.contracts.errors import MissingFieldViolation, TypeMismatchViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract("a", "A", int, True, "declared"),
+                FieldContract("b", "B", str, True, "declared"),
+            ),
+            locked=True,
+        )
+        violations = contract.validate({"a": "wrong_type"})  # Missing b, wrong type a
+
+        assert len(violations) == 2
+        types = {type(v) for v in violations}
+        assert MissingFieldViolation in types
+        assert TypeMismatchViolation in types

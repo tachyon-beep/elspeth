@@ -616,8 +616,8 @@ class TypeMismatchViolation(ContractViolation):
     doesn't match the expected type. Results in row quarantine.
 
     Attributes:
-        expected_type: The type that was expected (e.g., "int")
-        actual_type: The type that was received (e.g., "str")
+        expected_type: The type that was expected (e.g., int, str)
+        actual_type: The type that was received (e.g., str, float)
         actual_value: The actual value received (for debugging)
 
     Note:
@@ -631,8 +631,8 @@ class TypeMismatchViolation(ContractViolation):
         >>> raise TypeMismatchViolation(
         ...     normalized_name="amount",
         ...     original_name="Amount",
-        ...     expected_type="int",
-        ...     actual_type="str",
+        ...     expected_type=int,
+        ...     actual_type=str,
         ...     actual_value="not_a_number"
         ... )
         TypeMismatchViolation: Field 'Amount' (amount) expected type 'int', got 'str'
@@ -643,8 +643,8 @@ class TypeMismatchViolation(ContractViolation):
         *,
         normalized_name: str,
         original_name: str,
-        expected_type: str,
-        actual_type: str,
+        expected_type: type,
+        actual_type: type,
         actual_value: Any,
     ) -> None:
         """Initialize TypeMismatchViolation.
@@ -663,7 +663,7 @@ class TypeMismatchViolation(ContractViolation):
 
     def _format_message(self) -> str:
         """Format message showing type mismatch."""
-        return f"Field '{self.original_name}' ({self.normalized_name}) expected type '{self.expected_type}', got '{self.actual_type}'"
+        return f"Field '{self.original_name}' ({self.normalized_name}) expected type '{self.expected_type.__name__}', got '{self.actual_type.__name__}'"
 
 
 class ExtraFieldViolation(ContractViolation):

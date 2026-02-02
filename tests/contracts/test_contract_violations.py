@@ -98,11 +98,11 @@ class TestTypeMismatchViolation:
         exc = TypeMismatchViolation(
             normalized_name="amount",
             original_name="Amount",
-            expected_type="int",
-            actual_type="str",
+            expected_type=int,
+            actual_type=str,
             actual_value="not_a_number",
         )
-        assert exc.expected_type == "int"
+        assert exc.expected_type is int
 
     def test_type_mismatch_stores_actual_type(self) -> None:
         """TypeMismatchViolation stores actual_type attribute."""
@@ -111,11 +111,11 @@ class TestTypeMismatchViolation:
         exc = TypeMismatchViolation(
             normalized_name="amount",
             original_name="Amount",
-            expected_type="int",
-            actual_type="str",
+            expected_type=int,
+            actual_type=str,
             actual_value="not_a_number",
         )
-        assert exc.actual_type == "str"
+        assert exc.actual_type is str
 
     def test_type_mismatch_stores_actual_value(self) -> None:
         """TypeMismatchViolation stores actual_value attribute."""
@@ -124,8 +124,8 @@ class TestTypeMismatchViolation:
         exc = TypeMismatchViolation(
             normalized_name="amount",
             original_name="Amount",
-            expected_type="int",
-            actual_type="str",
+            expected_type=int,
+            actual_type=str,
             actual_value="not_a_number",
         )
         assert exc.actual_value == "not_a_number"
@@ -137,8 +137,8 @@ class TestTypeMismatchViolation:
         exc = TypeMismatchViolation(
             normalized_name="amount",
             original_name="Amount",
-            expected_type="int",
-            actual_type="str",
+            expected_type=int,
+            actual_type=str,
             actual_value="not_a_number",
         )
         msg = str(exc)
@@ -152,8 +152,8 @@ class TestTypeMismatchViolation:
         exc = TypeMismatchViolation(
             normalized_name="customer_id",
             original_name="Customer ID",
-            expected_type="int",
-            actual_type="str",
+            expected_type=int,
+            actual_type=str,
             actual_value="abc",
         )
         msg = str(exc)
