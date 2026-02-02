@@ -3,6 +3,11 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 allow_hits:
+- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=b5c827ffff839109
+  owner: architecture
+  reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use resolve_name() for strict lookup'
+  safety: Code reviewed - legitimate API pattern; resolve_name() raises KeyError for strict lookups
+  expires: null
 - key: engine/triggers.py:R5:TriggerEvaluator:record_accept:fp=a183521ba11a8ee6
   owner: bugfix
   reason: Defense-in-depth - ExpressionParser returns Any; boundary validation before

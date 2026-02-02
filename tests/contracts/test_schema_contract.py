@@ -244,3 +244,93 @@ class TestSchemaContractEdgeCases:
         # Indices should both contain it
         assert "simple_field" in contract._by_normalized
         assert "simple_field" in contract._by_original
+
+
+# --- Mutation Tests ---
+
+
+class TestSchemaContractMutation:
+    """Test immutable 'mutation' methods that return new instances."""
+
+    def test_with_locked_returns_new_instance(self) -> None:
+        """with_locked() returns new contract with locked=True."""
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        locked = original.with_locked()
+
+        assert locked.locked is True
+        assert original.locked is False  # Original unchanged
+        assert locked is not original
+
+    def test_with_locked_preserves_fields(self) -> None:
+        """with_locked() preserves all fields."""
+        fc = FieldContract("x", "X", int, True, "declared")
+        original = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=False)
+        locked = original.with_locked()
+
+        assert locked.fields == original.fields
+        assert locked.mode == original.mode
+
+    def test_with_field_adds_inferred_field(self) -> None:
+        """with_field() adds new inferred field to contract."""
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        updated = original.with_field("amount", "'Amount'", 100)
+
+        assert len(updated.fields) == 1
+        assert updated.fields[0].normalized_name == "amount"
+        assert updated.fields[0].original_name == "'Amount'"
+        assert updated.fields[0].python_type is int
+        assert updated.fields[0].source == "inferred"
+        assert updated.fields[0].required is False
+
+    def test_with_field_normalizes_numpy_type(self) -> None:
+        """with_field() normalizes numpy.int64 to int."""
+        import numpy as np
+
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        updated = original.with_field("count", "Count", np.int64(42))
+
+        assert updated.fields[0].python_type is int  # Not numpy.int64
+
+    def test_with_field_normalizes_pandas_timestamp(self) -> None:
+        """with_field() normalizes pandas.Timestamp to datetime."""
+        from datetime import datetime
+
+        import pandas as pd
+
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        updated = original.with_field("ts", "Timestamp", pd.Timestamp("2024-01-01"))
+
+        assert updated.fields[0].python_type is datetime
+
+    def test_with_field_rejects_nan(self) -> None:
+        """with_field() rejects NaN values."""
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+
+        with pytest.raises(ValueError, match="non-finite"):
+            original.with_field("bad", "Bad", float("nan"))
+
+    def test_with_field_locked_rejects_existing(self) -> None:
+        """with_field() raises if field already exists and contract is locked."""
+        fc = FieldContract("amount", "'Amount'", int, True, "declared")
+        locked = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=True)
+
+        with pytest.raises(TypeError, match="already locked"):
+            locked.with_field("amount", "'Amount'", 200)
+
+    def test_with_field_unlocked_allows_update(self) -> None:
+        """with_field() allows adding fields when not locked."""
+        fc = FieldContract("a", "A", int, True, "declared")
+        unlocked = SchemaContract(mode="FLEXIBLE", fields=(fc,), locked=False)
+
+        # Can add new field
+        updated = unlocked.with_field("b", "B", "hello")
+        assert len(updated.fields) == 2
+
+    def test_with_field_updates_indices(self) -> None:
+        """with_field() updates name resolution indices."""
+        original = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+        updated = original.with_field("amount", "'Amount USD'", 100)
+
+        # Both names should resolve
+        assert updated.resolve_name("amount") == "amount"
+        assert updated.resolve_name("'Amount USD'") == "amount"

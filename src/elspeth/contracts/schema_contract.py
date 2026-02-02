@@ -11,7 +11,9 @@ Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
+
+from elspeth.contracts.type_normalization import normalize_type_for_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,3 +98,57 @@ class SchemaContract:
             The FieldContract if found, None otherwise
         """
         return self._by_normalized.get(normalized_name)
+
+    def with_locked(self) -> SchemaContract:
+        """Return new contract with locked=True.
+
+        Once locked, types are frozen and cannot be changed.
+        This is called after the first row is processed.
+
+        Returns:
+            New SchemaContract instance with locked=True
+        """
+        return SchemaContract(
+            mode=self.mode,
+            fields=self.fields,
+            locked=True,
+        )
+
+    def with_field(
+        self,
+        normalized: str,
+        original: str,
+        value: Any,
+    ) -> SchemaContract:
+        """Return new contract with inferred field added.
+
+        Called for OBSERVED/FLEXIBLE extras on first row.
+        Returns new instance (frozen pattern).
+
+        Args:
+            normalized: Normalized field name (Python identifier)
+            original: Original field name (from source)
+            value: Sample value for type inference
+
+        Returns:
+            New SchemaContract with field added
+
+        Raises:
+            TypeError: If field exists and contract is locked
+            ValueError: If value is NaN or Infinity
+        """
+        if self.locked and normalized in self._by_normalized:
+            raise TypeError(f"Field '{original}' ({normalized}) already locked")
+
+        new_field = FieldContract(
+            normalized_name=normalized,
+            original_name=original,
+            python_type=normalize_type_for_contract(value),
+            required=False,  # Inferred fields are never required
+            source="inferred",
+        )
+        return SchemaContract(
+            mode=self.mode,
+            fields=(*self.fields, new_field),
+            locked=self.locked,
+        )
