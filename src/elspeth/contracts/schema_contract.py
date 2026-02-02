@@ -319,15 +319,16 @@ class SchemaContract:
         )
 
         # Verify integrity (Tier 1 audit requirement)
-        if "version_hash" in data:
-            expected_hash = data["version_hash"]
-            actual_hash = contract.version_hash()
-            if actual_hash != expected_hash:
-                raise ValueError(
-                    f"Contract integrity violation: hash mismatch. "
-                    f"Expected {expected_hash}, got {actual_hash}. "
-                    f"Checkpoint may be corrupted or from different version."
-                )
+        # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+        # to_checkpoint_format() ALWAYS writes version_hash, so missing = corruption
+        expected_hash = data["version_hash"]  # KeyError if missing = correct!
+        actual_hash = contract.version_hash()
+        if actual_hash != expected_hash:
+            raise ValueError(
+                f"Contract integrity violation: hash mismatch. "
+                f"Expected {expected_hash}, got {actual_hash}. "
+                f"Checkpoint may be corrupted or from different version."
+            )
 
         return contract
 

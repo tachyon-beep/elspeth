@@ -1,0 +1,89 @@
+# ELSPETH Schema Contracts Demo
+#
+# This pipeline demonstrates the Unified Schema Contracts feature with
+# automatic header normalization. The input CSV has intentionally "crazy"
+# headers that get normalized to Python identifiers while preserving
+# the original names in the audit trail.
+#
+# Original headers:
+#   Customer ID!!              -> customer_id
+#   "  Amount (USD)  "         -> amount_usd
+#   Transaction Date/Time      -> transaction_date_time
+#   Product Name               -> product_name
+#   Status [Active/Inactive]   -> status_active_inactive
+#   NOTES & Comments           -> notes_comments
+#
+# Run with:
+#   uv run elspeth run -s examples/schema_contracts_demo/suite.yaml --execute
+#
+# After running, inspect the audit trail:
+#   uv run elspeth-mcp --database sqlite:///examples/schema_contracts_demo/runs/audit.db
+#
+# Then use MCP tools:
+#   > get_run_contract("<run_id>")    # See field mappings
+#   > explain_field("<run_id>", "customer_id")  # Trace field provenance
+
+source:
+  plugin: csv
+  options:
+    path: examples/schema_contracts_demo/input.csv
+    schema:
+      # OBSERVED mode: infer schema from first row
+      # This creates a SchemaContract that tracks:
+      # - original_name: The actual CSV header
+      # - normalized_name: Python-safe identifier
+      # - python_type: Inferred type from data
+      fields: dynamic
+    # Normalize crazy headers to Python identifiers
+    normalize_fields: true
+    on_validation_failure: discard
+
+transforms:
+  # Simple transform to demonstrate contract propagation
+  - plugin: field_mapper
+    options:
+      mappings:
+        # Access fields by their NORMALIZED names
+        amount_cents: "int(amount_usd * 100)"
+        customer_upper: "customer_id.upper()"
+        is_active: "status_active_inactive == 'Active'"
+      schema:
+        fields: dynamic
+
+  # Add a calculated field
+  - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: examples/schema_contracts_demo/output/processed.csv
+      schema:
+        fields: dynamic
+
+  # High-value transactions sink
+  high_value:
+    plugin: csv
+    options:
+      path: examples/schema_contracts_demo/output/high_value.csv
+      schema:
+        fields: dynamic
+
+gates:
+  # Route high-value transactions to separate sink
+  - plugin: threshold
+    name: high_value_gate
+    options:
+      field: amount_usd  # Use NORMALIZED name
+      threshold: 500
+      comparison: ">="
+      true_sink: high_value
+      false_sink: output
+
+default_sink: output
+
+landscape:
+  url: sqlite:///examples/schema_contracts_demo/runs/audit.db

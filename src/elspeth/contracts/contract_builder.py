@@ -88,7 +88,9 @@ class ContractBuilder:
                 continue
 
             # New field - infer type
-            original_name = normalized_to_original.get(normalized_name, normalized_name)
+            # Per CLAUDE.md: No silent fallback - if field is in row but not in
+            # resolution, that's a bug in the source plugin. KeyError is correct!
+            original_name = normalized_to_original[normalized_name]
             updated = updated.with_field(normalized_name, original_name, value)
 
         # Lock the contract

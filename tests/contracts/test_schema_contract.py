@@ -553,6 +553,19 @@ class TestSchemaContractCheckpoint:
         with pytest.raises(ValueError, match="integrity"):
             SchemaContract.from_checkpoint(data)
 
+    def test_from_checkpoint_missing_hash_crashes(self, sample_contract: SchemaContract) -> None:
+        """from_checkpoint() crashes on missing version_hash (Tier 1 integrity).
+
+        Per CLAUDE.md Tier 1: "Bad data in the audit trail = crash immediately."
+        to_checkpoint_format() ALWAYS writes version_hash, so if it's missing
+        that's corruption - not an older format to silently accept.
+        """
+        data = sample_contract.to_checkpoint_format()
+        del data["version_hash"]  # Simulate corruption
+
+        with pytest.raises(KeyError):
+            SchemaContract.from_checkpoint(data)
+
     def test_from_checkpoint_unknown_type_crashes(self) -> None:
         """from_checkpoint() crashes on unknown type (Tier 1 integrity)."""
         data = {

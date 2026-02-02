@@ -6,6 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from elspeth.contracts.errors import TypeMismatchViolation
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -307,19 +308,21 @@ class TestContractBuilderEdgeCases:
         assert updated.locked is True
         assert len(updated.fields) == 0
 
-    def test_field_in_row_not_in_resolution(self) -> None:
-        """Field in row but not in resolution uses normalized name as original."""
+    def test_field_in_row_not_in_resolution_crashes(self) -> None:
+        """Field in row but not in resolution raises KeyError (Tier 1 integrity).
+
+        Per CLAUDE.md: Sources are system code. If a field is in the row but
+        not in field_resolution, that's a bug in the source plugin.
+        Silent fallback corrupts the audit trail with wrong original_name.
+        """
         from elspeth.contracts.contract_builder import ContractBuilder
 
         contract = SchemaContract(mode="OBSERVED", fields=(), locked=False)
         builder = ContractBuilder(contract)
 
-        # Field 'orphan' is in row but not in resolution
+        # Field 'orphan' is in row but not in resolution - this is a source bug
         first_row = {"known": 1, "orphan": 2}
         field_resolution = {"Known": "known"}  # 'orphan' not in resolution
 
-        updated = builder.process_first_row(first_row, field_resolution)
-
-        orphan_field = next(f for f in updated.fields if f.normalized_name == "orphan")
-        # When not in resolution, normalized_name is used as original_name
-        assert orphan_field.original_name == "orphan"
+        with pytest.raises(KeyError, match="orphan"):
+            builder.process_first_row(first_row, field_resolution)
