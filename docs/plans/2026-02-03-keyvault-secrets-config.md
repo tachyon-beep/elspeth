@@ -15,9 +15,15 @@
 - ✅ P0-4: Reuse existing `KeyVaultSecretLoader` instead of duplicating code
 - ✅ P1-5: Add edge case tests (unicode, newlines, partial failures, idempotency)
 - ✅ P1-6: Document that `vault_url` must be literal (no `${VAR}` allowed)
-- ✅ P1-7: Add grep verification before removing old env vars
+- ✅ P1-7: Add grep verification before removing old env vars (AMENDED: includes .md/.yaml)
 - ✅ P1-8: Remove dead cache code from simplified fingerprint.py
-- ✅ P2-10: Add audit trail table for secret resolution events
+- ✅ P2-10: Add audit trail table for secret resolution events (AMENDED: deferred recording)
+
+**Amendments from Risk Assessment (2026-02-03):**
+- ✅ FIXED: Task 7 run_id timing - secrets load BEFORE run exists. Solution: return resolution records for deferred recording.
+- ✅ FIXED: Task 5 incomplete - grep found 7 test files referencing old env vars, not just 2. All are now listed.
+- ✅ FIXED: P1-7 grep scope - now includes `.md`, `.yaml`, `.yml` files
+- ✅ IMPROVED: Task 6 preserves existing secret_loader exports (still used by other code)
 
 ---
 
@@ -362,6 +368,8 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Create: `src/elspeth/core/security/config_secrets.py`
 - Test: `tests/core/security/test_config_secrets.py`
 
+**AMENDED:** Function now returns resolution records for deferred audit recording (see Task 7).
+
 **Step 1: Write the failing test**
 
 Create `tests/core/security/test_config_secrets.py`:
@@ -381,17 +389,17 @@ import pytest
 class TestLoadSecretsFromConfig:
     """Tests for load_secrets_from_config function."""
 
-    def test_env_source_does_nothing(self) -> None:
-        """source: env should not modify environment."""
+    def test_env_source_returns_empty_list(self) -> None:
+        """source: env should return empty resolution list."""
         from elspeth.core.config import SecretsConfig
         from elspeth.core.security.config_secrets import load_secrets_from_config
 
         config = SecretsConfig(source="env")
 
-        # Should not raise, should not modify env
+        # Should not raise, should not modify env, returns empty list
         with patch.dict(os.environ, {}, clear=False):
-            load_secrets_from_config(config)
-            # No assertions needed - just verify it doesn't crash
+            resolutions = load_secrets_from_config(config)
+            assert resolutions == []
 
     def test_keyvault_loads_mapped_secrets(self) -> None:
         """source: keyvault should load all mapped secrets into env."""
@@ -416,10 +424,42 @@ class TestLoadSecretsFromConfig:
             MockLoader.return_value = mock_loader
 
             with patch.dict(os.environ, {}, clear=False):
-                load_secrets_from_config(config)
+                resolutions = load_secrets_from_config(config)
 
                 assert os.environ["AZURE_OPENAI_KEY"] == "secret-key-value"
                 assert os.environ["AZURE_OPENAI_ENDPOINT"] == "https://endpoint.openai.azure.com"
+                # Returns resolution records for audit
+                assert len(resolutions) == 2
+
+    def test_keyvault_returns_resolution_records(self) -> None:
+        """Resolution records should contain audit information."""
+        from elspeth.core.config import SecretsConfig
+        from elspeth.core.security.config_secrets import load_secrets_from_config
+
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url="https://test-vault.vault.azure.net",
+            mapping={"AZURE_OPENAI_KEY": "azure-openai-key"},
+        )
+
+        with patch("elspeth.core.security.config_secrets.KeyVaultSecretLoader") as MockLoader:
+            mock_loader = MagicMock()
+            mock_loader.get_secret.return_value = ("secret-value", MagicMock())
+            MockLoader.return_value = mock_loader
+
+            with patch.dict(os.environ, {}, clear=False):
+                resolutions = load_secrets_from_config(config)
+
+                assert len(resolutions) == 1
+                rec = resolutions[0]
+                assert rec["env_var_name"] == "AZURE_OPENAI_KEY"
+                assert rec["source"] == "keyvault"
+                assert rec["vault_url"] == "https://test-vault.vault.azure.net"
+                assert rec["secret_name"] == "azure-openai-key"
+                assert "timestamp" in rec
+                assert "latency_ms" in rec
+                # secret_value is included for deferred fingerprinting
+                assert rec["secret_value"] == "secret-value"
 
     def test_keyvault_missing_secret_fails_fast(self) -> None:
         """Missing secret in Key Vault should raise immediately."""
@@ -636,6 +676,10 @@ them into environment variables before config resolution.
 IMPORTANT: This module reuses the existing KeyVaultSecretLoader from
 secret_loader.py to avoid code duplication and maintain consistent caching.
 
+AMENDED: Returns resolution records for deferred audit recording.
+Secrets are loaded BEFORE the run is created, so audit recording must happen
+later when run_id is available.
+
 Usage:
     from elspeth.core.config import SecretsConfig
     from elspeth.core.security.config_secrets import load_secrets_from_config
@@ -645,14 +689,16 @@ Usage:
         vault_url="https://my-vault.vault.azure.net",
         mapping={"AZURE_OPENAI_KEY": "azure-openai-key"},
     )
-    load_secrets_from_config(config)
+    resolutions = load_secrets_from_config(config)
     # Now os.environ["AZURE_OPENAI_KEY"] contains the secret value
+    # resolutions can be passed to orchestrator for audit recording
 """
 
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.core.config import SecretsConfig
@@ -669,7 +715,7 @@ class SecretLoadError(Exception):
     pass
 
 
-def load_secrets_from_config(config: "SecretsConfig") -> None:
+def load_secrets_from_config(config: "SecretsConfig") -> list[dict[str, Any]]:
     """Load secrets from configured source and inject into environment.
 
     When source is 'env', this function does nothing (secrets come from
@@ -681,12 +727,20 @@ def load_secrets_from_config(config: "SecretsConfig") -> None:
     Args:
         config: SecretsConfig specifying source and mapping
 
+    Returns:
+        List of resolution records for deferred audit recording.
+        Each record contains: env_var_name, source, vault_url, secret_name,
+        timestamp, latency_ms, secret_value (for fingerprinting).
+
+        NOTE: secret_value is included so the caller can compute fingerprints
+        with the appropriate key. It should NOT be stored directly.
+
     Raises:
         SecretLoadError: If any secret cannot be loaded (fail fast)
     """
     if config.source == "env":
         # Nothing to do - secrets are already in environment
-        return
+        return []
 
     # source == "keyvault"
     # P0-1: No defensive assertions - Pydantic guarantees vault_url and mapping
@@ -714,19 +768,42 @@ def load_secrets_from_config(config: "SecretsConfig") -> None:
         ) from e
     except Exception as e:
         # P0-2: This catches Azure auth errors during client creation
-        # The KeyVaultSecretLoader uses lazy client init, so auth errors
-        # will occur on first get_secret() call instead
+        error_str = str(e)
+        if "ClientAuthenticationError" in error_str or "credential" in error_str.lower():
+            raise SecretLoadError(
+                f"Failed to authenticate to Key Vault ({config.vault_url})\n"
+                f"DefaultAzureCredential could not find valid credentials.\n"
+                f"Ensure Managed Identity, Azure CLI login, or service principal env vars are configured.\n"
+                f"Error: {e}"
+            ) from e
         raise SecretLoadError(
             f"Failed to initialize Key Vault loader for {config.vault_url}\n"
             f"Error: {e}"
         ) from e
 
-    # Load each mapped secret
+    # Load each mapped secret and collect resolution records
+    resolutions: list[dict[str, Any]] = []
+
     for env_var_name, keyvault_secret_name in config.mapping.items():
+        start_time = time.time()
         try:
             secret_value, _ref = loader.get_secret(keyvault_secret_name)
+            latency_ms = (time.time() - start_time) * 1000
+
             # Inject into environment (overrides existing)
             os.environ[env_var_name] = secret_value
+
+            # Record for deferred audit (includes secret_value for fingerprinting)
+            resolutions.append({
+                "env_var_name": env_var_name,
+                "source": "keyvault",
+                "vault_url": config.vault_url,
+                "secret_name": keyvault_secret_name,
+                "timestamp": start_time,
+                "latency_ms": latency_ms,
+                "secret_value": secret_value,  # For fingerprinting, NOT for storage
+            })
+
         except SecretNotFoundError as e:
             # P0-2: Catch specific exception for missing secrets
             raise SecretLoadError(
@@ -742,7 +819,6 @@ def load_secrets_from_config(config: "SecretsConfig") -> None:
             ) from e
         except Exception as e:
             # P0-2: Catch auth and other Azure errors
-            # Check for common Azure error patterns
             error_str = str(e)
             if "ClientAuthenticationError" in error_str or "credential" in error_str.lower():
                 raise SecretLoadError(
@@ -757,12 +833,14 @@ def load_secrets_from_config(config: "SecretsConfig") -> None:
                     f"Mapped from: {env_var_name}\n"
                     f"Error: {e}"
                 ) from e
+
+    return resolutions
 ```
 
 **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/core/security/test_config_secrets.py -v`
-Expected: PASS (all 12 tests)
+Expected: PASS (all 14 tests)
 
 **Step 5: Commit**
 
@@ -779,12 +857,16 @@ Features:
 - Fail fast on any missing secret with specific error types
 - Clear error messages with vault URL, secret name, and env var name
 - Handles unicode, multiline, and long secrets correctly
+- Returns resolution records for deferred audit recording
 
 Review feedback incorporated:
 - P0-1: No defensive assertions on Pydantic-validated data
 - P0-2: Catches specific Azure exceptions (SecretNotFoundError, auth errors)
 - P0-4: Reuses KeyVaultSecretLoader instead of duplicating _get_keyvault_client
 - P1-5: Edge case tests for unicode, newlines, long values, idempotency
+
+AMENDED: Returns resolution records instead of recording directly,
+solving the run_id timing issue (secrets load before run exists).
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
@@ -1029,8 +1111,9 @@ Then, modify the `run` command config loading section. Replace the try block sta
         raise typer.Exit(1) from None
 
     # Phase 2: Load secrets from Key Vault if configured
+    # Returns resolution records for later audit recording
     try:
-        load_secrets_from_config(secrets_config)
+        secret_resolutions = load_secrets_from_config(secrets_config)
     except SecretLoadError as e:
         typer.echo(f"Error loading secrets: {e}", err=True)
         raise typer.Exit(1) from None
@@ -1048,6 +1131,8 @@ Then, modify the `run` command config loading section. Replace the try block sta
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 ```
+
+NOTE: `secret_resolutions` will be passed to the orchestrator in Task 7 for deferred audit recording.
 
 **Step 4: Run test to verify it passes**
 
@@ -1068,6 +1153,9 @@ Secrets are now loaded in two phases:
 This ensures secrets are available before config references like
 \${AZURE_OPENAI_KEY} are resolved.
 
+Resolution records are captured for deferred audit recording
+(will be recorded after run is created in Task 7).
+
 Review feedback incorporated:
 - User-friendly error messages for secrets validation failures
 - Clear separation of YAML parse, secrets load, and config resolve phases
@@ -1083,20 +1171,34 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 - Modify: `src/elspeth/core/security/fingerprint.py`
 - Modify: `tests/core/security/test_fingerprint_keyvault.py`
 - Modify: `tests/core/security/test_fingerprint.py`
+- Update: 5 additional test files (see Step 1b)
 
-**Step 1: P1-7 - Verify no other code references removed env vars**
+**AMENDED:** Previous version only listed 2 test files. Grep found 7 files total.
 
-Before removing the old mechanism, verify no other code depends on it:
+**Step 1a: P1-7 - Verify no other code references removed env vars (EXPANDED)**
+
+Before removing the old mechanism, verify all references:
 
 ```bash
-# Search for references to the env vars being removed
-grep -r "ELSPETH_KEYVAULT_URL" src/ tests/ --include="*.py" | grep -v "__pycache__"
-grep -r "ELSPETH_KEYVAULT_SECRET_NAME" src/ tests/ --include="*.py" | grep -v "__pycache__"
+# Search for references in ALL file types (not just .py)
+grep -r "ELSPETH_KEYVAULT_URL" . --include="*.py" --include="*.md" --include="*.yaml" --include="*.yml" | grep -v "__pycache__" | grep -v ".git/"
+grep -r "ELSPETH_KEYVAULT_SECRET_NAME" . --include="*.py" --include="*.md" --include="*.yaml" --include="*.yml" | grep -v "__pycache__" | grep -v ".git/"
 ```
 
-Expected: Only `src/elspeth/core/security/fingerprint.py` and `tests/core/security/test_fingerprint_keyvault.py` should reference these.
+**Step 1b: Complete list of files requiring updates**
 
-If other files reference them, they must be updated first.
+Based on grep results, these files reference the old env vars:
+
+| File | References | Action |
+|------|------------|--------|
+| `src/elspeth/core/security/fingerprint.py` | 6 | REWRITE (Task 5 main target) |
+| `tests/core/security/test_fingerprint.py` | 8 | Update tests for new behavior |
+| `tests/core/security/test_fingerprint_keyvault.py` | - | REPLACE entirely |
+| `tests/core/security/test_secret_loader.py` | 2 | Remove `monkeypatch.setenv` for old vars |
+| `tests/core/security/test_url.py` | 7 | Remove `monkeypatch.delenv` for old vars |
+| `tests/plugins/sinks/test_database_sink.py` | 3 | Remove `monkeypatch.delenv` for old vars |
+| `tests/plugins/clients/test_audited_http_client.py` | 1 | Remove `monkeypatch.delenv` for old vars |
+| `tests/integration/test_keyvault_fingerprint.py` | 4 | REWRITE for new approach |
 
 **Step 2: Update fingerprint.py to remove old env var handling**
 
@@ -1319,15 +1421,117 @@ class TestRemovedEnvVarsNotRecognized:
                 get_fingerprint_key()
 ```
 
-**Step 4: Run tests to verify they pass**
+**Step 4: Update test_fingerprint.py**
+
+Remove tests that reference `ELSPETH_KEYVAULT_URL`. Update the file to remove:
+- Any `monkeypatch.setenv("ELSPETH_KEYVAULT_URL", ...)` lines
+- Any `monkeypatch.delenv("ELSPETH_KEYVAULT_URL", ...)` lines
+- Tests that depend on Key Vault fallback behavior
+
+**Step 5: Update other test files**
+
+For each of these files, remove `monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)` lines:
+
+- `tests/core/security/test_secret_loader.py`
+- `tests/core/security/test_url.py`
+- `tests/plugins/sinks/test_database_sink.py`
+- `tests/plugins/clients/test_audited_http_client.py`
+
+These lines were added to prevent Key Vault fallback interference during tests. With the fallback removed, they're no longer needed.
+
+**Step 6: Update tests/integration/test_keyvault_fingerprint.py**
+
+This integration test needs complete rewrite to use the new secrets config approach:
+
+```python
+# tests/integration/test_keyvault_fingerprint.py
+"""Integration tests for Azure Key Vault secret loading via secrets config.
+
+These tests require real Azure credentials and a Key Vault with secrets.
+Skip by default; run with: pytest -m integration tests/integration/test_keyvault_fingerprint.py
+
+Setup:
+1. Create Azure Key Vault
+2. Create secrets: 'elspeth-fingerprint-key', 'test-api-key'
+3. Authenticate via Azure CLI: az login
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+from elspeth.core.config import SecretsConfig
+from elspeth.core.security import get_fingerprint_key
+from elspeth.core.security.config_secrets import load_secrets_from_config
+
+
+@pytest.mark.integration
+class TestKeyVaultSecretsIntegration:
+    """Integration tests requiring real Azure Key Vault."""
+
+    # Set this in your environment for integration testing
+    TEST_VAULT_URL = os.environ.get("ELSPETH_TEST_VAULT_URL")
+
+    @pytest.fixture(autouse=True)
+    def require_keyvault_url(self) -> None:
+        """Skip if test vault URL not configured."""
+        if not self.TEST_VAULT_URL:
+            pytest.skip("ELSPETH_TEST_VAULT_URL not set - skipping Key Vault integration test")
+
+    def test_loads_fingerprint_key_via_secrets_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Can load fingerprint key from Key Vault via secrets config."""
+        # Remove env var to ensure we're loading from Key Vault
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url=self.TEST_VAULT_URL,
+            mapping={"ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key"},
+        )
+
+        # Load secrets (injects into environment)
+        resolutions = load_secrets_from_config(config)
+
+        # Verify key is now available
+        key = get_fingerprint_key()
+        assert isinstance(key, bytes)
+        assert len(key) > 0
+
+        # Verify resolution record
+        assert len(resolutions) == 1
+        assert resolutions[0]["source"] == "keyvault"
+
+    def test_loads_multiple_secrets(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Can load multiple secrets in single config."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("TEST_API_KEY", raising=False)
+
+        config = SecretsConfig(
+            source="keyvault",
+            vault_url=self.TEST_VAULT_URL,
+            mapping={
+                "ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key",
+                "TEST_API_KEY": "test-api-key",
+            },
+        )
+
+        resolutions = load_secrets_from_config(config)
+
+        assert len(resolutions) == 2
+        assert os.environ.get("ELSPETH_FINGERPRINT_KEY")
+        assert os.environ.get("TEST_API_KEY")
+```
+
+**Step 7: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/core/security/test_fingerprint_keyvault.py tests/core/security/test_fingerprint.py -v`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 8: Commit**
 
 ```bash
-git add src/elspeth/core/security/fingerprint.py tests/core/security/test_fingerprint_keyvault.py
+git add src/elspeth/core/security/fingerprint.py tests/
 git commit -m "refactor(security): simplify fingerprint key to use env var only
 
 Removes the old ELSPETH_KEYVAULT_URL / ELSPETH_KEYVAULT_SECRET_NAME mechanism.
@@ -1335,9 +1539,20 @@ Fingerprint key now comes from ELSPETH_FINGERPRINT_KEY environment variable,
 which can be populated by the secrets config loading from Azure Key Vault.
 
 Review feedback incorporated:
-- P1-7: Verified no other code references removed env vars (grep check)
+- P1-7: Verified and updated all 7 files that reference removed env vars
 - P1-8: Removed dead module-level cache code (_cached_fingerprint_key)
 - Added tests verifying old env vars are NOT recognized
+- Updated integration tests for new secrets config approach
+
+Files updated:
+- src/elspeth/core/security/fingerprint.py (simplified)
+- tests/core/security/test_fingerprint.py (removed old env var references)
+- tests/core/security/test_fingerprint_keyvault.py (replaced entirely)
+- tests/core/security/test_secret_loader.py (removed delenv calls)
+- tests/core/security/test_url.py (removed delenv calls)
+- tests/plugins/sinks/test_database_sink.py (removed delenv calls)
+- tests/plugins/clients/test_audited_http_client.py (removed delenv calls)
+- tests/integration/test_keyvault_fingerprint.py (rewritten for new approach)
 
 BREAKING CHANGE: ELSPETH_KEYVAULT_URL and ELSPETH_KEYVAULT_SECRET_NAME are
 no longer recognized. Use the secrets config in pipeline YAML instead.
@@ -1351,6 +1566,8 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/elspeth/core/security/__init__.py`
+
+**AMENDED:** Preserves existing exports that are still used by other code (secret_loader classes).
 
 **Step 1: Read current exports**
 
@@ -1367,16 +1584,36 @@ Exports:
 - get_fingerprint_key: Get the fingerprint key from environment
 - SecretLoadError: Raised when secret loading fails
 - load_secrets_from_config: Load secrets from pipeline config
+- Secret loader classes: For advanced use cases
 """
 
 from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 from elspeth.core.security.fingerprint import get_fingerprint_key, secret_fingerprint
+from elspeth.core.security.secret_loader import (
+    CachedSecretLoader,
+    CompositeSecretLoader,
+    EnvSecretLoader,
+    KeyVaultSecretLoader,
+    SecretLoader,
+    SecretNotFoundError,
+    SecretRef,
+)
 
 __all__ = [
+    # Fingerprinting
     "get_fingerprint_key",
-    "load_secrets_from_config",
     "secret_fingerprint",
+    # Config-based loading (new)
+    "load_secrets_from_config",
     "SecretLoadError",
+    # Secret loader classes (still used by config_secrets and other code)
+    "CachedSecretLoader",
+    "CompositeSecretLoader",
+    "EnvSecretLoader",
+    "KeyVaultSecretLoader",
+    "SecretLoader",
+    "SecretNotFoundError",
+    "SecretRef",
 ]
 ```
 
@@ -1386,8 +1623,15 @@ __all__ = [
 git add src/elspeth/core/security/__init__.py
 git commit -m "refactor(security): update __init__.py exports
 
-Exports the new config_secrets functions and removes references to
-removed Key Vault env var functions.
+Exports the new config_secrets functions while preserving
+existing secret_loader exports (still used by other code).
+
+Removed exports:
+- clear_fingerprint_key_cache (module-level cache removed)
+
+Added exports:
+- load_secrets_from_config
+- SecretLoadError
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
@@ -1399,10 +1643,14 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 **Files:**
 - Create: `alembic/versions/xxx_add_secret_resolutions_table.py`
 - Modify: `src/elspeth/core/landscape/schema.py`
-- Modify: `src/elspeth/core/security/config_secrets.py`
-- Test: `tests/core/security/test_config_secrets.py`
+- Modify: `src/elspeth/core/landscape/recorder.py`
+- Modify: `src/elspeth/engine/orchestrator.py`
+- Test: `tests/core/landscape/test_secret_resolutions.py`
 
-**P2-10: Add audit trail for secret resolution events**
+**AMENDED:** Secrets load BEFORE run is created, so we use deferred recording:
+1. `load_secrets_from_config()` returns resolution records (Task 3)
+2. CLI captures these records (Task 4)
+3. Orchestrator records them AFTER run is created (this task)
 
 **Step 1: Add table to landscape schema**
 
@@ -1410,16 +1658,18 @@ Add to `src/elspeth/core/landscape/schema.py`:
 
 ```python
 # Secret resolution audit table (P2-10)
-secret_resolutions = Table(
+# Records which secrets were loaded from where during pipeline startup.
+# NOTE: Records are inserted AFTER run is created, though secrets load before.
+secret_resolutions_table = Table(
     "secret_resolutions",
     metadata,
     Column("resolution_id", Text, primary_key=True),
     Column("run_id", Text, ForeignKey("runs.run_id"), nullable=False, index=True),
-    Column("timestamp", Float, nullable=False),
+    Column("timestamp", Float, nullable=False),  # When secret was loaded (before run)
     Column("env_var_name", Text, nullable=False),
-    Column("source", Text, nullable=False),  # 'env' | 'keyvault'
-    Column("vault_url", Text, nullable=True),  # if source='keyvault'
-    Column("secret_name", Text, nullable=True),  # if source='keyvault'
+    Column("source", Text, nullable=False),  # 'keyvault' (env source doesn't record)
+    Column("vault_url", Text, nullable=True),
+    Column("secret_name", Text, nullable=True),
     Column("fingerprint", Text, nullable=False),  # HMAC fingerprint of secret value
     Column("resolution_latency_ms", Float, nullable=True),
 )
@@ -1427,18 +1677,24 @@ secret_resolutions = Table(
 
 **Step 2: Create Alembic migration**
 
-Create migration file (filename will have timestamp prefix):
+Create migration file `alembic/versions/2026_02_03_add_secret_resolutions.py`:
 
 ```python
 """Add secret_resolutions table for audit trail.
 
-Revision ID: <auto-generated>
-Revises: <previous>
+Revision ID: a1b2c3d4e5f6
+Revises: 2026_02_03_add_schema_contracts
 Create Date: 2026-02-03
 """
 
 from alembic import op
 import sqlalchemy as sa
+
+# revision identifiers
+revision = "a1b2c3d4e5f6"
+down_revision = "2026_02_03_add_schema_contracts"
+branch_labels = None
+depends_on = None
 
 
 def upgrade() -> None:
@@ -1460,70 +1716,210 @@ def downgrade() -> None:
     op.drop_table("secret_resolutions")
 ```
 
-**Step 3: Update load_secrets_from_config to record audit events**
+**Step 3: Add recorder method**
 
-Add audit recording to `config_secrets.py`:
+Add to `src/elspeth/core/landscape/recorder.py`:
 
 ```python
-def load_secrets_from_config(
-    config: "SecretsConfig",
-    *,
-    run_id: str | None = None,
-    landscape: "LandscapeRecorder | None" = None,
+def record_secret_resolutions(
+    self,
+    run_id: str,
+    resolutions: list[dict[str, Any]],
+    fingerprint_key: bytes,
 ) -> None:
-    """Load secrets from configured source and inject into environment.
+    """Record secret resolution events from deferred records.
 
-    When source is 'env', this function does nothing (secrets come from
-    environment variables as usual).
-
-    When source is 'keyvault', all mapped secrets are loaded from Azure
-    Key Vault and injected into os.environ, overriding any existing values.
+    Called by orchestrator after run is created. The resolution records
+    were captured during load_secrets_from_config() before the run existed.
 
     Args:
-        config: SecretsConfig specifying source and mapping
-        run_id: Optional run ID for audit recording
-        landscape: Optional LandscapeRecorder for audit recording
-
-    Raises:
-        SecretLoadError: If any secret cannot be loaded (fail fast)
+        run_id: The run ID to associate resolutions with
+        resolutions: List of resolution records from load_secrets_from_config()
+        fingerprint_key: Key for computing secret fingerprints
     """
-    # ... existing implementation ...
+    import uuid
+    from elspeth.core.security.fingerprint import secret_fingerprint
 
-    # After loading each secret, record to audit trail if landscape provided
-    if landscape is not None and run_id is not None:
-        from elspeth.core.security.fingerprint import secret_fingerprint
-        import time
-        import uuid
+    for rec in resolutions:
+        # Compute fingerprint (secret_value was included for this purpose)
+        fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
 
-        fp = secret_fingerprint(secret_value, key=get_fingerprint_key_if_available())
-        landscape.record_secret_resolution(
-            resolution_id=str(uuid.uuid4()),
-            run_id=run_id,
-            timestamp=time.time(),
-            env_var_name=env_var_name,
-            source="keyvault",
-            vault_url=config.vault_url,
-            secret_name=keyvault_secret_name,
-            fingerprint=fp,
-            resolution_latency_ms=latency_ms,
+        self._connection.execute(
+            secret_resolutions_table.insert().values(
+                resolution_id=str(uuid.uuid4()),
+                run_id=run_id,
+                timestamp=rec["timestamp"],
+                env_var_name=rec["env_var_name"],
+                source=rec["source"],
+                vault_url=rec.get("vault_url"),
+                secret_name=rec.get("secret_name"),
+                fingerprint=fp,
+                resolution_latency_ms=rec.get("latency_ms"),
+            )
         )
 ```
 
-**Step 4: Commit**
+**Step 4: Update orchestrator to record resolutions**
+
+In `src/elspeth/engine/orchestrator.py`, add `secret_resolutions` parameter to `execute()`:
+
+```python
+def execute(
+    self,
+    *,
+    secret_resolutions: list[dict[str, Any]] | None = None,
+) -> RunResult:
+    """Execute the pipeline.
+
+    Args:
+        secret_resolutions: Optional resolution records from load_secrets_from_config()
+                           for deferred audit recording.
+    """
+    # ... existing code to create run ...
+
+    # After run is created, record secret resolutions
+    if secret_resolutions and self._landscape:
+        try:
+            fingerprint_key = get_fingerprint_key()
+            self._landscape.record_secret_resolutions(
+                run_id=self._run_id,
+                resolutions=secret_resolutions,
+                fingerprint_key=fingerprint_key,
+            )
+        except ValueError:
+            # Fingerprint key not available - skip recording
+            # This can happen in dev mode without ELSPETH_FINGERPRINT_KEY
+            pass
+
+    # ... rest of execution ...
+```
+
+**Step 5: Update CLI to pass resolutions to orchestrator**
+
+In `src/elspeth/cli.py`, pass `secret_resolutions` when creating orchestrator:
+
+```python
+# In the run command, when creating the orchestrator:
+result = orchestrator.execute(secret_resolutions=secret_resolutions)
+```
+
+**Step 6: Add tests**
+
+Create `tests/core/landscape/test_secret_resolutions.py`:
+
+```python
+# tests/core/landscape/test_secret_resolutions.py
+"""Tests for secret resolution audit trail recording."""
+
+from __future__ import annotations
+
+import time
+import uuid
+
+import pytest
+
+from elspeth.core.landscape.recorder import LandscapeRecorder
+from elspeth.core.landscape.schema import secret_resolutions_table
+
+
+class TestSecretResolutionRecording:
+    """Tests for recording secret resolutions."""
+
+    def test_records_keyvault_resolution(self, landscape_recorder: LandscapeRecorder) -> None:
+        """Should record Key Vault resolution with fingerprint."""
+        run_id = f"test-{uuid.uuid4()}"
+        # Create run first (FK constraint)
+        landscape_recorder.create_run(run_id=run_id, config={})
+
+        resolutions = [
+            {
+                "env_var_name": "AZURE_OPENAI_KEY",
+                "source": "keyvault",
+                "vault_url": "https://test-vault.vault.azure.net",
+                "secret_name": "azure-openai-key",
+                "timestamp": time.time(),
+                "latency_ms": 150.5,
+                "secret_value": "secret-api-key-value",
+            }
+        ]
+
+        landscape_recorder.record_secret_resolutions(
+            run_id=run_id,
+            resolutions=resolutions,
+            fingerprint_key=b"test-fingerprint-key",
+        )
+
+        # Verify recorded
+        result = landscape_recorder._connection.execute(
+            secret_resolutions_table.select().where(
+                secret_resolutions_table.c.run_id == run_id
+            )
+        ).fetchone()
+
+        assert result is not None
+        assert result.env_var_name == "AZURE_OPENAI_KEY"
+        assert result.source == "keyvault"
+        assert result.vault_url == "https://test-vault.vault.azure.net"
+        assert result.secret_name == "azure-openai-key"
+        assert result.fingerprint  # Non-empty
+        assert len(result.fingerprint) == 64  # SHA256 hex
+        assert result.resolution_latency_ms == 150.5
+
+    def test_fingerprint_does_not_contain_secret(self, landscape_recorder: LandscapeRecorder) -> None:
+        """Fingerprint should not be the secret value."""
+        run_id = f"test-{uuid.uuid4()}"
+        landscape_recorder.create_run(run_id=run_id, config={})
+
+        secret_value = "my-actual-secret-value"
+        resolutions = [
+            {
+                "env_var_name": "TEST_SECRET",
+                "source": "keyvault",
+                "vault_url": "https://test.vault.azure.net",
+                "secret_name": "test",
+                "timestamp": time.time(),
+                "latency_ms": 100.0,
+                "secret_value": secret_value,
+            }
+        ]
+
+        landscape_recorder.record_secret_resolutions(
+            run_id=run_id,
+            resolutions=resolutions,
+            fingerprint_key=b"test-key",
+        )
+
+        result = landscape_recorder._connection.execute(
+            secret_resolutions_table.select().where(
+                secret_resolutions_table.c.run_id == run_id
+            )
+        ).fetchone()
+
+        # Fingerprint should NOT contain the secret value
+        assert secret_value not in result.fingerprint
+        assert "my-actual" not in result.fingerprint
+```
+
+**Step 7: Commit**
 
 ```bash
-git add alembic/versions/ src/elspeth/core/landscape/schema.py src/elspeth/core/security/config_secrets.py
+git add alembic/versions/ src/elspeth/core/landscape/ src/elspeth/engine/orchestrator.py src/elspeth/cli.py tests/core/landscape/test_secret_resolutions.py
 git commit -m "feat(audit): add secret_resolutions table for audit trail
 
 P2-10: Records which secrets were loaded from where during pipeline startup.
 
+Architecture (deferred recording):
+1. load_secrets_from_config() returns resolution records (secrets load before run)
+2. CLI captures these records
+3. Orchestrator records them AFTER run is created (solves timing issue)
+
 Table records:
 - run_id: Links to the pipeline run
 - env_var_name: The environment variable that was set
-- source: 'env' or 'keyvault'
-- vault_url: Key Vault URL if source='keyvault'
-- secret_name: Key Vault secret name if source='keyvault'
-- fingerprint: HMAC fingerprint of the secret value
+- source: 'keyvault' (env source doesn't create records)
+- vault_url: Key Vault URL
+- secret_name: Key Vault secret name
+- fingerprint: HMAC fingerprint of the secret value (NOT the value itself)
 - resolution_latency_ms: Time taken to load the secret
 
 This allows auditors to answer: 'Which Key Vault did this secret come from?'
@@ -1737,6 +2133,27 @@ elspeth run --settings settings.yaml --execute
 - The audit trail stores fingerprints of secrets, not actual values
 - Key Vault access can be audited via Azure Monitor
 - Secret resolutions are recorded in the `secret_resolutions` Landscape table
+
+## Migration from Old Approach
+
+If you were using `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables, migrate to the new config-based approach:
+
+**Before (deprecated):**
+```bash
+export ELSPETH_KEYVAULT_URL=https://my-vault.vault.azure.net
+export ELSPETH_KEYVAULT_SECRET_NAME=elspeth-fingerprint-key
+```
+
+**After (new):**
+```yaml
+# In settings.yaml
+secrets:
+  source: keyvault
+  vault_url: https://my-vault.vault.azure.net
+  mapping:
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+    # Add any other secrets you need...
+```
 ```
 
 `examples/azure_keyvault_secrets/input/data.csv`:
@@ -1757,6 +2174,7 @@ Complete working example showing how to configure a pipeline
 to load secrets from Azure Key Vault.
 
 Includes P1-6 clarification that vault_url must be literal URL.
+Includes migration guide from old ELSPETH_KEYVAULT_URL approach.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
@@ -1814,6 +2232,8 @@ Secret resolutions are recorded in the `secret_resolutions` Landscape table, inc
 - Which vault the secret came from
 - The HMAC fingerprint (not the value)
 - Resolution latency
+
+**Deprecated:** `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables are no longer recognized. Use the `secrets:` configuration section instead.
 ```
 
 **Step 2: Commit**
@@ -1824,6 +2244,7 @@ git commit -m "docs: update CLAUDE.md secret handling section
 
 Documents the new config-based secret loading from Azure Key Vault.
 Includes P1-6 clarification about literal vault_url requirement.
+Notes deprecation of old ELSPETH_KEYVAULT_* env vars.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
@@ -1951,6 +2372,28 @@ elspeth run --settings settings.yaml --dry-run
 The `vault_url` must be a literal URL like `https://my-vault.vault.azure.net`. Environment variable references are not supported in the secrets config because secrets are loaded before environment variables are resolved.
 
 **Fix:** Replace `vault_url: ${AZURE_KEYVAULT_URL}` with the actual URL.
+
+## Migration from Old Approach
+
+If you were using the old `ELSPETH_KEYVAULT_URL` environment variable:
+
+**Before:**
+```bash
+export ELSPETH_KEYVAULT_URL=https://my-vault.vault.azure.net
+export ELSPETH_KEYVAULT_SECRET_NAME=elspeth-fingerprint-key
+```
+
+**After:**
+```yaml
+# In settings.yaml
+secrets:
+  source: keyvault
+  vault_url: https://my-vault.vault.azure.net
+  mapping:
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+```
+
+The old environment variables are **no longer recognized**. You must migrate to the YAML configuration.
 ```
 
 **Step 2: Commit**
@@ -1964,6 +2407,8 @@ ELSPETH secret management.
 
 Includes troubleshooting for common issues including the
 vault_url literal requirement.
+
+Includes migration guide from old ELSPETH_KEYVAULT_URL approach.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
@@ -2010,11 +2455,11 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 This plan implements config-based Azure Key Vault secret loading with:
 
 1. **SecretsConfig Pydantic model** - Validates `source`, `vault_url`, `mapping` with HTTPS and literal URL requirements
-2. **config_secrets.py** - Loads secrets using existing `KeyVaultSecretLoader` (no code duplication)
+2. **config_secrets.py** - Loads secrets using existing `KeyVaultSecretLoader` (no code duplication), returns resolution records
 3. **CLI integration** - Two-phase config loading with user-friendly error messages
 4. **Simplified fingerprint.py** - Uses env var only, removed dead cache code
-5. **Audit trail** - `secret_resolutions` table records which secrets loaded from where
-6. **Comprehensive documentation** - Reference, example, runbook
+5. **Audit trail** - `secret_resolutions` table records which secrets loaded from where (deferred recording solves timing issue)
+6. **Comprehensive documentation** - Reference, example, runbook, migration guide
 
 **Review Feedback Incorporated:**
 - P0-1: Removed defensive assertions on Pydantic-validated data
@@ -2023,8 +2468,14 @@ This plan implements config-based Azure Key Vault secret loading with:
 - P0-4: Reuses existing `KeyVaultSecretLoader` instead of duplicating code
 - P1-5: Edge case tests (unicode, newlines, long values, idempotency)
 - P1-6: Documents that `vault_url` must be literal (no `${VAR}` allowed)
-- P1-7: Grep verification before removing old env vars
+- P1-7: Grep verification expanded to include .md/.yaml, all 7 test files listed
 - P1-8: Removed dead cache code from fingerprint.py
-- P2-10: Added `secret_resolutions` audit trail table
+- P2-10: Added `secret_resolutions` audit trail table with deferred recording
+
+**Risk Assessment Amendments:**
+- ✅ FIXED: Task 7 run_id timing - returns resolution records for deferred recording
+- ✅ FIXED: Task 5 incomplete - all 7 test files now listed
+- ✅ FIXED: P1-7 grep scope - includes .md/.yaml files
+- ✅ IMPROVED: Task 6 preserves existing exports still in use
 
 **Breaking change:** `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables are no longer recognized. Use the `secrets:` configuration in pipeline YAML instead.
