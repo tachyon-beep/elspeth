@@ -118,6 +118,11 @@ class TransformResult:
     # P3-2026-02-02: Enables pool metadata to flow to context_after_json
     context_after: dict[str, Any] | None = field(default=None, repr=False)
 
+    # Schema contract for output (optional)
+    # P3-2026-02-03: Enables TransformResult to carry output contract reference
+    # for downstream processing via to_pipeline_row()/to_pipeline_rows()
+    contract: SchemaContract | None = field(default=None, repr=False)
+
     def __post_init__(self) -> None:
         """Validate invariants - success results MUST have success_reason."""
         if self.status == "success" and self.success_reason is None:
@@ -137,6 +142,56 @@ class TransformResult:
         """True if this result has any output data (row or rows)."""
         return self.row is not None or self.rows is not None
 
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert single-row success result to PipelineRow.
+
+        Returns:
+            PipelineRow wrapping row data with contract
+
+        Raises:
+            ValueError: If result is error, multi-row, or has no contract
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if self.status == "error":
+            raise ValueError("Cannot convert error result to PipelineRow")
+        if self.is_multi_row:
+            raise ValueError(
+                "Cannot convert multi-row result to single PipelineRow. "
+                "Use to_pipeline_rows() instead."
+            )
+        if self.contract is None:
+            raise ValueError(
+                "TransformResult has no contract - cannot create PipelineRow"
+            )
+        # Single-row success result - row is guaranteed to be non-None
+        return PipelineRow(self.row, self.contract)  # type: ignore[arg-type]
+
+    def to_pipeline_rows(self) -> list[PipelineRow]:
+        """Convert multi-row success result to list of PipelineRows.
+
+        Returns:
+            List of PipelineRow instances, one per output row
+
+        Raises:
+            ValueError: If result is error, single-row, or has no contract
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if self.status == "error":
+            raise ValueError("Cannot convert error result to PipelineRows")
+        if not self.is_multi_row:
+            raise ValueError(
+                "Cannot convert single-row result to multiple PipelineRows. "
+                "Use to_pipeline_row() instead."
+            )
+        if self.contract is None:
+            raise ValueError(
+                "TransformResult has no contract - cannot create PipelineRows"
+            )
+        # Multi-row success result - rows is guaranteed to be non-None
+        return [PipelineRow(row, self.contract) for row in self.rows]  # type: ignore[union-attr]
+
     @classmethod
     def success(
         cls,
@@ -144,6 +199,7 @@ class TransformResult:
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
+        contract: SchemaContract | None = None,
     ) -> TransformResult:
         """Create successful result with single output row.
 
@@ -154,6 +210,8 @@ class TransformResult:
                            See TransformSuccessReason for available fields.
             context_after: Optional operational metadata for audit trail
                           (e.g., pool stats, ordering info).
+            contract: Optional schema contract for the output row.
+                     Enables conversion to PipelineRow via to_pipeline_row().
 
         Returns:
             TransformResult with status="success" and the provided row.
@@ -171,6 +229,7 @@ class TransformResult:
             rows=None,
             success_reason=success_reason,
             context_after=context_after,
+            contract=contract,
         )
 
     @classmethod
@@ -180,6 +239,7 @@ class TransformResult:
         *,
         success_reason: TransformSuccessReason,
         context_after: dict[str, Any] | None = None,
+        contract: SchemaContract | None = None,
     ) -> TransformResult:
         """Create successful result with multiple output rows.
 
@@ -190,6 +250,8 @@ class TransformResult:
                            See TransformSuccessReason for available fields.
             context_after: Optional operational metadata for audit trail
                           (e.g., pool stats, ordering info).
+            contract: Optional schema contract for the output rows.
+                     Enables conversion to PipelineRows via to_pipeline_rows().
 
         Returns:
             TransformResult with status="success", row=None, rows=rows
@@ -212,6 +274,7 @@ class TransformResult:
             rows=rows,
             success_reason=success_reason,
             context_after=context_after,
+            contract=contract,
         )
 
     @classmethod
@@ -234,6 +297,7 @@ class TransformResult:
 
         Returns:
             TransformResult with status="error" and the provided reason.
+            Error results never carry contracts (contract=None).
         """
         return cls(
             status="error",
@@ -242,6 +306,7 @@ class TransformResult:
             retryable=retryable,
             rows=None,
             context_after=context_after,
+            contract=None,  # Error results don't carry contracts
         )
 
 
