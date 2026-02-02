@@ -596,12 +596,14 @@ class TestDatabaseSinkCanonicalHashing:
 
 
 class TestDatabaseSinkSchemaValidation:
-    """Tests for DatabaseSink schema compatibility validation.
+    """Tests for DatabaseSink schema modes using infer-and-lock pattern.
 
-    DatabaseSink requires fixed-column structure. Schemas that allow extra fields
-    (free mode, dynamic mode) are incompatible because:
-    - Table columns are fixed at table creation
-    - Extra fields would either be silently dropped (audit violation) or cause errors
+    DatabaseSink supports all schema modes:
+    - strict: columns from config, extras rejected at insert time
+    - free: declared columns + extras from first row, then locked
+    - dynamic: columns from first row, then locked
+
+    Table schema is created on first write; subsequent rows must match.
     """
 
     @pytest.fixture
@@ -609,41 +611,29 @@ class TestDatabaseSinkSchemaValidation:
         """Create a SQLite database URL."""
         return f"sqlite:///{tmp_path / 'test.db'}"
 
-    def test_rejects_free_mode_schema(self, db_url: str) -> None:
-        """DatabaseSink should reject free mode schemas at initialization.
-
-        Free mode allows extra fields, but database requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        free_schema = {"mode": "free", "fields": ["id: int"]}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            DatabaseSink({"url": db_url, "table": "output", "schema": free_schema})
-
-    def test_rejects_dynamic_schema(self, db_url: str) -> None:
-        """DatabaseSink should reject dynamic schemas at initialization.
-
-        Dynamic schemas allow any fields, but database requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        dynamic_schema = {"fields": "dynamic"}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            DatabaseSink({"url": db_url, "table": "output", "schema": dynamic_schema})
-
     def test_accepts_strict_mode_schema(self, db_url: str) -> None:
-        """DatabaseSink should accept strict mode schemas.
-
-        Strict mode has fixed fields - compatible with database structure.
-        """
+        """DatabaseSink accepts strict mode - columns from config."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
 
-        # Should not raise
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": strict_schema})
+        assert sink is not None
+
+    def test_accepts_free_mode_schema(self, db_url: str) -> None:
+        """DatabaseSink accepts free mode - declared + first-row extras, then locked."""
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        free_schema = {"mode": "free", "fields": ["id: int"]}
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": free_schema})
+        assert sink is not None
+
+    def test_accepts_dynamic_schema(self, db_url: str) -> None:
+        """DatabaseSink accepts dynamic mode - columns from first row, then locked."""
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        dynamic_schema = {"fields": "dynamic"}
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": dynamic_schema})
         assert sink is not None

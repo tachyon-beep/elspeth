@@ -59,10 +59,10 @@ class CSVSink(BaseSink):
         validate_input: Validate incoming rows against schema (default: False)
         mode: "write" (truncate, default) or "append" (add to existing file)
 
-    The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields (headers inferred from first row)
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]} - headers from schema
-        - Free: {"mode": "free", "fields": ["id: int"]} - headers from schema, extras allowed
+    The schema can be (all use infer-and-lock pattern):
+        - Strict: {"mode": "strict", "fields": [...]} - columns from config, extras rejected
+        - Free: {"mode": "free", "fields": [...]} - declared + first-row extras, then locked
+        - Dynamic: {"fields": "dynamic"} - columns from first row, then locked
 
     Append mode behavior:
         - If file exists: reads headers from it and appends rows without header
@@ -191,13 +191,13 @@ class CSVSink(BaseSink):
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config
 
-        # CSV requires fixed-column structure - reject schemas that allow extra fields
-        if self._schema_config.allows_extra_fields:
-            raise ValueError(
-                f"CSVSink requires fixed-column structure but schema allows_extra_fields=True "
-                f"(mode={self._schema_config.mode!r}, is_dynamic={self._schema_config.is_dynamic}). "
-                f"Use JSONSink for flexible schemas, or use mode='strict' for CSV output."
-            )
+        # CSV supports all schema modes via infer-and-lock:
+        # - mode='strict': columns from config, extras rejected at write time
+        # - mode='free': declared columns + extras from first row, then locked
+        # - fields='dynamic': columns from first row, then locked
+        #
+        # DictWriter's default extrasaction='raise' enforces the lock - any row
+        # with fields not in the established fieldnames will error.
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)

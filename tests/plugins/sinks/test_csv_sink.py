@@ -326,49 +326,81 @@ class TestCSVSink:
 
 
 class TestCSVSinkSchemaValidation:
-    """Tests for CSVSink schema compatibility validation.
+    """Tests for CSVSink schema modes using infer-and-lock pattern.
 
-    CSVSink requires fixed-column structure. Schemas that allow extra fields
-    (free mode, dynamic mode) are incompatible because:
-    - CSV headers are fixed at file creation
-    - Extra fields would either be silently dropped (audit violation) or cause errors
+    CSVSink supports all schema modes:
+    - strict: columns from config, extras rejected at write time
+    - free: declared columns + extras from first row, then locked
+    - dynamic: columns from first row, then locked
+
+    The "lock" is enforced by DictWriter's extrasaction='raise' default.
     """
 
-    def test_rejects_free_mode_schema(self, tmp_path: Path) -> None:
-        """CSVSink should reject free mode schemas at initialization.
-
-        Free mode allows extra fields, but CSV requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-
-        free_schema = {"mode": "free", "fields": ["id: int"]}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            CSVSink({"path": str(tmp_path / "output.csv"), "schema": free_schema})
-
-    def test_rejects_dynamic_schema(self, tmp_path: Path) -> None:
-        """CSVSink should reject dynamic schemas at initialization.
-
-        Dynamic schemas allow any fields, but CSV requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.csv_sink import CSVSink
-
-        dynamic_schema = {"fields": "dynamic"}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            CSVSink({"path": str(tmp_path / "output.csv"), "schema": dynamic_schema})
-
     def test_accepts_strict_mode_schema(self, tmp_path: Path) -> None:
-        """CSVSink should accept strict mode schemas.
-
-        Strict mode has fixed fields - compatible with CSV structure.
-        """
+        """CSVSink accepts strict mode - columns from config."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
 
-        # Should not raise
         sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": strict_schema})
         assert sink is not None
+
+    def test_accepts_free_mode_schema(self, tmp_path: Path) -> None:
+        """CSVSink accepts free mode - declared + first-row extras, then locked."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        free_schema = {"mode": "free", "fields": ["id: int"]}
+
+        sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": free_schema})
+        assert sink is not None
+
+    def test_accepts_dynamic_schema(self, tmp_path: Path) -> None:
+        """CSVSink accepts dynamic mode - columns from first row, then locked."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        dynamic_schema = {"fields": "dynamic"}
+
+        sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": dynamic_schema})
+        assert sink is not None
+
+    def test_dynamic_schema_infers_columns_from_first_row(self, tmp_path: Path) -> None:
+        """Dynamic schema uses first row's keys as column headers."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        sink = CSVSink(
+            {
+                "path": str(tmp_path / "output.csv"),
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # First write establishes columns
+        sink.write([{"a": 1, "b": 2}], ctx)
+        sink.close()
+
+        # Verify headers match first row
+        with open(tmp_path / "output.csv") as f:
+            reader = csv.DictReader(f)
+            assert set(reader.fieldnames or []) == {"a", "b"}
+
+    def test_dynamic_schema_rejects_new_fields_after_lock(self, tmp_path: Path) -> None:
+        """After first write, new fields are rejected (infer-and-lock)."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        sink = CSVSink(
+            {
+                "path": str(tmp_path / "output.csv"),
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # First write locks columns to {a, b}
+        sink.write([{"a": 1, "b": 2}], ctx)
+
+        # Second write with extra field 'c' should fail
+        with pytest.raises(ValueError, match="c"):
+            sink.write([{"a": 3, "b": 4, "c": 5}], ctx)
+
+        sink.close()

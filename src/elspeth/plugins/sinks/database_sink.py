@@ -106,13 +106,12 @@ class DatabaseSink(BaseSink):
         # DataPluginConfig ensures schema_config is not None
         self._schema_config = cfg.schema_config
 
-        # Database requires fixed-column structure - reject schemas that allow extra fields
-        if self._schema_config.allows_extra_fields:
-            raise ValueError(
-                f"DatabaseSink requires fixed-column structure but schema allows_extra_fields=True "
-                f"(mode={self._schema_config.mode!r}, is_dynamic={self._schema_config.is_dynamic}). "
-                f"Use JSONSink for flexible schemas, or use mode='strict' for database output."
-            )
+        # Database supports all schema modes via infer-and-lock:
+        # - mode='strict': columns from config, extras rejected at insert time
+        # - mode='free': declared columns + extras from first row, then locked
+        # - fields='dynamic': columns from first row, then locked
+        #
+        # Table schema is created on first write; subsequent rows must match.
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)
