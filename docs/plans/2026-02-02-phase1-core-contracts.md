@@ -829,12 +829,35 @@ Expected: FAIL with `ImportError: cannot import name 'SchemaContract'`
 
 **Step 4.3: Implement SchemaContract core structure**
 
-Add to `src/elspeth/contracts/schema_contract.py`:
+Add to `src/elspeth/contracts/schema_contract.py`. First, update the imports at the top of the file:
 
 ```python
+# src/elspeth/contracts/schema_contract.py
+"""Schema contracts for preserving type and name information through the pipeline.
+
+This module implements the Unified Schema Contracts design:
+- FieldContract: Immutable field metadata (normalized name, original name, type)
+- SchemaContract: Per-node schema with O(1) name resolution
+- PipelineRow: Row wrapper enabling dual-name access
+
+Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    pass  # Forward references if needed
 
 
+# FieldContract class here (from Task 3)...
+```
+
+Then add the SchemaContract class:
+
+```python
 @dataclass(frozen=True, slots=True)
 class SchemaContract:
     """Immutable schema contract for a node.
@@ -954,6 +977,14 @@ resolve_name() accepts both original and normalized names.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
+
+**Step 4.6: Integration checkpoint - run all contract tests**
+
+```bash
+.venv/bin/python -m pytest tests/contracts/ -v --tb=short
+```
+
+Expected: All tests PASS. This catches any import or integration issues between Tasks 1-4 before continuing.
 
 ---
 
@@ -1308,16 +1339,32 @@ Expected: FAIL with `AttributeError: 'SchemaContract' object has no attribute 'v
 
 **Step 6.3: Implement validate method**
 
-Add to `SchemaContract` class:
+First, update imports at the top of `src/elspeth/contracts/schema_contract.py`:
 
 ```python
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Literal
+
 from elspeth.contracts.errors import (
+    ContractMergeError,
     ContractViolation,
     ExtraFieldViolation,
     MissingFieldViolation,
     TypeMismatchViolation,
 )
+from elspeth.contracts.type_normalization import normalize_type_for_contract
 
+if TYPE_CHECKING:
+    pass  # Forward references if needed
+```
+
+Then add the `validate` method to the `SchemaContract` class:
+
+```python
 # In SchemaContract class:
 
     def validate(self, row: dict[str, Any]) -> list[ContractViolation]:
@@ -1377,8 +1424,6 @@ from elspeth.contracts.errors import (
         return violations
 ```
 
-Add imports at top of file.
-
 **Step 6.4: Run tests to verify they pass**
 
 ```bash
@@ -1403,6 +1448,14 @@ Returns list of ContractViolation instances.
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
+
+**Step 6.6: Integration checkpoint - run all contract tests**
+
+```bash
+.venv/bin/python -m pytest tests/contracts/ -v --tb=short
+```
+
+Expected: All tests PASS. This validates SchemaContract validation logic before adding checkpoint serialization.
 
 ---
 
@@ -1538,13 +1591,15 @@ Expected: FAIL
 
 **Step 7.3: Implement checkpoint methods**
 
-Add to `SchemaContract` class:
+Add the `canonical_json` import at the top of the file (other imports were added in Step 6.3):
 
 ```python
-import hashlib
-from datetime import datetime
 from elspeth.core.canonical import canonical_json
+```
 
+Then add these methods to the `SchemaContract` class:
+
+```python
 # In SchemaContract class:
 
     def version_hash(self) -> str:
@@ -1927,6 +1982,15 @@ Merge contracts when fork/join paths converge:
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
 
+**Step 8.6: Integration checkpoint - run all contract tests and type checker**
+
+```bash
+.venv/bin/python -m pytest tests/contracts/ -v --tb=short
+.venv/bin/python -m mypy src/elspeth/contracts/schema_contract.py src/elspeth/contracts/type_normalization.py
+```
+
+Expected: All tests PASS, no mypy errors. This validates the complete SchemaContract implementation before adding PipelineRow.
+
 ---
 
 ## Task 9: PipelineRow Wrapper
@@ -2267,28 +2331,75 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/elspeth/contracts/__init__.py`
+- Modify: `src/elspeth/contracts/errors.py` (exports added in Task 1)
 - Test: Run all tests
 
 **Step 10.1: Update module exports**
 
-Add to `src/elspeth/contracts/__init__.py`:
+In `src/elspeth/contracts/__init__.py`, add the following imports after the existing imports (around line 120, after the errors imports):
 
 ```python
-# Schema contracts (new)
+# After: from elspeth.contracts.errors import (...)
+
+# Schema contracts (Phase 1: Core Contracts)
 from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
     SchemaContract,
 )
 from elspeth.contracts.type_normalization import normalize_type_for_contract
+```
 
-# In __all__ list, add:
+Also update the errors import block to include the new violation types (Task 1 added these to errors.py):
+
+```python
+from elspeth.contracts.errors import (
+    BatchPendingError,
+    CoalesceFailureReason,
+    ConfigGateReason,
+    # Schema contract violations (new)
+    ContractMergeError,
+    ContractViolation,
+    ErrorDetail,
+    ExecutionError,
+    ExtraFieldViolation,
+    FrameworkBugError,
+    MissingFieldViolation,
+    PluginContractViolation,
+    PluginGateReason,
+    QueryFailureDetail,
+    RoutingReason,
+    RowErrorEntry,
+    TemplateErrorEntry,
+    TransformActionCategory,
+    TransformErrorCategory,
+    TransformErrorReason,
+    TransformSuccessReason,
+    TypeMismatchViolation,
+    UsageStats,
+)
+```
+
+Then add to the `__all__` list (insert after existing errors section around line 182):
+
+```python
 __all__ = [
     # ... existing exports ...
+
+    # Schema contract violations (after existing errors)
+    "ContractMergeError",
+    "ContractViolation",
+    "ExtraFieldViolation",
+    "MissingFieldViolation",
+    "TypeMismatchViolation",
+
+    # Schema contracts (new section, add before or after "data" section)
     "FieldContract",
     "PipelineRow",
     "SchemaContract",
     "normalize_type_for_contract",
+
+    # ... rest of existing exports ...
 ]
 ```
 
