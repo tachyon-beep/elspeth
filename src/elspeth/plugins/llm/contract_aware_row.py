@@ -91,19 +91,27 @@ class ContractAwareRow:
             raise AttributeError(key) from e
 
     def __contains__(self, key: str) -> bool:
-        """Check if field exists (by either name form).
+        """Check if field exists in actual data (by either name form).
 
         Args:
             key: Field name (original or normalized)
 
         Returns:
-            True if field exists in contract
+            True if field exists in actual row data (not just in contract)
+
+        Note:
+            P2 fix: __contains__ must check _data after name resolution,
+            not just the contract. This enables template conditionals like
+            {% if "optional_field" in row %} to work correctly when the
+            field is defined in the contract but missing from the actual data.
         """
         try:
-            self._contract.resolve_name(key)
-            return True
+            resolved = self._contract.resolve_name(key)
+            return resolved in self._data
         except KeyError:
-            return False
+            # Field not in contract - check if it exists in data anyway
+            # (shouldn't happen in normal use, but be defensive)
+            return key in self._data
 
     def __iter__(self) -> Iterator[str]:
         """Iterate over normalized field names.

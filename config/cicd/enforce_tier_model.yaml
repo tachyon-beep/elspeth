@@ -1794,3 +1794,15 @@ allow_hits:
   reason: Payload may be purged per retention policy - KeyError is expected for missing content
   safety: Returns None to caller as documented Optional return type; explicit contract
   expires: null
+# Contract propagation - skip non-primitive types (dict/list from LLM _usage fields)
+- key: contracts/contract_propagation.py:R6:propagate_contract:fp=4b95d3836f318d93
+  owner: P1-2026-02-03
+  reason: Intentional skip of non-primitive types during contract inference (dict, list)
+  safety: Field is silently skipped in contract (not an error) - data still flows, just untracked
+  expires: null
+# Pre-existing dict.get in merge_contract_with_output
+- key: contracts/contract_propagation.py:R1:merge_contract_with_output:fp=9636ed57716986de
+  owner: architecture
+  reason: Optional lookup for original name - field may not have been in input contract
+  safety: Fallback to output field's original_name is correct behavior for new fields
+  expires: null

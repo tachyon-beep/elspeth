@@ -113,3 +113,83 @@ class TestContractAwareRow:
         keys = list(row)
 
         assert set(keys) == {"amount_usd", "customer_id", "simple"}
+
+
+class TestContractAwareRowContainsMembership:
+    """Test __contains__ reflects actual data presence, not just contract.
+
+    P2 bug: __contains__ was checking the contract, not the actual data.
+    This broke template conditionals like {% if "optional" in row %}.
+    """
+
+    @pytest.fixture
+    def contract_with_optional(self) -> SchemaContract:
+        """Contract with both required and optional fields."""
+        return SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract("id", "ID", int, True, "declared"),  # required
+                FieldContract("name", "Name", str, True, "declared"),  # required
+                FieldContract("notes", "Notes", str, False, "declared"),  # optional
+            ),
+            locked=True,
+        )
+
+    def test_contains_returns_true_when_data_present(self, contract_with_optional: SchemaContract) -> None:
+        """__contains__ returns True when field exists in actual data."""
+        data = {"id": 1, "name": "Alice", "notes": "Some notes"}
+        row = ContractAwareRow(data, contract_with_optional)
+
+        assert "id" in row
+        assert "name" in row
+        assert "notes" in row
+
+    def test_contains_returns_false_when_data_missing(self, contract_with_optional: SchemaContract) -> None:
+        """__contains__ returns False when field is in contract but not in data.
+
+        This is the P2 bug: __contains__ was returning True because "notes"
+        exists in the contract, even though the actual data doesn't have it.
+        """
+        data = {"id": 1, "name": "Alice"}  # notes is MISSING from data
+        row = ContractAwareRow(data, contract_with_optional)
+
+        assert "id" in row  # Present in data
+        assert "name" in row  # Present in data
+        assert "notes" not in row  # NOT in data, even though in contract
+
+    def test_contains_works_with_original_names(self, contract_with_optional: SchemaContract) -> None:
+        """__contains__ works with original names when data present."""
+        data = {"id": 1, "name": "Alice", "notes": "Some notes"}
+        row = ContractAwareRow(data, contract_with_optional)
+
+        assert "ID" in row  # Original name, data present
+        assert "Name" in row
+        assert "Notes" in row
+
+    def test_contains_with_original_names_returns_false_when_data_missing(self, contract_with_optional: SchemaContract) -> None:
+        """__contains__ returns False for original names when data missing."""
+        data = {"id": 1, "name": "Alice"}  # notes missing
+        row = ContractAwareRow(data, contract_with_optional)
+
+        assert "Notes" not in row  # Original name, data missing
+
+    def test_template_conditional_pattern(self, contract_with_optional: SchemaContract) -> None:
+        """Template pattern {% if "field" in row %} works correctly.
+
+        This is the exact use case that was broken by the P2 bug.
+        """
+        data_with_notes = {"id": 1, "name": "Alice", "notes": "Some notes"}
+        data_without_notes = {"id": 1, "name": "Alice"}
+
+        row_with = ContractAwareRow(data_with_notes, contract_with_optional)
+        row_without = ContractAwareRow(data_without_notes, contract_with_optional)
+
+        # With notes: should be able to access
+        if "notes" in row_with:
+            value = row_with["notes"]
+            assert value == "Some notes"
+
+        # Without notes: membership check should prevent access
+        if "notes" in row_without:
+            # This block should NOT execute
+            pytest.fail("Should not enter this block when data is missing")

@@ -42,12 +42,21 @@ def propagate_contract(
 
     for name, value in output_row.items():
         if name not in existing_names:
-            # New field - infer type
+            # New field - try to infer type
+            # Non-primitive types (dict, list) are skipped rather than crashing
+            # (common with LLM _usage metadata fields)
+            try:
+                python_type = normalize_type_for_contract(value)
+            except TypeError:
+                # Non-primitive type - skip this field in contract
+                # The field will still exist in the data, just not tracked in contract
+                continue
+
             new_fields.append(
                 FieldContract(
                     normalized_name=name,
                     original_name=name,  # No original for transform-created fields
-                    python_type=normalize_type_for_contract(value),
+                    python_type=python_type,
                     required=False,  # Inferred fields are never required
                     source="inferred",
                 )

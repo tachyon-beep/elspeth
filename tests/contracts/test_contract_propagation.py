@@ -434,3 +434,85 @@ class TestMergeContractWithOutput:
 
         id_field = next(f for f in merged.fields if f.normalized_name == "id")
         assert id_field.source == "declared"
+
+
+class TestPropagateContractNonPrimitiveTypes:
+    """Test contract propagation with non-primitive types (dict, list)."""
+
+    @pytest.fixture
+    def input_contract(self) -> SchemaContract:
+        """Input contract with source fields."""
+        return SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="ID",
+                    python_type=int,
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+    def test_dict_field_does_not_crash_propagation(self, input_contract: SchemaContract) -> None:
+        """Dict fields (like LLM _usage) should not crash propagation.
+
+        P1 bug: LLM transforms add _usage dict fields which caused TypeError
+        when propagate_contract tried to normalize the type.
+        """
+        output_row = {
+            "id": 1,
+            "response_usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        }
+
+        # Should not raise TypeError
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        # Contract should be returned without the non-primitive field
+        # (skipped rather than crashing)
+        assert output_contract is not None
+
+    def test_list_field_does_not_crash_propagation(self, input_contract: SchemaContract) -> None:
+        """List fields should not crash propagation."""
+        output_row = {
+            "id": 1,
+            "tags": ["red", "green", "blue"],
+        }
+
+        # Should not raise TypeError
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        assert output_contract is not None
+
+    def test_mixed_primitive_and_nonprimitive_fields(self, input_contract: SchemaContract) -> None:
+        """Primitive fields are added, non-primitive fields are skipped."""
+        output_row = {
+            "id": 1,
+            "score": 95.5,  # Primitive - should be added
+            "metadata": {"key": "value"},  # Non-primitive - should be skipped
+            "active": True,  # Primitive - should be added
+        }
+
+        output_contract = propagate_contract(
+            input_contract=input_contract,
+            output_row=output_row,
+            transform_adds_fields=True,
+        )
+
+        # Should have id, score, active (3 fields)
+        # metadata should be skipped
+        field_names = {f.normalized_name for f in output_contract.fields}
+        assert "id" in field_names
+        assert "score" in field_names
+        assert "active" in field_names
+        assert "metadata" not in field_names  # Skipped
