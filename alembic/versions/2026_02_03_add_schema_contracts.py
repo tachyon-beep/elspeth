@@ -28,60 +28,40 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # runs table: schema contract columns
-    op.add_column(
-        "runs",
-        sa.Column("schema_contract_json", sa.Text(), nullable=True),
-    )
-    op.add_column(
-        "runs",
-        sa.Column("schema_contract_hash", sa.String(16), nullable=True),
-    )
+    # Use batch_alter_table for SQLite compatibility (recreates table)
+    with op.batch_alter_table("runs", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("schema_contract_json", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("schema_contract_hash", sa.String(16), nullable=True))
 
     # nodes table: input/output contract columns
-    op.add_column(
-        "nodes",
-        sa.Column("input_contract_json", sa.Text(), nullable=True),
-    )
-    op.add_column(
-        "nodes",
-        sa.Column("output_contract_json", sa.Text(), nullable=True),
-    )
+    with op.batch_alter_table("nodes", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("input_contract_json", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("output_contract_json", sa.Text(), nullable=True))
 
     # validation_errors table: structured violation details
-    op.add_column(
-        "validation_errors",
-        sa.Column("violation_type", sa.String(32), nullable=True),
-    )
-    op.add_column(
-        "validation_errors",
-        sa.Column("original_field_name", sa.String(256), nullable=True),
-    )
-    op.add_column(
-        "validation_errors",
-        sa.Column("normalized_field_name", sa.String(256), nullable=True),
-    )
-    op.add_column(
-        "validation_errors",
-        sa.Column("expected_type", sa.String(32), nullable=True),
-    )
-    op.add_column(
-        "validation_errors",
-        sa.Column("actual_type", sa.String(32), nullable=True),
-    )
+    with op.batch_alter_table("validation_errors", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("violation_type", sa.String(32), nullable=True))
+        batch_op.add_column(sa.Column("original_field_name", sa.String(256), nullable=True))
+        batch_op.add_column(sa.Column("normalized_field_name", sa.String(256), nullable=True))
+        batch_op.add_column(sa.Column("expected_type", sa.String(32), nullable=True))
+        batch_op.add_column(sa.Column("actual_type", sa.String(32), nullable=True))
 
 
 def downgrade() -> None:
     # validation_errors table: remove structured violation details
-    op.drop_column("validation_errors", "actual_type")
-    op.drop_column("validation_errors", "expected_type")
-    op.drop_column("validation_errors", "normalized_field_name")
-    op.drop_column("validation_errors", "original_field_name")
-    op.drop_column("validation_errors", "violation_type")
+    with op.batch_alter_table("validation_errors", schema=None) as batch_op:
+        batch_op.drop_column("actual_type")
+        batch_op.drop_column("expected_type")
+        batch_op.drop_column("normalized_field_name")
+        batch_op.drop_column("original_field_name")
+        batch_op.drop_column("violation_type")
 
     # nodes table: remove input/output contract columns
-    op.drop_column("nodes", "output_contract_json")
-    op.drop_column("nodes", "input_contract_json")
+    with op.batch_alter_table("nodes", schema=None) as batch_op:
+        batch_op.drop_column("output_contract_json")
+        batch_op.drop_column("input_contract_json")
 
     # runs table: remove schema contract columns
-    op.drop_column("runs", "schema_contract_hash")
-    op.drop_column("runs", "schema_contract_json")
+    with op.batch_alter_table("runs", schema=None) as batch_op:
+        batch_op.drop_column("schema_contract_hash")
+        batch_op.drop_column("schema_contract_json")

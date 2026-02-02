@@ -5,8 +5,6 @@ Phase 5 Unified Schema Contracts: These columns store schema contracts
 in the audit trail for complete field mapping traceability.
 """
 
-from pathlib import Path
-
 from sqlalchemy import create_engine, inspect
 
 
@@ -166,7 +164,7 @@ class TestValidationErrorsContractColumns:
 class TestSchemaContractColumnsInDatabase:
     """Integration tests for schema contract columns in a real database."""
 
-    def test_create_tables_with_contract_columns(self, tmp_path: Path) -> None:
+    def test_create_tables_with_contract_columns(self, tmp_path) -> None:
         """Verify all tables with contract columns can be created in database."""
         from elspeth.core.landscape.schema import metadata
 
