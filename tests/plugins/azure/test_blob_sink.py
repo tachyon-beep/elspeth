@@ -60,6 +60,8 @@ def make_config(
     format: str = "csv",
     overwrite: bool = True,
     csv_options: dict[str, Any] | None = None,
+    display_headers: dict[str, str] | None = None,
+    restore_source_headers: bool = False,
     schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Helper to create config dicts with defaults.
@@ -91,6 +93,10 @@ def make_config(
 
     if csv_options:
         config["csv_options"] = csv_options
+    if display_headers is not None:
+        config["display_headers"] = display_headers
+    if restore_source_headers:
+        config["restore_source_headers"] = True
     return config
 
 
@@ -181,6 +187,11 @@ class TestAzureBlobSinkConfigValidation:
                 }
             )
 
+    def test_display_headers_and_restore_source_headers_mutually_exclusive(self) -> None:
+        """display_headers and restore_source_headers cannot both be set."""
+        with pytest.raises(PluginConfigError, match="Cannot use both display_headers and restore_source_headers"):
+            AzureBlobSink(make_config(display_headers={"id": "ID"}, restore_source_headers=True))
+
 
 class TestAzureBlobSinkWriteCSV:
     """Tests for CSV writing to Azure Blob."""
@@ -249,6 +260,40 @@ class TestAzureBlobSinkWriteCSV:
         assert len(lines) == 1
         assert "1,alice" in lines[0]
 
+    def test_csv_display_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """CSV display headers map header names only."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(display_headers={"id": "ID", "name": "Full Name"}))
+        rows = [{"id": 1, "name": "alice"}]
+
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        lines = uploaded_content.decode().strip().split("\n")
+        assert lines[0].startswith("ID,Full Name")
+        assert "1,alice" in lines[1]
+
+    def test_csv_restore_source_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """restore_source_headers uses field resolution mapping for headers."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(restore_source_headers=True))
+        sink.set_resume_field_resolution({"User ID": "user_id", "Amount $": "amount"})
+        rows = [{"user_id": "1", "amount": "100"}]
+
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        lines = uploaded_content.decode().strip().split("\n")
+        assert lines[0].startswith("User ID,Amount $")
+
 
 class TestAzureBlobSinkWriteJSON:
     """Tests for JSON writing to Azure Blob."""
@@ -279,6 +324,26 @@ class TestAzureBlobSinkWriteJSON:
         # Verify ArtifactDescriptor
         assert isinstance(result, ArtifactDescriptor)
         assert result.content_hash == hashlib.sha256(uploaded_content).hexdigest()
+
+    def test_json_display_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """JSON display headers map field names in output."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(format="json", display_headers={"id": "ID", "name": "Full Name"}))
+        rows = [
+            {"id": 1, "name": "alice"},
+        ]
+
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        import json
+
+        parsed = json.loads(uploaded_content.decode())
+        assert parsed == [{"ID": 1, "Full Name": "alice"}]
 
 
 class TestAzureBlobSinkWriteJSONL:
@@ -312,6 +377,26 @@ class TestAzureBlobSinkWriteJSONL:
 
         # Verify ArtifactDescriptor
         assert isinstance(result, ArtifactDescriptor)
+
+    def test_jsonl_display_headers(self, mock_container_client: MagicMock, ctx: PluginContext) -> None:
+        """JSONL display headers map field names in output."""
+        mock_blob_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.get_blob_client.return_value = mock_blob_client
+        mock_container_client.return_value = mock_container
+
+        sink = AzureBlobSink(make_config(format="jsonl", display_headers={"id": "ID"}))
+        rows = [
+            {"id": 1, "name": "alice"},
+        ]
+
+        sink.write(rows, ctx)
+
+        uploaded_content = mock_blob_client.upload_blob.call_args[0][0]
+        lines = uploaded_content.decode().strip().split("\n")
+        import json
+
+        assert json.loads(lines[0]) == {"ID": 1, "name": "alice"}
 
 
 class TestAzureBlobSinkPathTemplating:
