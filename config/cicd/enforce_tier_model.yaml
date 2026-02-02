@@ -332,84 +332,67 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=ca339dc4c3e28cb0
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=fb548bb8caf699fa
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=1adbef057dd0c6a8
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=ad0b19ecf0114f44
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+# P2-2026-02-02: Whitelist reduction - remaining legitimate .get() patterns
+# These methods NOW validate node_id first, then use .get() only for legitimate cases
+# (e.g., "valid node, no rows buffered yet" vs "invalid node")
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_rows:fp=1b78bdc47d772749
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case
+    of valid node with no rows buffered yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffered_tokens:fp=c1ffb2e357312212
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case
+    of valid node with no tokens buffered yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=7149093de61a26a6
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case
+    of valid node with no rows buffered yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:_get_buffered_data:fp=0565939bc65a5330
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case
+    of valid node with no tokens buffered yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=848f158a657b45ed
+  owner: P2-2026-02-02
+  reason: After validation against aggregation_settings, .get() handles legitimate case
+    of valid node with no rows buffered yet
+  safety: OrchestrationInvariantError raised if node_id not in aggregation_settings
+  expires: null
+# execute_flush uses .get() followed by explicit None check and RuntimeError
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:fp=bfa25063e4e9f79d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:_reset_batch_state:fp=52b065ae51eb7490
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_buffer_count:fp=ed10cdaf9e8417a7
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_checkpoint_state:fp=266593a9d8f52785
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  owner: P2-2026-02-02
+  reason: Pattern is .get() followed by explicit None check raising RuntimeError
+  safety: RuntimeError raised immediately if batch_id is None - explicit failure, not silent
+  expires: null
+# restore_from_checkpoint version check - missing _version is invalid checkpoint
 - key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=44de9b3e54172856
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
+  owner: P2-2026-02-02
+  reason: Version check for checkpoint format - None from missing key triggers ValueError
+  safety: ValueError raised for missing or wrong version - explicit validation pattern
+  expires: null
+# Testing/inspection methods - do not validate against aggregation_settings
+- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=b4c52a40eff695df
+  owner: P2-2026-02-02
+  reason: Testing/inspection method that needs to work with partial setups; returns
+    None if no batch exists
+  safety: Documented as "primarily for testing" - production uses checkpoint state
+  expires: null
+- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=6e71afd1d2337fdf
+  owner: P2-2026-02-02
+  reason: Checkpoint recovery lookup - returns None if no state was restored for node
+  safety: Designed API contract - None is valid return for nodes without restored state
+  expires: null
+# R5 isinstance check remains valid
 - key: engine/executors.py:R5:AggregationExecutor:restore_from_checkpoint:fp=d005edf49465263c
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=ca632308ccd9455b
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:fp=b4c52a40eff695df
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:fp=b27c084351efbf17
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:fp=2a062158f9058b39
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:check_flush_status:fp=12f7c635a7a3a052
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:fp=6e71afd1d2337fdf
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=f010c021f277c4d6
@@ -2301,27 +2284,8 @@ allow_hits:
   reason: Tier-3 boundary validation - user config fields list must be list type
   safety: Raises explicit ValueError for non-list fields value
   expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=6ca19ec767a89a81
-  owner: bugfix
-  reason: Deserializing optional TokenInfo field - fork_group_id is None by default
-    in TokenInfo contract
-  safety: Returns None for missing keys which is the correct default for optional
-    lineage field
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=643271cd701c8e93
-  owner: bugfix
-  reason: Deserializing optional TokenInfo field - join_group_id is None by default
-    in TokenInfo contract
-  safety: Returns None for missing keys which is the correct default for optional
-    lineage field
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:fp=b3ac54805112ea99
-  owner: bugfix
-  reason: Deserializing optional TokenInfo field - expand_group_id is None by default
-    in TokenInfo contract
-  safety: Returns None for missing keys which is the correct default for optional
-    lineage field
-  expires: null
+# P2-2026-02-02: Removed stale restore_from_checkpoint .get() entries
+# These patterns were fixed to use direct [] access with explicit required_fields validation
 - key: core/security/fingerprint.py:R1:get_fingerprint_key:fp=43784a01ff8211a5
   owner: bugfix
   reason: Tier-3 boundary - ELSPETH_FINGERPRINT_KEY is optional env var for direct

@@ -281,6 +281,7 @@ class TestProcessorBatchTransforms:
         # Note: _version field required since Bug #12 checkpoint versioning fix
         # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
         # Note: fire_offset fields required since P2-2026-02-01 trigger ordering fix
+        # Note: All lineage fields required in v1.1 format (values can be None)
         restored_buffer_state = {
             "_version": "1.1",
             sum_node.node_id: {
@@ -290,12 +291,18 @@ class TestProcessorBatchTransforms:
                         "row_id": row0.row_id,
                         "row_data": {"value": 1},
                         "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
                     },
                     {
                         "token_id": token1.token_id,
                         "row_id": row1.row_id,
                         "row_data": {"value": 2},
                         "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
                     },
                 ],
                 "batch_id": old_batch.batch_id,
