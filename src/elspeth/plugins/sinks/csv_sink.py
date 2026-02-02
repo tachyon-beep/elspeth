@@ -88,6 +88,10 @@ class CSVSink(BaseSink):
         - Free mode: All schema fields present (extras allowed)
         - Dynamic mode: No validation (schema adapts to existing headers)
 
+        When display headers are configured (display_headers or restore_source_headers),
+        the existing file headers are display names, so we map expected schema fields
+        to their display equivalents before comparison.
+
         Returns:
             OutputValidationResult indicating compatibility.
         """
@@ -114,7 +118,19 @@ class CSVSink(BaseSink):
         fields = self._schema_config.fields
         if fields is None:
             return OutputValidationResult.success(target_fields=existing)
-        expected = [f.name for f in fields]
+
+        # Base expected fields are normalized schema names
+        expected_normalized = [f.name for f in fields]
+
+        # When display headers are configured, the file contains display names
+        # Map expected fields to their display equivalents for comparison
+        display_map = self._get_effective_display_headers()
+        if display_map is not None:
+            # Map normalized -> display for comparison against file headers
+            expected = [display_map.get(f, f) for f in expected_normalized]
+        else:
+            expected = expected_normalized
+
         existing_set, expected_set = set(existing), set(expected)
 
         if self._schema_config.mode == "strict":
@@ -154,8 +170,11 @@ class CSVSink(BaseSink):
         # Display header configuration
         self._display_headers = cfg.display_headers
         self._restore_source_headers = cfg.restore_source_headers
-        # Populated in on_start() if restore_source_headers=True
+        # Populated lazily on first write if restore_source_headers=True
+        # Must be lazy because field resolution is only recorded AFTER first source iteration,
+        # which happens after on_start() is called.
         self._resolved_display_headers: dict[str, str] | None = None
+        self._display_headers_resolved: bool = False  # Track if we've attempted resolution
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
@@ -211,6 +230,10 @@ class CSVSink(BaseSink):
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
+
+        # Lazy resolution of display headers from Landscape
+        # Must happen AFTER source iteration begins (when field resolution is recorded)
+        self._resolve_display_headers_if_needed(ctx)
 
         # Lazy initialization - open file on first write
         if self._file is None:
@@ -325,8 +348,10 @@ class CSVSink(BaseSink):
 
         # Write header row using display names if configured
         if display_fields != data_fields:
-            # Write display headers manually
-            self._file.write(self._delimiter.join(display_fields) + "\n")
+            # Write display headers using csv.writer to handle quoting properly
+            # Display names may contain delimiters, quotes, or newlines (e.g., "Amount, USD")
+            header_writer = csv.writer(self._file, delimiter=self._delimiter)
+            header_writer.writerow(display_fields)
         else:
             # No display mapping - use standard writeheader()
             self._writer.writeheader()
@@ -376,6 +401,44 @@ class CSVSink(BaseSink):
             return self._resolved_display_headers
         return None
 
+    def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve display headers from Landscape if restore_source_headers=True.
+
+        Called on first write() to fetch field resolution mapping. This MUST be lazy
+        because the orchestrator calls sink.on_start() BEFORE source.load() iterates,
+        and record_source_field_resolution() only happens after the first source row.
+
+        Args:
+            ctx: Plugin context with Landscape access.
+
+        Raises:
+            ValueError: If Landscape is unavailable or source didn't record resolution.
+        """
+        if self._display_headers_resolved:
+            return  # Already resolved (or not needed)
+
+        self._display_headers_resolved = True
+
+        if not self._restore_source_headers:
+            return  # Nothing to resolve
+
+        # Fetch source field resolution from Landscape
+        if ctx.landscape is None:
+            raise ValueError(
+                "restore_source_headers=True requires Landscape to be available. "
+                "This is a framework bug - context should have landscape set."
+            )
+
+        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
+        if resolution_mapping is None:
+            raise ValueError(
+                "restore_source_headers=True but source did not record field resolution. "
+                "Ensure source uses normalize_fields: true to enable header restoration."
+            )
+
+        # Build reverse mapping: final (normalized) -> original
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+
     def _compute_file_hash(self) -> str:
         """Compute SHA-256 hash of the file contents."""
         sha256 = hashlib.sha256()
@@ -411,28 +474,11 @@ class CSVSink(BaseSink):
     def on_start(self, ctx: PluginContext) -> None:
         """Called before processing begins.
 
-        If restore_source_headers=True, fetches the source field resolution
-        from the Landscape audit trail and builds the reverse mapping.
+        Note: restore_source_headers resolution is done lazily in write() because
+        the field resolution mapping is only recorded AFTER source iteration begins,
+        which happens after on_start() is called.
         """
-        if not self._restore_source_headers:
-            return
-
-        # Fetch source field resolution from Landscape
-        if ctx.landscape is None:
-            raise ValueError(
-                "restore_source_headers=True requires Landscape to be available. "
-                "This is a framework bug - context should have landscape set."
-            )
-
-        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
-        if resolution_mapping is None:
-            raise ValueError(
-                "restore_source_headers=True but source did not record field resolution. "
-                "Ensure source uses normalize_fields: true to enable header restoration."
-            )
-
-        # Build reverse mapping: final (normalized) -> original
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+        pass
 
     def on_complete(self, ctx: PluginContext) -> None:
         """Called after processing completes."""

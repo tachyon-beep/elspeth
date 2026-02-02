@@ -174,7 +174,11 @@ class TestCSVSinkDisplayHeaders:
             assert header == ["User ID", "case StUdY --- 1!!"]
 
     def test_restore_source_headers_requires_landscape(self, tmp_path: Path) -> None:
-        """restore_source_headers fails if Landscape is not available."""
+        """restore_source_headers fails if Landscape is not available.
+
+        Note: Error occurs on first write(), not on_start(), because field resolution
+        is only available after source iteration begins (lazy resolution).
+        """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -188,11 +192,19 @@ class TestCSVSinkDisplayHeaders:
 
         ctx = PluginContext(run_id="test-run", config={}, landscape=None)
 
+        # on_start is now a no-op for restore_source_headers (lazy resolution)
+        sink.on_start(ctx)
+
+        # Error occurs on first write when resolution is attempted
         with pytest.raises(ValueError, match="requires Landscape"):
-            sink.on_start(ctx)
+            sink.write([{"id": "test"}], ctx)
 
     def test_restore_source_headers_requires_field_resolution(self, tmp_path: Path) -> None:
-        """restore_source_headers fails if source didn't record resolution."""
+        """restore_source_headers fails if source didn't record resolution.
+
+        Note: Error occurs on first write(), not on_start(), because field resolution
+        is only available after source iteration begins (lazy resolution).
+        """
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         output_file = tmp_path / "output.csv"
@@ -209,8 +221,12 @@ class TestCSVSinkDisplayHeaders:
 
         ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
 
+        # on_start is now a no-op for restore_source_headers (lazy resolution)
+        sink.on_start(ctx)
+
+        # Error occurs on first write when resolution is attempted
         with pytest.raises(ValueError, match="did not record field resolution"):
-            sink.on_start(ctx)
+            sink.write([{"id": "test"}], ctx)
 
     def test_transform_added_fields_use_normalized_names(self, tmp_path: Path) -> None:
         """Fields added by transforms use their normalized names (no original exists)."""
@@ -428,3 +444,213 @@ class TestFieldResolutionReverseMapping:
 
         reverse = resolution.reverse_mapping
         assert reverse == {"id": "id", "name": "name"}
+
+
+class TestCSVDisplayHeadersAppendMode:
+    """Tests for CSV append mode with display headers."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_append_with_explicit_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode correctly validates and appends when display headers match."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+
+        # First write with display headers
+        sink1 = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+            }
+        )
+        sink1.write([{"user_id": "u1", "amount": 100.0}], ctx)
+        sink1.flush()
+        sink1.close()
+
+        # Append with same display headers
+        sink2 = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "mode": "append",
+            }
+        )
+        sink2.write([{"user_id": "u2", "amount": 200.0}], ctx)
+        sink2.flush()
+        sink2.close()
+
+        # Verify both rows present with correct headers
+        with open(output_file) as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            assert header == ["User ID", "Amount"]
+            rows = list(reader)
+            assert len(rows) == 2
+            assert rows[0] == ["u1", "100.0"]
+            assert rows[1] == ["u2", "200.0"]
+
+
+class TestCSVDisplayHeadersSpecialCharacters:
+    """Tests for CSV display headers containing special characters."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_display_header_with_comma(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Display headers containing commas are properly quoted in CSV."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["amount: float", "currency: str"]},
+                "display_headers": {"amount": "Amount, USD", "currency": "Currency"},
+            }
+        )
+
+        sink.write([{"amount": 100.0, "currency": "USD"}], ctx)
+        sink.flush()
+        sink.close()
+
+        # Read raw file to verify quoting
+        with open(output_file) as f:
+            content = f.read()
+            # Header should be quoted because it contains comma
+            assert '"Amount, USD"' in content or "'Amount, USD'" in content
+
+        # Verify it parses correctly with csv module
+        with open(output_file) as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            assert header == ["Amount, USD", "Currency"]
+            rows = list(reader)
+            assert len(rows) == 1
+            assert rows[0] == ["100.0", "USD"]
+
+    def test_display_header_with_quotes(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Display headers containing quotes are properly escaped in CSV."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["value: str"]},
+                "display_headers": {"value": 'Value "quoted"'},
+            }
+        )
+
+        sink.write([{"value": "test"}], ctx)
+        sink.flush()
+        sink.close()
+
+        # Verify it parses correctly with csv module
+        with open(output_file) as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            assert header == ['Value "quoted"']
+
+    def test_display_header_with_newline(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Display headers containing newlines are properly quoted in CSV."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        sink = CSVSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["description: str"]},
+                "display_headers": {"description": "Description\n(multi-line)"},
+            }
+        )
+
+        sink.write([{"description": "test"}], ctx)
+        sink.flush()
+        sink.close()
+
+        # Verify it parses correctly with csv module
+        with open(output_file) as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            assert header == ["Description\n(multi-line)"]
+
+
+class TestJSONLDisplayHeadersAppendMode:
+    """Tests for JSONL append/resume mode with display headers."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a minimal plugin context."""
+        return PluginContext(run_id="test-run", config={})
+
+    def test_append_with_explicit_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Append mode correctly validates and appends when display headers match."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # First write with display headers
+        sink1 = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+            }
+        )
+        sink1.write([{"user_id": "u1", "amount": 100.0}], ctx)
+        sink1.flush()
+        sink1.close()
+
+        # Append with same display headers
+        sink2 = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "mode": "append",
+            }
+        )
+        sink2.write([{"user_id": "u2", "amount": 200.0}], ctx)
+        sink2.flush()
+        sink2.close()
+
+        # Verify both rows present with display names as keys
+        with open(output_file) as f:
+            lines = f.readlines()
+            assert len(lines) == 2
+            row1 = json.loads(lines[0])
+            row2 = json.loads(lines[1])
+            assert row1 == {"User ID": "u1", "Amount": 100.0}
+            assert row2 == {"User ID": "u2", "Amount": 200.0}
+
+    def test_resume_validation_with_display_headers(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Resume validation succeeds when existing file uses display names."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.jsonl"
+
+        # Pre-create file with display headers
+        with open(output_file, "w") as f:
+            f.write(json.dumps({"User ID": "u1", "Amount": 100.0}) + "\n")
+
+        # Open in append mode with matching display headers - should validate successfully
+        sink = JSONSink(
+            {
+                "path": str(output_file),
+                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "display_headers": {"user_id": "User ID", "amount": "Amount"},
+                "mode": "append",
+            }
+        )
+
+        # Validation happens lazily, trigger it by calling validate_output_target
+        result = sink.validate_output_target()
+        assert result.valid, f"Validation failed: {result.error_message}"

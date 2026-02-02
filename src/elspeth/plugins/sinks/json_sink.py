@@ -94,6 +94,10 @@ class JSONSink(BaseSink):
         - Free mode: All schema fields present (extras allowed)
         - Dynamic mode: No validation (schema adapts to existing structure)
 
+        When display headers are configured (display_headers or restore_source_headers),
+        the existing file keys are display names, so we map expected schema fields
+        to their display equivalents before comparison.
+
         Note: Only JSONL format supports resume. JSON array returns valid=True
         (it will overwrite anyway).
 
@@ -134,7 +138,19 @@ class JSONSink(BaseSink):
         fields = self._schema_config.fields
         if fields is None:
             return OutputValidationResult.success(target_fields=existing)
-        expected = [f.name for f in fields]
+
+        # Base expected fields are normalized schema names
+        expected_normalized = [f.name for f in fields]
+
+        # When display headers are configured, the file contains display names
+        # Map expected fields to their display equivalents for comparison
+        display_map = self._get_effective_display_headers()
+        if display_map is not None:
+            # Map normalized -> display for comparison against file keys
+            expected = [display_map.get(f, f) for f in expected_normalized]
+        else:
+            expected = expected_normalized
+
         existing_set, expected_set = set(existing), set(expected)
 
         if self._schema_config.mode == "strict":
@@ -172,8 +188,11 @@ class JSONSink(BaseSink):
         # Display header configuration
         self._display_headers = cfg.display_headers
         self._restore_source_headers = cfg.restore_source_headers
-        # Populated in on_start() if restore_source_headers=True
+        # Populated lazily on first write if restore_source_headers=True
+        # Must be lazy because field resolution is only recorded AFTER first source iteration,
+        # which happens after on_start() is called.
         self._resolved_display_headers: dict[str, str] | None = None
+        self._display_headers_resolved: bool = False  # Track if we've attempted resolution
 
         # Auto-detect format from extension if not specified
         fmt = cfg.format
@@ -231,6 +250,10 @@ class JSONSink(BaseSink):
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
+
+        # Lazy resolution of display headers from Landscape
+        # Must happen AFTER source iteration begins (when field resolution is recorded)
+        self._resolve_display_headers_if_needed(ctx)
 
         # Apply display header mapping to row keys if configured
         output_rows = self._apply_display_headers(rows)
@@ -325,6 +348,44 @@ class JSONSink(BaseSink):
             return self._resolved_display_headers
         return None
 
+    def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve display headers from Landscape if restore_source_headers=True.
+
+        Called on first write() to fetch field resolution mapping. This MUST be lazy
+        because the orchestrator calls sink.on_start() BEFORE source.load() iterates,
+        and record_source_field_resolution() only happens after the first source row.
+
+        Args:
+            ctx: Plugin context with Landscape access.
+
+        Raises:
+            ValueError: If Landscape is unavailable or source didn't record resolution.
+        """
+        if self._display_headers_resolved:
+            return  # Already resolved (or not needed)
+
+        self._display_headers_resolved = True
+
+        if not self._restore_source_headers:
+            return  # Nothing to resolve
+
+        # Fetch source field resolution from Landscape
+        if ctx.landscape is None:
+            raise ValueError(
+                "restore_source_headers=True requires Landscape to be available. "
+                "This is a framework bug - context should have landscape set."
+            )
+
+        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
+        if resolution_mapping is None:
+            raise ValueError(
+                "restore_source_headers=True but source did not record field resolution. "
+                "Ensure source uses normalize_fields: true to enable header restoration."
+            )
+
+        # Build reverse mapping: final (normalized) -> original
+        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+
     def _apply_display_headers(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Apply display header mapping to row keys.
 
@@ -348,28 +409,11 @@ class JSONSink(BaseSink):
     def on_start(self, ctx: PluginContext) -> None:
         """Called before processing begins.
 
-        If restore_source_headers=True, fetches the source field resolution
-        from the Landscape audit trail and builds the reverse mapping.
+        Note: restore_source_headers resolution is done lazily in write() because
+        the field resolution mapping is only recorded AFTER source iteration begins,
+        which happens after on_start() is called.
         """
-        if not self._restore_source_headers:
-            return
-
-        # Fetch source field resolution from Landscape
-        if ctx.landscape is None:
-            raise ValueError(
-                "restore_source_headers=True requires Landscape to be available. "
-                "This is a framework bug - context should have landscape set."
-            )
-
-        resolution_mapping = ctx.landscape.get_source_field_resolution(ctx.run_id)
-        if resolution_mapping is None:
-            raise ValueError(
-                "restore_source_headers=True but source did not record field resolution. "
-                "Ensure source uses normalize_fields: true to enable header restoration."
-            )
-
-        # Build reverse mapping: final (normalized) -> original
-        self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
+        pass
 
     def on_complete(self, ctx: PluginContext) -> None:
         """Called after processing completes."""

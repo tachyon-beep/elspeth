@@ -3133,3 +3133,19 @@ allow_hits:
   reason: Pydantic field validator - input comes from YAML which may have wrong types
   safety: ValueError raised with position info - explicit validation failure
   expires: null
+# Display header feature: intentional fallback for unmapped fields
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=05865d01c165d3a4
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+  expires: null
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=68ac900b5becaf25
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+  expires: null
+- key: plugins/sinks/json_sink.py:R1:JSONSink:_apply_display_headers:fp=968f5ecb64bbb866
+  owner: feature
+  reason: Display header mapping - fields not in map keep original name (transform-added fields)
+  safety: Intentional fallback to original field name, not bug hiding
+  expires: null
