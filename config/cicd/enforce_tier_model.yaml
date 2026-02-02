@@ -2702,11 +2702,6 @@ allow_hits:
   reason: Tier 1 trust validation - crash on corruption from our own audit database
   safety: ValueError raised on corrupt data - explicit failure, not silent coercion
   expires: null
-- key: core/landscape/recorder.py:R1:LandscapeRecorder:get_source_field_resolution:fp=b8612595082740a2
-  owner: feature
-  reason: Tier 1 trust validation - resolution_mapping may legitimately be absent
-  safety: Returns None if absent, crashes on wrong type - no silent coercion
-  expires: null
 - key: core/landscape/recorder.py:R5:LandscapeRecorder:get_source_field_resolution:fp=aa918a3847425cd7
   owner: feature
   reason: Tier 1 trust validation - crash on corruption from our own audit database
