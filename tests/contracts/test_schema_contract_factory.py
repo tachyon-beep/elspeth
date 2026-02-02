@@ -121,3 +121,57 @@ class TestCreateContractFromConfig:
         contract = create_contract_from_config(config)
 
         assert contract.locked is False
+
+
+class TestContractWithFieldResolution:
+    """Test creating contracts with field resolution (original names)."""
+
+    def test_field_resolution_sets_original_names(self) -> None:
+        """Field resolution mapping populates original_name."""
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["amount_usd: int", "customer_id: str"],
+            }
+        )
+        resolution = {
+            "'Amount USD'": "amount_usd",
+            "Customer ID": "customer_id",
+        }
+        contract = create_contract_from_config(config, field_resolution=resolution)
+
+        amount_field = next(f for f in contract.fields if f.normalized_name == "amount_usd")
+        assert amount_field.original_name == "'Amount USD'"
+
+        customer_field = next(f for f in contract.fields if f.normalized_name == "customer_id")
+        assert customer_field.original_name == "Customer ID"
+
+    def test_no_resolution_uses_normalized_as_original(self) -> None:
+        """Without resolution, original_name equals normalized_name."""
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["id: int"],
+            }
+        )
+        contract = create_contract_from_config(config)  # No resolution
+
+        id_field = contract.fields[0]
+        assert id_field.original_name == id_field.normalized_name == "id"
+
+    def test_partial_resolution(self) -> None:
+        """Resolution mapping can be partial (not all fields mapped)."""
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["mapped_field: int", "unmapped_field: str"],
+            }
+        )
+        resolution = {"Original Header": "mapped_field"}  # Only one field
+        contract = create_contract_from_config(config, field_resolution=resolution)
+
+        mapped = next(f for f in contract.fields if f.normalized_name == "mapped_field")
+        unmapped = next(f for f in contract.fields if f.normalized_name == "unmapped_field")
+
+        assert mapped.original_name == "Original Header"
+        assert unmapped.original_name == "unmapped_field"  # Falls back to normalized
