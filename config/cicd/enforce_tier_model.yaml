@@ -2771,3 +2771,28 @@ allow_hits:
     fields)
   safety: Intentional fallback to original field name, not bug hiding
   expires: null
+- key: plugins/azure/blob_source.py:R4:AzureBlobSource:_load_csv:fp=03c24bba772bb01a
+  owner: plugins
+  reason: External CSV parsing boundary - pandas can raise multiple exception types
+  safety: Records validation error and yields quarantined row or stops on unparseable file
+  expires: '2026-05-02'
+- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=07890795b89ac2ba
+  owner: plugins
+  reason: External JSON boundary - ensure data_key lookup only on dict payloads
+  safety: Raises ValueError with context for audit trail
+  expires: '2026-05-02'
+- key: plugins/azure/blob_source.py:R5:AzureBlobSource:_load_json_array:fp=be167c469ac90c06
+  owner: plugins
+  reason: External JSON boundary - enforce array payloads for row iteration
+  safety: Raises ValueError with context for audit trail
+  expires: '2026-05-02'
+- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_load_jsonl:fp=40400e88b9b491de
+  owner: plugins
+  reason: External JSONL boundary - malformed lines quarantined per Tier 3 policy
+  safety: Records validation errors and yields quarantined rows, continues safely
+  expires: '2026-05-02'
+- key: plugins/azure/blob_source.py:R6:AzureBlobSource:_validate_and_yield:fp=d134c56423d55f53
+  owner: plugins
+  reason: External data validation - schema errors quarantined instead of crashing
+  safety: Records validation errors and yields quarantined rows for routing
+  expires: '2026-05-02'
