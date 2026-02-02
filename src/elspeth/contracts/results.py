@@ -156,14 +156,9 @@ class TransformResult:
         if self.status == "error":
             raise ValueError("Cannot convert error result to PipelineRow")
         if self.is_multi_row:
-            raise ValueError(
-                "Cannot convert multi-row result to single PipelineRow. "
-                "Use to_pipeline_rows() instead."
-            )
+            raise ValueError("Cannot convert multi-row result to single PipelineRow. Use to_pipeline_rows() instead.")
         if self.contract is None:
-            raise ValueError(
-                "TransformResult has no contract - cannot create PipelineRow"
-            )
+            raise ValueError("TransformResult has no contract - cannot create PipelineRow")
         # Single-row success result - row is guaranteed to be non-None
         return PipelineRow(self.row, self.contract)  # type: ignore[arg-type]
 
@@ -181,14 +176,9 @@ class TransformResult:
         if self.status == "error":
             raise ValueError("Cannot convert error result to PipelineRows")
         if not self.is_multi_row:
-            raise ValueError(
-                "Cannot convert single-row result to multiple PipelineRows. "
-                "Use to_pipeline_row() instead."
-            )
+            raise ValueError("Cannot convert single-row result to multiple PipelineRows. Use to_pipeline_row() instead.")
         if self.contract is None:
-            raise ValueError(
-                "TransformResult has no contract - cannot create PipelineRows"
-            )
+            raise ValueError("TransformResult has no contract - cannot create PipelineRows")
         # Multi-row success result - rows is guaranteed to be non-None
         return [PipelineRow(row, self.contract) for row in self.rows]  # type: ignore[union-attr]
 
