@@ -1169,6 +1169,9 @@ class Orchestrator:
 
                 # Track whether field resolution has been recorded (must happen after first iteration)
                 field_resolution_recorded = False
+                # Track whether schema contract has been recorded (must happen after first VALID row)
+                # Separate from field_resolution because first row might be quarantined
+                schema_contract_recorded = False
 
                 # PROCESS phase - iterate through rows
                 phase_start = time.perf_counter()
@@ -1214,13 +1217,6 @@ class Orchestrator:
                                         resolution_mapping=resolution_mapping,
                                     )
                                 )
-
-                            # Record schema contract after first-row inference
-                            # For OBSERVED/FLEXIBLE modes, the contract is locked after first row
-                            # is processed with inferred types. Record to audit trail.
-                            schema_contract = config.source.get_schema_contract()
-                            if schema_contract is not None:
-                                recorder.update_run_contract(run_id, schema_contract)
 
                         # Handle quarantined source rows - route directly to sink
                         if source_item.is_quarantined:
@@ -1308,6 +1304,24 @@ class Orchestrator:
 
                         # Extract row data from SourceRow (all source items are SourceRow)
                         row_data: dict[str, Any] = source_item.row
+
+                        # ─────────────────────────────────────────────────────────────────
+                        # Record schema contract after first VALID row
+                        # (BUG FIX: mwwo + c1v5 - contract only exists after first valid row)
+                        #
+                        # For OBSERVED/FLEXIBLE modes, the source's schema contract is set
+                        # when the first valid row is processed. Quarantined rows don't
+                        # trigger contract population. Recording must happen here, not on
+                        # the first iteration which may be a quarantined row.
+                        # ─────────────────────────────────────────────────────────────────
+                        if not schema_contract_recorded:
+                            schema_contract = config.source.get_schema_contract()
+                            if schema_contract is not None:
+                                schema_contract_recorded = True
+                                # Update run-level contract
+                                recorder.update_run_contract(run_id, schema_contract)
+                                # Update source node's output_contract (was NULL at registration)
+                                recorder.update_node_output_contract(run_id, source_id, schema_contract)
 
                         # ─────────────────────────────────────────────────────────────────
                         # CRITICAL: Clear operation_id now that source item is fetched.

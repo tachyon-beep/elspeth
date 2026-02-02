@@ -144,6 +144,72 @@ class TestUpdateRunContract:
         assert row.schema_contract_hash == contract.version_hash()
 
 
+class TestUpdateNodeOutputContract:
+    """Tests for update_node_output_contract() method.
+
+    BUG FIX: c1v5 - Source output_contract recorded before it is built.
+    This method allows updating a node's output_contract after first-row inference.
+    """
+
+    def test_update_node_output_contract_stores_contract(self) -> None:
+        """update_node_output_contract() updates source node after inference."""
+        from sqlalchemy import select
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Start run without contract
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Register source node without output_contract (dynamic source)
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={"path": "test.csv"},
+            schema_config=DYNAMIC_SCHEMA,
+            output_contract=None,  # Not known at registration time
+        )
+
+        # After processing first valid row, source infers schema
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="customer_id",
+                    original_name="Customer ID",
+                    python_type=str,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+
+        # Update the node's output_contract
+        recorder.update_node_output_contract(run.run_id, "source_1", contract)
+
+        # Verify stored
+        with db.connection() as conn:
+            result = conn.execute(
+                select(nodes_table.c.output_contract_json).where(
+                    (nodes_table.c.run_id == run.run_id) & (nodes_table.c.node_id == "source_1")
+                )
+            )
+            row = result.fetchone()
+
+        assert row is not None
+        assert row.output_contract_json is not None
+
+        # Verify can be restored
+        audit_record = ContractAuditRecord.from_json(row.output_contract_json)
+        assert audit_record.mode == "OBSERVED"
+        assert len(audit_record.fields) == 1
+        assert audit_record.fields[0].normalized_name == "customer_id"
+
+
 class TestGetRunContract:
     """Tests for get_run_contract() method."""
 

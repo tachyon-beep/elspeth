@@ -337,3 +337,117 @@ class TestOrchestratorContractRecording:
             assert run_row is not None
             # No contract recorded because first-row callback never fires
             assert run_row.schema_contract_json is None
+
+    def test_contract_recorded_after_first_valid_row_not_first_iteration(self, payload_store) -> None:
+        """Contract recorded after first VALID row, not first iteration.
+
+        BUG FIX: mwwo - Run schema contract tied to first iteration, not first valid row
+
+        If the first row is quarantined, the contract should still be recorded
+        when a later valid row is processed. This tests the fix for the bug where
+        the schema_contract_recorded flag was set on first iteration regardless
+        of whether the row was valid.
+        """
+        db = LandscapeDB.in_memory()
+
+        test_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="id",
+                    original_name="id",
+                    python_type=int,
+                    required=True,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+
+        class QuarantineThenValidSource(_TestSourceBase):
+            """Source that yields quarantined row first, then valid row."""
+
+            name = "quarantine_first_source"
+            output_schema = _TestSchema
+            _on_validation_failure = "quarantine"
+
+            def __init__(self, contract: SchemaContract) -> None:
+                super().__init__()
+                self._contract: SchemaContract | None = None
+                self._expected_contract = contract
+
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                # First row: quarantined (contract not set yet)
+                yield SourceRow.quarantined(
+                    row={"id": "invalid"},  # String instead of int
+                    error="type error",
+                    destination="quarantine",
+                )
+
+                # Second row: valid (now set the contract)
+                self._contract = self._expected_contract
+                yield SourceRow.valid({"id": 1}, contract=self._contract)
+
+            def get_schema_contract(self) -> SchemaContract | None:
+                return self._contract
+
+        class CollectSink(_TestSinkBase):
+            name = "collect"
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.results: list[dict[str, Any]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                from elspeth.contracts import ArtifactDescriptor
+
+                self.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+        source = QuarantineThenValidSource(contract=test_contract)
+        sink = CollectSink()
+        quarantine_sink = CollectSink()
+
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink), "quarantine": as_sink(quarantine_sink)},
+        )
+        graph = build_production_graph(config, default_sink="default")
+        orchestrator = Orchestrator(db)
+
+        result = orchestrator.run(config, graph=graph, payload_store=payload_store)
+
+        # Both rows should be processed
+        assert result.rows_processed == 2
+        # One quarantined, one succeeded
+        assert result.rows_quarantined == 1
+        assert result.rows_succeeded == 1
+
+        # Verify contract WAS recorded (not skipped due to quarantined first row)
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import nodes_table, runs_table
+
+        with db.engine.connect() as conn:
+            run_row = conn.execute(select(runs_table).where(runs_table.c.run_id == result.run_id)).fetchone()
+
+            assert run_row is not None
+            # Contract should be recorded after the second (valid) row
+            assert run_row.schema_contract_json is not None
+
+            # Verify the contract content
+            import json
+
+            contract_data = json.loads(run_row.schema_contract_json)
+            assert contract_data["mode"] == "OBSERVED"
+            assert len(contract_data["fields"]) == 1
+            assert contract_data["fields"][0]["normalized_name"] == "id"
+
+            # Also verify source node has output_contract (c1v5 fix)
+            source_node = conn.execute(
+                select(nodes_table).where((nodes_table.c.run_id == result.run_id) & (nodes_table.c.node_type == "source"))
+            ).fetchone()
+
+            assert source_node is not None
+            assert source_node.output_contract_json is not None
