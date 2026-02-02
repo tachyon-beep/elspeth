@@ -122,6 +122,21 @@ class SourceProtocol(Protocol):
         """
         ...
 
+    # === Schema Contract Support ===
+
+    def get_schema_contract(self) -> Any:
+        """Return schema contract for this source.
+
+        Sources with schema validation should override this to return their
+        SchemaContract. For OBSERVED/FLEXIBLE modes, the contract is typically
+        locked after the first row is processed (type inference happens).
+
+        Returns:
+            SchemaContract if available, None otherwise. Using Any return type
+            to avoid circular import with contracts module in Protocol definition.
+        """
+        ...
+
 
 @runtime_checkable
 class TransformProtocol(Protocol):

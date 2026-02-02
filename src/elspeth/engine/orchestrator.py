@@ -905,6 +905,12 @@ class Orchestrator:
                 schema_dict = node_info.config["schema"]
                 schema_config = SchemaConfig.from_dict(schema_dict)
 
+                # Get output_contract for source nodes
+                # Sources have get_schema_contract() method that returns their output contract
+                output_contract = None
+                if node_id == source_id:
+                    output_contract = config.source.get_schema_contract()
+
                 recorder.register_node(
                     run_id=run_id,
                     node_id=node_id,  # Use graph's ID
@@ -914,6 +920,7 @@ class Orchestrator:
                     config=node_info.config,
                     determinism=determinism,
                     schema_config=schema_config,
+                    output_contract=output_contract,
                 )
 
             # Register edges from graph - key by (from_node, label) for lookup
@@ -1207,6 +1214,13 @@ class Orchestrator:
                                         resolution_mapping=resolution_mapping,
                                     )
                                 )
+
+                            # Record schema contract after first-row inference
+                            # For OBSERVED/FLEXIBLE modes, the contract is locked after first row
+                            # is processed with inferred types. Record to audit trail.
+                            schema_contract = config.source.get_schema_contract()
+                            if schema_contract is not None:
+                                recorder.update_run_contract(run_id, schema_contract)
 
                         # Handle quarantined source rows - route directly to sink
                         if source_item.is_quarantined:

@@ -124,6 +124,7 @@ def create_mock_source(rows: list[dict[str, Any]]) -> MagicMock:
 
     mock_source.load.return_value = iter([SourceRow.valid(row) for row in rows])
     mock_source.get_field_resolution.return_value = None
+    mock_source.get_schema_contract.return_value = None
 
     return mock_source
 

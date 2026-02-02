@@ -534,6 +534,14 @@ class _TestSourceBase:
         """
         return None
 
+    def get_schema_contract(self) -> Any:
+        """Return schema contract for audit trail.
+
+        Test sources don't have contracts by default, so return None.
+        Override in test classes that need to provide contracts.
+        """
+        return None
+
 
 class CallbackSource(_TestSourceBase):
     """Source with callbacks for deterministic MockClock testing.
