@@ -30,8 +30,13 @@ fields and declare only the truly required subset in required_input_fields.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from jinja2 import Environment
 from jinja2.nodes import Const, Getattr, Getitem, Name, Node
+
+if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
 
 
 def extract_jinja2_fields(
@@ -146,3 +151,77 @@ def extract_jinja2_fields_with_details(
 
     walk(ast)
     return fields
+
+
+def extract_jinja2_fields_with_names(
+    template_string: str,
+    contract: SchemaContract | None = None,
+    namespace: str = "row",
+) -> dict[str, dict[str, str | bool]]:
+    """Extract field names with original/normalized name resolution.
+
+    Enhanced version of extract_jinja2_fields that:
+    - Reports both original and normalized names when contract provided
+    - Resolves original names to their normalized form
+    - Indicates whether resolution was successful
+
+    This helps developers understand which fields their templates need
+    and see both name forms for documentation/debugging.
+
+    Args:
+        template_string: Jinja2 template to parse
+        contract: Optional SchemaContract for name resolution
+        namespace: Variable name to search for (default: "row")
+
+    Returns:
+        Dict mapping normalized_name -> {
+            "normalized": str,  # Normalized name (key)
+            "original": str,    # Original name (or same as normalized if unknown)
+            "resolved": bool,   # True if found in contract
+        }
+
+    Examples:
+        >>> # Without contract
+        >>> extract_jinja2_fields_with_names("{{ row.field }}")
+        {'field': {'normalized': 'field', 'original': 'field', 'resolved': False}}
+
+        >>> # With contract (has "'Amount USD'" -> "amount_usd")
+        >>> extract_jinja2_fields_with_names(
+        ...     "{{ row[\"'Amount USD'\"] }}",
+        ...     contract=contract,
+        ... )
+        {'amount_usd': {'normalized': 'amount_usd', 'original': "'Amount USD'", 'resolved': True}}
+    """
+    # First, extract all field references as-written
+    raw_fields = extract_jinja2_fields(template_string, namespace)
+
+    result: dict[str, dict[str, str | bool]] = {}
+
+    for field_as_written in raw_fields:
+        if contract is not None:
+            # Try to resolve via contract
+            try:
+                normalized = contract.resolve_name(field_as_written)
+                fc = contract.get_field(normalized)
+                original = fc.original_name if fc else field_as_written
+                result[normalized] = {
+                    "normalized": normalized,
+                    "original": original,
+                    "resolved": True,
+                }
+            except KeyError:
+                # Not in contract - report as-is
+                result[field_as_written] = {
+                    "normalized": field_as_written,
+                    "original": field_as_written,
+                    "resolved": False,
+                }
+        else:
+            # No contract - report as-is
+            result[field_as_written] = {
+                "normalized": field_as_written,
+                "original": field_as_written,
+                "resolved": False,
+            }
+
+    return result
