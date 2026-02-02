@@ -2650,3 +2650,38 @@ allow_hits:
   reason: External data validation - schema errors quarantined instead of crashing
   safety: Records validation errors and yields quarantined rows for routing
   expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=7c73c8316bba0990
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=46da55f37bbc126a
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=7d1117034a44fd20
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=c3fbc8bf81f68b7f
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=c65b0c2993cc03b9
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=775087621040bda3
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
+- key: contracts/type_normalization.py:R5:normalize_type_for_contract:fp=13c52ef2cbcda91c
+  owner: architecture
+  reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
+  safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
+  expires: '2026-05-02'
