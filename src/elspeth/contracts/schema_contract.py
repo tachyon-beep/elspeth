@@ -56,12 +56,8 @@ class SchemaContract:
     locked: bool = False
 
     # Computed indices - populated in __post_init__
-    _by_normalized: dict[str, FieldContract] = field(
-        default_factory=dict, repr=False, compare=False, hash=False
-    )
-    _by_original: dict[str, str] = field(
-        default_factory=dict, repr=False, compare=False, hash=False
-    )
+    _by_normalized: dict[str, FieldContract] = field(default_factory=dict, repr=False, compare=False, hash=False)
+    _by_original: dict[str, str] = field(default_factory=dict, repr=False, compare=False, hash=False)
 
     def __post_init__(self) -> None:
         """Build O(1) lookup indices after initialization."""

@@ -46,9 +46,7 @@ def sample_fields() -> tuple[FieldContract, ...]:
 class TestSchemaContractCreation:
     """Tests for SchemaContract creation."""
 
-    def test_create_fixed_mode_contract(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_create_fixed_mode_contract(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """Create FIXED mode contract with fields tuple and locked=True."""
         contract = SchemaContract(
             mode="FIXED",
@@ -60,9 +58,7 @@ class TestSchemaContractCreation:
         assert contract.fields == sample_fields
         assert contract.locked is True
 
-    def test_create_flexible_mode_contract(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_create_flexible_mode_contract(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """Create FLEXIBLE mode contract with locked=False."""
         contract = SchemaContract(
             mode="FLEXIBLE",
@@ -86,9 +82,7 @@ class TestSchemaContractCreation:
         assert contract.fields == ()
         assert contract.locked is False
 
-    def test_frozen_immutable_raises_attribute_error(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_frozen_immutable_raises_attribute_error(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """Frozen dataclass - assigning raises AttributeError."""
         contract = SchemaContract(
             mode="FIXED",
@@ -105,9 +99,7 @@ class TestSchemaContractCreation:
         with pytest.raises(AttributeError):
             contract.fields = ()  # type: ignore[misc]
 
-    def test_locked_defaults_to_false(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_locked_defaults_to_false(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """locked defaults to False when not specified."""
         contract = SchemaContract(
             mode="FIXED",
@@ -123,9 +115,7 @@ class TestSchemaContractCreation:
 class TestSchemaContractNameResolution:
     """Tests for SchemaContract name resolution."""
 
-    def test_resolve_name_already_normalized(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_resolve_name_already_normalized(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """resolve_name("amount_usd") returns "amount_usd" (already normalized)."""
         contract = SchemaContract(
             mode="FIXED",
@@ -135,9 +125,7 @@ class TestSchemaContractNameResolution:
         result = contract.resolve_name("amount_usd")
         assert result == "amount_usd"
 
-    def test_resolve_name_original_to_normalized(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_resolve_name_original_to_normalized(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """resolve_name("'Amount USD'") returns "amount_usd" (original -> normalized)."""
         contract = SchemaContract(
             mode="FIXED",
@@ -147,9 +135,7 @@ class TestSchemaContractNameResolution:
         result = contract.resolve_name("'Amount USD'")
         assert result == "amount_usd"
 
-    def test_resolve_name_nonexistent_raises_keyerror(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_resolve_name_nonexistent_raises_keyerror(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """resolve_name("nonexistent") raises KeyError."""
         contract = SchemaContract(
             mode="FIXED",
@@ -159,9 +145,7 @@ class TestSchemaContractNameResolution:
         with pytest.raises(KeyError, match="'nonexistent' not found in schema contract"):
             contract.resolve_name("nonexistent")
 
-    def test_indices_populated(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_indices_populated(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """_by_normalized and _by_original indices are populated."""
         contract = SchemaContract(
             mode="FIXED",
@@ -180,9 +164,7 @@ class TestSchemaContractNameResolution:
         assert contract._by_original["'Is Active?'"] == "is_active"
         assert len(contract._by_original) == 3
 
-    def test_get_field_returns_field_contract(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_get_field_returns_field_contract(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """get_field("amount_usd") returns the FieldContract."""
         contract = SchemaContract(
             mode="FIXED",
@@ -195,9 +177,7 @@ class TestSchemaContractNameResolution:
         assert field.original_name == "'Amount USD'"
         assert field.python_type is float
 
-    def test_get_field_nonexistent_returns_none(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_get_field_nonexistent_returns_none(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """get_field("nonexistent") returns None."""
         contract = SchemaContract(
             mode="FIXED",
@@ -207,9 +187,7 @@ class TestSchemaContractNameResolution:
         result = contract.get_field("nonexistent")
         assert result is None
 
-    def test_resolve_all_fields_both_directions(
-        self, sample_fields: tuple[FieldContract, ...]
-    ) -> None:
+    def test_resolve_all_fields_both_directions(self, sample_fields: tuple[FieldContract, ...]) -> None:
         """All fields resolve correctly in both directions."""
         contract = SchemaContract(
             mode="FIXED",
