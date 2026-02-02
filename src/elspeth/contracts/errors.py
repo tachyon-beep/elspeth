@@ -255,6 +255,9 @@ TransformErrorCategory = Literal[
     "content_filtered",
     "content_safety_violation",
     "prompt_injection_detected",
+    # Contract violations (schema validation)
+    "contract_violation",
+    "multiple_contract_violations",
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",
@@ -592,6 +595,20 @@ class ContractViolation(Exception):
         """Format the error message. Override in subclasses for specific messages."""
         return f"Contract violation on field '{self.original_name}' ({self.normalized_name})"
 
+    def to_error_reason(self) -> dict[str, Any]:
+        """Convert violation to TransformErrorReason dict.
+
+        Returns:
+            Dict with 'reason' key suitable for TransformResult.error().
+            The violation_type is derived from the class name.
+        """
+        return {
+            "reason": "contract_violation",
+            "violation_type": self.__class__.__name__,
+            "field": self.normalized_name,
+            "original_field": self.original_name,
+        }
+
 
 class MissingFieldViolation(ContractViolation):
     """Raised when a required field is missing from the data.
@@ -665,6 +682,24 @@ class TypeMismatchViolation(ContractViolation):
         """Format message showing type mismatch."""
         return f"Field '{self.original_name}' ({self.normalized_name}) expected type '{self.expected_type.__name__}', got '{self.actual_type.__name__}'"
 
+    def to_error_reason(self) -> dict[str, Any]:
+        """Convert violation to TransformErrorReason dict with type details.
+
+        Returns:
+            Dict with 'reason' key and type-specific fields suitable for
+            TransformResult.error(). Includes expected_type, actual_type,
+            and actual_value (as repr for safe string representation).
+        """
+        base = super().to_error_reason()
+        base.update(
+            {
+                "expected_type": self.expected_type.__name__,
+                "actual_type": self.actual_type.__name__,
+                "actual_value": repr(self.actual_value),
+            }
+        )
+        return base
+
 
 class ExtraFieldViolation(ContractViolation):
     """Raised when an unexpected field is present in FIXED schema mode.
@@ -715,3 +750,54 @@ class ContractMergeError(ValueError):
         self.type_a = type_a
         self.type_b = type_b
         super().__init__(f"Cannot merge contracts: field '{field}' has conflicting types '{type_a}' and '{type_b}'")
+
+
+# =============================================================================
+# Contract Violation to Error Conversion Helpers
+# =============================================================================
+
+
+def violations_to_error_reason(violations: list[ContractViolation]) -> dict[str, Any]:
+    """Convert list of violations to TransformErrorReason.
+
+    Provides a convenient way to convert one or more contract violations
+    into a dict suitable for TransformResult.error().
+
+    Args:
+        violations: List of ContractViolation instances
+
+    Returns:
+        Single violation: its to_error_reason() directly
+        Multiple violations: wrapped dict with count and list
+
+    Raises:
+        ValueError: If violations list is empty
+
+    Example:
+        >>> violations = [
+        ...     MissingFieldViolation(normalized_name="id", original_name="ID"),
+        ...     TypeMismatchViolation(
+        ...         normalized_name="amount",
+        ...         original_name="Amount",
+        ...         expected_type=int,
+        ...         actual_type=str,
+        ...         actual_value="bad"
+        ...     ),
+        ... ]
+        >>> reason = violations_to_error_reason(violations)
+        >>> reason["reason"]
+        'multiple_contract_violations'
+        >>> reason["count"]
+        2
+    """
+    if not violations:
+        raise ValueError("violations list cannot be empty")
+
+    if len(violations) == 1:
+        return violations[0].to_error_reason()
+
+    return {
+        "reason": "multiple_contract_violations",
+        "count": len(violations),
+        "violations": [v.to_error_reason() for v in violations],
+    }
