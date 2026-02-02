@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
@@ -420,15 +421,24 @@ class SourceRow:
     is_quarantined: bool
     quarantine_error: str | None = None
     quarantine_destination: str | None = None
+    contract: SchemaContract | None = None
 
     @classmethod
-    def valid(cls, row: dict[str, Any]) -> SourceRow:
-        """Create a valid row result.
+    def valid(
+        cls,
+        row: dict[str, Any],
+        contract: SchemaContract | None = None,
+    ) -> SourceRow:
+        """Create a valid source row.
 
         Args:
-            row: The validated row data to pass to the engine.
+            row: Validated row data
+            contract: Optional schema contract for the row
+
+        Returns:
+            SourceRow with is_quarantined=False
         """
-        return cls(row=row, is_quarantined=False)
+        return cls(row=row, is_quarantined=False, contract=contract)
 
     @classmethod
     def quarantined(
@@ -450,4 +460,23 @@ class SourceRow:
             is_quarantined=True,
             quarantine_error=error,
             quarantine_destination=destination,
+            contract=None,  # Quarantined rows don't have contracts
         )
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert to PipelineRow for processing.
+
+        Returns:
+            PipelineRow wrapping row data with contract
+
+        Raises:
+            ValueError: If row is quarantined or has no contract
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if self.is_quarantined:
+            raise ValueError("Cannot convert quarantined row to PipelineRow")
+        if self.contract is None:
+            raise ValueError("SourceRow has no contract - cannot create PipelineRow")
+
+        return PipelineRow(self.row, self.contract)
