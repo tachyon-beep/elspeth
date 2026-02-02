@@ -1716,3 +1716,8 @@ allow_hits:
   reason: Python __contains__ protocol - must return bool for 'in' operator, not re-raise
   safety: Returns explicit True/False as required by Python data model
   expires: '2026-05-02'
+- key: contracts/header_modes.py:R5:parse_header_mode:fp=dc93452b5432e8a4
+  owner: feature
+  reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
+  safety: ValueError raised for invalid config - explicit validation failure
+  expires: null
