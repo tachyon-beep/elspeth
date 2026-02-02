@@ -20,6 +20,7 @@ from typing import Any, Self
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from elspeth.contracts.header_modes import HeaderMode, parse_header_mode
 from elspeth.contracts.schema import SchemaConfig
 
 
@@ -198,41 +199,94 @@ class TabularSourceDataConfig(SourceDataConfig):
 
 
 class SinkPathConfig(PathConfig):
-    """Base config for file-based sink plugins with display header options.
+    """Base config for file-based sink plugins with header output mode.
 
-    Extends PathConfig to add optional display header configuration
-    for output formatting. Sinks own their output format - display headers
-    are resolved at sink level, not carried through the pipeline.
+    Extends PathConfig to add header output configuration for output formatting.
+    Sinks own their output format - headers are resolved at sink level,
+    not carried through the pipeline.
 
-    Display Header Options:
+    Header Mode Options:
+        headers: Unified header mode setting. Can be:
+            - "normalized": Use Python identifier names (default)
+            - "original": Restore original source header names
+            - dict: Custom mapping from normalized to output names
+
+    Legacy Options (for backwards compatibility):
         display_headers: Explicit mapping from normalized field names to
-            display names. Use for full control over output headers.
-        restore_source_headers: Convenience flag to automatically restore
-            original source headers. Requires source to have used field
-            normalization (normalize_fields: true).
+            display names. Superseded by headers: {mapping}.
+        restore_source_headers: Flag to restore original source headers.
+            Superseded by headers: original.
 
-    These options are mutually exclusive - use one or the other, not both.
+    Priority Order (highest to lowest):
+        1. headers (if specified)
+        2. restore_source_headers (legacy, maps to ORIGINAL)
+        3. display_headers (legacy, maps to CUSTOM)
+        4. Default: NORMALIZED
+
+    When 'headers' is set, it takes precedence and legacy options are ignored.
+    Legacy options remain mutually exclusive when 'headers' is not set.
     """
+
+    headers: str | dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Header output mode: 'normalized', 'original', or {field: header} mapping"
+        ),
+    )
 
     display_headers: dict[str, str] | None = Field(
         default=None,
         description=(
-            "Explicit mapping from normalized field names to display names. Example: {'user_id': 'User ID', 'amount': 'Transaction Amount'}"
+            "LEGACY: Explicit mapping from normalized field names to display names. "
+            "Prefer 'headers: {mapping}' instead."
         ),
     )
 
     restore_source_headers: bool = Field(
         default=False,
         description=(
-            "Automatically restore original source headers from field normalization. "
-            "Requires source to have used normalize_fields: true. "
-            "Transform-added fields use their normalized names (no original exists)."
+            "LEGACY: Automatically restore original source headers. "
+            "Prefer 'headers: original' instead."
         ),
     )
 
+    @field_validator("headers")
+    @classmethod
+    def _validate_headers(cls, v: str | dict[str, str] | None) -> str | dict[str, str] | None:
+        """Validate headers field value.
+
+        Must be 'normalized', 'original', a dict mapping, or None.
+        """
+        if v is None:
+            return v
+
+        if isinstance(v, dict):
+            return v
+
+        if isinstance(v, str):
+            if v not in ("normalized", "original"):
+                raise ValueError(
+                    f"Invalid header mode '{v}'. Expected 'normalized', 'original', or mapping dict."
+                )
+            return v
+
+        raise ValueError(
+            f"headers must be 'normalized', 'original', or a dict mapping, got {type(v).__name__}"
+        )
+
     @model_validator(mode="after")
     def _validate_display_options(self) -> Self:
-        """Validate display header option interactions."""
+        """Validate display header option interactions.
+
+        When 'headers' is set, it takes full precedence and legacy options
+        are ignored (no validation needed). When 'headers' is not set,
+        legacy options remain mutually exclusive.
+        """
+        # New 'headers' takes precedence - skip legacy validation
+        if self.headers is not None:
+            return self
+
+        # Legacy validation: mutual exclusion when headers not set
         if self.display_headers is not None and self.restore_source_headers:
             raise ValueError(
                 "Cannot use both display_headers and restore_source_headers. "
@@ -240,6 +294,43 @@ class SinkPathConfig(PathConfig):
                 "to automatically restore source field names."
             )
         return self
+
+    @property
+    def headers_mode(self) -> HeaderMode:
+        """Get resolved header mode.
+
+        Priority:
+        1. 'headers' setting (if specified)
+        2. 'restore_source_headers' (legacy, maps to ORIGINAL)
+        3. 'display_headers' (legacy, maps to CUSTOM)
+        4. Default: NORMALIZED
+        """
+        if self.headers is not None:
+            return parse_header_mode(self.headers)
+
+        if self.restore_source_headers:
+            return HeaderMode.ORIGINAL
+
+        if self.display_headers is not None:
+            return HeaderMode.CUSTOM
+
+        return HeaderMode.NORMALIZED
+
+    @property
+    def headers_mapping(self) -> dict[str, str] | None:
+        """Get custom header mapping if CUSTOM mode.
+
+        Returns the explicit header mapping dict if headers mode is CUSTOM,
+        otherwise None.
+        """
+        if isinstance(self.headers, dict):
+            return self.headers
+
+        # Only use display_headers if headers is not set
+        if self.headers is None and self.display_headers is not None:
+            return self.display_headers
+
+        return None
 
 
 class TransformDataConfig(DataPluginConfig):
