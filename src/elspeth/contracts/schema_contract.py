@@ -10,7 +10,9 @@ Design doc: docs/plans/2026-02-02-unified-schema-contracts-design.md
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal
 
 from elspeth.contracts.errors import (
@@ -214,3 +216,107 @@ class SchemaContract:
                     )
 
         return violations
+
+    def version_hash(self) -> str:
+        """Deterministic hash of contract for checkpoint references.
+
+        Uses canonical JSON of field definitions for reproducibility.
+        The hash is truncated to 16 hex characters (64 bits).
+
+        Returns:
+            16-character hex hash string
+        """
+        from elspeth.core.canonical import canonical_json
+
+        field_defs = [
+            {
+                "n": fc.normalized_name,
+                "o": fc.original_name,
+                "t": fc.python_type.__name__,
+                "r": fc.required,
+            }
+            for fc in sorted(self.fields, key=lambda f: f.normalized_name)
+        ]
+        content = canonical_json({"mode": self.mode, "fields": field_defs})
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    def to_checkpoint_format(self) -> dict[str, Any]:
+        """Full contract serialization for checkpoint storage.
+
+        Includes version_hash for integrity verification on restore.
+
+        Returns:
+            Dict suitable for JSON serialization
+        """
+        return {
+            "mode": self.mode,
+            "locked": self.locked,
+            "version_hash": self.version_hash(),
+            "fields": [
+                {
+                    "normalized_name": fc.normalized_name,
+                    "original_name": fc.original_name,
+                    "python_type": fc.python_type.__name__,
+                    "required": fc.required,
+                    "source": fc.source,
+                }
+                for fc in self.fields
+            ],
+        }
+
+    @classmethod
+    def from_checkpoint(cls, data: dict[str, Any]) -> SchemaContract:
+        """Restore contract from checkpoint format.
+
+        Validates hash integrity per Tier 1 audit requirements.
+
+        Args:
+            data: Dict from to_checkpoint_format()
+
+        Returns:
+            Restored SchemaContract
+
+        Raises:
+            KeyError: If checkpoint has unknown python_type
+            ValueError: If restored hash doesn't match stored hash
+        """
+        # Explicit type map - NO FALLBACK (Tier 1: crash on corruption)
+        # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+        type_map: dict[str, type] = {
+            "int": int,
+            "str": str,
+            "float": float,
+            "bool": bool,
+            "NoneType": type(None),
+            "datetime": datetime,
+        }
+
+        fields = tuple(
+            FieldContract(
+                normalized_name=f["normalized_name"],
+                original_name=f["original_name"],
+                python_type=type_map[f["python_type"]],  # KeyError on unknown = correct!
+                required=f["required"],
+                source=f["source"],
+            )
+            for f in data["fields"]
+        )
+
+        contract = cls(
+            mode=data["mode"],
+            fields=fields,
+            locked=data["locked"],
+        )
+
+        # Verify integrity (Tier 1 audit requirement)
+        if "version_hash" in data:
+            expected_hash = data["version_hash"]
+            actual_hash = contract.version_hash()
+            if actual_hash != expected_hash:
+                raise ValueError(
+                    f"Contract integrity violation: hash mismatch. "
+                    f"Expected {expected_hash}, got {actual_hash}. "
+                    f"Checkpoint may be corrupted or from different version."
+                )
+
+        return contract

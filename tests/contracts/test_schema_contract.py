@@ -468,3 +468,117 @@ class TestSchemaContractValidation:
         types = {type(v) for v in violations}
         assert MissingFieldViolation in types
         assert TypeMismatchViolation in types
+
+
+# --- Checkpoint Serialization Tests ---
+
+
+class TestSchemaContractCheckpoint:
+    """Test checkpoint serialization/deserialization."""
+
+    @pytest.fixture
+    def sample_contract(self) -> SchemaContract:
+        """Sample contract for testing."""
+        return SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract("amount", "'Amount USD'", int, True, "declared"),
+                FieldContract("note", "Note", str, False, "inferred"),
+            ),
+            locked=True,
+        )
+
+    def test_version_hash_deterministic(self, sample_contract: SchemaContract) -> None:
+        """version_hash() returns same value for same contract."""
+        hash1 = sample_contract.version_hash()
+        hash2 = sample_contract.version_hash()
+        assert hash1 == hash2
+        assert len(hash1) == 16  # Truncated SHA-256
+
+    def test_version_hash_changes_on_field_change(self) -> None:
+        """Different fields produce different hashes."""
+        c1 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("b", "B", int, True, "declared"),),
+            locked=True,
+        )
+        assert c1.version_hash() != c2.version_hash()
+
+    def test_version_hash_changes_on_type_change(self) -> None:
+        """Different type produces different hash."""
+        c1 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", str, True, "declared"),),
+            locked=True,
+        )
+        assert c1.version_hash() != c2.version_hash()
+
+    def test_to_checkpoint_format(self, sample_contract: SchemaContract) -> None:
+        """to_checkpoint_format() returns serializable dict."""
+        data = sample_contract.to_checkpoint_format()
+
+        assert data["mode"] == "FLEXIBLE"
+        assert data["locked"] is True
+        assert "version_hash" in data
+        assert len(data["fields"]) == 2
+        assert data["fields"][0]["normalized_name"] == "amount"
+        assert data["fields"][0]["python_type"] == "int"
+
+    def test_from_checkpoint_round_trip(self, sample_contract: SchemaContract) -> None:
+        """Contract survives checkpoint round-trip."""
+        data = sample_contract.to_checkpoint_format()
+        restored = SchemaContract.from_checkpoint(data)
+
+        assert restored.mode == sample_contract.mode
+        assert restored.locked == sample_contract.locked
+        assert len(restored.fields) == len(sample_contract.fields)
+        assert restored.fields[0].normalized_name == "amount"
+        assert restored.fields[0].python_type is int
+
+    def test_from_checkpoint_validates_hash(self, sample_contract: SchemaContract) -> None:
+        """from_checkpoint() validates hash integrity."""
+        data = sample_contract.to_checkpoint_format()
+        data["version_hash"] = "corrupted_hash"
+
+        with pytest.raises(ValueError, match="integrity"):
+            SchemaContract.from_checkpoint(data)
+
+    def test_from_checkpoint_unknown_type_crashes(self) -> None:
+        """from_checkpoint() crashes on unknown type (Tier 1 integrity)."""
+        data = {
+            "mode": "FIXED",
+            "locked": True,
+            "fields": [
+                {
+                    "normalized_name": "x",
+                    "original_name": "X",
+                    "python_type": "UnknownType",
+                    "required": True,
+                    "source": "declared",
+                }
+            ],
+        }
+        with pytest.raises(KeyError):
+            SchemaContract.from_checkpoint(data)
+
+    def test_from_checkpoint_nonetype_round_trip(self) -> None:
+        """type(None) survives checkpoint round-trip."""
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract("x", "X", type(None), False, "inferred"),),
+            locked=True,
+        )
+        data = contract.to_checkpoint_format()
+        restored = SchemaContract.from_checkpoint(data)
+
+        assert restored.fields[0].python_type is type(None)
