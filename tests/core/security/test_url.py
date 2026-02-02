@@ -74,7 +74,6 @@ class TestSanitizedDatabaseUrl:
     def test_raises_when_password_present_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises SecretFingerprintError when password present but no key in production mode."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "postgresql://user:secret@host/db"
 
         with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
@@ -83,7 +82,6 @@ class TestSanitizedDatabaseUrl:
     def test_dev_mode_sanitizes_without_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Dev mode (fail_if_no_key=False) sanitizes but returns None fingerprint."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "postgresql://user:secret@host/db"
 
         result = SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=False)
@@ -249,7 +247,6 @@ class TestSanitizedWebhookUrl:
     def test_raises_when_token_present_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises SecretFingerprintError when token present but no key in production mode."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "https://api.example.com?token=secret"
 
         with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
@@ -258,7 +255,6 @@ class TestSanitizedWebhookUrl:
     def test_dev_mode_sanitizes_without_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Dev mode (fail_if_no_key=False) sanitizes but returns None fingerprint."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "https://api.example.com?token=secret"
 
         result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
@@ -401,7 +397,6 @@ class TestSensitiveParams:
         even though the value is empty, to prevent leaking parameter names.
         """
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "https://api.example.com/hook?token="
 
         result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
@@ -414,7 +409,6 @@ class TestSensitiveParams:
     def test_empty_api_key_value_still_strips_param_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Empty api_key value still removes param name from URL."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "https://api.example.com/hook?api_key=&format=json"
 
         result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
@@ -430,7 +424,6 @@ class TestSensitiveParams:
         No non-empty secrets = no fingerprint needed = no error in production mode.
         """
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         url = "https://api.example.com?token="
 
         # Should NOT raise - no actual secret values to fingerprint

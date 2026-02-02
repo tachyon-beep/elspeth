@@ -2,7 +2,6 @@
 """Security utilities for ELSPETH."""
 
 from elspeth.core.security.fingerprint import (
-    clear_fingerprint_key_cache,
     get_fingerprint_key,
     secret_fingerprint,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "SecretLoader",
     "SecretNotFoundError",
     "SecretRef",
-    "clear_fingerprint_key_cache",
     "get_fingerprint_key",
     "secret_fingerprint",
 ]
