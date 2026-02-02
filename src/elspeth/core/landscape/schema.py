@@ -52,6 +52,10 @@ runs_table = Table(
     Column("exported_at", DateTime(timezone=True)),  # When export completed
     Column("export_format", String(16)),  # csv, json
     Column("export_sink", String(128)),  # Sink name used for export
+    # Schema contract for audit trail (Phase 5: Unified Schema Contracts)
+    # Stores the run-level schema contract with field resolution and types
+    Column("schema_contract_json", Text),  # Full contract with field resolution and types
+    Column("schema_contract_hash", String(16)),  # version_hash for integrity verification
 )
 
 # === Nodes (Plugin Instances) ===
@@ -73,6 +77,11 @@ nodes_table = Table(
     # Schema configuration for audit trail (WP-11.99)
     Column("schema_mode", String(16)),  # "dynamic", "strict", "free", "parse", or NULL
     Column("schema_fields_json", Text),  # JSON array of field definitions, or NULL
+    # Schema contracts for audit trail (Phase 5: Unified Schema Contracts)
+    # Input contract: what the node requires (field names and types)
+    Column("input_contract_json", Text),
+    # Output contract: what the node guarantees (field names and types)
+    Column("output_contract_json", Text),
     # Composite PK: same node config can exist in multiple runs
     # This allows running the same pipeline multiple times against the same database
     PrimaryKeyConstraint("node_id", "run_id"),
@@ -396,6 +405,13 @@ validation_errors_table = Table(
     Column("schema_mode", String(16), nullable=False),  # "strict", "free", "dynamic", "parse"
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Schema contract violation details (Phase 5: Unified Schema Contracts)
+    # These columns provide structured violation data for auditing
+    Column("violation_type", String(32)),  # "type_mismatch", "missing_field", "extra_field"
+    Column("original_field_name", String(256)),  # "'Amount USD'" for display
+    Column("normalized_field_name", String(256)),  # "amount_usd" for code reference
+    Column("expected_type", String(32)),  # "int", "str", etc.
+    Column("actual_type", String(32)),  # Type of actual value
     # Composite FK to nodes (node_id, run_id) - nullable node_id supported
     ForeignKeyConstraint(
         ["node_id", "run_id"],
