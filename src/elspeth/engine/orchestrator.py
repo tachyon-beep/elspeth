@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1079,7 +1080,7 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
-        routed_destinations: dict[str, int] = {}  # Track routing destinations
+        routed_destinations: Counter[str] = Counter()  # Track routing destinations
         # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
@@ -1340,7 +1341,7 @@ class Orchestrator:
                         rows_expanded += pre_agg_expanded
                         rows_buffered += pre_agg_buffered
                         for dest, count in pre_agg_routed_dests.items():
-                            routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                            routed_destinations[dest] += count
 
                         results = processor.process_row(
                             row_index=row_index,
@@ -1374,7 +1375,7 @@ class Orchestrator:
                                 # GateExecutor contract: ROUTED outcome always has sink_name set
                                 if result.sink_name is None:
                                     raise RuntimeError("ROUTED outcome requires sink_name")
-                                routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
+                                routed_destinations[result.sink_name] += 1
                                 pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                             elif result.outcome == RowOutcome.FAILED:
                                 rows_failed += 1
@@ -1443,7 +1444,7 @@ class Orchestrator:
                                                     rows_routed += 1
                                                     # sink_name is guaranteed non-None for ROUTED outcome
                                                     routed_sink = cont_result.sink_name or default_sink_name
-                                                    routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                                    routed_destinations[routed_sink] += 1
                                                     pending_tokens[routed_sink].append(
                                                         (cont_result.token, PendingOutcome(RowOutcome.ROUTED))
                                                     )
@@ -1527,7 +1528,7 @@ class Orchestrator:
                         rows_expanded += agg_expanded
                         rows_buffered += agg_buffered
                         for dest, count in agg_routed_dests.items():
-                            routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                            routed_destinations[dest] += count
 
                     # Flush pending coalesce operations at end-of-source
                     if coalesce_executor is not None:
@@ -1565,7 +1566,7 @@ class Orchestrator:
                                             rows_routed += 1
                                             # sink_name is guaranteed non-None for ROUTED outcome
                                             routed_sink = cont_result.sink_name or default_sink_name
-                                            routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                            routed_destinations[routed_sink] += 1
                                             pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                         elif cont_result.outcome == RowOutcome.QUARANTINED:
                                             rows_quarantined += 1
@@ -2345,7 +2346,7 @@ class Orchestrator:
         rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
-        routed_destinations: dict[str, int] = {}  # Track routing destinations
+        routed_destinations: Counter[str] = Counter()  # Track routing destinations
         # Track (token, pending_outcome) pairs for deferred outcome recording
         # Outcomes are recorded by SinkExecutor.write() AFTER sink durability is achieved
         # Fix: P1-2026-01-31 - use PendingOutcome to carry error_hash for QUARANTINED
@@ -2406,7 +2407,7 @@ class Orchestrator:
                 rows_expanded += pre_agg_expanded
                 rows_buffered += pre_agg_buffered
                 for dest, count in pre_agg_routed_dests.items():
-                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                    routed_destinations[dest] += count
 
                 results = processor.process_existing_row(
                     row_id=row_id,
@@ -2432,7 +2433,7 @@ class Orchestrator:
                         rows_routed += 1
                         if result.sink_name is None:
                             raise RuntimeError("ROUTED outcome requires sink_name")
-                        routed_destinations[result.sink_name] = routed_destinations.get(result.sink_name, 0) + 1
+                        routed_destinations[result.sink_name] += 1
                         pending_tokens[result.sink_name].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     elif result.outcome == RowOutcome.FAILED:
                         rows_failed += 1
@@ -2488,7 +2489,7 @@ class Orchestrator:
                                             rows_routed += 1
                                             # sink_name is guaranteed non-None for ROUTED outcome
                                             routed_sink = cont_result.sink_name or default_sink_name
-                                            routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                            routed_destinations[routed_sink] += 1
                                             pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                         elif cont_result.outcome == RowOutcome.QUARANTINED:
                                             rows_quarantined += 1
@@ -2535,7 +2536,7 @@ class Orchestrator:
                 rows_expanded += agg_expanded
                 rows_buffered += agg_buffered
                 for dest, count in agg_routed_dests.items():
-                    routed_destinations[dest] = routed_destinations.get(dest, 0) + count
+                    routed_destinations[dest] += count
 
             # Flush pending coalesce operations
             if coalesce_executor is not None:
@@ -2571,7 +2572,7 @@ class Orchestrator:
                                     rows_routed += 1
                                     # sink_name is guaranteed non-None for ROUTED outcome
                                     routed_sink = cont_result.sink_name or default_sink_name
-                                    routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                                    routed_destinations[routed_sink] += 1
                                     pending_tokens[routed_sink].append((cont_result.token, PendingOutcome(RowOutcome.ROUTED)))
                                 elif cont_result.outcome == RowOutcome.QUARANTINED:
                                     rows_quarantined += 1
@@ -2807,7 +2808,7 @@ class Orchestrator:
         rows_forked = 0
         rows_expanded = 0
         rows_buffered = 0
-        routed_destinations: dict[str, int] = {}
+        routed_destinations: Counter[str] = Counter()
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
             agg_node_id = NodeID(agg_node_id_str)
@@ -2891,7 +2892,7 @@ class Orchestrator:
                         # GateExecutor contract: ROUTED outcome always has sink_name set
                         rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
-                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                        routed_destinations[routed_sink] += 1
                         pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
                     elif result.outcome == RowOutcome.QUARANTINED:
                         # Row quarantined by downstream transform - already recorded
@@ -2974,7 +2975,7 @@ class Orchestrator:
         rows_forked = 0
         rows_expanded = 0
         rows_buffered = 0
-        routed_destinations: dict[str, int] = {}
+        routed_destinations: Counter[str] = Counter()
         total_steps = len(config.transforms)
 
         for agg_node_id_str, agg_settings in config.aggregation_settings.items():
@@ -3064,7 +3065,7 @@ class Orchestrator:
                         # GateExecutor contract: ROUTED outcome always has sink_name set
                         rows_routed += 1
                         routed_sink = result.sink_name or default_sink_name
-                        routed_destinations[routed_sink] = routed_destinations.get(routed_sink, 0) + 1
+                        routed_destinations[routed_sink] += 1
                         pending_tokens[routed_sink].append((result.token, PendingOutcome(RowOutcome.ROUTED)))
 
                         # Checkpoint if enabled

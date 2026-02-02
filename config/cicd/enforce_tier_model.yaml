@@ -395,139 +395,79 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=f010c021f277c4d6
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:fp=b5e6013d4cab4656
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R5:Orchestrator:_validate_route_destinations:fp=84ff406202fec3a9
+- key: engine/orchestrator.py:R5:Orchestrator:_validate_route_destinations:fp=1373b46447ff0a33
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R5:Orchestrator:_validate_transform_error_sinks:fp=b90b7eea038a2cf2
+- key: engine/orchestrator.py:R5:Orchestrator:_validate_transform_error_sinks:fp=b0df26ab3a46a77f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R5:Orchestrator:_execute_run:fp=8dfe67580de446ec
+- key: engine/orchestrator.py:R5:Orchestrator:_execute_run:fp=60269a1a52fc3a3f
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=5a77e2c5ec0256d5
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=0ebdf561c522fee9
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=537ca92a1027510a
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=0792ed4801aac290
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:fp=9e31c588c20ef8aa
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=e5779555de04f94c
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=f89a9e4da3acee6f
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=1a5bb40e61ca48eb
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=e5fb0a69fd212b53
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=62df751c80015e35
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=9617d1a253984931
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=74c440819197c2fc
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=70bee192e3f7d249
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=e6bdd448c93c17b3
+- key: engine/orchestrator.py:R4:Orchestrator:_execute_run:fp=1ab6ebf0d64f4e1d
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R5:Orchestrator:_process_resumed_rows:fp=3235a8a9b80eb9b0
+- key: engine/orchestrator.py:R5:Orchestrator:_process_resumed_rows:fp=7e4004d91b7ff507
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=9521525f319d0ef0
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=d46cfda5a9444a0a
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=9bc808540f8de750
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=d191cc4fa2a1d122
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_process_resumed_rows:fp=fd7c62af9c985a18
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=f432ffa6f115711b
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=1cc32913544b5967
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=03f60d2e62279460
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=b7087a603901028b
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=699db20f5d8c307c
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=82b55a145cfa120a
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=958e0dca6cf1e34b
+- key: engine/orchestrator.py:R4:Orchestrator:_process_resumed_rows:fp=d6edd95cc87be354
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/orchestrator.py:R5:Orchestrator:_find_aggregation_transform:fp=3dc502c076389804
+- key: engine/orchestrator.py:R5:Orchestrator:_find_aggregation_transform:fp=b16cfbc19471f884
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_check_aggregation_timeouts:fp=1a5b7b304afbdf4d
-  owner: architecture
-  reason: Optional field access at trust boundary
-  safety: Code reviewed - legitimate pattern
-  expires: '2026-05-02'
-- key: engine/orchestrator.py:R1:Orchestrator:_flush_remaining_aggregation_buffers:fp=49266fc9071668cc
-  owner: architecture
-  reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=f9f576369fb2a80c
