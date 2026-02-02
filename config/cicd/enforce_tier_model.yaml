@@ -2690,3 +2690,8 @@ allow_hits:
   reason: Type normalization for contracts - isinstance() required to distinguish numpy/pandas from Python primitives
   safety: Code reviewed - legitimate serialization pattern per CLAUDE.md
   expires: '2026-05-02'
+- key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=3b85560d6ac41d4a
+  owner: architecture
+  reason: Python __contains__ protocol - must return bool for 'in' operator, not re-raise
+  safety: Returns explicit True/False as required by Python data model
+  expires: '2026-05-02'

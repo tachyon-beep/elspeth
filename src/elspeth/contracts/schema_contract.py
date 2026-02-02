@@ -402,3 +402,130 @@ class SchemaContract:
             fields=tuple(merged_fields.values()),
             locked=self.locked or other.locked,
         )
+
+
+class PipelineRow:
+    """Row wrapper that enables dual-name access and type tracking.
+
+    Wraps row data with a SchemaContract reference, enabling:
+    - Access by normalized name: row["amount_usd"] or row.amount_usd
+    - Access by original name: row["'Amount USD'"]
+    - Type tracking via contract reference
+    - Checkpoint serialization
+
+    Uses __slots__ for memory efficiency (no __dict__ per instance).
+    """
+
+    __slots__ = ("_contract", "_data")
+
+    def __init__(self, data: dict[str, Any], contract: SchemaContract) -> None:
+        """Initialize PipelineRow.
+
+        Args:
+            data: Row data with normalized field names as keys
+            contract: Schema contract for name resolution and validation
+        """
+        self._data = data
+        self._contract = contract
+
+    def __getitem__(self, key: str) -> Any:
+        """Access field by original OR normalized name.
+
+        Args:
+            key: Field name (either original or normalized)
+
+        Returns:
+            Field value
+
+        Raises:
+            KeyError: If field not found in contract or data
+        """
+        normalized = self._contract.resolve_name(key)
+        return self._data[normalized]
+
+    def __getattr__(self, key: str) -> Any:
+        """Dot notation access: row.field_name.
+
+        Args:
+            key: Attribute name (must be normalized field name)
+
+        Returns:
+            Field value
+
+        Raises:
+            AttributeError: If field not found
+        """
+        # Prevent infinite recursion for private attributes
+        if key.startswith("_"):
+            raise AttributeError(key)
+        try:
+            return self[key]
+        except KeyError as e:
+            raise AttributeError(key) from e
+
+    def __contains__(self, key: str) -> bool:
+        """Support 'if field in row' checks.
+
+        Args:
+            key: Field name (original or normalized)
+
+        Returns:
+            True if field exists in contract
+        """
+        try:
+            self._contract.resolve_name(key)
+            return True
+        except KeyError:
+            return False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Export raw data (normalized keys) for serialization.
+
+        Returns:
+            Copy of internal data dict
+        """
+        return dict(self._data)
+
+    @property
+    def contract(self) -> SchemaContract:
+        """Access the schema contract (for introspection/debugging).
+
+        Returns:
+            The SchemaContract associated with this row
+        """
+        return self._contract
+
+    def to_checkpoint_format(self) -> dict[str, Any]:
+        """Serialize for checkpoint storage.
+
+        Returns dict with data and contract reference (not full contract).
+        Contract is stored once per node, not per row.
+
+        Returns:
+            Checkpoint-serializable dict
+        """
+        return {
+            "data": self._data,
+            "contract_version": self._contract.version_hash(),
+        }
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        checkpoint_data: dict[str, Any],
+        contract_registry: dict[str, SchemaContract],
+    ) -> PipelineRow:
+        """Restore from checkpoint.
+
+        Args:
+            checkpoint_data: Output from to_checkpoint_format()
+            contract_registry: Node contracts indexed by version_hash
+
+        Returns:
+            Restored PipelineRow
+
+        Raises:
+            KeyError: If contract version not in registry
+        """
+        contract = contract_registry[checkpoint_data["contract_version"]]
+        return cls(data=checkpoint_data["data"], contract=contract)
