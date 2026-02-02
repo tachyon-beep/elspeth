@@ -103,6 +103,12 @@ class TestNormalizeTypeForContract:
         result = normalize_type_for_contract(pd.Timestamp("2024-01-01"))
         assert result is datetime
 
+    def test_pandas_nat_returns_nonetype(self) -> None:
+        """pd.NaT (Not a Time) normalizes to type(None) like None."""
+        from elspeth.contracts.type_normalization import normalize_type_for_contract
+
+        assert normalize_type_for_contract(pd.NaT) is type(None)
+
     def test_numpy_datetime64_returns_datetime(self) -> None:
         """np.datetime64('2024-01-01') -> datetime."""
         from elspeth.contracts.type_normalization import normalize_type_for_contract
@@ -216,6 +222,12 @@ class TestEdgeCases:
 
         result = normalize_type_for_contract(np.str_("hello"))
         assert result is str
+
+    def test_numpy_bytes_returns_str(self) -> None:
+        """numpy.bytes_ normalizes to str."""
+        from elspeth.contracts.type_normalization import normalize_type_for_contract
+
+        assert normalize_type_for_contract(np.bytes_(b"hello")) is str
 
     def test_zero_float_is_valid(self) -> None:
         """0.0 is a valid float (not NaN/Infinity)."""

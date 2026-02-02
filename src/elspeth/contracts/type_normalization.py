@@ -31,6 +31,10 @@ def normalize_type_for_contract(value: Any) -> type:
     if value is None:
         return type(None)
 
+    # pd.NaT = "Not a Time" (missing datetime), treat like None
+    if value is pd.NaT:
+        return type(None)
+
     # CRITICAL: Reject NaN/Infinity (Tier 1 audit integrity)
     # Must check before numpy type normalization to catch np.float64(nan) etc.
     if isinstance(value, (float, np.floating)) and (math.isnan(value) or math.isinf(value)):
