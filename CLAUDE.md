@@ -18,15 +18,6 @@ ELSPETH is built for **high-stakes accountability**. The audit trail must withst
 - The Landscape audit trail is the source of truth, not logs or metrics
 - No inference - if it's not recorded, it didn't happen
 
-**Data storage points** (non-negotiable):
-
-1. **Source entry** - Raw data stored before any processing
-2. **Transform boundaries** - Input AND output captured at every transform
-3. **External calls** - Full request AND response recorded
-4. **Sink output** - Final artifacts with content hashes
-
-This is more storage than minimal, but it means `explain()` queries are simple and complete.
-
 ## Data Manifesto: Three-Tier Trust Model
 
 ELSPETH has three fundamentally different trust tiers with distinct handling rules:
