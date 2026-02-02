@@ -74,6 +74,9 @@ from elspeth.contracts.config import (
     RuntimeTelemetryConfig,
     RuntimeTelemetryProtocol,
 )
+
+# Schema contracts (Phase 2: Source Integration)
+from elspeth.contracts.contract_builder import ContractBuilder
 from elspeth.contracts.data import (
     CompatibilityResult,
     PluginSchema,
@@ -155,6 +158,10 @@ from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
     SchemaContract,
+)
+from elspeth.contracts.schema_contract_factory import (
+    create_contract_from_config,
+    map_schema_mode,
 )
 from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.type_normalization import normalize_type_for_contract
@@ -316,7 +323,10 @@ __all__ = [  # Grouped by category for readability
     # sink
     "OutputValidationResult",
     # schema contracts
+    "ContractBuilder",
+    "create_contract_from_config",
     "FieldContract",
+    "map_schema_mode",
     "PipelineRow",
     "SchemaContract",
     "normalize_type_for_contract",
