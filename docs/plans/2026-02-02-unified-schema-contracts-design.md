@@ -30,16 +30,44 @@ Three distinct modes with clear semantics:
 |------|----------------|--------|------------------|
 | **FIXED** | Required | Rejected | Strict on declared |
 | **FLEXIBLE** | Required minimum | Allowed (infer-and-lock) | Strict on declared + inferred |
-| **DYNAMIC** | None | All fields are "extra" | Infer-and-lock all |
+| **OBSERVED** | None | All fields observed | Infer-and-lock all |
 
 Mapping from current modes:
 - `strict` → **FIXED** (contract is complete, no extras)
 - `free` → **FLEXIBLE** (contract is minimum guarantee, extras OK)
-- `dynamic` → **DYNAMIC** (contract discovered at runtime)
+- `dynamic` → **OBSERVED** (contract observed from data at runtime)
+
+### Why "OBSERVED" not "DYNAMIC"?
+
+The name "DYNAMIC" implies constantly changing, but the actual behavior is **observe once, then lock**. "OBSERVED" accurately describes the mechanism: the schema is observed from the first row and locked for the remainder of the run.
+
+### First-Row Locking: Operational Contract
+
+**CRITICAL:** In OBSERVED and FLEXIBLE modes, the first row determines the schema for the entire run.
+
+```yaml
+source:
+  plugin: csv
+  options:
+    schema:
+      mode: OBSERVED  # ⚠️ First row locks types for entire run
+```
+
+**This is an explicit operational contract:**
+- The operator accepts responsibility for first-row quality
+- If row 1 has `amount: "123"` (string), all subsequent rows validate against `str`
+- If row 500 has `amount: 456` (int), it will be quarantined as type mismatch
+
+**Why not sample multiple rows?** Sources aren't guaranteed batch semantics. Streaming sources may receive one row per hour - you can't wait for N rows to "sample" a schema. The first row IS the contract.
+
+**Guidance for operators:**
+- For predictable sources: OBSERVED mode is safe when you control the data
+- For unpredictable sources: Use FLEXIBLE with declared minimums
+- For strict contracts: Use FIXED with complete field definitions
 
 ### Infer-and-Lock Semantics
 
-For FLEXIBLE and DYNAMIC modes:
+For FLEXIBLE and OBSERVED modes:
 - First row defines field types for any "extra" fields
 - Types are locked for the duration of the run
 - Subsequent rows with type violations → quarantine sink
@@ -70,31 +98,46 @@ class FieldContract:
 The full contract for a node, including name resolution:
 
 ```python
+import math
+import numpy as np
+import pandas as pd
+from datetime import datetime
+
 def _normalize_type_for_contract(value: Any) -> type:
     """Convert numpy/pandas types to Python primitives for contract storage.
 
     This is critical because `type(numpy.int64(42))` returns `numpy.int64`,
     not `int`. Contracts must store primitive types for consistent validation.
+
+    Raises:
+        ValueError: If value is NaN or Infinity (invalid for audit trail)
     """
     if value is None:
         return type(None)  # NoneType
 
-    # Handle numpy types (if numpy is available)
-    type_name = type(value).__name__
-    numpy_to_primitive = {
-        "int8": int, "int16": int, "int32": int, "int64": int,
-        "uint8": int, "uint16": int, "uint32": int, "uint64": int,
-        "float16": float, "float32": float, "float64": float,
-        "bool_": bool,
-        "str_": str,
-    }
-    if type_name in numpy_to_primitive:
-        return numpy_to_primitive[type_name]
+    # CRITICAL: Reject NaN/Infinity before type inference (Tier 1 audit integrity)
+    # Per CLAUDE.md: "NaN and Infinity are strictly rejected, not silently converted"
+    if isinstance(value, (float, np.floating)):
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(
+                f"Cannot infer type from non-finite float: {value}. "
+                f"NaN/Infinity are invalid in audit trail. Use None for missing values."
+            )
 
-    # Handle pandas Timestamp -> datetime
-    if type_name == "Timestamp":
-        from datetime import datetime
+    # Use isinstance() checks - Pythonic pattern per canonical.py
+    # String matching on __name__ is fragile and bug-hiding
+    if isinstance(value, np.integer):
+        return int
+    if isinstance(value, np.floating):
+        return float
+    if isinstance(value, np.bool_):
+        return bool
+    if isinstance(value, pd.Timestamp):
         return datetime
+    if isinstance(value, np.datetime64):
+        return datetime
+    if isinstance(value, (np.str_, np.bytes_)):
+        return str
 
     # Already a primitive
     return type(value)
@@ -107,7 +150,7 @@ class SchemaContract:
     Uses frozen dataclass pattern - all "mutations" return new instances.
     This ensures contracts are safe to share across checkpoint boundaries.
     """
-    mode: Literal["FIXED", "FLEXIBLE", "DYNAMIC"]
+    mode: Literal["FIXED", "FLEXIBLE", "OBSERVED"]
     fields: tuple[FieldContract, ...]              # Immutable sequence
     locked: bool = False                           # True after first row processed
 
@@ -137,7 +180,7 @@ class SchemaContract:
     def with_field(self, normalized: str, original: str, value: Any) -> "SchemaContract":
         """Return new contract with inferred field added.
 
-        Called for DYNAMIC/FLEXIBLE extras on first row.
+        Called for OBSERVED/FLEXIBLE extras on first row.
         Returns new instance (frozen pattern).
         """
         if self.locked and normalized in self._by_normalized:
@@ -177,7 +220,7 @@ class SchemaContract:
     def with_inferred(self, data: dict[str, Any]) -> "SchemaContract":
         """Return new contract with any new fields inferred from data."""
         # For FIXED mode, reject extras
-        # For FLEXIBLE/DYNAMIC, infer new field types
+        # For FLEXIBLE/OBSERVED, infer new field types
         ...
 ```
 
@@ -229,13 +272,13 @@ class PipelineRow:
 Each node declares its **input contract** (what it requires) and **output contract** (what it guarantees). The schema evolves at each stage:
 
 ```
-Source (DYNAMIC)              Transform (FLEXIBLE)           Sink (FIXED)
+Source (OBSERVED)             Transform (FLEXIBLE)           Sink (FIXED)
 ┌─────────────────────┐      ┌─────────────────────┐       ┌─────────────────────┐
 │ Input: N/A          │      │ Input:              │       │ Input:              │
 │                     │      │   requires: [a, b]  │       │   requires: [a,b,d] │
 │ Output:             │      │   mode: FLEXIBLE    │       │   mode: FIXED       │
 │   inferred: {a,b,c} │─────►│                     │──────►│                     │
-│   mode: DYNAMIC     │      │ Output:             │       │ Output: N/A         │
+│   mode: OBSERVED    │      │ Output:             │       │ Output: N/A         │
 │                     │      │   guarantees: [a,b,d]│       │                     │
 └─────────────────────┘      │   mode: FLEXIBLE    │       └─────────────────────┘
                              └─────────────────────┘
@@ -245,7 +288,7 @@ Source (DYNAMIC)              Transform (FLEXIBLE)           Sink (FIXED)
 
 At config time:
 - Check that upstream `guaranteed_fields` ⊇ downstream `required_fields`
-- For DYNAMIC sources, validation deferred until first row (fields unknown upfront)
+- For OBSERVED sources, validation deferred until first row (fields unknown upfront)
 
 At runtime per row:
 ```python
@@ -259,7 +302,7 @@ def process_row(row: PipelineRow, node: Node) -> PipelineRow | Quarantine:
     output_data = node.execute(row)
 
     # 3. Wrap output with node's OUTPUT contract
-    #    (infers new fields if FLEXIBLE/DYNAMIC)
+    #    (infers new fields if FLEXIBLE/OBSERVED)
     output_contract = node.output_contract.with_inferred(output_data)
     return PipelineRow(output_data, output_contract)
 ```
@@ -438,10 +481,14 @@ class SchemaContract:
         ).hexdigest()[:16]
 
     def to_checkpoint_format(self) -> dict[str, Any]:
-        """Full contract serialization for checkpoint storage."""
+        """Full contract serialization for checkpoint storage.
+
+        Includes version_hash for integrity verification on restore.
+        """
         return {
             "mode": self.mode,
             "locked": self.locked,
+            "version_hash": self.version_hash(),  # For integrity verification
             "fields": [
                 {
                     "normalized_name": fc.normalized_name,
@@ -456,19 +503,48 @@ class SchemaContract:
 
     @classmethod
     def from_checkpoint(cls, data: dict[str, Any]) -> "SchemaContract":
-        """Restore contract from checkpoint format."""
-        type_map = {"int": int, "str": str, "float": float, "bool": bool, "NoneType": type(None)}
+        """Restore contract from checkpoint format.
+
+        Raises:
+            KeyError: If checkpoint has unknown python_type (Tier 1 integrity)
+            ValueError: If restored contract hash doesn't match stored hash
+        """
+        # Explicit type map - NO FALLBACK (Tier 1: crash on corruption)
+        # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+        type_map = {
+            "int": int,
+            "str": str,
+            "float": float,
+            "bool": bool,
+            "NoneType": type(None),
+            "datetime": datetime,
+        }
+
         fields = tuple(
             FieldContract(
                 normalized_name=f["normalized_name"],
                 original_name=f["original_name"],
-                python_type=type_map.get(f["python_type"], str),  # Default to str for unknown
+                python_type=type_map[f["python_type"]],  # KeyError on unknown = correct!
                 required=f["required"],
                 source=f["source"],
             )
             for f in data["fields"]
         )
-        return cls(mode=data["mode"], fields=fields, locked=data["locked"])
+
+        contract = cls(mode=data["mode"], fields=fields, locked=data["locked"])
+
+        # Verify integrity (Tier 1 audit requirement)
+        if "version_hash" in data:
+            expected_hash = data["version_hash"]
+            actual_hash = contract.version_hash()
+            if actual_hash != expected_hash:
+                raise ValueError(
+                    f"Contract integrity violation: hash mismatch. "
+                    f"Expected {expected_hash}, got {actual_hash}. "
+                    f"Checkpoint may be corrupted or from different version."
+                )
+
+        return contract
 ```
 
 **Checkpoint storage strategy:**
@@ -487,13 +563,13 @@ class SchemaContract:
         """Merge two contracts at a coalesce point.
 
         Rules:
-        1. Mode: Most restrictive wins (FIXED > FLEXIBLE > DYNAMIC)
+        1. Mode: Most restrictive wins (FIXED > FLEXIBLE > OBSERVED)
         2. Fields present in both: Types must match (error if not)
         3. Fields in only one: Included but marked non-required
         4. Locked: True if either is locked
         """
         # Mode precedence
-        mode_order = {"FIXED": 0, "FLEXIBLE": 1, "DYNAMIC": 2}
+        mode_order = {"FIXED": 0, "FLEXIBLE": 1, "OBSERVED": 2}
         merged_mode = min(self.mode, other.mode, key=lambda m: mode_order[m])
 
         # Build merged field set
@@ -547,7 +623,7 @@ class SchemaContract:
 | Path A has `{x: int}`, Path B has `{x: int}` | `{x: int}` (types match) |
 | Path A has `{x: int}`, Path B has `{x: str}` | **Error** - type mismatch |
 | Path A has `{x: int, y: str}`, Path B has `{x: int}` | `{x: int, y?: str}` (y optional) |
-| Path A is FIXED, Path B is DYNAMIC | Merged is FIXED (most restrictive) |
+| Path A is FIXED, Path B is OBSERVED | Merged is FIXED (most restrictive) |
 
 **Design rationale:** Type mismatches at coalesce are bugs in the pipeline design, not data issues. A gate that routes to different paths with incompatible transformations cannot safely merge. This is caught at the coalesce point, not silently widened.
 
@@ -560,7 +636,7 @@ class SchemaContract:
 ### Phase 2: Source Integration
 - Sources emit `PipelineRow` with inferred contracts
 - Update `FieldResolution` to merge into `SchemaContract`
-- Infer-and-lock on first row for DYNAMIC sources
+- Infer-and-lock on first row for OBSERVED sources
 
 ### Phase 3: Transform/Sink Integration
 - Transforms validate input against contract, propagate output contract
@@ -581,7 +657,7 @@ Per NO LEGACY CODE policy, all call sites updated in same commit:
 
 | Component | Current | New |
 |-----------|---------|-----|
-| `SchemaConfig.mode` | `strict\|free\|None` | `FIXED\|FLEXIBLE\|DYNAMIC` |
+| `SchemaConfig.mode` | `strict\|free\|None` | `FIXED\|FLEXIBLE\|OBSERVED` |
 | `PluginSchema.to_row()` | Returns `dict[str, Any]` | Returns `PipelineRow` |
 | `FieldResolution` | Separate dataclass | Merged into `SchemaContract` |
 | Row in transforms | `dict[str, Any]` | `PipelineRow` |
