@@ -152,6 +152,10 @@ class LandscapeExporter:
     def _iter_records(self, run_id: str) -> Iterator[dict[str, Any]]:
         """Internal: iterate over raw records (no signing).
 
+        Bug 76r fix: Uses batch queries to pre-load all data, avoiding N+1 pattern.
+        Previous implementation did ~25,000 queries for 1000 rows with 5 states each.
+        New implementation does ~10 queries regardless of data size.
+
         Args:
             run_id: The run ID to export
 
@@ -241,7 +245,42 @@ class LandscapeExporter:
                     "latency_ms": call.latency_ms,
                 }
 
-        # Rows and their tokens/states
+        # === Bug 76r fix: Pre-load all row-related data with batch queries ===
+        # This replaces the N+1 pattern where nested loops issued per-entity queries.
+        # Now we do 5 batch queries and build lookup dicts in memory.
+
+        # Batch query 1: All tokens for this run
+        all_tokens = self._recorder.get_all_tokens_for_run(run_id)
+        tokens_by_row: dict[str, list[Any]] = defaultdict(list)
+        for token in all_tokens:
+            tokens_by_row[token.row_id].append(token)
+
+        # Batch query 2: All token parents for this run
+        all_parents = self._recorder.get_all_token_parents_for_run(run_id)
+        parents_by_token: dict[str, list[Any]] = defaultdict(list)
+        for parent in all_parents:
+            parents_by_token[parent.token_id].append(parent)
+
+        # Batch query 3: All node states for this run
+        all_states = self._recorder.get_all_node_states_for_run(run_id)
+        states_by_token: dict[str, list[Any]] = defaultdict(list)
+        for state in all_states:
+            states_by_token[state.token_id].append(state)
+
+        # Batch query 4: All routing events for this run
+        all_routing_events = self._recorder.get_all_routing_events_for_run(run_id)
+        events_by_state: dict[str, list[Any]] = defaultdict(list)
+        for event in all_routing_events:
+            events_by_state[event.state_id].append(event)
+
+        # Batch query 5: All state-parented calls for this run
+        all_calls = self._recorder.get_all_calls_for_run(run_id)
+        calls_by_state: dict[str, list[Any]] = defaultdict(list)
+        for call in all_calls:
+            if call.state_id:  # Should always be true for state-parented calls
+                calls_by_state[call.state_id].append(call)
+
+        # Now iterate through rows using pre-loaded data (no more per-entity queries)
         for row in self._recorder.get_rows(run_id):
             yield {
                 "record_type": "row",
@@ -252,8 +291,8 @@ class LandscapeExporter:
                 "source_data_hash": row.source_data_hash,
             }
 
-            # Tokens for this row
-            for token in self._recorder.get_tokens(row.row_id):
+            # Tokens for this row (from pre-loaded dict)
+            for token in tokens_by_row.get(row.row_id, []):
                 yield {
                     "record_type": "token",
                     "run_id": run_id,
@@ -266,8 +305,8 @@ class LandscapeExporter:
                     "expand_group_id": token.expand_group_id,
                 }
 
-                # Token parents (for fork/join lineage)
-                for parent in self._recorder.get_token_parents(token.token_id):
+                # Token parents (from pre-loaded dict)
+                for parent in parents_by_token.get(token.token_id, []):
                     yield {
                         "record_type": "token_parent",
                         "run_id": run_id,
@@ -276,8 +315,8 @@ class LandscapeExporter:
                         "ordinal": parent.ordinal,
                     }
 
-                # Node states for this token
-                for state in self._recorder.get_node_states_for_token(token.token_id):
+                # Node states for this token (from pre-loaded dict)
+                for state in states_by_token.get(token.token_id, []):
                     # Handle discriminated union types
                     if isinstance(state, NodeStateOpen):
                         yield {
@@ -344,8 +383,8 @@ class LandscapeExporter:
                             "completed_at": state.completed_at.isoformat(),
                         }
 
-                    # Routing events for this state
-                    for event in self._recorder.get_routing_events(state.state_id):
+                    # Routing events for this state (from pre-loaded dict)
+                    for event in events_by_state.get(state.state_id, []):
                         yield {
                             "record_type": "routing_event",
                             "run_id": run_id,
@@ -358,8 +397,8 @@ class LandscapeExporter:
                             "reason_hash": event.reason_hash,
                         }
 
-                    # External calls for this state
-                    for call in self._recorder.get_calls(state.state_id):
+                    # External calls for this state (from pre-loaded dict)
+                    for call in calls_by_state.get(state.state_id, []):
                         yield {
                             "record_type": "call",
                             "run_id": run_id,

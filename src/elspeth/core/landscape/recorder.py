@@ -2009,6 +2009,118 @@ class LandscapeRecorder:
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]
 
+    # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
+    #
+    # These methods fetch all entities for a run in a single query,
+    # replacing the N+1 pattern where per-entity queries nested inside loops.
+
+    def get_all_tokens_for_run(self, run_id: str) -> list[Token]:
+        """Get all tokens for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Token models, ordered by row_id then created_at
+        """
+        # JOIN through rows table to filter by run_id
+        query = (
+            select(tokens_table)
+            .join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
+            .where(rows_table.c.run_id == run_id)
+            .order_by(tokens_table.c.row_id, tokens_table.c.created_at, tokens_table.c.token_id)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_repo.load(r) for r in db_rows]
+
+    def get_all_node_states_for_run(self, run_id: str) -> list[NodeState]:
+        """Get all node states for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of NodeState models, ordered by token_id then step_index then attempt
+        """
+        # node_states has run_id denormalized (per CLAUDE.md composite FK pattern)
+        query = (
+            select(node_states_table)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(
+                node_states_table.c.token_id,
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
+            )
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._node_state_repo.load(r) for r in db_rows]
+
+    def get_all_routing_events_for_run(self, run_id: str) -> list[RoutingEvent]:
+        """Get all routing events for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of RoutingEvent models, ordered by state_id then ordinal
+        """
+        # JOIN through node_states to filter by run_id
+        query = (
+            select(routing_events_table)
+            .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(
+                routing_events_table.c.state_id,
+                routing_events_table.c.ordinal,
+                routing_events_table.c.event_id,
+            )
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._routing_event_repo.load(r) for r in db_rows]
+
+    def get_all_calls_for_run(self, run_id: str) -> list[Call]:
+        """Get all calls (state-parented) for a run (batch query).
+
+        Note: Operation-parented calls are fetched separately via get_operation_calls.
+        This method only returns calls parented by node_states.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Call models, ordered by state_id then call_index
+        """
+        # JOIN through node_states to filter by run_id
+        # Only state-parented calls (state_id IS NOT NULL)
+        query = (
+            select(calls_table)
+            .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(calls_table.c.state_id, calls_table.c.call_index)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
+
+    def get_all_token_parents_for_run(self, run_id: str) -> list[TokenParent]:
+        """Get all token parent relationships for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of TokenParent models, ordered by token_id then ordinal
+        """
+        # JOIN through tokens and rows to filter by run_id
+        query = (
+            select(token_parents_table)
+            .join(tokens_table, token_parents_table.c.token_id == tokens_table.c.token_id)
+            .join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
+            .where(rows_table.c.run_id == run_id)
+            .order_by(token_parents_table.c.token_id, token_parents_table.c.ordinal)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_parent_repo.load(r) for r in db_rows]
+
     def allocate_call_index(self, state_id: str) -> int:
         """Allocate next call index for a state_id (thread-safe).
 

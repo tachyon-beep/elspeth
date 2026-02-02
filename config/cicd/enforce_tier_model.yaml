@@ -1736,3 +1736,61 @@ allow_hits:
   reason: Config parsing - config value from YAML is Tier 3 external data; isinstance() distinguishes string from dict
   safety: ValueError raised for invalid config - explicit validation failure
   expires: null
+# Bug 76r fix: Batch export N+1 query optimization - sparse lookup patterns
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=55302e0e9e543c78
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all rows have tokens (batch export uses pre-loaded dicts)
+  safety: Empty list returned for missing key; legitimate data model (rows may have no tokens)
+  expires: null
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=aba88aa6c6ca83c9
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all tokens have parent relationships (root tokens)
+  safety: Empty list returned for missing key; legitimate data model (root tokens have no parents)
+  expires: null
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=aaec941d0d631818
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all tokens have node states yet (in-progress processing)
+  safety: Empty list returned for missing key; legitimate data model (token may be pre-processing)
+  expires: null
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=ffb6feddd8d65af2
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all node states have routing events (non-gate nodes)
+  safety: Empty list returned for missing key; legitimate data model (only gates route)
+  expires: null
+- key: core/landscape/exporter.py:R1:LandscapeExporter:_iter_records:fp=247a1344180ee183
+  owner: P2-2026-02-02-76r
+  reason: Sparse lookup - not all node states have external calls (local-only transforms)
+  safety: Empty list returned for missing key; legitimate data model (not all transforms call APIs)
+  expires: null
+# Bug 76r fix: Discriminated union dispatch for NodeState subtypes
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=2e1d3379790a665a
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
+  expires: null
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=2057d6b40391c7b7
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
+  expires: null
+- key: core/landscape/exporter.py:R5:LandscapeExporter:_iter_records:fp=b785bb584f15894f
+  owner: P2-2026-02-02-76r
+  reason: Discriminated union - NodeState is union of Open/Pending/Completed/Failed with different fields
+  safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
+  expires: null
+# Pre-existing recorder.py patterns (payload retrieval and Tier-3 validation)
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=9d5e1d0e48e6babd
+  owner: architecture
+  reason: Payload may be purged per retention policy - KeyError/OSError/JSONDecodeError are expected
+  safety: Returns payload_available=False to caller; explicit state communication, not silent failure
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=a70928bc72c11c14
+  owner: architecture
+  reason: External row data (Tier-3) may contain non-canonical values (NaN, Infinity)
+  safety: Logs warning with details, falls back to repr() hash per CLAUDE.md tier model guidelines
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=dec3fb64532671b8
+  owner: architecture
+  reason: Payload may be purged per retention policy - KeyError is expected for missing content
+  safety: Returns None to caller as documented Optional return type; explicit contract
+  expires: null
