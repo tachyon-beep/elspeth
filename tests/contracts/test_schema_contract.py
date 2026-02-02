@@ -582,3 +582,125 @@ class TestSchemaContractCheckpoint:
         restored = SchemaContract.from_checkpoint(data)
 
         assert restored.fields[0].python_type is type(None)
+
+
+# --- Merge Tests for Coalesce ---
+
+
+class TestSchemaContractMerge:
+    """Test contract merging for fork/join coalesce."""
+
+    def test_merge_same_field_same_type(self) -> None:
+        """Same field, same type merges successfully."""
+        from elspeth.contracts.errors import ContractMergeError  # noqa: F401 - imported for test setup
+
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        assert len(merged.fields) == 1
+        assert merged.fields[0].python_type is int
+
+    def test_merge_different_types_raises(self) -> None:
+        """Different types raise ContractMergeError."""
+        from elspeth.contracts.errors import ContractMergeError
+
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", str, True, "declared"),),
+            locked=True,
+        )
+        with pytest.raises(ContractMergeError, match="conflicting types"):
+            c1.merge(c2)
+
+    def test_merge_field_only_in_one_path_becomes_optional(self) -> None:
+        """Field in only one path becomes optional (required=False)."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract("x", "X", int, True, "declared"),
+                FieldContract("y", "Y", str, True, "declared"),
+            ),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        # y is only in c1, so becomes optional in merged
+        y_field = next(f for f in merged.fields if f.normalized_name == "y")
+        assert y_field.required is False
+
+    def test_merge_mode_precedence(self) -> None:
+        """Most restrictive mode wins: FIXED > FLEXIBLE > OBSERVED."""
+        fixed = SchemaContract(mode="FIXED", fields=(), locked=True)
+        flexible = SchemaContract(mode="FLEXIBLE", fields=(), locked=True)
+        observed = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+
+        assert fixed.merge(observed).mode == "FIXED"
+        assert observed.merge(fixed).mode == "FIXED"
+        assert flexible.merge(observed).mode == "FLEXIBLE"
+
+    def test_merge_locked_if_either_locked(self) -> None:
+        """Merged contract is locked if either input is locked."""
+        locked = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+        unlocked = SchemaContract(mode="OBSERVED", fields=(), locked=False)
+
+        assert locked.merge(unlocked).locked is True
+        assert unlocked.merge(locked).locked is True
+
+    def test_merge_required_if_either_required(self) -> None:
+        """Field is required if required in either path."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, False, "inferred"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        assert merged.fields[0].required is True
+
+    def test_merge_source_declared_wins(self) -> None:
+        """Field source is 'declared' if either is declared."""
+        c1 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("x", "X", int, True, "inferred"),),
+            locked=True,
+        )
+        merged = c1.merge(c2)
+
+        assert merged.fields[0].source == "declared"
+
+    def test_merge_empty_contracts(self) -> None:
+        """Merging empty contracts works."""
+        c1 = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+        c2 = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+        merged = c1.merge(c2)
+
+        assert len(merged.fields) == 0

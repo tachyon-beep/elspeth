@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from elspeth.contracts.errors import (
+    ContractMergeError,
     ContractViolation,
     ExtraFieldViolation,
     MissingFieldViolation,
@@ -320,3 +321,84 @@ class SchemaContract:
                 )
 
         return contract
+
+    def merge(self, other: SchemaContract) -> SchemaContract:
+        """Merge two contracts at a coalesce point.
+
+        Rules:
+        1. Mode: Most restrictive wins (FIXED > FLEXIBLE > OBSERVED)
+        2. Fields present in both: Types must match (error if not)
+        3. Fields in only one: Included but marked non-required
+        4. Locked: True if either is locked
+
+        Args:
+            other: Contract to merge with
+
+        Returns:
+            New merged SchemaContract
+
+        Raises:
+            ContractMergeError: If field types conflict
+        """
+        # Mode precedence: FIXED > FLEXIBLE > OBSERVED
+        mode_order: dict[str, int] = {"FIXED": 0, "FLEXIBLE": 1, "OBSERVED": 2}
+        merged_mode = min(
+            self.mode,
+            other.mode,
+            key=lambda m: mode_order[m],
+        )
+
+        # Build merged field set
+        merged_fields: dict[str, FieldContract] = {}
+
+        all_names = {fc.normalized_name for fc in self.fields} | {fc.normalized_name for fc in other.fields}
+
+        for name in all_names:
+            in_self = name in self._by_normalized
+            in_other = name in other._by_normalized
+
+            if in_self and in_other:
+                self_fc = self._by_normalized[name]
+                other_fc = other._by_normalized[name]
+                # Both have field - types must match
+                if self_fc.python_type != other_fc.python_type:
+                    raise ContractMergeError(
+                        field=name,
+                        type_a=self_fc.python_type.__name__,
+                        type_b=other_fc.python_type.__name__,
+                    )
+                # Use the one that's required if either is
+                # Use declared source if either is declared
+                merged_fields[name] = FieldContract(
+                    normalized_name=name,
+                    original_name=self_fc.original_name,
+                    python_type=self_fc.python_type,
+                    required=self_fc.required or other_fc.required,
+                    source="declared" if self_fc.source == "declared" or other_fc.source == "declared" else "inferred",
+                )
+            elif in_self:
+                # Only in self - include but mark non-required
+                fc = self._by_normalized[name]
+                merged_fields[name] = FieldContract(
+                    normalized_name=fc.normalized_name,
+                    original_name=fc.original_name,
+                    python_type=fc.python_type,
+                    required=False,  # Can't require field from only one path
+                    source=fc.source,
+                )
+            else:
+                # Only in other (in_other must be True since name came from union)
+                fc = other._by_normalized[name]
+                merged_fields[name] = FieldContract(
+                    normalized_name=fc.normalized_name,
+                    original_name=fc.original_name,
+                    python_type=fc.python_type,
+                    required=False,  # Can't require field from only one path
+                    source=fc.source,
+                )
+
+        return SchemaContract(
+            mode=merged_mode,
+            fields=tuple(merged_fields.values()),
+            locked=self.locked or other.locked,
+        )
