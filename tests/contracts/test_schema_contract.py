@@ -704,3 +704,136 @@ class TestSchemaContractMerge:
         merged = c1.merge(c2)
 
         assert len(merged.fields) == 0
+
+
+# --- Any Type Tests ---
+
+
+class TestSchemaContractAnyType:
+    """Test 'any' type handling (python_type=object)."""
+
+    def test_validate_any_type_accepts_int(self) -> None:
+        """Field with python_type=object accepts int values."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": 42})
+        assert violations == []
+
+    def test_validate_any_type_accepts_string(self) -> None:
+        """Field with python_type=object accepts str values."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": "hello"})
+        assert violations == []
+
+    def test_validate_any_type_accepts_list(self) -> None:
+        """Field with python_type=object accepts list values."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": [1, 2, 3]})
+        assert violations == []
+
+    def test_validate_any_type_accepts_dict(self) -> None:
+        """Field with python_type=object accepts dict values."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": {"nested": "value"}})
+        assert violations == []
+
+    def test_validate_any_type_accepts_none(self) -> None:
+        """Field with python_type=object accepts None values."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({"data": None})
+        assert violations == []
+
+    def test_validate_any_type_still_requires_presence(self) -> None:
+        """Required 'any' field still must be present."""
+        from elspeth.contracts.errors import MissingFieldViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({})  # Missing required field
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], MissingFieldViolation)
+
+    def test_validate_any_type_optional_can_be_missing(self) -> None:
+        """Optional 'any' field can be missing."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, False, "declared"),),
+            locked=True,
+        )
+        violations = contract.validate({})
+        assert violations == []
+
+    def test_checkpoint_object_type_round_trip(self) -> None:
+        """python_type=object survives checkpoint round-trip."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("data", "Data", object, True, "declared"),),
+            locked=True,
+        )
+        data = contract.to_checkpoint_format()
+
+        # Verify serialization
+        assert data["fields"][0]["python_type"] == "object"
+
+        # Verify restoration
+        restored = SchemaContract.from_checkpoint(data)
+        assert restored.fields[0].python_type is object
+
+    def test_any_type_mixed_with_typed_fields(self) -> None:
+        """Contract with both 'any' and typed fields validates correctly."""
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract("id", "ID", int, True, "declared"),
+                FieldContract("data", "Data", object, True, "declared"),
+                FieldContract("name", "Name", str, True, "declared"),
+            ),
+            locked=True,
+        )
+
+        # Valid: id=int, data=anything, name=str
+        violations = contract.validate(
+            {
+                "id": 42,
+                "data": {"complex": ["nested", 123]},
+                "name": "test",
+            }
+        )
+        assert violations == []
+
+        # Invalid: id should be int
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        violations = contract.validate(
+            {
+                "id": "not_int",
+                "data": "anything",
+                "name": "test",
+            }
+        )
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].normalized_name == "id"

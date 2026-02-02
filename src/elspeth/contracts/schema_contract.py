@@ -170,6 +170,9 @@ class SchemaContract:
         2. Field types match (with numpy/pandas normalization)
         3. FIXED mode: No extra fields allowed
 
+        Note: Fields with python_type=object ('any' type) skip type validation
+        since they accept any value type by design.
+
         Args:
             row: Row data with normalized field names as keys
 
@@ -188,6 +191,11 @@ class SchemaContract:
                     )
                 )
             elif fc.normalized_name in row:
+                # Skip type check for 'any' fields (python_type is object)
+                # 'any' type accepts any value - existence check above is sufficient
+                if fc.python_type is object:
+                    continue
+
                 value = row[fc.normalized_name]
                 # Normalize runtime type for comparison
                 # (handles numpy.int64 matching int, etc.)
@@ -290,6 +298,7 @@ class SchemaContract:
             "bool": bool,
             "NoneType": type(None),
             "datetime": datetime,
+            "object": object,  # For 'any' type fields that accept any value
         }
 
         fields = tuple(
