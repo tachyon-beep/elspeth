@@ -83,6 +83,13 @@ from elspeth.contracts.contract_propagation import (
     merge_contract_with_output,
     propagate_contract,
 )
+
+# Schema contracts (Phase 4: Audit Trail Integration)
+from elspeth.contracts.contract_records import (
+    ContractAuditRecord,
+    FieldAuditRecord,
+    ValidationErrorWithContract,
+)
 from elspeth.contracts.data import (
     CompatibilityResult,
     PluginSchema,
@@ -346,6 +353,10 @@ __all__ = [  # Grouped by category for readability
     "normalize_type_for_contract",
     "PipelineRow",
     "SchemaContract",
+    # schema contracts (Phase 4: Audit Trail Integration)
+    "ContractAuditRecord",
+    "FieldAuditRecord",
+    "ValidationErrorWithContract",
     # schema contracts (Phase 3: Pipeline Integration)
     "create_output_contract_from_schema",
     "HeaderMode",

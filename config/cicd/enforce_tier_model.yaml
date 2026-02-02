@@ -3,6 +3,11 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 per_file_rules:
+- pattern: contracts/contract_records.py
+  rules:
+  - R5
+  reason: Violation type dispatch requires isinstance() for polymorphic serialization of ContractViolation subclasses
+  expires: null
 - pattern: contracts/type_normalization.py
   rules:
   - R5
