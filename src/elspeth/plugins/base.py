@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -385,6 +386,9 @@ class BaseSource(ABC):
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
 
+    # Schema contract for row validation (Phase 2)
+    _schema_contract: "SchemaContract | None" = None
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -392,6 +396,7 @@ class BaseSource(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self._schema_contract = None
 
     @abstractmethod
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
@@ -410,6 +415,27 @@ class BaseSource(ABC):
     def close(self) -> None:
         """Clean up resources."""
         ...
+
+    # === Schema Contract Support (Phase 2) ===
+
+    def get_schema_contract(self) -> "SchemaContract | None":
+        """Get the current schema contract.
+
+        Returns:
+            SchemaContract if set, None otherwise
+        """
+        return self._schema_contract
+
+    def set_schema_contract(self, contract: "SchemaContract") -> None:
+        """Set or update the schema contract.
+
+        Called during initialization for explicit schemas (FIXED/FLEXIBLE),
+        or after first-row inference for OBSERVED mode.
+
+        Args:
+            contract: The schema contract to use for validation
+        """
+        self._schema_contract = contract
 
     # === Lifecycle Hooks (Phase 3) ===
 
