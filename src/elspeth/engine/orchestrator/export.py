@@ -229,7 +229,12 @@ def _json_schema_to_python_type(field_name: str, field_info: dict[str, Any]) -> 
 
     Handles Pydantic's type mapping including special cases:
     - datetime: {"type": "string", "format": "date-time"}
+    - date: {"type": "string", "format": "date"}
+    - time: {"type": "string", "format": "time"}
+    - timedelta: {"type": "string", "format": "duration"}
+    - UUID: {"type": "string", "format": "uuid"}
     - Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+    - Nullable: {"anyOf": [{"type": "T"}, {"type": "null"}]} -> T
     - list[T]: {"type": "array", "items": {...}}
     - dict: {"type": "object"} without properties
 
@@ -243,23 +248,36 @@ def _json_schema_to_python_type(field_name: str, field_info: dict[str, Any]) -> 
     Raises:
         ValueError: If field type is not supported (prevents silent degradation)
     """
-    from datetime import datetime
+    from datetime import date, datetime, time, timedelta
     from decimal import Decimal
+    from uuid import UUID
 
-    # Check for datetime first (string with format annotation)
-    # "format" is optional in JSON Schema, so check with "in" first
-    if "type" in field_info and field_info["type"] == "string" and "format" in field_info and field_info["format"] == "date-time":
-        return datetime
-
-    # Check for Decimal (anyOf pattern)
+    # Handle anyOf patterns FIRST (before checking for "type" key)
+    # anyOf is used for: Decimal, nullable types (T | None)
     if "anyOf" in field_info:
-        # Pydantic emits: {"anyOf": [{"type": "number"}, {"type": "string"}]}
-        # This indicates Decimal (accepts both for parsing flexibility)
-        any_of_types = field_info["anyOf"]
-        # Only consider items that have "type" key, then access directly
-        type_strs = {item["type"] for item in any_of_types if "type" in item}
-        if {"number", "string"}.issubset(type_strs):
+        any_of_items = field_info["anyOf"]
+
+        # Pattern 1: Decimal - {"anyOf": [{"type": "number"}, {"type": "string", ...}]}
+        type_strs = {item.get("type") for item in any_of_items if "type" in item}
+        if {"number", "string"}.issubset(type_strs) and "null" not in type_strs:
             return Decimal
+
+        # Pattern 2: Nullable - {"anyOf": [{"type": "T", ...}, {"type": "null"}]}
+        # Extract the non-null type and recursively resolve it
+        if "null" in type_strs:
+            non_null_items = [item for item in any_of_items if item.get("type") != "null"]
+            if len(non_null_items) == 1:
+                # Recursively resolve the non-null type
+                # This handles cases like: date | None where the non-null part has format
+                return _json_schema_to_python_type(field_name, non_null_items[0])
+
+        # Unsupported anyOf pattern (e.g., Union[str, int] without null)
+        raise ValueError(
+            f"Resume failed: Field '{field_name}' has unsupported anyOf pattern. "
+            f"Supported patterns: Decimal (number|string), nullable (T|null). "
+            f"Schema definition: {field_info}. "
+            f"This is a bug in schema reconstruction - please report this."
+        )
 
     # Get basic type - required for all non-anyOf fields
     if "type" not in field_info:
@@ -270,14 +288,25 @@ def _json_schema_to_python_type(field_name: str, field_info: dict[str, Any]) -> 
         )
     field_type_str = field_info["type"]
 
+    # Handle string types with format specifiers
+    if field_type_str == "string":
+        fmt = field_info.get("format")
+        if fmt == "date-time":
+            return datetime
+        if fmt == "date":
+            return date
+        if fmt == "time":
+            return time
+        if fmt == "duration":
+            return timedelta
+        if fmt == "uuid":
+            return UUID
+        # Plain string (no format or unknown format)
+        return str
+
     # Handle array types
     if field_type_str == "array":
         # "items" is optional in JSON Schema arrays
-        if "items" not in field_info:
-            # Generic list without item type constraint
-            return list
-        # items_schema = field_info["items"]  # Available if needed for recursive handling
-        # For typed arrays, we'd need recursive handling
         # For now, return list (Pydantic will validate items at parse time)
         return list
 
@@ -286,9 +315,8 @@ def _json_schema_to_python_type(field_name: str, field_info: dict[str, Any]) -> 
         # Generic dict (no specific structure)
         return dict
 
-    # Handle primitive types
+    # Handle other primitive types
     primitive_type_map = {
-        "string": str,
         "integer": int,
         "number": float,
         "boolean": bool,
@@ -300,7 +328,8 @@ def _json_schema_to_python_type(field_name: str, field_info: dict[str, Any]) -> 
     # Unknown type - CRASH instead of silent degradation
     raise ValueError(
         f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
-        f"Supported types: string, integer, number, boolean, date-time, Decimal, array, object. "
+        f"Supported types: string, integer, number, boolean, date-time, date, time, "
+        f"duration, uuid, Decimal, array, object. "
         f"Schema definition: {field_info}. "
         f"This is a bug in schema reconstruction - please report this."
     )

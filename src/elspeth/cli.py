@@ -1323,11 +1323,20 @@ def validate(
     try:
         config, _secret_resolutions = _load_settings_with_secrets(settings_path)
     except (YamlParserError, YamlScannerError) as e:
-        # YAML syntax errors (malformed YAML) - show helpful message
+        # YAML syntax errors from Dynaconf/ruamel (malformed YAML) - show helpful message
         _format_validation_error(
             title="YAML Syntax Error",
             message=f"Failed to parse {settings_path.name}",
             details=[str(e.problem)] if hasattr(e, "problem") else None,
+            hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
+        )
+        raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        # YAML syntax errors from PyYAML (used in _load_raw_yaml) - show helpful message
+        _format_validation_error(
+            title="YAML Syntax Error",
+            message=f"Failed to parse {settings_path.name}",
+            details=[str(e)],
             hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
         )
         raise typer.Exit(1) from None

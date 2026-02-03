@@ -1959,3 +1959,20 @@ allow_hits:
   reason: isinstance() check required to find batch-aware transforms - protocol contract verification
   safety: RuntimeError raised if no matching transform found - explicit failure, not silent
   expires: null
+# JSON Schema type mapping - external data from Pydantic's JSON schema
+# These .get() calls are legitimate because JSON Schema doesn't guarantee all fields
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=76eb122944753b45
+  owner: bugfix
+  reason: JSON Schema items may not have "type" key - external data at trust boundary
+  safety: Missing type handled by subsequent "type" in item check; falls through to error
+  expires: null
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=ff1b7e567dcc1a55
+  owner: bugfix
+  reason: JSON Schema items may not have "type" key - external data at trust boundary
+  safety: Filters items by type != "null"; items without type are correctly excluded
+  expires: null
+- key: engine/orchestrator/export.py:R1:_json_schema_to_python_type:fp=117a3e0e68aa409d
+  owner: bugfix
+  reason: JSON Schema "format" field is optional per spec - external data at trust boundary
+  safety: Missing format defaults to None, falls through to plain str return - correct behavior
+  expires: null

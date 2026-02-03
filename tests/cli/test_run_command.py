@@ -705,20 +705,21 @@ class TestRunCommandPayloadStorage:
 
 
 class TestRunCommandDirectoryValidation:
-    """Tests for directory validation before pipeline execution.
+    """Tests for directory auto-creation during pipeline execution.
 
-    The CLI validates that output directories exist before attempting
-    to create databases or write files, providing clear error messages.
+    The CLI automatically creates output directories (landscape, sinks)
+    to provide a better user experience without manual setup.
     """
 
-    def test_run_rejects_nonexistent_landscape_directory(self, tmp_path: Path) -> None:
-        """Run fails with clear error when landscape database directory doesn't exist."""
+    def test_run_creates_nonexistent_landscape_directory(self, tmp_path: Path) -> None:
+        """Run auto-creates landscape database directory if it doesn't exist."""
         csv_file = tmp_path / "input.csv"
         csv_file.write_text("id,name\n1,alice\n")
         output_file = tmp_path / "output.json"
 
-        # Point to a non-existent directory for landscape
-        nonexistent_dir = tmp_path / "nonexistent_subdir" / "audit.db"
+        # Point to a non-existent directory for landscape - should be auto-created
+        landscape_dir = tmp_path / "auto_created_subdir"
+        landscape_db = landscape_dir / "audit.db"
 
         settings = {
             "source": {
@@ -739,29 +740,32 @@ class TestRunCommandDirectoryValidation:
                 },
             },
             "default_sink": "default",
-            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+            "landscape": {"url": f"sqlite:///{landscape_db}"},
         }
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(yaml.dump(settings))
 
+        # Verify directory doesn't exist before run
+        assert not landscape_dir.exists()
+
         result = runner.invoke(app, ["run", "-s", str(settings_file), "--execute"])
 
-        assert result.exit_code == 1
-        assert "directory" in result.output.lower()
-        assert "does not exist" in result.output.lower()
-        assert "nonexistent_subdir" in result.output
+        # Run should succeed - directory auto-created
+        assert result.exit_code == 0, f"Run failed: {result.output}"
+        # Directory should now exist
+        assert landscape_dir.exists()
 
-    def test_run_dry_run_skips_directory_validation(self, tmp_path: Path) -> None:
-        """Dry run mode doesn't require directories to exist.
+    def test_run_dry_run_skips_directory_creation(self, tmp_path: Path) -> None:
+        """Dry run mode doesn't create directories.
 
-        This allows users to validate config syntax without having
-        the full directory structure set up.
+        This allows users to validate config syntax without modifying
+        the filesystem.
         """
         csv_file = tmp_path / "input.csv"
         csv_file.write_text("id,name\n1,alice\n")
 
-        # Point to a non-existent directory - should be OK in dry run
-        nonexistent_dir = tmp_path / "nonexistent" / "audit.db"
+        # Point to a non-existent directory - should NOT be created in dry run
+        nonexistent_dir = tmp_path / "nonexistent"
 
         settings = {
             "source": {
@@ -782,23 +786,26 @@ class TestRunCommandDirectoryValidation:
                 },
             },
             "default_sink": "default",
-            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+            "landscape": {"url": f"sqlite:///{nonexistent_dir / 'audit.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(yaml.dump(settings))
 
         result = runner.invoke(app, ["run", "-s", str(settings_file), "--dry-run"])
 
-        # Dry run should succeed even with non-existent directory
+        # Dry run should succeed
         assert result.exit_code == 0
         assert "dry run" in result.output.lower() or "would" in result.output.lower()
+        # Directory should NOT have been created
+        assert not nonexistent_dir.exists()
 
-    def test_run_shows_mkdir_suggestion(self, tmp_path: Path) -> None:
-        """Error message includes mkdir command to create directory."""
+    def test_run_creates_nested_sink_directory(self, tmp_path: Path) -> None:
+        """Run auto-creates nested directories for sink output paths."""
         csv_file = tmp_path / "input.csv"
         csv_file.write_text("id,name\n1,alice\n")
 
-        nonexistent_dir = tmp_path / "missing_dir" / "audit.db"
+        # Point to nested non-existent directory for sink output
+        nested_output = tmp_path / "nested" / "output" / "results.json"
 
         settings = {
             "source": {
@@ -813,19 +820,23 @@ class TestRunCommandDirectoryValidation:
                 "default": {
                     "plugin": "json",
                     "options": {
-                        "path": str(tmp_path / "output.json"),
+                        "path": str(nested_output),
                         "schema": {"mode": "observed"},
                     },
                 },
             },
             "default_sink": "default",
-            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+            "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(yaml.dump(settings))
 
+        # Verify nested directory doesn't exist before run
+        assert not nested_output.parent.exists()
+
         result = runner.invoke(app, ["run", "-s", str(settings_file), "--execute"])
 
-        assert result.exit_code == 1
-        # Should show helpful mkdir -p suggestion
-        assert "mkdir -p" in result.output
+        # Run should succeed - directory auto-created
+        assert result.exit_code == 0, f"Run failed: {result.output}"
+        # Nested directory should now exist
+        assert nested_output.parent.exists()
