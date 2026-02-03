@@ -14,6 +14,7 @@ Mutant gaps addressed:
 from typing import Any
 
 from elspeth.contracts import Determinism, NodeType, RoutingMode, TriggerType
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import GateName, NodeID
 from elspeth.core.config import AggregationSettings, GateSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -23,6 +24,26 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import RowOutcome, TransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class PassthroughTransform(BaseTransform):
@@ -496,7 +517,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -563,7 +584,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -630,20 +651,20 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         child_tokens = [
             TokenInfo(
                 row_id="row1",
                 token_id="child_a",
-                row_data={"id": 1},
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_a",
             ),
             TokenInfo(
                 row_id="row1",
                 token_id="child_b",
-                row_data={"id": 1},
+                row_data=_make_pipeline_row({"id": 1}),
                 branch_name="path_b",
             ),
         ]
@@ -910,7 +931,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
         )
 
         # Create work item with specific step
@@ -936,7 +957,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data={"id": 1},
+            row_data=_make_pipeline_row({"id": 1}),
             branch_name="left_branch",
         )
 

@@ -38,6 +38,7 @@ from elspeth.contracts import (
     SourceRow,
 )
 from elspeth.contracts.config.runtime import RuntimeCheckpointConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -52,6 +53,26 @@ from tests.conftest import (
     as_source,
     as_transform,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -435,11 +456,12 @@ class TestCheckpointDurability:
             payload_ref = payload_store.store(json.dumps(row_data).encode("utf-8"))
 
             # Create row with payload reference
+            pipeline_row = _make_pipeline_row(row_data)
             row = recorder.create_row(
                 run_id=run_id,
                 source_node_id="source",
                 row_index=i,
-                data=row_data,
+                data=pipeline_row.to_dict(),
                 payload_ref=payload_ref,
             )
             row_ids.append(row.row_id)

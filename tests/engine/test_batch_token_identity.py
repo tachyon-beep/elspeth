@@ -16,8 +16,9 @@ tokens get wrong outcomes but counts still match.
 
 from typing import Any
 
-from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts import Determinism, NodeType, SourceRow
 from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -31,6 +32,26 @@ from tests.helpers.audit_assertions import (
     assert_all_batch_members_consumed,
     assert_output_token_distinct_from_inputs,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class SumTransform(BaseTransform):
@@ -110,9 +131,11 @@ class TestBatchTokenIdentity:
         all_results = []
         input_token_ids = []
         for i in range(3):
+            pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})  # 10, 20, 30
+            source_row = SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": (i + 1) * 10},  # 10, 20, 30
+                source_row=source_row,
                 transforms=[transform],
                 ctx=ctx,
             )
@@ -144,7 +167,7 @@ class TestBatchTokenIdentity:
         assert_output_token_distinct_from_inputs(output_token_id, input_token_ids)
 
         # Verify aggregation result
-        assert completed[0].final_data["total"] == 60  # 10 + 20 + 30
+        assert completed[0].final_data.to_dict()["total"] == 60  # 10 + 20 + 30
 
     def test_triggering_token_not_reused(self) -> None:
         """The token that triggers the flush must NOT be reused as output.
@@ -194,9 +217,11 @@ class TestBatchTokenIdentity:
         ctx = PluginContext(run_id=run.run_id, config={})
 
         # Process row 0 - buffered, returns CONSUMED_IN_BATCH
+        pipeline_row_0 = _make_pipeline_row({"value": 10})
+        source_row_0 = SourceRow.valid(pipeline_row_0, contract=pipeline_row_0.contract)
         results_0 = processor.process_row(
             row_index=0,
-            row_data={"value": 10},
+            source_row=source_row_0,
             transforms=[transform],
             ctx=ctx,
         )
@@ -205,9 +230,11 @@ class TestBatchTokenIdentity:
         first_token_id = results_0[0].token.token_id
 
         # Process row 1 - triggers flush
+        pipeline_row_1 = _make_pipeline_row({"value": 20})
+        source_row_1 = SourceRow.valid(pipeline_row_1, contract=pipeline_row_1.contract)
         results_1 = processor.process_row(
             row_index=1,
-            row_data={"value": 20},
+            source_row=source_row_1,
             transforms=[transform],
             ctx=ctx,
         )
@@ -231,7 +258,7 @@ class TestBatchTokenIdentity:
         assert output_token_id != first_token_id, "Output token should not equal first buffered token either"
 
         # Verify output data is correct
-        assert completed[0].final_data["total"] == 30  # 10 + 20
+        assert completed[0].final_data.to_dict()["total"] == 30  # 10 + 20
 
     def test_batch_members_correctly_recorded(self) -> None:
         """Batch members table should contain all input tokens.
@@ -284,9 +311,11 @@ class TestBatchTokenIdentity:
         all_results = []
         input_token_ids = []
         for i in range(3):
+            pipeline_row = _make_pipeline_row({"value": (i + 1) * 10})
+            source_row = SourceRow.valid(pipeline_row, contract=pipeline_row.contract)
             results = processor.process_row(
                 row_index=i,
-                row_data={"value": (i + 1) * 10},
+                source_row=source_row,
                 transforms=[transform],
                 ctx=ctx,
             )

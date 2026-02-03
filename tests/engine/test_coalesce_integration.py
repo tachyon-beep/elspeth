@@ -74,8 +74,7 @@ class ListSource(_TestSourceBase):
         pass
 
     def load(self, ctx: Any) -> Iterator[SourceRow]:
-        for row in self._data:
-            yield SourceRow.valid(row)
+        yield from self.wrap_rows(self._data)
 
     def close(self) -> None:
         pass
@@ -512,8 +511,10 @@ class TestCoalesceSuccessMetrics:
 
             def process(self, row: dict, ctx: Any) -> TransformResult:
                 self.processed_count += 1
-                row["post_processed"] = True
-                return TransformResult.success(row, success_reason={"action": "post_coalesce"})
+                # PipelineRow is immutable - must convert to dict, modify, and return
+                row_dict = row.to_dict() if hasattr(row, "to_dict") else row
+                row_dict["post_processed"] = True
+                return TransformResult.success(row_dict, success_reason={"action": "post_coalesce"})
 
         settings = ElspethSettings(
             source=SourceSettings(
@@ -805,13 +806,13 @@ class TestCoalesceTimeoutIntegration:
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
                 # Row 1: id=1, both branches work
-                yield SourceRow.valid({"id": 1, "value": 100})
+                yield from self.wrap_rows([{"id": 1, "value": 100}])
                 # Row 2: id=2, we'll make path_b fail via a transform
-                yield SourceRow.valid({"id": 2, "value": 200})
+                yield from self.wrap_rows([{"id": 2, "value": 200}])
                 # Wait long enough for timeout to fire if check_timeouts is called
                 time.sleep(0.25)
                 # Row 3: gives orchestrator a chance to check timeouts
-                yield SourceRow.valid({"id": 3, "value": 300})
+                yield from self.wrap_rows([{"id": 3, "value": 300}])
 
             def close(self) -> None:
                 pass
@@ -1031,8 +1032,7 @@ class TestForkAggregationCoalesce:
                 pass
 
             def load(self, ctx: Any) -> Iterator[SourceRow]:
-                for row in self._data:
-                    yield SourceRow.valid(row)
+                yield from self.wrap_rows(self._data)
 
             def close(self) -> None:
                 pass

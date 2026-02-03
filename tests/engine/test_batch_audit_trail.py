@@ -31,6 +31,7 @@ from elspeth.contracts.audit import NodeStateCompleted, NodeStateFailed
 from elspeth.contracts.enums import CallStatus, CallType, NodeStateStatus, NodeType
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.engine.executors import TransformExecutor
@@ -39,6 +40,26 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 # =============================================================================
@@ -100,15 +121,16 @@ def create_token_in_recorder(
     Returns:
         TokenInfo for the created token
     """
+    pipeline_row = _make_pipeline_row(row_data)
     row = recorder.create_row(
         run_id=run_id,
         source_node_id=node_id,
         row_index=row_index,
-        data=row_data,
+        data=pipeline_row.to_dict(),
         row_id=row_id,
     )
     recorder.create_token(row_id=row.row_id, token_id=token_id)
-    return TokenInfo(row_id=row_id, token_id=token_id, row_data=row_data)
+    return TokenInfo(row_id=row_id, token_id=token_id, row_data=pipeline_row)
 
 
 @contextmanager

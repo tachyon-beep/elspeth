@@ -17,6 +17,7 @@ from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeType, RowOutcome
 from elspeth.contracts.results import RowResult
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -26,6 +27,26 @@ from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import TransformResult as PluginTransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestProcessorGuards:
@@ -81,7 +102,7 @@ class TestProcessorGuards:
         token_info = TokenInfo(
             token_id=token.token_id,
             row_id=row.row_id,
-            row_data={"value": 1},
+            row_data=_make_pipeline_row({"value": 1}),
             branch_name=None,
         )
 

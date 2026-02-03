@@ -512,8 +512,22 @@ class _TestSourceBase:
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
         for row in rows:
-            yield SourceRow.valid(row)
+            # Create observed schema contract for this row
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="observed",
+                )
+                for key in row.keys()
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+            yield SourceRow.valid(row, contract=contract)
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
