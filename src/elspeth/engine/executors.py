@@ -546,15 +546,19 @@ class GateExecutor:
         """
         if gate.node_id is None:
             raise OrchestrationInvariantError(f"Gate '{gate.name}' executed without node_id - orchestrator bug")
-        input_hash = stable_hash(token.row_data)
 
-        # Begin node state
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
+
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
         )
 
         # BUG-RECORDER-01 fix: Set state_id on context for external call recording
@@ -562,6 +566,10 @@ class GateExecutor:
         ctx.state_id = state.state_id
         ctx.node_id = gate.node_id
         # Note: call_index allocation handled by LandscapeRecorder.allocate_call_index()
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        # This allows gates to access original header names via ctx.contract.resolve_name()
+        ctx.contract = token.row_data.contract
 
         # Execute with timing and span
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
@@ -650,16 +658,27 @@ class GateExecutor:
                     node_id=gate.node_id,
                     action=action,
                 )
+                # Create PipelineRow from result for fork
+                # Use result.contract if provided, otherwise fallback to input contract
+                fork_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
+                if fork_contract is None:
+                    raise ValueError(
+                        f"Cannot create PipelineRow for fork: no contract available. "
+                        f"GateResult.contract is None and input token has no contract. "
+                        f"This is a bug in gate '{gate.name}' or upstream pipeline."
+                    )
+                fork_row = PipelineRow(result.row, fork_contract)
+
                 # Create child tokens (ATOMIC: also records parent FORKED outcome)
                 child_tokens, _fork_group_id = token_manager.fork_token(
                     parent_token=token,
                     branches=list(action.destinations),
                     step_in_pipeline=step_in_pipeline,
                     run_id=ctx.run_id,
-                    row_data=result.row,
+                    row_data=fork_row,
                 )
 
-        except (MissingEdgeError, RuntimeError) as e:
+        except (MissingEdgeError, RuntimeError, ValueError) as e:
             # Record failure before re-raising - ensures node_state is never left OPEN
             routing_error: ExecutionError = {
                 "exception": str(e),
@@ -682,8 +701,26 @@ class GateExecutor:
             duration_ms=duration_ms,
         )
 
-        # Update token with new row data, preserving all lineage metadata
-        updated_token = token.with_updated_data(result.row)
+        # Update token with new PipelineRow, preserving all lineage metadata
+        # Use result.contract if provided, otherwise fallback to input contract
+        output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
+        if output_contract is None:
+            raise ValueError(
+                f"Cannot create PipelineRow: no contract available. "
+                f"GateResult.contract is None and input token has no contract. "
+                f"This is a bug in gate '{gate.name}' or upstream pipeline."
+            )
+        new_row = PipelineRow(result.row, output_contract)
+
+        # B2 fix: Log PipelineRow creation for observability
+        slog.debug(
+            "pipeline_row_created",
+            token_id=token.token_id,
+            gate=gate.name,
+            contract_mode=output_contract.mode,
+        )
+
+        updated_token = token.with_updated_data(new_row)
 
         return GateOutcome(
             result=result,
@@ -729,16 +766,22 @@ class GateExecutor:
             ValueError: If condition result doesn't match any route label
             RuntimeError: If fork destination without token_manager
         """
-        input_hash = stable_hash(token.row_data)
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
 
-        # Begin node state
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
         )
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        ctx.contract = token.row_data.contract
 
         # Create parser and evaluate condition
         # P2-2026-01-21: Pass token_id for accurate child token attribution in traces
@@ -752,7 +795,8 @@ class GateExecutor:
             start = time.perf_counter()
             try:
                 parser = ExpressionParser(gate_config.condition)
-                eval_result = parser.evaluate(token.row_data)
+                # ExpressionParser.evaluate() expects dict, not PipelineRow
+                eval_result = parser.evaluate(input_dict)
                 duration_ms = (time.perf_counter() - start) * 1000
             except Exception as e:
                 duration_ms = (time.perf_counter() - start) * 1000
@@ -870,12 +914,14 @@ class GateExecutor:
             raise
 
         # Create GateResult for audit fields
+        # Config gates don't modify data, so use input dict as output
         result = GateResult(
-            row=token.row_data,
+            row=input_dict,
             action=action,
+            contract=token.row_data.contract,  # Preserve contract reference
         )
         result.input_hash = input_hash
-        result.output_hash = stable_hash(token.row_data)
+        result.output_hash = stable_hash(input_dict)  # Same as input (no modification)
         result.duration_ms = duration_ms
 
         # Complete node state - always "completed" for successful execution
@@ -883,12 +929,12 @@ class GateExecutor:
         self._recorder.complete_node_state(
             state_id=state.state_id,
             status=NodeStateStatus.COMPLETED,
-            output_data=token.row_data,
+            output_data=input_dict,  # Landscape stores dict, not PipelineRow
             duration_ms=duration_ms,
         )
 
         # Token row_data is unchanged (config gates don't modify data)
-        # Use with_updated_data anyway to preserve all lineage metadata
+        # PipelineRow is already set on token, so just preserve it
         updated_token = token.with_updated_data(token.row_data)
 
         return GateOutcome(

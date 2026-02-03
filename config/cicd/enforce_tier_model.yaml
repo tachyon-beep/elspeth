@@ -1259,6 +1259,21 @@ allow_hits:
   reason: Configuration validation - checking if route label exists in route_resolution_map
   safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
   expires: null
+- key: engine/executors.py:R1:GateExecutor:execute_gate:fp=4107d16f9b5cfad7
+  owner: bugfix
+  reason: Configuration validation - checking if route label exists in route_resolution_map (line shift from PipelineRow migration)
+  safety: Returns None which is explicitly handled - raises MissingEdgeError with proper node_state completion
+  expires: null
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=d653bcd4e15d02a2
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
+  expires: '2026-05-02'
+- key: engine/executors.py:R5:GateExecutor:execute_config_gate:fp=e8e81319208e59ea
+  owner: architecture
+  reason: AST/type checking - ExpressionParser returns Any; must distinguish bool/str for route label conversion
+  safety: Code reviewed - legitimate pattern; else branch handles unexpected types via str() conversion
+  expires: '2026-05-02'
 - key: contracts/config/runtime.py:R5:_validate_int_field:fp=144b982455015cdd
   owner: bugfix
   reason: Tier-3 boundary - from_policy() validates plugin config (user YAML) before conversion
