@@ -75,6 +75,20 @@ class TestTracingConfigParsing:
         assert result.public_key is None
         assert result.secret_key is None
         assert result.host == "https://cloud.langfuse.com"  # Default: cloud
+        assert result.tracing_enabled is True  # v3: default enabled
+
+    def test_langfuse_tracing_enabled_field(self) -> None:
+        """LangfuseTracingConfig supports tracing_enabled field (v3)."""
+        config = {
+            "provider": "langfuse",
+            "public_key": "pk-xxx",
+            "secret_key": "sk-xxx",
+            "tracing_enabled": False,  # Explicitly disabled
+        }
+        result = parse_tracing_config(config)
+
+        assert isinstance(result, LangfuseTracingConfig)
+        assert result.tracing_enabled is False
 
     def test_unknown_provider_returns_base_config(self) -> None:
         """Unknown provider returns base TracingConfig."""

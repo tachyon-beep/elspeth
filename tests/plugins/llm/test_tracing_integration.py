@@ -5,11 +5,14 @@ These tests verify end-to-end tracing behavior by:
 1. Creating transforms with tracing configuration
 2. Mocking external SDKs (Langfuse, Azure Monitor)
 3. Verifying traces capture complete LLM call information
+
+Note: Tests updated for Langfuse SDK v3 (context manager pattern).
 """
 
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -58,30 +61,35 @@ def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:
 
 
 class TestLangfuseIntegration:
-    """Integration tests for Langfuse tracing."""
+    """Integration tests for Langfuse tracing (v3 API)."""
 
     @pytest.fixture
     def mock_langfuse_client(self) -> MagicMock:
-        """Create a mock Langfuse client that captures traces."""
-        captured_traces: list[dict[str, Any]] = []
-        captured_generations: list[dict[str, Any]] = []
+        """Create a mock Langfuse client that captures v3 observations.
+
+        v3 API uses start_as_current_observation() context manager for both
+        spans and generations, with update() to record outputs.
+        """
+        captured_observations: list[dict[str, Any]] = []
 
         mock_client = MagicMock()
 
-        def capture_trace(**kwargs: Any) -> MagicMock:
-            trace = MagicMock()
-            captured_traces.append(kwargs)
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            """Mock start_as_current_observation context manager."""
+            obs = MagicMock()
+            obs_record = {"kwargs": kwargs, "updates": []}
+            captured_observations.append(obs_record)
 
-            def capture_generation(**gen_kwargs: Any) -> MagicMock:
-                captured_generations.append(gen_kwargs)
-                return MagicMock()
+            def capture_update(**update_kwargs: Any) -> None:
+                obs_record["updates"].append(update_kwargs)
 
-            trace.generation = capture_generation
-            return trace
+            obs.update = capture_update
+            yield obs
 
-        mock_client.trace = capture_trace
-        mock_client.captured_traces = captured_traces
-        mock_client.captured_generations = captured_generations
+        mock_client.start_as_current_observation = mock_start_observation
+        mock_client.captured_observations = captured_observations
+        mock_client.flush = MagicMock()
 
         return mock_client
 
@@ -101,38 +109,44 @@ class TestLangfuseIntegration:
         transform._langfuse_client = mock_langfuse_client
         transform._tracing_active = True
 
-        # Create a trace and record a generation
-        with transform._create_langfuse_trace("token-123", {"name": "world"}) as trace:
-            assert trace is not None
-            # Simulate recording after LLM call
-            transform._record_langfuse_generation(
-                trace=trace,
-                prompt="Hello world",
-                response_content="Hi there!",
-                model="gpt-4",
-                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-                latency_ms=150.0,
-            )
+        # Create mock context
+        ctx = _make_mock_ctx()
 
-        # Verify trace was created with correct metadata
-        assert len(mock_langfuse_client.captured_traces) == 1
-        trace_kwargs = mock_langfuse_client.captured_traces[0]
-        assert trace_kwargs["name"] == "elspeth.azure_llm"
-        assert trace_kwargs["metadata"]["token_id"] == "token-123"
-        assert trace_kwargs["metadata"]["plugin"] == "azure_llm"
-        assert trace_kwargs["metadata"]["deployment"] == "gpt-4"
+        # Record a trace (v3 pattern - single method call after LLM response)
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="token-123",
+            prompt="Hello world",
+            response_content="Hi there!",
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            latency_ms=150.0,
+        )
 
-        # Verify generation was recorded with complete data
-        assert len(mock_langfuse_client.captured_generations) == 1
-        gen_kwargs = mock_langfuse_client.captured_generations[0]
+        # Verify observations were created (span + generation)
+        assert len(mock_langfuse_client.captured_observations) == 2
+
+        # First observation is the outer span
+        span_kwargs = mock_langfuse_client.captured_observations[0]["kwargs"]
+        assert span_kwargs["as_type"] == "span"
+        assert span_kwargs["name"] == "elspeth.azure_llm"
+        assert span_kwargs["metadata"]["token_id"] == "token-123"
+        assert span_kwargs["metadata"]["plugin"] == "azure_llm"
+        assert span_kwargs["metadata"]["deployment"] == "gpt-4"
+
+        # Second observation is the generation
+        gen_kwargs = mock_langfuse_client.captured_observations[1]["kwargs"]
+        assert gen_kwargs["as_type"] == "generation"
         assert gen_kwargs["name"] == "llm_call"
         assert gen_kwargs["model"] == "gpt-4"
-        assert gen_kwargs["input"] == "Hello world"
-        assert gen_kwargs["output"] == "Hi there!"
-        assert gen_kwargs["usage"]["input"] == 10
-        assert gen_kwargs["usage"]["output"] == 5
-        assert gen_kwargs["usage"]["total"] == 15
-        assert gen_kwargs["metadata"]["latency_ms"] == 150.0
+        assert gen_kwargs["input"] == [{"role": "user", "content": "Hello world"}]
+
+        # Verify update() was called with output and usage_details
+        gen_updates = mock_langfuse_client.captured_observations[1]["updates"]
+        assert len(gen_updates) == 1
+        assert gen_updates[0]["output"] == "Hi there!"
+        assert gen_updates[0]["usage_details"]["input"] == 10
+        assert gen_updates[0]["usage_details"]["output"] == 5
+        assert gen_updates[0]["metadata"]["latency_ms"] == 150.0
 
     def test_langfuse_captures_openrouter_call(self, mock_langfuse_client: MagicMock) -> None:
         """Langfuse captures OpenRouter HTTP call."""
@@ -150,32 +164,36 @@ class TestLangfuseIntegration:
         transform._langfuse_client = mock_langfuse_client
         transform._tracing_active = True
 
-        # Create a trace and record a generation
-        with transform._create_langfuse_trace("token-456", {"name": "test"}) as trace:
-            assert trace is not None
-            # Simulate recording after OpenRouter call
-            transform._record_langfuse_generation(
-                trace=trace,
-                prompt="Analyze this",
-                response_content="Analysis complete",
-                model="anthropic/claude-3-opus",
-                usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
-                latency_ms=250.0,
-            )
+        # Create mock context
+        ctx = _make_mock_ctx()
 
-        # Verify trace was created with OpenRouter-specific metadata
-        assert len(mock_langfuse_client.captured_traces) == 1
-        trace_kwargs = mock_langfuse_client.captured_traces[0]
-        assert trace_kwargs["name"] == "elspeth.openrouter_llm"
-        assert trace_kwargs["metadata"]["plugin"] == "openrouter_llm"
-        assert trace_kwargs["metadata"]["model"] == "anthropic/claude-3-opus"
+        # Record a trace (v3 pattern)
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="token-456",
+            prompt="Analyze this",
+            response_content="Analysis complete",
+            model="anthropic/claude-3-opus",
+            usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+            latency_ms=250.0,
+        )
 
-        # Verify generation captures OpenRouter response
-        assert len(mock_langfuse_client.captured_generations) == 1
-        gen_kwargs = mock_langfuse_client.captured_generations[0]
+        # Verify observations were created
+        assert len(mock_langfuse_client.captured_observations) == 2
+
+        # Span has OpenRouter-specific metadata
+        span_kwargs = mock_langfuse_client.captured_observations[0]["kwargs"]
+        assert span_kwargs["name"] == "elspeth.openrouter_llm"
+        assert span_kwargs["metadata"]["plugin"] == "openrouter_llm"
+        assert span_kwargs["metadata"]["model"] == "anthropic/claude-3-opus"
+
+        # Generation captures OpenRouter response
+        gen_kwargs = mock_langfuse_client.captured_observations[1]["kwargs"]
         assert gen_kwargs["model"] == "anthropic/claude-3-opus"
-        assert gen_kwargs["input"] == "Analyze this"
-        assert gen_kwargs["output"] == "Analysis complete"
+        assert gen_kwargs["input"] == [{"role": "user", "content": "Analyze this"}]
+
+        gen_updates = mock_langfuse_client.captured_observations[1]["updates"]
+        assert gen_updates[0]["output"] == "Analysis complete"
 
     def test_langfuse_client_created_on_start(self) -> None:
         """Langfuse client is created during on_start when config is valid."""
@@ -200,11 +218,12 @@ class TestLangfuseIntegration:
             ctx = _make_mock_ctx()
             transform.on_start(ctx)
 
-            # Verify client was created with correct parameters
+            # Verify client was created with correct parameters (v3 includes tracing_enabled)
             mock_langfuse_class.assert_called_once_with(
                 public_key="pk-test",
                 secret_key="sk-test",
                 host="https://custom.langfuse.com",
+                tracing_enabled=True,
             )
             assert transform._tracing_active is True
             assert transform._langfuse_client is mock_langfuse_instance
@@ -443,10 +462,6 @@ class TestTracingDisabled:
         assert transform._tracing_config is None
         assert transform._tracing_active is False
 
-        # Verify trace context returns None
-        with transform._create_langfuse_trace("token-123", {}) as trace:
-            assert trace is None
-
     def test_no_tracing_when_provider_is_none(self) -> None:
         """No tracing setup when provider is 'none'."""
         config = _make_azure_config(tracing={"provider": "none"})
@@ -460,23 +475,27 @@ class TestTracingDisabled:
 
         assert transform._tracing_active is False
 
-    def test_generation_not_recorded_when_trace_is_none(self) -> None:
-        """No generation recorded when trace is None."""
+    def test_record_trace_does_nothing_when_tracing_inactive(self) -> None:
+        """_record_langfuse_trace is a no-op when tracing is inactive."""
         config = _make_azure_config()
         transform = AzureLLMTransform(config)
 
-        # This should not raise any errors
-        transform._record_langfuse_generation(
-            trace=None,
+        ctx = _make_mock_ctx()
+
+        # This should not raise any errors (no-op when tracing inactive)
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
             prompt="test",
             response_content="response",
-            model="gpt-4",
+            usage=None,
+            latency_ms=None,
         )
         # If we get here without error, test passes
 
 
 class TestTracingMetadata:
-    """Tests for tracing metadata completeness."""
+    """Tests for tracing metadata completeness (v3 API)."""
 
     def test_trace_includes_token_id_for_correlation(self) -> None:
         """Trace includes token_id for correlation with Landscape audit trail."""
@@ -489,26 +508,37 @@ class TestTracingMetadata:
         )
         transform = AzureLLMTransform(config)
 
-        captured_traces: list[dict[str, Any]] = []
+        captured_observations: list[dict[str, Any]] = []
         mock_langfuse = MagicMock()
 
-        def capture_trace(**kwargs: Any) -> MagicMock:
-            captured_traces.append(kwargs)
-            return MagicMock()
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            obs = MagicMock()
+            obs.update = MagicMock()
+            captured_observations.append(kwargs)
+            yield obs
 
-        mock_langfuse.trace = capture_trace
+        mock_langfuse.start_as_current_observation = mock_start_observation
 
         transform._langfuse_client = mock_langfuse
         transform._tracing_active = True
 
-        with transform._create_langfuse_trace("token-abc-123", {"field": "value"}):
-            pass
+        ctx = _make_mock_ctx()
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="token-abc-123",
+            prompt="test",
+            response_content="response",
+            usage=None,
+            latency_ms=None,
+        )
 
-        assert len(captured_traces) == 1
-        assert captured_traces[0]["metadata"]["token_id"] == "token-abc-123"
+        # First observation is the span, which has token_id in metadata
+        assert len(captured_observations) >= 1
+        assert captured_observations[0]["metadata"]["token_id"] == "token-abc-123"
 
     def test_generation_includes_usage_metrics(self) -> None:
-        """Generation includes token usage for cost tracking."""
+        """Generation includes token usage for cost tracking (v3: usage_details)."""
         config = _make_azure_config(
             tracing={
                 "provider": "langfuse",
@@ -518,27 +548,35 @@ class TestTracingMetadata:
         )
         transform = AzureLLMTransform(config)
 
-        captured_generations: list[dict[str, Any]] = []
-        mock_trace = MagicMock()
-        mock_trace.generation = lambda **kwargs: captured_generations.append(kwargs)
+        captured_updates: list[dict[str, Any]] = []
 
-        transform._langfuse_client = MagicMock()
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            obs = MagicMock()
+            obs.update = lambda **uk: captured_updates.append(uk)
+            yield obs
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.start_as_current_observation = mock_start_observation
+
+        transform._langfuse_client = mock_langfuse
         transform._tracing_active = True
 
-        transform._record_langfuse_generation(
-            trace=mock_trace,
+        ctx = _make_mock_ctx()
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
             prompt="test prompt",
             response_content="test response",
-            model="gpt-4",
             usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
             latency_ms=500.0,
         )
 
-        assert len(captured_generations) == 1
-        usage = captured_generations[0]["usage"]
-        assert usage["input"] == 100
-        assert usage["output"] == 50
-        assert usage["total"] == 150
+        # Find the update call with usage_details (from the generation observation)
+        usage_update = next((u for u in captured_updates if "usage_details" in u), None)
+        assert usage_update is not None
+        assert usage_update["usage_details"]["input"] == 100
+        assert usage_update["usage_details"]["output"] == 50
 
     def test_generation_includes_latency(self) -> None:
         """Generation includes latency for performance monitoring."""
@@ -551,20 +589,32 @@ class TestTracingMetadata:
         )
         transform = OpenRouterLLMTransform(config)
 
-        captured_generations: list[dict[str, Any]] = []
-        mock_trace = MagicMock()
-        mock_trace.generation = lambda **kwargs: captured_generations.append(kwargs)
+        captured_updates: list[dict[str, Any]] = []
 
-        transform._langfuse_client = MagicMock()
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            obs = MagicMock()
+            obs.update = lambda **uk: captured_updates.append(uk)
+            yield obs
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.start_as_current_observation = mock_start_observation
+
+        transform._langfuse_client = mock_langfuse
         transform._tracing_active = True
 
-        transform._record_langfuse_generation(
-            trace=mock_trace,
+        ctx = _make_mock_ctx()
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
             prompt="test",
             response_content="response",
             model="anthropic/claude-3-opus",
+            usage=None,
             latency_ms=1234.5,
         )
 
-        assert len(captured_generations) == 1
-        assert captured_generations[0]["metadata"]["latency_ms"] == 1234.5
+        # Find the update call with metadata (from the generation observation)
+        metadata_update = next((u for u in captured_updates if "metadata" in u), None)
+        assert metadata_update is not None
+        assert metadata_update["metadata"]["latency_ms"] == 1234.5

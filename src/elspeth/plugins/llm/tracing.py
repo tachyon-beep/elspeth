@@ -94,12 +94,14 @@ class LangfuseTracingConfig(TracingConfig):
         public_key: Langfuse public API key (REQUIRED - use ${LANGFUSE_PUBLIC_KEY})
         secret_key: Langfuse secret API key (REQUIRED - use ${LANGFUSE_SECRET_KEY})
         host: Langfuse host URL (default: cloud.langfuse.com)
+        tracing_enabled: Whether tracing is enabled (v3 parameter, default: True)
     """
 
     provider: str = "langfuse"
     public_key: str | None = None
     secret_key: str | None = None
     host: str = "https://cloud.langfuse.com"
+    tracing_enabled: bool = True
 
 
 def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
@@ -136,6 +138,7 @@ def parse_tracing_config(config: dict[str, Any] | None) -> TracingConfig | None:
                 public_key=config.get("public_key"),
                 secret_key=config.get("secret_key"),
                 host=config.get("host", "https://cloud.langfuse.com"),
+                tracing_enabled=config.get("tracing_enabled", True),
             )
         case _:
             return TracingConfig(provider=provider)

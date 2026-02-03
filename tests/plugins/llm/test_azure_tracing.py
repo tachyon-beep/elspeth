@@ -1,6 +1,10 @@
 # tests/plugins/llm/test_azure_tracing.py
-"""Tests for Tier 2 tracing in AzureLLMTransform."""
+"""Tests for Tier 2 tracing in AzureLLMTransform.
 
+Note: Tests updated for Langfuse SDK v3 (context manager pattern).
+"""
+
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -169,11 +173,21 @@ class TestAzureLLMTransformTracing:
             assert transform._langfuse_client is mock_langfuse_instance
 
 
-class TestLangfuseSpanCreation:
-    """Tests for Langfuse span creation around LLM calls."""
+def _make_mock_ctx(run_id: str = "test-run") -> MagicMock:
+    """Create a mock PluginContext."""
+    ctx = MagicMock()
+    ctx.landscape = MagicMock()
+    ctx.run_id = run_id
+    ctx.telemetry_emit = lambda x: None
+    ctx.rate_limit_registry = None
+    return ctx
 
-    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock]:
-        """Create transform with mocked Langfuse client."""
+
+class TestLangfuseSpanCreation:
+    """Tests for Langfuse span creation around LLM calls (v3 API)."""
+
+    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
+        """Create transform with mocked Langfuse client (v3 pattern)."""
         config = _make_base_config()
         config["tracing"] = {
             "provider": "langfuse",
@@ -182,56 +196,88 @@ class TestLangfuseSpanCreation:
         }
         transform = AzureLLMTransform(config)
 
-        # Mock Langfuse client
+        captured_observations: list[dict[str, Any]] = []
+
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            obs = MagicMock()
+            obs_record = {"kwargs": kwargs, "updates": []}
+            captured_observations.append(obs_record)
+            obs.update = lambda **uk: obs_record["updates"].append(uk)
+            yield obs
+
         mock_langfuse = MagicMock()
-        mock_trace = MagicMock()
-        mock_langfuse.trace.return_value = mock_trace
+        mock_langfuse.start_as_current_observation = mock_start_observation
+        mock_langfuse.flush = MagicMock()
 
         transform._langfuse_client = mock_langfuse
         transform._tracing_active = True
 
-        return transform, mock_langfuse
+        return transform, mock_langfuse, captured_observations
 
     def test_langfuse_trace_created_for_llm_call(self) -> None:
-        """Langfuse trace is created when making LLM call."""
-        transform, mock_langfuse = self._create_transform_with_langfuse()
+        """Langfuse trace is created when making LLM call (v3: span + generation)."""
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
 
-        # Simulate an LLM call with tracing
-        with transform._create_langfuse_trace("test-token", {"name": "world"}) as trace:
-            assert trace is not None
+        ctx = _make_mock_ctx()
 
-        # Verify trace was created
-        mock_langfuse.trace.assert_called_once()
-
-    def test_langfuse_generation_records_input_output(self) -> None:
-        """Langfuse generation records prompt and response."""
-        transform, _mock_langfuse = self._create_transform_with_langfuse()
-
-        mock_trace = MagicMock()
-
-        # Record a generation
-        transform._record_langfuse_generation(
-            trace=mock_trace,
+        # Record trace (v3 pattern - single method call)
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
             prompt="Hello world",
             response_content="Hi there!",
-            model="gpt-4",
+            usage=None,
+            latency_ms=None,
+        )
+
+        # Verify observations were created (span + generation)
+        assert len(captured_observations) == 2
+        assert captured_observations[0]["kwargs"]["as_type"] == "span"
+        assert captured_observations[1]["kwargs"]["as_type"] == "generation"
+
+    def test_langfuse_generation_records_input_output(self) -> None:
+        """Langfuse generation records prompt and response via update()."""
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
+
+        ctx = _make_mock_ctx()
+
+        # Record a trace
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
+            prompt="Hello world",
+            response_content="Hi there!",
             usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             latency_ms=150.0,
         )
 
-        # Verify generation was recorded with correct data
-        mock_trace.generation.assert_called_once()
-        call_kwargs = mock_trace.generation.call_args.kwargs
-        assert call_kwargs["input"] == "Hello world"
-        assert call_kwargs["output"] == "Hi there!"
-        assert call_kwargs["model"] == "gpt-4"
-        assert call_kwargs["usage"]["input"] == 10
-        assert call_kwargs["usage"]["output"] == 5
+        # Verify generation was recorded with correct data via update()
+        gen_record = captured_observations[1]  # Second observation is generation
+        assert gen_record["kwargs"]["input"] == [{"role": "user", "content": "Hello world"}]
+        assert gen_record["kwargs"]["model"] == "gpt-4"
+
+        # Check update() was called with output and usage_details
+        assert len(gen_record["updates"]) == 1
+        assert gen_record["updates"][0]["output"] == "Hi there!"
+        assert gen_record["updates"][0]["usage_details"]["input"] == 10
+        assert gen_record["updates"][0]["usage_details"]["output"] == 5
 
     def test_no_trace_when_tracing_not_active(self) -> None:
         """No trace created when tracing is not active."""
         config = _make_base_config()
         transform = AzureLLMTransform(config)
 
-        with transform._create_langfuse_trace("test-token", {}) as trace:
-            assert trace is None
+        ctx = _make_mock_ctx()
+
+        # This should be a no-op (no error, no trace)
+        transform._record_langfuse_trace(
+            ctx=ctx,
+            token_id="test-token",
+            prompt="test",
+            response_content="response",
+            usage=None,
+            latency_ms=None,
+        )
+        # If we get here without error and _langfuse_client is None, test passes
+        assert transform._langfuse_client is None

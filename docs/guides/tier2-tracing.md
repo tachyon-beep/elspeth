@@ -2,6 +2,14 @@
 
 Tier 2 tracing provides deep LLM observability beyond the framework's Tier 1 telemetry. While Tier 1 captures latency, status, and content hashes for ALL external calls, Tier 2 captures full prompts, responses, and token-level metrics for LLM calls specifically.
 
+> **Langfuse SDK v3.12+ Required** (as of ELSPETH RC-2)
+>
+> ELSPETH now uses Langfuse SDK v3 which is built on OpenTelemetry standards. If you're upgrading from an earlier ELSPETH version with Langfuse v2, update your SDK:
+> ```bash
+> uv pip install 'langfuse>=3.12,<4'
+> ```
+> No configuration changes are required - the migration is internal to ELSPETH.
+
 ## Overview
 
 ELSPETH has two independent telemetry tiers:
@@ -114,14 +122,17 @@ transforms:
         public_key: ${LANGFUSE_PUBLIC_KEY}
         secret_key: ${LANGFUSE_SECRET_KEY}
         host: https://cloud.langfuse.com  # Default, or self-hosted URL
+        tracing_enabled: true  # v3: Can be disabled per-plugin (default: true)
 ```
 
 ### Required Dependency
 
 ```bash
 uv pip install elspeth[tracing-langfuse]
-# Or manually: uv pip install langfuse
+# Or manually: uv pip install 'langfuse>=3.12,<4'
 ```
+
+> **Note:** Langfuse SDK v3.12+ is required. This version uses OpenTelemetry-based context managers for trace lifecycle management and is thread-safe for concurrent pipeline execution.
 
 ### Langfuse Credentials
 
@@ -161,6 +172,19 @@ Unlike Azure AI auto-instrumentation:
 - **Works with any plugin:** HTTP-based manual instrumentation, not SDK-dependent
 - **Self-hosted option:** Keep data on-premises if required
 - **LLM-specific features:** Prompt versioning, A/B testing, evaluation scores
+- **Thread-safe:** Uses OpenTelemetry thread-local context (safe for concurrent pipelines)
+
+### Langfuse v3 Behavioral Note
+
+In Langfuse SDK v3, traces are recorded **after** a successful LLM call, not wrapped around the call. This means:
+
+- **LLM call succeeds:** Trace is created with full prompt, response, and usage
+- **LLM call fails:** No trace is created in Langfuse
+
+This is acceptable because:
+1. Failed LLM calls are always recorded in the Landscape audit trail (source of truth)
+2. Telemetry events are still emitted for operational visibility
+3. Tier 2 tracing is for prompt engineering and cost tracking, not failure investigation
 
 ## Using Both Tiers Together
 
@@ -431,11 +455,13 @@ echo $APPLICATIONINSIGHTS_CONNECTION_STRING
 Tier 2 traces include `token_id` in metadata for correlation. To link a Langfuse trace to Landscape:
 
 1. Find the trace in Langfuse
-2. Note the `token_id` from trace metadata
+2. Look in the span metadata for `token_id` (Langfuse v3 uses W3C Trace Context IDs, not custom observation IDs)
 3. Query Landscape:
    ```bash
    elspeth explain --run <run_id> --token <token_id>
    ```
+
+**Note on Langfuse v3:** The SDK now uses W3C Trace Context compliant IDs. Custom observation IDs are no longer supported. Use `metadata.token_id` for correlation with the ELSPETH Landscape audit trail.
 
 ### High Latency from Tracing
 

@@ -7,8 +7,7 @@ Uses BatchTransformMixin for concurrent row processing with FIFO output ordering
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -275,10 +274,10 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 pass  # No tracing
 
     def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing.
+        """Initialize Langfuse tracing (v3 API).
 
-        Langfuse requires manual span creation around LLM calls.
-        The Langfuse client is stored for use in _process_row().
+        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
+        The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
             from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
@@ -291,13 +290,15 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 public_key=cfg.public_key,
                 secret_key=cfg.secret_key,
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
             self._tracing_active = True
 
             logger.info(
-                "Langfuse tracing initialized",
+                "Langfuse tracing initialized (v3)",
                 provider="langfuse",
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
 
         except ImportError:
@@ -307,89 +308,78 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 hint="Install with: uv pip install elspeth[tracing-langfuse]",
             )
 
-    @contextmanager
-    def _create_langfuse_trace(
+    def _record_langfuse_trace(
         self,
+        ctx: PluginContext,
         token_id: str,
-        row_data: dict[str, Any],
-    ) -> Generator[Any, None, None]:
-        """Create a Langfuse trace context for an LLM call.
-
-        Args:
-            token_id: Token ID for correlation
-            row_data: Input row data (for metadata)
-
-        Yields:
-            Langfuse trace object, or None if tracing not active
-
-        Example:
-            with self._create_langfuse_trace(token_id, row) as trace:
-                response = self._call_llm(...)
-                if trace:
-                    self._record_langfuse_generation(trace, prompt, response, ...)
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            yield None
-            return
-
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            yield None
-            return
-
-        trace = self._langfuse_client.trace(
-            name=f"elspeth.{self.name}",
-            metadata={
-                "token_id": token_id,
-                "plugin": self.name,
-                "model": self._model,
-            },
-        )
-        try:
-            yield trace
-        finally:
-            # Trace auto-closes, but we ensure it's ended
-            pass
-
-    def _record_langfuse_generation(
-        self,
-        trace: Any,
         prompt: str,
         response_content: str,
         model: str,
-        usage: dict[str, int] | None = None,
-        latency_ms: float | None = None,
+        usage: dict[str, int] | None,
+        latency_ms: float | None,
     ) -> None:
-        """Record an LLM generation in Langfuse.
+        """Record LLM call to Langfuse using v3 nested context managers.
+
+        Langfuse v3 uses OpenTelemetry-based context managers. The span and generation
+        are created with start_as_current_observation() and auto-close on exit.
 
         Args:
-            trace: Langfuse trace object from _create_langfuse_trace
+            ctx: Plugin context for telemetry emission
+            token_id: Token ID for correlation
             prompt: The prompt sent to the LLM
             response_content: The response received
             model: Model name
             usage: Token usage dict with prompt_tokens/completion_tokens
             latency_ms: Call latency in milliseconds
         """
-        if trace is None:
+        if not self._tracing_active or self._langfuse_client is None:
+            return
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
             return
 
-        generation_kwargs: dict[str, Any] = {
-            "name": "llm_call",
-            "model": model,
-            "input": prompt,
-            "output": response_content,
-        }
+        try:
+            with (
+                self._langfuse_client.start_as_current_observation(
+                    as_type="span",
+                    name=f"elspeth.{self.name}",
+                    metadata={"token_id": token_id, "plugin": self.name, "model": model},
+                ),
+                self._langfuse_client.start_as_current_observation(
+                    as_type="generation",
+                    name="llm_call",
+                    model=model,
+                    input=[{"role": "user", "content": prompt}],
+                ) as generation,
+            ):
+                update_kwargs: dict[str, Any] = {"output": response_content}
 
-        if usage:
-            generation_kwargs["usage"] = {
-                "input": usage.get("prompt_tokens", 0),
-                "output": usage.get("completion_tokens", 0),
-                "total": usage.get("total_tokens", 0),
-            }
+                if usage:
+                    # Validate types at external boundary (Tier 3 data from LLM API)
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+                        update_kwargs["usage_details"] = {
+                            "input": prompt_tokens,
+                            "output": completion_tokens,
+                        }
 
-        if latency_ms is not None:
-            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+                if latency_ms is not None:
+                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
 
-        trace.generation(**generation_kwargs)
+                generation.update(**update_kwargs)
+        except Exception as e:
+            # No Silent Failures: emit telemetry event for trace failure
+            ctx.telemetry_emit(
+                {
+                    "event": "langfuse_trace_failed",
+                    "plugin": self.name,
+                    "error": str(e),
+                }
+            )
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning("Failed to record Langfuse trace", error=str(e))
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -480,82 +470,81 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
             http_client = self._get_http_client(ctx.state_id)
 
-            # 4. Call OpenRouter API with Tier 2 tracing (EXTERNAL - wrap)
+            # 4. Call OpenRouter API (EXTERNAL - wrap)
             token_id = ctx.token.token_id if ctx.token else "unknown"
             start_time = time.monotonic()
 
-            with self._create_langfuse_trace(token_id, row) as trace:
-                try:
-                    response = http_client.post(
-                        "/chat/completions",
-                        json=request_body,
-                        headers={"Content-Type": "application/json"},
-                    )
-                    response.raise_for_status()
-                except httpx.HTTPStatusError as e:
-                    # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
-                    # Matching Azure pattern: non-retryable errors return TransformResult.error()
-                    status_code = e.response.status_code
-                    if status_code == 429:
-                        raise RateLimitError(f"Rate limited: {e}") from e
-                    elif status_code >= 500:
-                        raise ServerError(f"Server error ({status_code}): {e}") from e
-                    # Non-retryable HTTP errors (4xx except 429) return error result
+            try:
+                response = http_client.post(
+                    "/chat/completions",
+                    json=request_body,
+                    headers={"Content-Type": "application/json"},
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
+                # Matching Azure pattern: non-retryable errors return TransformResult.error()
+                status_code = e.response.status_code
+                if status_code == 429:
+                    raise RateLimitError(f"Rate limited: {e}") from e
+                elif status_code >= 500:
+                    raise ServerError(f"Server error ({status_code}): {e}") from e
+                # Non-retryable HTTP errors (4xx except 429) return error result
+                return TransformResult.error(
+                    {"reason": "api_call_failed", "error": str(e), "status_code": status_code},
+                    retryable=False,
+                )
+            except httpx.RequestError as e:
+                # Network errors (timeout, connection refused) are retryable
+                raise NetworkError(f"Network error: {e}") from e
+
+            # 5. Parse JSON response (EXTERNAL DATA - wrap)
+            try:
+                data = response.json()
+            except (ValueError, TypeError) as e:
+                error_reason_json: TransformErrorReason = {
+                    "reason": "invalid_json_response",
+                    "error": f"Response is not valid JSON: {e}",
+                    "content_type": response.headers.get("content-type", "unknown"),
+                }
+                if response.text:
+                    error_reason_json["body_preview"] = response.text[:500]
+                return TransformResult.error(error_reason_json, retryable=False)
+
+            # 6. Extract content from response (EXTERNAL DATA - wrap)
+            try:
+                choices = data["choices"]
+                if not choices:
                     return TransformResult.error(
-                        {"reason": "api_call_failed", "error": str(e), "status_code": status_code},
+                        {"reason": "empty_choices", "response": data},
                         retryable=False,
                     )
-                except httpx.RequestError as e:
-                    # Network errors (timeout, connection refused) are retryable
-                    raise NetworkError(f"Network error: {e}") from e
+                content = choices[0]["message"]["content"]
+            except (KeyError, IndexError, TypeError) as e:
+                return TransformResult.error(
+                    {
+                        "reason": "malformed_response",
+                        "error": f"{type(e).__name__}: {e}",
+                        "response_keys": list(data.keys()) if isinstance(data, dict) else None,
+                    },
+                    retryable=False,
+                )
 
-                # 5. Parse JSON response (EXTERNAL DATA - wrap)
-                try:
-                    data = response.json()
-                except (ValueError, TypeError) as e:
-                    error_reason_json: TransformErrorReason = {
-                        "reason": "invalid_json_response",
-                        "error": f"Response is not valid JSON: {e}",
-                        "content_type": response.headers.get("content-type", "unknown"),
-                    }
-                    if response.text:
-                        error_reason_json["body_preview"] = response.text[:500]
-                    return TransformResult.error(error_reason_json, retryable=False)
+            # OpenRouter can return {"usage": null} or omit usage entirely.
+            # Use `or {}` to handle both missing AND null cases.
+            usage = data.get("usage") or {}
 
-                # 6. Extract content from response (EXTERNAL DATA - wrap)
-                try:
-                    choices = data["choices"]
-                    if not choices:
-                        return TransformResult.error(
-                            {"reason": "empty_choices", "response": data},
-                            retryable=False,
-                        )
-                    content = choices[0]["message"]["content"]
-                except (KeyError, IndexError, TypeError) as e:
-                    return TransformResult.error(
-                        {
-                            "reason": "malformed_response",
-                            "error": f"{type(e).__name__}: {e}",
-                            "response_keys": list(data.keys()) if isinstance(data, dict) else None,
-                        },
-                        retryable=False,
-                    )
-
-                # OpenRouter can return {"usage": null} or omit usage entirely.
-                # Use `or {}` to handle both missing AND null cases.
-                usage = data.get("usage") or {}
-
-                # Record in Langfuse if tracing is active
-                if trace is not None:
-                    latency_ms = (time.monotonic() - start_time) * 1000
-                    self._record_langfuse_generation(
-                        trace=trace,
-                        prompt=rendered.prompt,
-                        response_content=content,
-                        model=data.get("model", self._model),
-                        usage=usage,
-                        latency_ms=latency_ms,
-                    )
+            # Record in Langfuse using v3 nested context managers (after successful call)
+            latency_ms = (time.monotonic() - start_time) * 1000
+            self._record_langfuse_trace(
+                ctx=ctx,
+                token_id=token_id,
+                prompt=rendered.prompt,
+                response_content=content,
+                model=data.get("model", self._model),
+                usage=usage,
+                latency_ms=latency_ms,
+            )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
             output = dict(row)

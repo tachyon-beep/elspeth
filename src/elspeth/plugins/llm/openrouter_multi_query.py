@@ -15,8 +15,7 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -446,10 +445,10 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 pass  # No tracing
 
     def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing.
+        """Initialize Langfuse tracing (v3 API).
 
-        Langfuse requires manual span creation around LLM calls.
-        The Langfuse client is stored for use in _process_single_query().
+        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
+        The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
             from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
@@ -462,13 +461,15 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 public_key=cfg.public_key,
                 secret_key=cfg.secret_key,
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
             self._tracing_active = True
 
             logger.info(
-                "Langfuse tracing initialized",
+                "Langfuse tracing initialized (v3)",
                 provider="langfuse",
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
 
         except ImportError:
@@ -478,94 +479,78 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 hint="Install with: uv pip install elspeth[tracing-langfuse]",
             )
 
-    @contextmanager
-    def _create_langfuse_trace(
+    def _record_langfuse_trace(
         self,
         token_id: str,
-        row_data: dict[str, Any],
-    ) -> Generator[Any, None, None]:
-        """Create a Langfuse trace context for a row's LLM calls.
-
-        For multi-query transforms, we trace at the row level since each row
-        triggers multiple queries. Individual query timing is captured in
-        the pool_context metadata.
-
-        Args:
-            token_id: Token ID for correlation
-            row_data: Input row data (for metadata)
-
-        Yields:
-            Langfuse trace object, or None if tracing not active
-        """
-        if not self._tracing_active or self._langfuse_client is None:
-            yield None
-            return
-
-        if not isinstance(self._tracing_config, LangfuseTracingConfig):
-            yield None
-            return
-
-        trace = self._langfuse_client.trace(
-            name=f"elspeth.{self.name}",
-            metadata={
-                "token_id": token_id,
-                "plugin": self.name,
-                "model": self._model,
-                "query_count": len(self._query_specs),
-            },
-        )
-        try:
-            yield trace
-        finally:
-            # Trace auto-closes, but we ensure it's ended
-            pass
-
-    def _record_langfuse_generation(
-        self,
-        trace: Any,
         query_count: int,
         succeeded_count: int,
         total_usage: dict[str, int] | None = None,
         latency_ms: float | None = None,
     ) -> None:
-        """Record multi-query execution summary in Langfuse.
+        """Record multi-query execution summary in Langfuse using v3 nested context managers.
 
         For multi-query transforms, we record aggregate metrics since
         individual query details are in the audit trail.
 
         Args:
-            trace: Langfuse trace object from _create_langfuse_trace
+            token_id: Token ID for correlation
             query_count: Total number of queries executed
             succeeded_count: Number of successful queries
             total_usage: Aggregated token usage across all queries
             latency_ms: Total row processing latency in milliseconds
         """
-        if trace is None:
+        if not self._tracing_active or self._langfuse_client is None:
+            return
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
             return
 
-        generation_kwargs: dict[str, Any] = {
-            "name": "multi_query_batch",
-            "model": self._model,
-            "input": f"{query_count} queries",
-            "output": f"{succeeded_count}/{query_count} succeeded",
-        }
+        try:
+            with (
+                self._langfuse_client.start_as_current_observation(
+                    as_type="span",
+                    name=f"elspeth.{self.name}",
+                    metadata={
+                        "token_id": token_id,
+                        "plugin": self.name,
+                        "model": self._model,
+                        "query_count": query_count,
+                    },
+                ),
+                self._langfuse_client.start_as_current_observation(
+                    as_type="generation",
+                    name="multi_query_batch",
+                    model=self._model,
+                    input=[{"role": "user", "content": f"{query_count} queries"}],
+                ) as generation,
+            ):
+                update_kwargs: dict[str, Any] = {
+                    "output": f"{succeeded_count}/{query_count} succeeded",
+                }
 
-        if total_usage:
-            generation_kwargs["usage"] = {
-                "input": total_usage.get("prompt_tokens", 0),
-                "output": total_usage.get("completion_tokens", 0),
-                "total": total_usage.get("total_tokens", 0),
-            }
+                if total_usage:
+                    # Validate types at external boundary
+                    prompt_tokens = total_usage.get("prompt_tokens", 0)
+                    completion_tokens = total_usage.get("completion_tokens", 0)
+                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+                        update_kwargs["usage_details"] = {
+                            "input": prompt_tokens,
+                            "output": completion_tokens,
+                        }
 
-        metadata: dict[str, Any] = {
-            "query_count": query_count,
-            "succeeded_count": succeeded_count,
-        }
-        if latency_ms is not None:
-            metadata["latency_ms"] = latency_ms
-        generation_kwargs["metadata"] = metadata
+                metadata: dict[str, Any] = {
+                    "query_count": query_count,
+                    "succeeded_count": succeeded_count,
+                }
+                if latency_ms is not None:
+                    metadata["latency_ms"] = latency_ms
+                update_kwargs["metadata"] = metadata
 
-        trace.generation(**generation_kwargs)
+                generation.update(**update_kwargs)
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning("Failed to record Langfuse trace", error=str(e))
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -957,26 +942,24 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         start_time = time.monotonic()
 
         try:
-            with self._create_langfuse_trace(token_id, row) as trace:
-                result = self._process_single_row_internal(row, ctx.state_id)
+            result = self._process_single_row_internal(row, ctx.state_id)
 
-                # Record in Langfuse if tracing is active
-                if trace is not None:
-                    latency_ms = (time.monotonic() - start_time) * 1000
-                    # Count successes - if result is successful, all queries succeeded
-                    if result.status == "success":
-                        succeeded = len(self._query_specs)
-                    else:
-                        # Parse succeeded_count from error reason if available
-                        succeeded = result.reason.get("succeeded_count", 0) if result.reason else 0
-                    self._record_langfuse_generation(
-                        trace=trace,
-                        query_count=len(self._query_specs),
-                        succeeded_count=succeeded,
-                        latency_ms=latency_ms,
-                    )
+            # Record in Langfuse using v3 nested context managers (after processing)
+            latency_ms = (time.monotonic() - start_time) * 1000
+            # Count successes - if result is successful, all queries succeeded
+            if result.status == "success":
+                succeeded = len(self._query_specs)
+            else:
+                # Parse succeeded_count from error reason if available
+                succeeded = result.reason.get("succeeded_count", 0) if result.reason else 0
+            self._record_langfuse_trace(
+                token_id=token_id,
+                query_count=len(self._query_specs),
+                succeeded_count=succeeded,
+                latency_ms=latency_ms,
+            )
 
-                return result
+            return result
         finally:
             # Clean up cached clients for this state_id
             with self._http_clients_lock:

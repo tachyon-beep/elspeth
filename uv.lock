@@ -732,8 +732,8 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1,<4" },
     { name = "jinja2", marker = "extra == 'azure'", specifier = ">=3.1,<4" },
     { name = "jinja2", marker = "extra == 'llm'", specifier = ">=3.1,<4" },
-    { name = "langfuse", marker = "extra == 'all'", specifier = ">=2.50,<3" },
-    { name = "langfuse", marker = "extra == 'tracing-langfuse'", specifier = ">=2.50,<3" },
+    { name = "langfuse", marker = "extra == 'all'", specifier = ">=3.12,<4" },
+    { name = "langfuse", marker = "extra == 'tracing-langfuse'", specifier = ">=3.12,<4" },
     { name = "litellm", marker = "extra == 'all'", specifier = ">=1.81,<2" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.81,<2" },
     { name = "mcp", marker = "extra == 'all'", specifier = ">=1.0,<2" },
@@ -1306,21 +1306,23 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "2.60.10"
+version = "3.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
     { name = "backoff" },
     { name = "httpx" },
-    { name = "idna" },
+    { name = "openai" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
     { name = "packaging" },
     { name = "pydantic" },
     { name = "requests" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/45/77fdf53c9e9f49bb78f72eba3f992f2f3d8343e05976aabfe1fca276a640/langfuse-2.60.10.tar.gz", hash = "sha256:a26d0d927a28ee01b2d12bb5b862590b643cc4e60a28de6e2b0c2cfff5dbfc6a", size = 152648, upload-time = "2025-09-16T15:08:12.426Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/87/c28a09b696a1b908cf59b201d01e69066aeab804163d8dba055811790ed5/langfuse-3.12.1.tar.gz", hash = "sha256:da3bf4c0469eab4305f88a63cbb5ef89cf7542abbbcc9136a35c1bc708810520", size = 232768, upload-time = "2026-01-27T06:11:24.648Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/69/08584fbd69e14398d3932a77d0c8d7e20389da3e6470210d6719afba2801/langfuse-2.60.10-py3-none-any.whl", hash = "sha256:815c6369194aa5b2a24f88eb9952f7c3fc863272c41e90642a71f3bc76f4a11f", size = 275568, upload-time = "2025-09-16T15:08:10.166Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/51/a5752417d704831f8c9fc4d7ec070342dee21d781d92e6fe937e60912e61/langfuse-3.12.1-py3-none-any.whl", hash = "sha256:ccf091ed6b6e0d9d4dbc95ad5cbb0f60c4452ce95b18c114ed5896f4546af38f", size = 416999, upload-time = "2026-01-27T06:11:22.657Z" },
 ]
 
 [[package]]
