@@ -669,9 +669,9 @@ class TestTelemetryPartialStatus:
         mock_settings.retry.max_delay_seconds = 60.0
         mock_settings.retry.exponential_base = 2.0
 
-        # Patch _export_landscape to raise an exception
+        # Patch export_landscape module function to raise an exception
         with (
-            patch.object(orchestrator, "_export_landscape", side_effect=RuntimeError("Simulated export failure")),
+            patch("elspeth.engine.orchestrator.core.export_landscape", side_effect=RuntimeError("Simulated export failure")),
             pytest.raises(RuntimeError, match="Simulated export failure"),
         ):
             orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings, payload_store=payload_store)

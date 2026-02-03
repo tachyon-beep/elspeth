@@ -1,5 +1,5 @@
-# src/elspeth/engine/orchestrator.py
-"""Orchestrator: Full run lifecycle management.
+# src/elspeth/engine/orchestrator/core.py
+"""Core Orchestrator class for pipeline execution.
 
 Coordinates:
 - Run initialization
@@ -8,6 +8,12 @@ Coordinates:
 - Sink writing
 - Run completion
 - Post-run audit export (when configured)
+
+The Orchestrator is the main entry point for running ELSPETH pipelines.
+It delegates to focused helper modules for:
+- Validation: Route and sink validation (validation.py)
+- Export: Landscape export functionality (export.py)
+- Aggregation: Timeout and flush handling (aggregation.py)
 """
 
 from __future__ import annotations
@@ -49,15 +55,14 @@ from elspeth.contracts.types import (
     SinkName,
 )
 from elspeth.core.canonical import stable_hash
-from elspeth.core.config import AggregationSettings, GateSettings
+from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.operations import track_operation
 
-# Import aggregation functions (extracted from this module)
+# Import module functions from orchestrator submodules
 from elspeth.engine.orchestrator.aggregation import (
     check_aggregation_timeouts,
-    find_aggregation_transform,
     flush_remaining_aggregation_buffers,
     handle_incomplete_batches,
 )
@@ -65,10 +70,7 @@ from elspeth.engine.orchestrator.export import (
     export_landscape,
     reconstruct_schema_from_json,
 )
-
-# Import types from new location (refactoring in progress)
 from elspeth.engine.orchestrator.types import (
-    AggregationFlushResult,
     PipelineConfig,
     RouteValidationError,
     RowPlugin,
@@ -258,45 +260,6 @@ class Orchestrator:
         if cleanup_errors:
             error_summary = "; ".join(f"{name}: {type(e).__name__}: {e}" for name, e in cleanup_errors)
             raise RuntimeError(f"Plugin cleanup failed for {len(cleanup_errors)} transform(s): {error_summary}")
-
-    def _validate_route_destinations(
-        self,
-        route_resolution_map: dict[tuple[NodeID, str], str],
-        available_sinks: set[str],
-        transform_id_map: dict[int, NodeID],
-        transforms: list[RowPlugin],
-        config_gate_id_map: dict[GateName, NodeID] | None = None,
-        config_gates: list[GateSettings] | None = None,
-    ) -> None:
-        """Delegate to validation module."""
-        validate_route_destinations(
-            route_resolution_map,
-            available_sinks,
-            transform_id_map,
-            transforms,
-            config_gate_id_map,
-            config_gates,
-        )
-
-    def _validate_transform_error_sinks(
-        self,
-        transforms: list[RowPlugin],
-        available_sinks: set[str],
-        _transform_id_map: dict[int, NodeID],
-    ) -> None:
-        """Delegate to validation module.
-
-        Note: _transform_id_map is kept for API consistency but intentionally unused.
-        """
-        validate_transform_error_sinks(transforms, available_sinks)
-
-    def _validate_source_quarantine_destination(
-        self,
-        source: SourceProtocol,
-        available_sinks: set[str],
-    ) -> None:
-        """Delegate to validation module."""
-        validate_source_quarantine_destination(source, available_sinks)
 
     def _assign_plugin_node_ids(
         self,
@@ -535,11 +498,8 @@ class Orchestrator:
                         )
                     )
 
-                    self._export_landscape(
-                        run_id=run.run_id,
-                        settings=settings,
-                        sinks=config.sinks,
-                    )
+                    # Call module function directly (no wrapper method)
+                    export_landscape(self._db, run.run_id, settings, config.sinks)
 
                     recorder.set_export_status(run.run_id, status=ExportStatus.COMPLETED)
                     self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
@@ -788,7 +748,7 @@ class Orchestrator:
 
                 recorder.register_node(
                     run_id=run_id,
-                    node_id=node_id,  # Use graph's ID
+                    node_id=node_id,
                     plugin_name=node_info.plugin_name,
                     node_type=NodeType(node_info.node_type),  # Already lowercase
                     plugin_version=plugin_version,
@@ -819,7 +779,8 @@ class Orchestrator:
             # Validate all route destinations BEFORE processing any rows
             # This catches config errors early instead of after partial processing
             # Note: config gates also add to route_resolution_map, validated the same way
-            self._validate_route_destinations(
+            # Call module function directly (no wrapper method)
+            validate_route_destinations(
                 route_resolution_map=route_resolution_map,
                 available_sinks=set(config.sinks.keys()),
                 transform_id_map=transform_id_map,
@@ -829,14 +790,15 @@ class Orchestrator:
             )
 
             # Validate transform error sink destinations
-            self._validate_transform_error_sinks(
+            # Call module function directly (no wrapper method)
+            validate_transform_error_sinks(
                 transforms=config.transforms,
                 available_sinks=set(config.sinks.keys()),
-                _transform_id_map=transform_id_map,
             )
 
             # Validate source quarantine destination
-            self._validate_source_quarantine_destination(
+            # Call module function directly (no wrapper method)
+            validate_source_quarantine_destination(
                 source=config.source,
                 available_sinks=set(config.sinks.keys()),
             )
@@ -1220,7 +1182,8 @@ class Orchestrator:
                         # new row ensures the timed-out batch contains only previously
                         # buffered rows, not the row that just arrived.
                         # ─────────────────────────────────────────────────────────────────
-                        timeout_result = self._check_aggregation_timeouts(
+                        # Call module function directly (no wrapper method)
+                        timeout_result = check_aggregation_timeouts(
                             config=config,
                             processor=processor,
                             ctx=ctx,
@@ -1394,16 +1357,36 @@ class Orchestrator:
                     # CRITICAL: Flush remaining aggregation buffers at end-of-source
                     # ─────────────────────────────────────────────────────────────────
                     if config.aggregation_settings:
-                        flush_result = self._flush_remaining_aggregation_buffers(
+                        # Build checkpoint callback if checkpointing is enabled
+                        checkpoint_callback: Callable[[TokenInfo], None] | None = None
+                        if self._checkpoint_config and self._checkpoint_config.enabled and self._checkpoint_manager:
+
+                            def make_checkpoint_callback() -> Callable[[TokenInfo], None]:
+                                # Closure captures: run_id, default_last_node_id, processor, self
+                                captured_run_id = run_id
+                                captured_node_id = default_last_node_id
+
+                                def callback(token: TokenInfo) -> None:
+                                    agg_state = processor.get_aggregation_checkpoint_state()
+                                    self._maybe_checkpoint(
+                                        run_id=captured_run_id,
+                                        token_id=token.token_id,
+                                        node_id=captured_node_id,
+                                        aggregation_state=agg_state,
+                                    )
+
+                                return callback
+
+                            checkpoint_callback = make_checkpoint_callback()
+
+                        # Call module function directly (no wrapper method)
+                        flush_result = flush_remaining_aggregation_buffers(
                             config=config,
                             processor=processor,
                             ctx=ctx,
                             pending_tokens=pending_tokens,
                             default_sink_name=default_sink_name,
-                            run_id=run_id,
-                            recorder=recorder,
-                            checkpoint=False,  # Checkpointing now happens after sink write
-                            last_node_id=default_last_node_id,
+                            checkpoint_callback=checkpoint_callback,
                         )
                         rows_succeeded += flush_result.rows_succeeded
                         rows_failed += flush_result.rows_failed
@@ -1663,19 +1646,6 @@ class Orchestrator:
             routed_destinations=routed_destinations,
         )
 
-    def _export_landscape(
-        self,
-        run_id: str,
-        settings: ElspethSettings,
-        sinks: dict[str, Any],
-    ) -> None:
-        """Delegate to export module."""
-        export_landscape(self._db, run_id, settings, sinks)
-
-    def _reconstruct_schema_from_json(self, schema_dict: dict[str, Any]) -> type:
-        """Delegate to export module."""
-        return reconstruct_schema_from_json(schema_dict)
-
     def resume(
         self,
         resume_point: ResumePoint,
@@ -1712,8 +1682,8 @@ class Orchestrator:
         # Pass payload_store for external call payload persistence
         recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
-        # 1. Handle incomplete batches
-        self._handle_incomplete_batches(recorder, run_id)
+        # 1. Handle incomplete batches - call module function directly
+        handle_incomplete_batches(recorder, run_id)
 
         # 2. Update run status to running
         recorder.update_run_status(run_id, RunStatus.RUNNING)
@@ -1736,8 +1706,9 @@ class Orchestrator:
         source_schema_json = recorder.get_source_schema(run_id)
 
         # Deserialize schema and recreate Pydantic model class with full type fidelity
+        # Call module function directly (no wrapper method)
         schema_dict = json.loads(source_schema_json)
-        source_schema_class = self._reconstruct_schema_from_json(schema_dict)
+        source_schema_class = reconstruct_schema_from_json(schema_dict)
 
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
@@ -1846,7 +1817,8 @@ class Orchestrator:
 
         # Validate route destinations (config may have changed since original run)
         # This catches config errors early instead of after partial processing
-        self._validate_route_destinations(
+        # Call module function directly (no wrapper method)
+        validate_route_destinations(
             route_resolution_map=route_resolution_map,
             available_sinks=set(config.sinks.keys()),
             transform_id_map=transform_id_map,
@@ -1856,14 +1828,15 @@ class Orchestrator:
         )
 
         # Validate transform error sink destinations
-        self._validate_transform_error_sinks(
+        # Call module function directly (no wrapper method)
+        validate_transform_error_sinks(
             transforms=config.transforms,
             available_sinks=set(config.sinks.keys()),
-            _transform_id_map=transform_id_map,
         )
 
         # Validate source quarantine destination
-        self._validate_source_quarantine_destination(
+        # Call module function directly (no wrapper method)
+        validate_source_quarantine_destination(
             source=config.source,
             available_sinks=set(config.sinks.keys()),
         )
@@ -2010,7 +1983,8 @@ class Orchestrator:
                 # Check for timed-out aggregations BEFORE processing this row
                 # (BUG FIX: P1-2026-01-22 - ensures timeout flushes OLD batch)
                 # ─────────────────────────────────────────────────────────────────
-                timeout_result = self._check_aggregation_timeouts(
+                # Call module function directly (no wrapper method)
+                timeout_result = check_aggregation_timeouts(
                     config=config,
                     processor=processor,
                     ctx=ctx,
@@ -2127,15 +2101,15 @@ class Orchestrator:
             # CRITICAL: Flush remaining aggregation buffers at end-of-source
             # ─────────────────────────────────────────────────────────────────
             if config.aggregation_settings:
-                flush_result = self._flush_remaining_aggregation_buffers(
+                # Call module function directly (no wrapper method)
+                # No checkpointing during resume
+                flush_result = flush_remaining_aggregation_buffers(
                     config=config,
                     processor=processor,
                     ctx=ctx,
                     pending_tokens=pending_tokens,
                     default_sink_name=default_sink_name,
-                    run_id=run_id,
-                    recorder=recorder,
-                    checkpoint=False,  # No checkpointing during resume
+                    checkpoint_callback=None,
                 )
                 rows_succeeded += flush_result.rows_succeeded
                 rows_failed += flush_result.rows_failed
@@ -2297,88 +2271,4 @@ class Orchestrator:
             rows_expanded=rows_expanded,
             rows_buffered=rows_buffered,
             routed_destinations=routed_destinations,
-        )
-
-    def _handle_incomplete_batches(
-        self,
-        recorder: LandscapeRecorder,
-        run_id: str,
-    ) -> None:
-        """Delegate to aggregation module."""
-        handle_incomplete_batches(recorder, run_id)
-
-    def _find_aggregation_transform(
-        self,
-        config: PipelineConfig,
-        agg_node_id_str: str,
-        agg_name: str,
-    ) -> tuple[TransformProtocol, int]:
-        """Delegate to aggregation module."""
-        return find_aggregation_transform(config, agg_node_id_str, agg_name)
-
-    def _check_aggregation_timeouts(
-        self,
-        config: PipelineConfig,
-        processor: RowProcessor,
-        ctx: PluginContext,
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-        default_sink_name: str,
-        agg_transform_lookup: dict[str, tuple[TransformProtocol, int]] | None = None,
-    ) -> AggregationFlushResult:
-        """Delegate to aggregation module."""
-        return check_aggregation_timeouts(
-            config=config,
-            processor=processor,
-            ctx=ctx,
-            pending_tokens=pending_tokens,
-            default_sink_name=default_sink_name,
-            agg_transform_lookup=agg_transform_lookup,
-        )
-
-    def _flush_remaining_aggregation_buffers(
-        self,
-        config: PipelineConfig,
-        processor: RowProcessor,
-        ctx: PluginContext,
-        pending_tokens: dict[str, list[tuple[TokenInfo, PendingOutcome | None]]],
-        default_sink_name: str,
-        run_id: str,
-        recorder: LandscapeRecorder,
-        checkpoint: bool = True,
-        last_node_id: str | None = None,
-    ) -> AggregationFlushResult:
-        """Delegate to aggregation module with checkpoint callback.
-
-        The checkpoint callback captures run_id, last_node_id, and processor
-        to enable checkpointing from within the module function.
-        """
-        # Build checkpoint callback if checkpointing is enabled
-        checkpoint_callback: Callable[[TokenInfo], None] | None = None
-        if checkpoint and last_node_id is not None:
-
-            def make_checkpoint_callback() -> Callable[[TokenInfo], None]:
-                # Closure captures: run_id, last_node_id, processor, self
-                captured_run_id = run_id
-                captured_node_id = last_node_id
-
-                def callback(token: TokenInfo) -> None:
-                    agg_state = processor.get_aggregation_checkpoint_state()
-                    self._maybe_checkpoint(
-                        run_id=captured_run_id,
-                        token_id=token.token_id,
-                        node_id=captured_node_id,
-                        aggregation_state=agg_state,
-                    )
-
-                return callback
-
-            checkpoint_callback = make_checkpoint_callback()
-
-        return flush_remaining_aggregation_buffers(
-            config=config,
-            processor=processor,
-            ctx=ctx,
-            pending_tokens=pending_tokens,
-            default_sink_name=default_sink_name,
-            checkpoint_callback=checkpoint_callback,
         )

@@ -9,8 +9,18 @@ Public API (unchanged):
 - PipelineConfig: Configuration dataclass
 - RunResult: Result dataclass
 - RouteValidationError: Validation exception
+- AggregationFlushResult: Result of flushing aggregation buffers (replaces 9-tuple)
+- RowPlugin: Type alias for transform/gate plugin union
+
+Module structure:
+- core.py: Orchestrator class (main entry point)
+- types.py: PipelineConfig, RunResult, RouteValidationError, AggregationFlushResult
+- validation.py: Route and sink validation functions
+- export.py: Landscape export functionality
+- aggregation.py: Aggregation timeout/flush handling
 """
 
+from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import (
     AggregationFlushResult,
     PipelineConfig,
@@ -27,7 +37,3 @@ __all__ = [
     "RowPlugin",
     "RunResult",
 ]
-
-# Orchestrator import deferred - will be added in Task 5
-# For now, import from the old location to maintain compatibility
-from elspeth.engine.orchestrator_legacy import Orchestrator

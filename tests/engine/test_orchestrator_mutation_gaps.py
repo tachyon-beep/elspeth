@@ -223,6 +223,8 @@ class TestRouteValidationEdgeCases:
 
     def test_continue_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 245: 'continue' destination should skip sink validation."""
+        from elspeth.engine.orchestrator.validation import validate_route_destinations
+
         # Route map with 'continue' destination
         route_resolution_map = {
             ("gate_1", "default"): "continue",  # Should be skipped
@@ -230,7 +232,8 @@ class TestRouteValidationEdgeCases:
         available_sinks = {"output"}  # 'continue' is not in sinks, but shouldn't error
 
         # Should not raise - 'continue' is special, not a sink name
-        orchestrator._validate_route_destinations(
+        # Call module function directly (wrapper methods removed in refactor)
+        validate_route_destinations(
             route_resolution_map=route_resolution_map,
             available_sinks=available_sinks,
             transform_id_map={},
@@ -239,13 +242,16 @@ class TestRouteValidationEdgeCases:
 
     def test_fork_destination_is_not_validated_as_sink(self, orchestrator: Orchestrator) -> None:
         """Line 249: 'fork' destination should skip sink validation."""
+        from elspeth.engine.orchestrator.validation import validate_route_destinations
+
         route_resolution_map = {
             ("gate_1", "split"): "fork",  # Should be skipped
         }
         available_sinks = {"output"}
 
         # Should not raise - 'fork' is special, not a sink name
-        orchestrator._validate_route_destinations(
+        # Call module function directly (wrapper methods removed in refactor)
+        validate_route_destinations(
             route_resolution_map=route_resolution_map,
             available_sinks=available_sinks,
             transform_id_map={},
@@ -256,6 +262,7 @@ class TestRouteValidationEdgeCases:
         """Lines 255-258: Invalid sink destination raises RouteValidationError."""
         from elspeth.contracts import GateName, NodeID
         from elspeth.core.config import GateSettings
+        from elspeth.engine.orchestrator.validation import validate_route_destinations
 
         route_resolution_map = {
             (NodeID("gate_1"), "error_route"): "nonexistent_sink",
@@ -271,7 +278,8 @@ class TestRouteValidationEdgeCases:
         ]
 
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator._validate_route_destinations(
+            # Call module function directly (wrapper methods removed in refactor)
+            validate_route_destinations(
                 route_resolution_map=route_resolution_map,
                 available_sinks=available_sinks,
                 transform_id_map={},
@@ -308,6 +316,7 @@ class TestSourceQuarantineValidation:
 
     def test_source_with_discard_quarantine_is_valid(self, orchestrator: Orchestrator) -> None:
         """Line 337: Source with on_validation_failure='discard' should pass."""
+        from elspeth.engine.orchestrator.validation import validate_source_quarantine_destination
 
         class SourceDiscardInvalid(_TestSourceBase):
             name = "discard_invalid"
@@ -321,13 +330,15 @@ class TestSourceQuarantineValidation:
         available_sinks = {"output"}
 
         # Should not raise
-        orchestrator._validate_source_quarantine_destination(
+        # Call module function directly (wrapper methods removed in refactor)
+        validate_source_quarantine_destination(
             source=as_source(source),
             available_sinks=available_sinks,
         )
 
     def test_source_with_invalid_quarantine_raises(self, orchestrator: Orchestrator) -> None:
         """Lines 344-347: Invalid quarantine sink raises RouteValidationError."""
+        from elspeth.engine.orchestrator.validation import validate_source_quarantine_destination
 
         class SourceBadQuarantine(_TestSourceBase):
             name = "bad_quarantine"
@@ -341,7 +352,8 @@ class TestSourceQuarantineValidation:
         available_sinks = {"output", "errors"}
 
         with pytest.raises(RouteValidationError) as exc_info:
-            orchestrator._validate_source_quarantine_destination(
+            # Call module function directly (wrapper methods removed in refactor)
+            validate_source_quarantine_destination(
                 source=as_source(source),
                 available_sinks=available_sinks,
             )

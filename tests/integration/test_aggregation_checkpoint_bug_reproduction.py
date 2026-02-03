@@ -262,7 +262,7 @@ class TestAggregationCheckpointFixVerification:
         from pathlib import Path
 
         # Read the orchestrator source
-        orchestrator_path = Path(__file__).parent.parent.parent / "src/elspeth/engine/orchestrator_legacy.py"
+        orchestrator_path = Path(__file__).parent.parent.parent / "src/elspeth/engine/orchestrator/core.py"
         source_code = orchestrator_path.read_text()
 
         # Parse and look for get_aggregation_checkpoint_state calls

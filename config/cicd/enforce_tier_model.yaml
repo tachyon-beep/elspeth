@@ -434,11 +434,11 @@ allow_hits:
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-# orchestrator_legacy.py - temporary during refactoring (Task 1 of extract-orchestrator-modules plan)
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_cleanup_transforms:fp=cd0aed37bc95ede0
+# orchestrator/core.py - final location after refactoring (Task 5 of extract-orchestrator-modules plan)
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_transforms:fp=cd0aed37bc95ede0
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - legitimate pattern; collects all cleanup errors then raises
   expires: '2026-05-02'
 # validation.py - extracted from orchestrator_legacy.py (Task 2 of extract-orchestrator-modules plan)
 - key: engine/orchestrator/validation.py:R5:validate_route_destinations:fp=b681c5049ba16d78
@@ -451,65 +451,62 @@ allow_hits:
   reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish for _on_error access
   safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R5:Orchestrator:_execute_run:fp=820c0f75de085170
+# orchestrator/core.py _execute_run exceptions - plugin cleanup at external boundary
+- key: engine/orchestrator/core.py:R5:Orchestrator:_execute_run:fp=94666d4e17fa8976
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
+  safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_execute_run:fp=253af88660f90573
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=107dcbeb763150d7
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_execute_run:fp=7f4f43dadf7b3038
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=94e459c5bae290db
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_execute_run:fp=b5f52a88413e4ef1
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=e9d4ffc968b59f65
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_execute_run:fp=8d0e820f25cef2d8
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=13afa5ac17f69b11
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_execute_run:fp=ffd10f7ead7231eb
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_run:fp=7fcd1ec2e01b59e2
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R5:Orchestrator:_process_resumed_rows:fp=2497fdfa89ec4c3e
+# orchestrator/core.py _process_resumed_rows exceptions - plugin cleanup at external boundary
+- key: engine/orchestrator/core.py:R5:Orchestrator:_process_resumed_rows:fp=520ab405a68261c6
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  reason: Type dispatch - RowPlugin is union of TransformProtocol|GateProtocol, must distinguish to access is_batch_aware
+  safety: isinstance() check selects code path for TransformProtocol-specific attributes; no bug hiding
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=480dd9e330cf97e3
-  owner: architecture
-  reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
-  expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=26bebba69646980d
+- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=689615e3530d103b
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=9c13c114397df01a
+- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=0dacb2142b54f7d7
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=25f564fd75712384
+- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=33ac3a4720492bf1
   owner: architecture
   reason: Broad exception handling at external boundary with logging
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R5:Orchestrator:_find_aggregation_transform:fp=659e865ba2eb1dd9
+- key: engine/orchestrator/core.py:R4:Orchestrator:_process_resumed_rows:fp=6e35b8e1b5415425
   owner: architecture
-  reason: AST/type checking - required for safe parsing or discriminated unions
-  safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
+  reason: Broad exception handling at external boundary with logging
+  safety: Code reviewed - plugin cleanup with error collection; raises after all cleanups attempted
   expires: '2026-05-02'
 - key: engine/processor.py:R5:RowProcessor:process_token_from_step:fp=f9f576369fb2a80c
   owner: architecture
