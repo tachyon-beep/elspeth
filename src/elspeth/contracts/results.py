@@ -311,10 +311,29 @@ class GateResult:
     row: dict[str, Any]
     action: RoutingAction
 
+    # Schema contract for output (optional)
+    # Enables conversion to PipelineRow via to_pipeline_row()
+    contract: SchemaContract | None = field(default=None, repr=False)
+
     # Audit fields - set by executor, not by plugin
     input_hash: str | None = field(default=None, repr=False)
     output_hash: str | None = field(default=None, repr=False)
     duration_ms: float | None = field(default=None, repr=False)
+
+    def to_pipeline_row(self) -> PipelineRow:
+        """Convert to PipelineRow for downstream processing.
+
+        Returns:
+            PipelineRow wrapping row data with contract
+
+        Raises:
+            ValueError: If contract is None
+        """
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        if self.contract is None:
+            raise ValueError("GateResult has no contract - cannot create PipelineRow")
+        return PipelineRow(self.row, self.contract)
 
 
 # NOTE: AcceptResult was deleted in aggregation structural cleanup.
