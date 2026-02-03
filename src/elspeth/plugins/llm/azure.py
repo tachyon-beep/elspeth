@@ -8,7 +8,8 @@ concurrent row processing with FIFO output ordering.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Self
 
@@ -429,28 +430,46 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             raise RuntimeError("Azure LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
+            import time
+
             llm_client = self._get_llm_client(ctx.state_id)
 
-            # 4. Call LLM (EXTERNAL - wrap)
+            # 4. Call LLM with Tier 2 tracing (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
             # to let the engine's RetryManager handle them. Non-retryable errors
             # (ContentPolicyError, ContextLengthError) return TransformResult.error().
-            try:
-                response = llm_client.chat_completion(
-                    model=self._model,
-                    messages=messages,
-                    temperature=self._temperature,
-                    max_tokens=self._max_tokens,
-                )
-            except LLMClientError as e:
-                if e.retryable:
-                    # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
-                    raise
-                # Non-retryable error - return error result
-                return TransformResult.error(
-                    {"reason": "llm_call_failed", "error": str(e)},
-                    retryable=False,
-                )
+            token_id = ctx.token_id or "unknown"
+            start_time = time.monotonic()
+
+            with self._create_langfuse_trace(token_id, row) as trace:
+                try:
+                    response = llm_client.chat_completion(
+                        model=self._model,
+                        messages=messages,
+                        temperature=self._temperature,
+                        max_tokens=self._max_tokens,
+                    )
+                except LLMClientError as e:
+                    if e.retryable:
+                        # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
+                        raise
+                    # Non-retryable error - return error result
+                    return TransformResult.error(
+                        {"reason": "llm_call_failed", "error": str(e)},
+                        retryable=False,
+                    )
+
+                # Record in Langfuse if tracing is active
+                if trace is not None:
+                    latency_ms = (time.monotonic() - start_time) * 1000
+                    self._record_langfuse_generation(
+                        trace=trace,
+                        prompt=rendered.prompt,
+                        response_content=response.content,
+                        model=self._model,
+                        usage=response.usage,
+                        latency_ms=latency_ms,
+                    )
 
             # 5. Build output row (OUR CODE - let exceptions crash)
             output = dict(row)
@@ -564,6 +583,90 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Azure Monitor handles its own batching/flushing
         # No explicit flush needed
+
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for an LLM call.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+
+        Example:
+            with self._create_langfuse_trace(token_id, row) as trace:
+                response = await self._call_llm(...)
+                if trace:
+                    self._record_langfuse_generation(trace, prompt, response, ...)
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "deployment": self._deployment_name,
+            },
+        )
+        try:
+            yield trace
+        finally:
+            # Trace auto-closes, but we ensure it's ended
+            pass
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record an LLM generation in Langfuse.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            prompt: The prompt sent to the LLM
+            response_content: The response received
+            model: Model/deployment name
+            usage: Token usage dict with prompt_tokens/completion_tokens
+            latency_ms: Call latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "llm_call",
+            "model": model,
+            "input": prompt,
+            "output": response_content,
+        }
+
+        if usage:
+            generation_kwargs["usage"] = {
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+            }
+
+        if latency_ms is not None:
+            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        trace.generation(**generation_kwargs)
 
 
 def _configure_azure_monitor(config: TracingConfig) -> bool:

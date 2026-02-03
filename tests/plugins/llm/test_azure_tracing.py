@@ -167,3 +167,71 @@ class TestAzureLLMTransformTracing:
 
             assert transform._tracing_active is True
             assert transform._langfuse_client is mock_langfuse_instance
+
+
+class TestLangfuseSpanCreation:
+    """Tests for Langfuse span creation around LLM calls."""
+
+    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock]:
+        """Create transform with mocked Langfuse client."""
+        config = _make_base_config()
+        config["tracing"] = {
+            "provider": "langfuse",
+            "public_key": "pk-xxx",
+            "secret_key": "sk-xxx",
+        }
+        transform = AzureLLMTransform(config)
+
+        # Mock Langfuse client
+        mock_langfuse = MagicMock()
+        mock_trace = MagicMock()
+        mock_langfuse.trace.return_value = mock_trace
+
+        transform._langfuse_client = mock_langfuse
+        transform._tracing_active = True
+
+        return transform, mock_langfuse
+
+    def test_langfuse_trace_created_for_llm_call(self) -> None:
+        """Langfuse trace is created when making LLM call."""
+        transform, mock_langfuse = self._create_transform_with_langfuse()
+
+        # Simulate an LLM call with tracing
+        with transform._create_langfuse_trace("test-token", {"name": "world"}) as trace:
+            assert trace is not None
+
+        # Verify trace was created
+        mock_langfuse.trace.assert_called_once()
+
+    def test_langfuse_generation_records_input_output(self) -> None:
+        """Langfuse generation records prompt and response."""
+        transform, mock_langfuse = self._create_transform_with_langfuse()
+
+        mock_trace = MagicMock()
+
+        # Record a generation
+        transform._record_langfuse_generation(
+            trace=mock_trace,
+            prompt="Hello world",
+            response_content="Hi there!",
+            model="gpt-4",
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            latency_ms=150.0,
+        )
+
+        # Verify generation was recorded with correct data
+        mock_trace.generation.assert_called_once()
+        call_kwargs = mock_trace.generation.call_args.kwargs
+        assert call_kwargs["input"] == "Hello world"
+        assert call_kwargs["output"] == "Hi there!"
+        assert call_kwargs["model"] == "gpt-4"
+        assert call_kwargs["usage"]["input"] == 10
+        assert call_kwargs["usage"]["output"] == 5
+
+    def test_no_trace_when_tracing_not_active(self) -> None:
+        """No trace created when tracing is not active."""
+        config = _make_base_config()
+        transform = AzureLLMTransform(config)
+
+        with transform._create_langfuse_trace("test-token", {}) as trace:
+            assert trace is None
