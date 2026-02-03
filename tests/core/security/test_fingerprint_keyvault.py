@@ -44,9 +44,8 @@ class TestFingerprintKeyEnvVarOnly:
 
     def test_empty_env_var_raises(self) -> None:
         """Empty string env var should raise ValueError."""
-        with patch.dict(os.environ, {_ENV_VAR: ""}):
-            with pytest.raises(ValueError, match="ELSPETH_FINGERPRINT_KEY"):
-                get_fingerprint_key()
+        with patch.dict(os.environ, {_ENV_VAR: ""}), pytest.raises(ValueError, match="ELSPETH_FINGERPRINT_KEY"):
+            get_fingerprint_key()
 
     def test_whitespace_only_env_var_is_valid(self) -> None:
         """Whitespace-only env var is used as-is (user's responsibility).

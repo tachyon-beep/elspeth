@@ -276,8 +276,17 @@ class SchemaContract:
     def version_hash(self) -> str:
         """Deterministic hash of contract for checkpoint references.
 
-        Uses canonical JSON of field definitions for reproducibility.
+        Uses canonical JSON of ALL serialized state for reproducibility.
         The hash is truncated to 16 hex characters (64 bits).
+
+        IMPORTANT: This hash MUST include ALL fields written by to_checkpoint_format().
+        Per CLAUDE.md Tier 1: integrity checks must detect any mutation of serialized state.
+        Missing fields from the hash would allow tampering without detection.
+
+        Includes:
+        - mode: Contract enforcement mode
+        - locked: Whether types are frozen (tampering could allow inference on resume)
+        - fields: All field definitions including 'source' (declared vs inferred)
 
         Returns:
             16-character hex hash string
@@ -290,10 +299,17 @@ class SchemaContract:
                 "o": fc.original_name,
                 "t": fc.python_type.__name__,
                 "r": fc.required,
+                "s": fc.source,  # Include source in hash - tampering = audit falsification
             }
             for fc in sorted(self.fields, key=lambda f: f.normalized_name)
         ]
-        content = canonical_json({"mode": self.mode, "fields": field_defs})
+        content = canonical_json(
+            {
+                "mode": self.mode,
+                "locked": self.locked,  # Include locked in hash - tampering = security risk
+                "fields": field_defs,
+            }
+        )
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def to_checkpoint_format(self) -> dict[str, Any]:

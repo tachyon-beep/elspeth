@@ -205,7 +205,7 @@ class TestLangfuseSpanCreation:
 
     def test_langfuse_generation_records_input_output(self) -> None:
         """Langfuse generation records prompt and response."""
-        transform, mock_langfuse = self._create_transform_with_langfuse()
+        transform, _mock_langfuse = self._create_transform_with_langfuse()
 
         mock_trace = MagicMock()
 

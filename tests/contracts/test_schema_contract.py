@@ -701,6 +701,72 @@ class TestSchemaContractCheckpoint:
 
         assert restored.fields[0].python_type is type(None)
 
+    def test_from_checkpoint_detects_locked_tampering(self) -> None:
+        """from_checkpoint() detects tampering with 'locked' flag.
+
+        Per CLAUDE.md Tier 1: integrity hash must cover ALL serialized state.
+        Flipping locked=False could allow type inference on resume.
+        """
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("id", "id", int, True, "declared"),),
+            locked=True,
+        )
+        data = contract.to_checkpoint_format()
+
+        # Tamper with locked flag
+        data["locked"] = False
+
+        with pytest.raises(ValueError, match="integrity"):
+            SchemaContract.from_checkpoint(data)
+
+    def test_from_checkpoint_detects_source_tampering(self) -> None:
+        """from_checkpoint() detects tampering with field 'source'.
+
+        Per CLAUDE.md Tier 1: integrity hash must cover ALL serialized state.
+        Changing source could falsify audit trail (declared vs inferred).
+        """
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("id", "id", int, True, "declared"),),
+            locked=True,
+        )
+        data = contract.to_checkpoint_format()
+
+        # Tamper with source field
+        data["fields"][0]["source"] = "inferred"
+
+        with pytest.raises(ValueError, match="integrity"):
+            SchemaContract.from_checkpoint(data)
+
+    def test_version_hash_changes_on_locked_change(self) -> None:
+        """Different 'locked' values produce different hashes."""
+        c1 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "declared"),),
+            locked=False,
+        )
+        assert c1.version_hash() != c2.version_hash()
+
+    def test_version_hash_changes_on_source_change(self) -> None:
+        """Different 'source' values produce different hashes."""
+        c1 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "declared"),),
+            locked=True,
+        )
+        c2 = SchemaContract(
+            mode="FIXED",
+            fields=(FieldContract("a", "A", int, True, "inferred"),),
+            locked=True,
+        )
+        assert c1.version_hash() != c2.version_hash()
+
 
 # --- Merge Tests for Coalesce ---
 
