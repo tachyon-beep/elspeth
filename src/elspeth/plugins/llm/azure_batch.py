@@ -251,7 +251,7 @@ class AzureBatchLLMTransform(BaseTransform):
         not per-row (since rows are processed by Azure infrastructure).
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):

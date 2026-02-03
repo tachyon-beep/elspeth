@@ -232,7 +232,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         The Langfuse client is stored for use in _process_single_row().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
 
             cfg = self._tracing_config
             if not isinstance(cfg, LangfuseTracingConfig):

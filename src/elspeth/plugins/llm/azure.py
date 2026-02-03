@@ -330,7 +330,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         The Langfuse client is stored for use in _process_row().
         """
         try:
-            from langfuse import Langfuse  # type: ignore[import-not-found]
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
 
             if not isinstance(tracing_config, LangfuseTracingConfig):
                 return
@@ -684,7 +684,7 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
 
     Returns True on success, False on failure.
     """
-    from azure.monitor.opentelemetry import configure_azure_monitor  # type: ignore[import-not-found]
+    from azure.monitor.opentelemetry import configure_azure_monitor  # type: ignore[import-not-found,import-untyped]
 
     if not isinstance(config, AzureAITracingConfig):
         return False
