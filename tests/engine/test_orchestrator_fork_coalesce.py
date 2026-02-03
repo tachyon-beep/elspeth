@@ -226,7 +226,7 @@ class TestCoalesceWiring:
         # NOTE: RowProcessor mock is SUSPICIOUS - tests implementation detail
         # (that coalesce_executor kwarg exists) rather than behavior.
         # TODO: Replace with behavior-based test in Phase 5.
-        with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor:
+        with patch("elspeth.engine.orchestrator_legacy.RowProcessor") as mock_processor:
             mock_processor.return_value.process_row.return_value = []
             mock_processor.return_value.token_manager = MagicMock()
 
@@ -346,7 +346,7 @@ class TestCoalesceWiring:
         )
 
         with (
-            patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls,
+            patch("elspeth.engine.orchestrator_legacy.RowProcessor") as mock_processor_cls,
             patch("elspeth.engine.executors.SinkExecutor") as mock_sink_executor_cls,
             patch("elspeth.core.landscape.LandscapeRecorder.record_token_outcome") as mock_record_outcome,
         ):

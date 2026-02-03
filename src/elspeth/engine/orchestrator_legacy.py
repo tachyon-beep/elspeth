@@ -18,7 +18,6 @@ import os
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -52,22 +51,23 @@ from elspeth.contracts.types import (
     SinkName,
 )
 from elspeth.core.canonical import stable_hash
-from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
+from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.operations import track_operation
+
+# Import types from new location (refactoring in progress)
+from elspeth.engine.orchestrator.types import (
+    PipelineConfig,
+    RouteValidationError,
+    RowPlugin,
+    RunResult,
+)
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import GateProtocol, SinkProtocol, SourceProtocol, TransformProtocol
-
-# Type alias for row-processing plugins in the transforms pipeline
-# NOTE: BaseAggregation was DELETED - aggregation is now handled by
-# batch-aware transforms (is_batch_aware=True on TransformProtocol)
-# Using protocols instead of base classes to support protocol-only plugins.
-RowPlugin = TransformProtocol | GateProtocol
-"""Union of all row-processing plugin types for pipeline transforms list."""
 
 if TYPE_CHECKING:
     from elspeth.contracts import ResumePoint
@@ -76,62 +76,6 @@ if TYPE_CHECKING:
     from elspeth.core.config import ElspethSettings
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.engine.clock import Clock
-
-
-@dataclass
-class PipelineConfig:
-    """Configuration for a pipeline run.
-
-    All plugin fields are now properly typed for IDE support and
-    static type checking.
-
-    Attributes:
-        source: Source plugin instance
-        transforms: List of transform/gate plugin instances (processed first)
-        sinks: Dict of sink_name -> sink plugin instance
-        config: Additional run configuration
-        gates: Config-driven gates (processed AFTER transforms, BEFORE sinks)
-        aggregation_settings: Dict of node_id -> AggregationSettings
-        coalesce_settings: List of coalesce configurations for merging fork paths
-    """
-
-    source: SourceProtocol
-    transforms: list[RowPlugin]
-    sinks: dict[str, SinkProtocol]  # Sinks implement batch write directly
-    config: dict[str, Any] = field(default_factory=dict)
-    gates: list[GateSettings] = field(default_factory=list)
-    aggregation_settings: dict[str, AggregationSettings] = field(default_factory=dict)
-    coalesce_settings: list[CoalesceSettings] = field(default_factory=list)
-
-
-@dataclass
-class RunResult:
-    """Result of a pipeline run."""
-
-    run_id: str
-    status: RunStatus
-    rows_processed: int
-    rows_succeeded: int
-    rows_failed: int
-    rows_routed: int
-    rows_quarantined: int = 0
-    rows_forked: int = 0
-    rows_coalesced: int = 0
-    rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
-    rows_expanded: int = 0  # Deaggregation parent tokens
-    rows_buffered: int = 0  # Passthrough mode buffered tokens
-    routed_destinations: dict[str, int] = field(default_factory=dict)  # sink_name -> count
-
-
-class RouteValidationError(Exception):
-    """Raised when route configuration is invalid.
-
-    This error is raised at pipeline initialization, before any rows are
-    processed. It indicates a configuration problem that would cause
-    failures during processing.
-    """
-
-    pass
 
 
 class Orchestrator:
