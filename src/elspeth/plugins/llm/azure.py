@@ -23,6 +23,13 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    AzureAITracingConfig,
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -199,6 +206,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
 
+        # Tier 2: Plugin-internal tracing
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
+
     def connect_output(
         self,
         output: OutputPort,
@@ -229,16 +241,116 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder, telemetry, and rate limit context.
+        """Capture recorder, telemetry, rate limit context, and initialize tracing.
 
         Called by the engine at pipeline start. Captures the landscape
         recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
+        Also initializes Tier 2 tracing if configured.
         """
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider.
+
+        Tracing is optional - if the required SDK is not installed,
+        we log a warning and continue without tracing.
+        """
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Validate configuration completeness
+        errors = validate_tracing_config(self._tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return  # Don't attempt setup with incomplete config
+
+        match self._tracing_config.provider:
+            case "azure_ai":
+                self._setup_azure_ai_tracing(logger)
+            case "langfuse":
+                self._setup_langfuse_tracing(logger)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_azure_ai_tracing(self, logger: Any) -> None:
+        """Initialize Azure AI / Application Insights tracing.
+
+        Azure Monitor OpenTelemetry auto-instruments the OpenAI SDK.
+        No manual instrumentation needed after configure_azure_monitor().
+
+        WARNING: This is process-level configuration. Multiple plugins
+        with azure_ai tracing will share the same configuration.
+        """
+        try:
+            # Check for existing OTEL configuration that might conflict
+            from opentelemetry import trace as otel_trace
+
+            if otel_trace.get_tracer_provider().__class__.__name__ != "ProxyTracerProvider":
+                logger.warning(
+                    "Existing OpenTelemetry tracer detected - Azure AI tracing may conflict with Tier 1 telemetry",
+                    existing_provider=otel_trace.get_tracer_provider().__class__.__name__,
+                )
+
+            success = _configure_azure_monitor(self._tracing_config)
+            if success:
+                self._tracing_active = True
+                cfg = self._tracing_config
+                logger.info(
+                    "Azure AI tracing initialized",
+                    provider="azure_ai",
+                    content_recording=cfg.enable_content_recording if isinstance(cfg, AzureAITracingConfig) else None,
+                    live_metrics=cfg.enable_live_metrics if isinstance(cfg, AzureAITracingConfig) else None,
+                )
+
+        except ImportError:
+            logger.warning(
+                "Azure AI tracing requested but package not installed",
+                provider="azure_ai",
+                hint="Install with: uv pip install elspeth[tracing-azure]",
+            )
+
+    def _setup_langfuse_tracing(self, logger: Any) -> None:
+        """Initialize Langfuse tracing.
+
+        Langfuse requires manual span creation around LLM calls.
+        The Langfuse client is stored for use in _process_row().
+        """
+        try:
+            from langfuse import Langfuse
+
+            cfg = self._tracing_config
+            if not isinstance(cfg, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=cfg.public_key,
+                secret_key=cfg.secret_key,
+                host=cfg.host,
+            )
+            self._tracing_active = True
+
+            logger.info(
+                "Langfuse tracing initialized",
+                provider="langfuse",
+                host=cfg.host,
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -420,7 +532,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         return self._deployment_name
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -430,3 +546,38 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         with self._llm_clients_lock:
             self._llm_clients.clear()
         self._underlying_client = None
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
+
+        # Azure Monitor handles its own batching/flushing
+        # No explicit flush needed
+
+
+def _configure_azure_monitor(config: TracingConfig) -> bool:
+    """Configure Azure Monitor (module-level to allow mocking).
+
+    Returns True on success, False on failure.
+    """
+    from azure.monitor.opentelemetry import configure_azure_monitor
+
+    if not isinstance(config, AzureAITracingConfig):
+        return False
+
+    configure_azure_monitor(
+        connection_string=config.connection_string,
+        enable_live_metrics=config.enable_live_metrics,
+    )
+    return True
