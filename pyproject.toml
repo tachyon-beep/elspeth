@@ -110,6 +110,27 @@ mcp = [
     "mcp>=1.0,<2",  # Model Context Protocol SDK
 ]
 
+tracing-azure = [
+    # Tier 2: Azure AI tracing for LLM plugins
+    # Uses the "distro" package which bundles OpenTelemetry instrumentations
+    # Note: May conflict with Tier 1 OTLP telemetry - see docs/guides/tier2-tracing.md
+    # Ref: https://pypi.org/project/azure-monitor-opentelemetry/
+    "azure-monitor-opentelemetry>=1.6,<2",  # Azure Monitor OpenTelemetry Distro
+]
+
+tracing-langfuse = [
+    # Tier 2: Langfuse tracing for LLM plugins
+    # No conflicts with Tier 1 telemetry - recommended for dual-tier setups
+    # Version 2.50+ required for stable trace() context manager API
+    # Ref: https://langfuse.com/docs/sdk/python
+    "langfuse>=2.50,<3",  # Langfuse SDK - v2.50+ has stable trace/generation API
+]
+
+tracing = [
+    # All Tier 2 tracing providers
+    "elspeth[tracing-azure,tracing-langfuse]",
+]
+
 all = [
     # dev dependencies
     "pytest>=9.0,<10",
@@ -138,6 +159,9 @@ all = [
     "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2",  # b46+ fixes LogData import error
     # mcp dependencies
     "mcp>=1.0,<2",
+    # tracing dependencies
+    "azure-monitor-opentelemetry>=1.6,<2",
+    "langfuse>=2.50,<3",
 ]
 
 [project.scripts]

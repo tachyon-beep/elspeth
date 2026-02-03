@@ -254,6 +254,55 @@ def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _load_settings_with_secrets(
+    settings_path: Path,
+) -> tuple[ElspethSettings, list[dict[str, Any]]]:
+    """Load settings with Key Vault secret resolution.
+
+    Three-phase loading pattern:
+    1. Raw YAML parse (no ${VAR} resolution) - extract secrets config
+    2. Secret injection from Key Vault (if configured) - populate os.environ
+    3. Full Dynaconf loading (resolves ${VAR}) - now has secrets available
+
+    This function encapsulates the secret-loading flow used by run, resume,
+    and validate commands to ensure Key Vault-backed pipelines work consistently.
+
+    Args:
+        settings_path: Path to settings YAML file (must exist)
+
+    Returns:
+        Tuple of (validated ElspethSettings, list of secret resolution records)
+        Resolution records are for deferred audit recording and contain:
+        env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
+        secret_value (for fingerprinting - NOT for storage)
+
+    Raises:
+        FileNotFoundError: Settings file not found
+        yaml.YAMLError: YAML syntax error
+        ValidationError: Pydantic validation error (secrets config or full config)
+        SecretLoadError: Key Vault secret loading failed
+    """
+    from elspeth.core.config import SecretsConfig
+
+    # Phase 1: Parse YAML to extract secrets config (no ${VAR} resolution yet)
+    # NOTE: vault_url must be literal per design - ${VAR} not supported
+    raw_config = _load_raw_yaml(settings_path)
+
+    # Extract and validate secrets config
+    secrets_dict = raw_config.get("secrets", {})
+    secrets_config = SecretsConfig(**secrets_dict)
+
+    # Phase 2: Load secrets from Key Vault if configured
+    # Returns resolution records for later audit recording
+    secret_resolutions = load_secrets_from_config(secrets_config)
+
+    # Phase 3: Full config loading with Dynaconf (resolves ${VAR})
+    # Now that secrets are in os.environ, Dynaconf can resolve them
+    config = load_settings(settings_path)
+
+    return config, secret_resolutions
+
+
 def _extract_secrets_config(raw_config: dict[str, Any]) -> SecretsConfig:
     """Extract and validate secrets config from raw YAML.
 
@@ -1273,9 +1322,10 @@ def validate(
 
     settings_path = Path(settings).expanduser()
 
-    # Load and validate config via Pydantic
+    # Load and validate config with Key Vault secrets (same flow as 'run' command)
+    # This ensures ${VAR} placeholders are resolved correctly for keyvault-backed configs
     try:
-        config = load_settings(settings_path)
+        config, _secret_resolutions = _load_settings_with_secrets(settings_path)
     except (YamlParserError, YamlScannerError) as e:
         # YAML syntax errors (malformed YAML) - show helpful message
         _format_validation_error(
@@ -1290,6 +1340,14 @@ def validate(
             title="File Not Found",
             message=f"Settings file does not exist: {settings}",
             hint="Check the path and ensure the file exists.",
+        )
+        raise typer.Exit(1) from None
+    except SecretLoadError as e:
+        # Key Vault secret loading errors - show helpful message
+        _format_validation_error(
+            title="Secret Loading Failed",
+            message=str(e),
+            hint="Check your Azure credentials and Key Vault configuration.",
         )
         raise typer.Exit(1) from None
     except ValidationError as e:
@@ -1325,6 +1383,9 @@ def validate(
                 message=error_msg,
             )
         raise typer.Exit(1) from None
+
+    # NOTE: _secret_resolutions captured but not used for validation
+    # Validation is a dry-run check, no audit recording needed
 
     # Instantiate plugins BEFORE graph construction
     try:
@@ -1899,7 +1960,6 @@ def resume(
     from elspeth.core.landscape import LandscapeDB
 
     # Settings are REQUIRED for topology validation
-    settings_config: ElspethSettings | None = None
     settings_path = Path(settings_file).expanduser() if settings_file else Path("settings.yaml")
 
     if not settings_path.exists():
@@ -1907,11 +1967,28 @@ def resume(
         typer.echo("Settings are required to validate checkpoint compatibility.", err=True)
         raise typer.Exit(1)
 
+    # Load settings with Key Vault secrets (same flow as 'run' command)
+    # This ensures ${VAR} placeholders are resolved correctly for keyvault-backed configs
     try:
-        settings_config = load_settings(settings_path)
-    except Exception as e:
-        typer.echo(f"Error loading {settings_path}: {e}", err=True)
+        settings_config, _secret_resolutions = _load_settings_with_secrets(settings_path)
+    except FileNotFoundError:
+        typer.echo(f"Error: Settings file not found: {settings_path}", err=True)
         raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        typer.echo(f"YAML syntax error in {settings_path}: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValidationError as e:
+        typer.echo("Configuration errors:", err=True)
+        for error in e.errors():
+            loc = ".".join(str(x) for x in error["loc"])
+            typer.echo(f"  - {loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+    except SecretLoadError as e:
+        typer.echo(f"Error loading secrets: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NOTE: _secret_resolutions captured but not used for resume
+    # Resume inherits the original run's secret resolution audit records
 
     # Resolve database URL
     if database:

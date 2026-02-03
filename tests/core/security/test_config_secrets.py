@@ -12,6 +12,7 @@ This module tests:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -466,3 +467,152 @@ class TestSecretLoadErrorException:
         error.__cause__ = cause
 
         assert error.__cause__ is cause
+
+
+class TestCLILoadSettingsWithSecrets:
+    """Test the _load_settings_with_secrets CLI helper function.
+
+    This helper implements the three-phase loading pattern used by
+    run, resume, and validate commands to ensure Key Vault secrets
+    are available for Dynaconf ${VAR} resolution.
+    """
+
+    def test_load_settings_with_secrets_env_source(self, tmp_path: Path) -> None:
+        """With source='env' (default), settings load without Key Vault calls."""
+        # Create minimal settings file (no secrets config = source='env')
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+source:
+  plugin: csv
+  options:
+    path: input.csv
+    schema:
+      mode: observed
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+default_sink: output
+landscape:
+  enabled: false
+""")
+
+        from elspeth.cli import _load_settings_with_secrets
+
+        config, resolutions = _load_settings_with_secrets(settings_file)
+
+        assert config.source.plugin == "csv"
+        assert config.default_sink == "output"
+        assert resolutions == []  # No secrets to load
+
+    def test_load_settings_with_secrets_keyvault_injects_env_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With source='keyvault', secrets are injected before ${VAR} resolution."""
+        # Clean env to ensure we're testing the injection path
+        monkeypatch.delenv("TEST_API_KEY", raising=False)
+
+        # Mock Key Vault response
+        mock_secret = MagicMock()
+        mock_secret.value = "injected-key-value"
+        mock_client = MagicMock()
+        mock_client.get_secret.return_value = mock_secret
+
+        # Create settings file that uses ${TEST_API_KEY}
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+secrets:
+  source: keyvault
+  vault_url: https://test-vault.vault.azure.net
+  mapping:
+    TEST_API_KEY: test-api-key-secret
+
+source:
+  plugin: csv
+  options:
+    path: input.csv
+    schema:
+      mode: observed
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+default_sink: output
+
+# Use the secret in some config value
+landscape:
+  enabled: false
+""")
+
+        from elspeth.cli import _load_settings_with_secrets
+
+        with patch(
+            "elspeth.core.security.secret_loader._get_keyvault_client",
+            return_value=mock_client,
+        ):
+            config, resolutions = _load_settings_with_secrets(settings_file)
+
+        # Settings loaded successfully
+        assert config.source.plugin == "csv"
+
+        # Secret was injected into environment
+        assert os.environ["TEST_API_KEY"] == "injected-key-value"
+
+        # Resolution records returned for audit
+        assert len(resolutions) == 1
+        assert resolutions[0]["env_var_name"] == "TEST_API_KEY"
+        assert resolutions[0]["source"] == "keyvault"
+        assert resolutions[0]["secret_name"] == "test-api-key-secret"
+
+    def test_load_settings_with_secrets_raises_on_missing_secret(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SecretLoadError raised when Key Vault secret doesn't exist."""
+        from elspeth.core.security.secret_loader import SecretNotFoundError
+
+        monkeypatch.delenv("MISSING_KEY", raising=False)
+
+        mock_client = MagicMock()
+        mock_client.get_secret.side_effect = SecretNotFoundError("missing-secret", "https://test-vault.vault.azure.net")
+
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+secrets:
+  source: keyvault
+  vault_url: https://test-vault.vault.azure.net
+  mapping:
+    MISSING_KEY: missing-secret
+
+source:
+  plugin: csv
+  options:
+    path: input.csv
+    schema:
+      mode: observed
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+default_sink: output
+landscape:
+  enabled: false
+""")
+
+        from elspeth.cli import _load_settings_with_secrets
+
+        with (
+            patch(
+                "elspeth.core.security.secret_loader._get_keyvault_client",
+                return_value=mock_client,
+            ),
+            pytest.raises(SecretLoadError) as exc_info,
+        ):
+            _load_settings_with_secrets(settings_file)
+
+        assert "missing-secret" in str(exc_info.value)
+        assert "not found" in str(exc_info.value)
