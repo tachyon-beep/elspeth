@@ -605,29 +605,35 @@ def report_json(
     violations: list[Finding],
     stale_entries: list[AllowlistEntry],
     expired_entries: list[AllowlistEntry],
+    expired_file_rules: list[PerFileRule] | None = None,
+    unused_file_rules: list[PerFileRule] | None = None,
 ) -> str:
     """Generate JSON report."""
-    return json.dumps(
-        {
-            "violations": [
-                {
-                    "rule_id": f.rule_id,
-                    "file": f.file_path,
-                    "line": f.line,
-                    "col": f.col,
-                    "context": list(f.symbol_context),
-                    "fingerprint": f.fingerprint,
-                    "code": f.code_snippet,
-                    "message": f.message,
-                    "key": f.canonical_key,
-                }
-                for f in violations
-            ],
-            "stale_allowlist_entries": [{"key": e.key, "owner": e.owner, "reason": e.reason} for e in stale_entries],
-            "expired_allowlist_entries": [{"key": e.key, "owner": e.owner, "expires": str(e.expires)} for e in expired_entries],
-        },
-        indent=2,
-    )
+    result: dict[str, Any] = {
+        "violations": [
+            {
+                "rule_id": f.rule_id,
+                "file": f.file_path,
+                "line": f.line,
+                "col": f.col,
+                "context": list(f.symbol_context),
+                "fingerprint": f.fingerprint,
+                "code": f.code_snippet,
+                "message": f.message,
+                "key": f.canonical_key,
+            }
+            for f in violations
+        ],
+        "stale_allowlist_entries": [{"key": e.key, "owner": e.owner, "reason": e.reason} for e in stale_entries],
+        "expired_allowlist_entries": [{"key": e.key, "owner": e.owner, "expires": str(e.expires)} for e in expired_entries],
+    }
+    if expired_file_rules:
+        result["expired_file_rules"] = [
+            {"pattern": r.pattern, "rules": r.rules, "reason": r.reason, "expires": str(r.expires)} for r in expired_file_rules
+        ]
+    if unused_file_rules:
+        result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
+    return json.dumps(result, indent=2)
 
 
 # =============================================================================
@@ -735,10 +741,12 @@ def run_check(args: argparse.Namespace) -> int:
         unused_file_rules = allowlist.get_unused_file_rules() if allowlist.fail_on_stale else []
 
     # Report results
-    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules)
+    # Include unused_file_rules in error condition - stale per-file rules should fail
+    # the same way stale explicit entries do when fail_on_stale is enabled
+    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules)
 
     if args.format == "json":
-        print(report_json(violations, stale_entries, expired_entries))
+        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules))
     else:
         # Text format
         if violations:
