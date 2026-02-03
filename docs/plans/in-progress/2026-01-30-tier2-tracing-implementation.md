@@ -6,9 +6,19 @@
 
 **Architecture:** Plugins optionally configure their own tracing providers. The framework provides configuration patterns and lifecycle hooks, but no abstraction over provider SDKs. Plugins bring their own dependencies and initialize in `on_start()`.
 
-**Tech Stack:** Python, Pydantic (config), azure-monitor-opentelemetry (Azure AI), langfuse (Langfuse), structlog (logging)
+**Tech Stack:** Python, Pydantic (config), azure-monitor-opentelemetry (Azure AI distro), langfuse (Langfuse), structlog (logging)
 
-**Status:** Ready for implementation (reviewed 2026-02-03)
+**Status:** Ready for implementation (reviewed 2026-02-03, gaps addressed)
+
+**Plugins in Scope:**
+| Plugin | Tracing Support | Notes |
+|--------|----------------|-------|
+| `AzureLLMTransform` | ✅ Full | Azure AI + Langfuse |
+| `AzureMultiQueryLLMTransform` | ✅ Full | Azure AI + Langfuse |
+| `OpenRouterLLMTransform` | ✅ Langfuse only | Azure AI auto-instrumentation requires OpenAI SDK |
+| `OpenRouterMultiQueryLLMTransform` | ✅ Langfuse only | Azure AI auto-instrumentation requires OpenAI SDK |
+| `AzureBatchLLMTransform` | ⚠️ Limited | Batch API - per-call tracing not possible (see Task 8) |
+| `OpenRouterBatchLLMTransform` | ✅ Langfuse only | Synchronous parallel calls (see Task 8) |
 
 ---
 
@@ -19,7 +29,6 @@ From the telemetry design document:
 > The framework provides **nothing** for plugin-internal tracing. Plugins are T1 code and handle their own integrations.
 
 This means:
-
 - **No framework abstraction** over provider SDKs
 - **No framework configuration** for plugin telemetry (it lives in plugin `options:`)
 - **Plugins are autonomous** — they bring their own dependencies and config
@@ -38,7 +47,6 @@ This means:
 | **Who implements** | Framework | Each plugin individually |
 
 Users can enable both:
-
 - Tier 1 → Datadog/Grafana for ops visibility
 - Tier 2 → Langfuse for prompt engineering analytics
 
@@ -81,7 +89,6 @@ When multiple LLM transforms in the same pipeline have different tracing configs
 ## Task 1: Create Tracing Config Models
 
 **Files:**
-
 - Create: `src/elspeth/plugins/llm/tracing.py`
 - Create: `tests/plugins/llm/test_tracing_config.py`
 
@@ -440,7 +447,6 @@ EOF
 ## Task 2: Add Optional Dependencies
 
 **Files:**
-
 - Modify: `pyproject.toml`
 
 ### Step 2.1: Add tracing optional dependencies
@@ -452,14 +458,18 @@ Add after the `azure = [...]` section (around line 101):
 ```toml
 tracing-azure = [
     # Tier 2: Azure AI tracing for LLM plugins
+    # Uses the "distro" package which bundles OpenTelemetry instrumentations
     # Note: May conflict with Tier 1 OTLP telemetry - see docs/guides/tier2-tracing.md
-    "azure-monitor-opentelemetry>=1.6,<2",  # Azure Monitor + OpenTelemetry
+    # Ref: https://pypi.org/project/azure-monitor-opentelemetry/
+    "azure-monitor-opentelemetry>=1.6,<2",  # Azure Monitor OpenTelemetry Distro
 ]
 
 tracing-langfuse = [
     # Tier 2: Langfuse tracing for LLM plugins
     # No conflicts with Tier 1 telemetry - recommended for dual-tier setups
-    "langfuse>=2.50,<3",  # Langfuse SDK
+    # Version 2.50+ required for stable trace() context manager API
+    # Ref: https://langfuse.com/docs/sdk/python
+    "langfuse>=2.50,<3",  # Langfuse SDK - v2.50+ has stable trace/generation API
 ]
 
 tracing = [
@@ -509,7 +519,6 @@ EOF
 ## Task 3: Add Tracing Config to AzureOpenAIConfig
 
 **Files:**
-
 - Modify: `src/elspeth/plugins/llm/azure.py`
 - Create: `tests/plugins/llm/test_azure_tracing.py`
 
@@ -624,7 +633,6 @@ EOF
 ## Task 4: Implement Tracing Lifecycle in AzureLLMTransform
 
 **Files:**
-
 - Modify: `src/elspeth/plugins/llm/azure.py`
 - Modify: `tests/plugins/llm/test_azure_tracing.py`
 
@@ -769,13 +777,16 @@ Run: `.venv/bin/python -m pytest tests/plugins/llm/test_azure_tracing.py::TestAz
 
 Expected: FAIL with `AttributeError: 'AzureLLMTransform' object has no attribute '_tracing_config'`
 
-### Step 4.3: Add tracing initialization to AzureLLMTransform.**init**
+### Step 4.3: Add tracing initialization to AzureLLMTransform.__init__
 
 **File:** `src/elspeth/plugins/llm/azure.py`
 
-Add import at top:
+Add imports at top (add to existing imports section):
 
 ```python
+from contextlib import contextmanager
+from collections.abc import Generator
+
 from elspeth.plugins.llm.tracing import (
     TracingConfig,
     LangfuseTracingConfig,
@@ -1007,7 +1018,6 @@ EOF
 **CRITICAL:** This task implements the actual tracing instrumentation that provides value.
 
 **Files:**
-
 - Modify: `src/elspeth/plugins/llm/azure.py`
 - Modify: `tests/plugins/llm/test_azure_tracing.py`
 
@@ -1249,7 +1259,6 @@ EOF
 ## Task 6: Add Tracing to AzureMultiQueryLLMTransform
 
 **Files:**
-
 - Modify: `src/elspeth/plugins/llm/azure_multi_query.py`
 
 ### Step 6.1: Add tracing field to config
@@ -1267,7 +1276,6 @@ Find the config class (likely `AzureMultiQueryConfig` or similar) and add:
 ### Step 6.2: Add tracing initialization (same pattern as Task 4)
 
 Copy the tracing initialization pattern from `AzureLLMTransform`:
-
 - Parse config in `__init__`
 - Validate in `on_start()`
 - Setup tracing providers
@@ -1296,63 +1304,495 @@ EOF
 
 ## Task 7: Add Tracing to OpenRouter Plugins
 
-**NOTE:** This task is REQUIRED (not optional). OpenRouter uses HTTP, so only Langfuse is supported.
+**NOTE:** This task is REQUIRED (not optional). OpenRouter uses HTTP directly, so only Langfuse is supported (Azure AI auto-instrumentation requires the OpenAI SDK).
 
 **Files:**
-
 - Modify: `src/elspeth/plugins/llm/openrouter.py`
 - Modify: `src/elspeth/plugins/llm/openrouter_multi_query.py`
+- Create: `tests/plugins/llm/test_openrouter_tracing.py`
 
-### Step 7.1: Add tracing field to OpenRouterConfig
+### Step 7.1: Write failing test for OpenRouter tracing config
+
+**File:** `tests/plugins/llm/test_openrouter_tracing.py`
+
+```python
+# tests/plugins/llm/test_openrouter_tracing.py
+"""Tests for Tier 2 tracing in OpenRouterLLMTransform."""
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
+from elspeth.plugins.llm.tracing import LangfuseTracingConfig
+
+
+class TestOpenRouterConfigTracing:
+    """Tests for tracing configuration in OpenRouterConfig."""
+
+    def test_tracing_field_accepts_none(self) -> None:
+        """Tracing field defaults to None (no tracing)."""
+        config = OpenRouterConfig(
+            model="anthropic/claude-3-opus",
+            api_key="test-key",
+            prompt_template="Hello {{ name }}",
+        )
+        assert config.tracing is None
+
+    def test_tracing_field_accepts_langfuse_config(self) -> None:
+        """Tracing field accepts Langfuse configuration dict."""
+        config = OpenRouterConfig(
+            model="anthropic/claude-3-opus",
+            api_key="test-key",
+            prompt_template="Hello {{ name }}",
+            tracing={
+                "provider": "langfuse",
+                "public_key": "pk-xxx",
+                "secret_key": "sk-xxx",
+            },
+        )
+        assert config.tracing is not None
+        assert config.tracing["provider"] == "langfuse"
+
+
+class TestOpenRouterLLMTransformTracing:
+    """Tests for tracing lifecycle in OpenRouterLLMTransform."""
+
+    def _create_transform(self, tracing_config: dict | None = None) -> OpenRouterLLMTransform:
+        """Create a transform with optional tracing config."""
+        config = {
+            "model": "anthropic/claude-3-opus",
+            "api_key": "test-key",
+            "prompt_template": "Hello {{ name }}",
+            "schema": {"mode": "observed"},
+        }
+        if tracing_config is not None:
+            config["tracing"] = tracing_config
+
+        return OpenRouterLLMTransform(config)
+
+    def test_no_tracing_when_config_is_none(self) -> None:
+        """No tracing setup when tracing config is None."""
+        transform = self._create_transform(tracing_config=None)
+        assert transform._tracing_config is None
+        assert transform._tracing_active is False
+
+    def test_azure_ai_tracing_rejected_with_warning(self) -> None:
+        """Azure AI tracing logs warning and is not activated for OpenRouter."""
+        transform = self._create_transform(
+            tracing_config={
+                "provider": "azure_ai",
+                "connection_string": "InstrumentationKey=xxx",
+            }
+        )
+
+        with patch("structlog.get_logger") as mock_get_logger:
+            mock_logger = MagicMock()
+            mock_get_logger.return_value = mock_logger
+
+            ctx = MagicMock()
+            ctx.landscape = MagicMock()
+
+            transform.on_start(ctx)
+
+            # Should have logged a warning about unsupported provider
+            mock_logger.warning.assert_called()
+            assert transform._tracing_active is False
+
+    def test_langfuse_tracing_initialized(self) -> None:
+        """Langfuse tracing is properly initialized for OpenRouter."""
+        transform = self._create_transform(
+            tracing_config={
+                "provider": "langfuse",
+                "public_key": "pk-xxx",
+                "secret_key": "sk-xxx",
+            }
+        )
+
+        mock_langfuse = MagicMock()
+        with patch("elspeth.plugins.llm.openrouter.Langfuse", return_value=mock_langfuse):
+            ctx = MagicMock()
+            ctx.landscape = MagicMock()
+
+            transform.on_start(ctx)
+
+            assert transform._tracing_active is True
+            assert transform._langfuse_client is mock_langfuse
+```
+
+### Step 7.2: Run test to verify it fails
+
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_openrouter_tracing.py::TestOpenRouterConfigTracing::test_tracing_field_accepts_none -v`
+
+Expected: FAIL with `pydantic_core._pydantic_core.ValidationError: ... Extra inputs are not permitted`
+
+### Step 7.3: Add tracing field to OpenRouterConfig
+
+**File:** `src/elspeth/plugins/llm/openrouter.py`
+
+Add to imports (at top):
+
+```python
+from elspeth.plugins.llm.tracing import (
+    TracingConfig,
+    LangfuseTracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
+```
+
+Add to `OpenRouterConfig` class (after `timeout_seconds` field):
 
 ```python
     # Tier 2: Plugin-internal tracing (optional)
-    # Note: Only Langfuse is supported - Azure AI auto-instrumentation
-    # requires the OpenAI SDK, which OpenRouter doesn't use.
+    # NOTE: Only Langfuse is supported for OpenRouter.
+    # Azure AI auto-instrumentation requires the OpenAI SDK, which OpenRouter doesn't use.
     tracing: dict[str, Any] | None = Field(
         default=None,
-        description="Tier 2 tracing configuration (langfuse only for OpenRouter)",
+        description="Tier 2 tracing configuration (langfuse only - azure_ai not supported)",
     )
 ```
 
-### Step 7.2: Add Langfuse-only tracing setup
+### Step 7.4: Add tracing initialization to OpenRouterLLMTransform.__init__
+
+Add to `__init__` method (after existing initialization, around line 165):
 
 ```python
+        # Tier 2: Plugin-internal tracing (Langfuse only for OpenRouter)
+        self._tracing_config: TracingConfig | None = parse_tracing_config(
+            cfg.tracing
+        )
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
+```
+
+### Step 7.5: Add tracing setup to on_start
+
+**File:** `src/elspeth/plugins/llm/openrouter.py`
+
+Update the `on_start` method:
+
+```python
+    def on_start(self, ctx: PluginContext) -> None:
+        """Capture recorder reference and initialize tracing.
+
+        Called by the engine at pipeline start. Captures the landscape
+        recorder reference and sets up Tier 2 tracing if configured.
+        """
+        self._recorder = ctx.landscape
+        self._run_id = ctx.run_id
+        self._telemetry_emit = ctx.telemetry_emit
+        self._limiter = ctx.limiter
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
     def _setup_tracing(self) -> None:
-        """Initialize Tier 2 tracing (Langfuse only for OpenRouter)."""
+        """Initialize Tier 2 tracing (Langfuse only for OpenRouter).
+
+        Azure AI auto-instrumentation is NOT supported because it requires
+        the OpenAI SDK. OpenRouter uses direct HTTP calls via httpx.
+        """
         import structlog
 
         logger = structlog.get_logger(__name__)
 
-        if self._tracing_config is None:
-            return
+        # Validate configuration completeness
+        errors = validate_tracing_config(self._tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return  # Don't attempt setup with incomplete config
 
-        # OpenRouter only supports Langfuse (no Azure AI auto-instrumentation)
-        if self._tracing_config.provider == "azure_ai":
-            logger.warning(
-                "Azure AI tracing not supported for OpenRouter - use Langfuse instead",
-                provider=self._tracing_config.provider,
-                hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
+        match self._tracing_config.provider:
+            case "azure_ai":
+                logger.warning(
+                    "Azure AI tracing not supported for OpenRouter - use Langfuse instead",
+                    provider="azure_ai",
+                    hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
+                )
+                return
+            case "langfuse":
+                self._setup_langfuse_tracing(logger)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_langfuse_tracing(self, logger: Any) -> None:
+        """Initialize Langfuse tracing.
+
+        Langfuse requires manual span creation around HTTP calls.
+        The Langfuse client is stored for use in _process_row().
+        """
+        try:
+            from langfuse import Langfuse
+
+            cfg = self._tracing_config
+            if not isinstance(cfg, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=cfg.public_key,
+                secret_key=cfg.secret_key,
+                host=cfg.host,
             )
-            return
+            self._tracing_active = True
 
-        if self._tracing_config.provider == "langfuse":
-            self._setup_langfuse_tracing(logger)
+            logger.info(
+                "Langfuse tracing initialized",
+                provider="langfuse",
+                host=cfg.host,
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
 ```
 
-### Step 7.3: Copy Langfuse span creation methods from azure.py
+### Step 7.6: Add Langfuse span creation methods
 
-Copy `_create_langfuse_trace()` and `_record_langfuse_generation()` to OpenRouter plugins.
+**File:** `src/elspeth/plugins/llm/openrouter.py`
 
-### Step 7.4: Run tests and commit
+Add these methods to the class:
+
+```python
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for an HTTP call.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "model": self._model,
+            },
+        )
+        try:
+            yield trace
+        finally:
+            # Trace auto-closes, but we ensure it's ended
+            pass
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record an HTTP/LLM generation in Langfuse.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            prompt: The prompt sent to the API
+            response_content: The response received
+            model: Model identifier
+            usage: Token usage dict with prompt_tokens/completion_tokens
+            latency_ms: Call latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "llm_call",
+            "model": model,
+            "input": prompt,
+            "output": response_content,
+        }
+
+        if usage:
+            generation_kwargs["usage"] = {
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+            }
+
+        if latency_ms is not None:
+            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        trace.generation(**generation_kwargs)
+```
+
+### Step 7.7: Integrate tracing into _process_row
+
+**File:** `src/elspeth/plugins/llm/openrouter.py`
+
+Modify `_process_row` to wrap the HTTP call with tracing. Add timing and span creation:
+
+```python
+    def _process_row(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+        """Process a single row through OpenRouter API.
+
+        Now includes Tier 2 tracing via Langfuse if configured.
+        """
+        import time
+
+        # 1. Render template with row data (THEIR DATA - wrap)
+        try:
+            rendered = self._template.render_with_metadata(row)
+        except TemplateError as e:
+            # ... existing error handling ...
+            return TransformResult.error(error_reason)
+
+        # 2. Build request (existing code)
+        messages: list[dict[str, str]] = []
+        if self._system_prompt:
+            messages.append({"role": "system", "content": self._system_prompt})
+        messages.append({"role": "user", "content": rendered.prompt})
+
+        request_body: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+        }
+        if self._max_tokens:
+            request_body["max_tokens"] = self._max_tokens
+
+        # ... existing state_id check ...
+
+        try:
+            http_client = self._get_http_client(ctx.state_id)
+
+            # === TRACING INTEGRATION START ===
+            start_time = time.monotonic()
+            token_id = ctx.token_id or "unknown"
+
+            with self._create_langfuse_trace(token_id, row) as trace:
+                # 4. Call OpenRouter API (EXTERNAL - wrap)
+                try:
+                    response = http_client.post(
+                        "/chat/completions",
+                        json=request_body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    # ... existing HTTP error handling ...
+                    pass
+                except httpx.RequestError as e:
+                    raise NetworkError(f"Network error: {e}") from e
+
+                # 5. Parse JSON response (EXTERNAL DATA - wrap)
+                try:
+                    data = response.json()
+                except (ValueError, TypeError) as e:
+                    # ... existing JSON error handling ...
+                    pass
+
+                # 6. Extract content from response (EXTERNAL DATA - wrap)
+                try:
+                    choices = data["choices"]
+                    if not choices:
+                        return TransformResult.error(...)
+                    content = choices[0]["message"]["content"]
+                except (KeyError, IndexError, TypeError) as e:
+                    return TransformResult.error(...)
+
+                usage = data.get("usage") or {}
+
+                # Record in Langfuse if tracing is active
+                if trace is not None:
+                    latency_ms = (time.monotonic() - start_time) * 1000
+                    self._record_langfuse_generation(
+                        trace=trace,
+                        prompt=rendered.prompt,
+                        response_content=content,
+                        model=data.get("model", self._model),
+                        usage=usage,
+                        latency_ms=latency_ms,
+                    )
+            # === TRACING INTEGRATION END ===
+
+            # 7. Build output row (existing code)
+            output = dict(row)
+            # ... rest of existing code ...
+            return TransformResult.success(output, ...)
+        finally:
+            # ... existing cleanup ...
+```
+
+### Step 7.8: Add tracing cleanup to close()
+
+```python
+    def close(self) -> None:
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active and self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+            except Exception as e:
+                import structlog
+                structlog.get_logger(__name__).warning(
+                    "Failed to flush Langfuse tracing", error=str(e)
+                )
+
+        # ... existing cleanup code ...
+        self._langfuse_client = None
+```
+
+### Step 7.9: Apply same pattern to OpenRouterMultiQueryLLMTransform
+
+**File:** `src/elspeth/plugins/llm/openrouter_multi_query.py`
+
+Apply the same changes:
+1. Add `tracing` field to config class
+2. Add tracing initialization in `__init__`
+3. Add `_setup_tracing()`, `_setup_langfuse_tracing()` methods
+4. Add `_create_langfuse_trace()`, `_record_langfuse_generation()` methods
+5. Wrap HTTP calls with tracing in the appropriate method
+6. Flush in `close()`
+
+### Step 7.10: Run tests to verify they pass
+
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_openrouter_tracing.py -v`
+
+Expected: All PASS
+
+### Step 7.11: Run existing OpenRouter tests
+
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_openrouter*.py -v`
+
+Expected: All PASS (no regression)
+
+### Step 7.12: Commit
 
 ```bash
-git add src/elspeth/plugins/llm/openrouter.py src/elspeth/plugins/llm/openrouter_multi_query.py
+git add src/elspeth/plugins/llm/openrouter.py src/elspeth/plugins/llm/openrouter_multi_query.py tests/plugins/llm/test_openrouter_tracing.py
 git commit -m "$(cat <<'EOF'
 feat(openrouter): add Tier 2 tracing support (Langfuse only)
 
-OpenRouter uses HTTP directly, so Azure AI auto-instrumentation
-doesn't apply. Langfuse manual spans provide LLM observability.
+OpenRouter uses HTTP directly via httpx, so Azure AI auto-instrumentation
+doesn't apply (it requires the OpenAI SDK). Langfuse manual spans provide
+LLM observability with full prompt/response capture.
+
+- Add tracing config field to OpenRouterConfig
+- Reject azure_ai provider with helpful warning
+- Implement Langfuse trace/generation recording
+- Wrap _process_row HTTP calls with timing
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 EOF
@@ -1361,10 +1801,164 @@ EOF
 
 ---
 
-## Task 8: Write Integration Tests
+## Task 8: Add Tracing to Batch Plugins (Limited Scope)
+
+**NOTE:** Batch plugins have fundamentally different execution models that limit tracing capabilities.
 
 **Files:**
+- Modify: `src/elspeth/plugins/llm/azure_batch.py`
+- Modify: `src/elspeth/plugins/llm/openrouter_batch.py`
 
+### Background: Why Batch Plugins Have Limited Tracing
+
+| Plugin | Execution Model | Tracing Capability |
+|--------|----------------|-------------------|
+| `AzureBatchLLMTransform` | Async batch API (submit job → poll → download) | ⚠️ **Job-level only** - individual row tracing impossible |
+| `OpenRouterBatchLLMTransform` | Synchronous parallel HTTP calls | ✅ **Per-call tracing** - Langfuse supported |
+
+**AzureBatchLLMTransform limitation:** Azure's Batch API submits all requests in a JSONL file and processes them asynchronously. The actual LLM calls happen in Azure's infrastructure, not in our code. We can only trace:
+- Batch job submission
+- Batch job completion
+- Result download
+
+We CANNOT trace individual row processing because we don't control those calls.
+
+### Step 8.1: Add job-level tracing to AzureBatchLLMTransform
+
+**File:** `src/elspeth/plugins/llm/azure_batch.py`
+
+Add tracing field to config:
+
+```python
+    # Tier 2: Plugin-internal tracing (optional)
+    # NOTE: Azure Batch API only supports JOB-LEVEL tracing, not per-row tracing.
+    # The actual LLM calls happen asynchronously in Azure's infrastructure.
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (job-level only for batch API)",
+    )
+```
+
+Add job-level span in process():
+
+```python
+    def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+        """Process batch of rows via Azure Batch API with job-level tracing."""
+        import time
+
+        start_time = time.monotonic()
+        token_id = ctx.token_id or "batch"
+
+        with self._create_langfuse_trace(token_id, {"row_count": len(rows)}) as trace:
+            # ... existing batch processing code ...
+
+            # On success, record the batch job as a single "generation"
+            if trace is not None:
+                latency_ms = (time.monotonic() - start_time) * 1000
+                self._record_langfuse_batch_job(
+                    trace=trace,
+                    row_count=len(rows),
+                    batch_id=batch_id,
+                    latency_ms=latency_ms,
+                )
+```
+
+Add batch-specific recording method:
+
+```python
+    def _record_langfuse_batch_job(
+        self,
+        trace: Any,
+        row_count: int,
+        batch_id: str,
+        latency_ms: float,
+    ) -> None:
+        """Record a batch job completion in Langfuse.
+
+        Unlike per-call tracing, this records the entire batch as one span.
+        Individual row prompts/responses are NOT captured (they happen in Azure).
+        """
+        if trace is None:
+            return
+
+        trace.span(
+            name="azure_batch_job",
+            metadata={
+                "batch_id": batch_id,
+                "row_count": row_count,
+                "latency_ms": latency_ms,
+                "note": "Individual row tracing not available for Azure Batch API",
+            },
+        )
+```
+
+### Step 8.2: Add per-call tracing to OpenRouterBatchLLMTransform
+
+**File:** `src/elspeth/plugins/llm/openrouter_batch.py`
+
+OpenRouterBatchLLMTransform uses `ThreadPoolExecutor` to make parallel HTTP calls synchronously. Each call CAN be traced individually.
+
+Add full Langfuse tracing (same pattern as OpenRouterLLMTransform):
+
+```python
+    # In _process_single_row() method - wrap each HTTP call
+    def _process_single_row(
+        self,
+        row: dict[str, Any],
+        row_index: int,
+        ctx: PluginContext,
+    ) -> tuple[int, dict[str, Any] | TransformErrorReason]:
+        """Process a single row with Langfuse tracing."""
+        import time
+
+        start_time = time.monotonic()
+        token_id = f"{ctx.token_id or 'batch'}_{row_index}"
+
+        with self._create_langfuse_trace(token_id, row) as trace:
+            # ... existing HTTP call code ...
+
+            if trace is not None:
+                latency_ms = (time.monotonic() - start_time) * 1000
+                self._record_langfuse_generation(
+                    trace=trace,
+                    prompt=rendered.prompt,
+                    response_content=content,
+                    model=data.get("model", self._model),
+                    usage=usage,
+                    latency_ms=latency_ms,
+                )
+```
+
+### Step 8.3: Run existing batch plugin tests
+
+Run: `.venv/bin/python -m pytest tests/plugins/llm/test_azure_batch*.py tests/plugins/llm/test_openrouter_batch*.py -v`
+
+Expected: All PASS
+
+### Step 8.4: Commit
+
+```bash
+git add src/elspeth/plugins/llm/azure_batch.py src/elspeth/plugins/llm/openrouter_batch.py
+git commit -m "$(cat <<'EOF'
+feat(batch): add Tier 2 tracing to batch LLM plugins
+
+- AzureBatchLLMTransform: Job-level tracing only (per-row not possible)
+- OpenRouterBatchLLMTransform: Per-call Langfuse tracing
+
+Note: Azure Batch API processes rows asynchronously in Azure's infrastructure,
+so individual row tracing is not possible. OpenRouter batch uses synchronous
+parallel HTTP calls, so full per-call tracing is supported.
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 9: Write Integration Tests (Renumbered from Task 8)
+
+**Files:**
 - Create: `tests/plugins/llm/test_tracing_integration.py`
 
 ### Step 8.1: Create integration test with mocked endpoints
@@ -1551,13 +2145,12 @@ EOF
 
 ---
 
-## Task 9: Write Documentation
+## Task 10: Write Documentation (Renumbered from Task 9)
 
 **Files:**
-
 - Create: `docs/guides/tier2-tracing.md`
 
-### Step 9.1: Create documentation guide
+### Step 10.1: Create documentation guide
 
 **File:** `docs/guides/tier2-tracing.md`
 
@@ -1579,10 +2172,21 @@ Tier 2 captures full prompts, responses, and token-level metrics for LLM calls s
 
 ## Supported Providers
 
-| Provider | Azure LLM | OpenRouter | Notes |
-|----------|-----------|------------|-------|
-| Azure AI (App Insights) | ✅ | ❌ | Auto-instruments OpenAI SDK |
-| Langfuse | ✅ | ✅ | Manual spans, universal |
+### Real-Time Plugins
+
+| Provider | Azure LLM | Azure MultiQuery | OpenRouter | OpenRouter MultiQuery |
+|----------|-----------|------------------|------------|----------------------|
+| Azure AI (App Insights) | ✅ | ✅ | ❌ | ❌ |
+| Langfuse | ✅ | ✅ | ✅ | ✅ |
+
+### Batch Plugins
+
+| Provider | Azure Batch | OpenRouter Batch | Notes |
+|----------|-------------|------------------|-------|
+| Azure AI | ❌ | ❌ | Batch API doesn't use OpenAI SDK |
+| Langfuse | ⚠️ Job-level | ✅ Per-call | Azure Batch = async in Azure infrastructure |
+
+**Azure Batch Limitation:** The Azure Batch API submits requests as a JSONL file and processes them asynchronously in Azure's infrastructure. Individual row tracing is not possible because we don't control those calls. Only job-level spans (submit/complete) are recorded.
 
 ### Azure AI (Application Insights)
 
@@ -1597,7 +2201,6 @@ uv pip install elspeth[tracing-azure]
 ```
 
 **Configuration:**
-
 ```yaml
 transforms:
   - plugin: azure_llm
@@ -1618,19 +2221,16 @@ transforms:
 ### Langfuse
 
 Langfuse provides LLM-specific observability:
-
 - Prompt engineering analytics
 - Cost tracking and attribution
 - Evaluation scores
 
 **Installation:**
-
 ```bash
 uv pip install elspeth[tracing-langfuse]
 ```
 
 **Configuration:**
-
 ```yaml
 transforms:
   - plugin: azure_llm  # or openrouter
@@ -1674,7 +2274,6 @@ transforms:
 ```
 
 **Result:**
-
 - Datadog shows all external call metrics (LLM + HTTP + DB)
 - Langfuse shows detailed prompt/response data for LLM calls
 
@@ -1739,7 +2338,6 @@ Ensure `api_version: 2024-10-21` or later.
 ### Langfuse traces delayed
 
 Langfuse batches traces for efficiency. Traces are flushed when:
-
 - `transform.close()` is called
 - Pipeline completes
 - Buffer fills (internal batching)
@@ -1748,14 +2346,12 @@ Langfuse batches traces for efficiency. Traces are flushed when:
 
 This warning appears when both Tier 1 and Tier 2 Azure AI are active.
 Options:
-
 1. Use Langfuse for Tier 2 instead (recommended)
 2. Disable Tier 1 telemetry
 3. Accept potential conflicts
-
 ```
 
-### Step 9.2: Commit
+### Step 10.2: Commit
 
 ```bash
 git add docs/guides/tier2-tracing.md
@@ -1772,27 +2368,27 @@ EOF
 
 ---
 
-## Task 10: Run Full Test Suite and Type Checks
+## Task 11: Run Full Test Suite and Type Checks (Renumbered from Task 10)
 
-### Step 10.1: Run mypy
+### Step 11.1: Run mypy on all tracing files
 
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/llm/tracing.py src/elspeth/plugins/llm/azure.py`
-
-Expected: No errors
-
-### Step 10.2: Run ruff
-
-Run: `.venv/bin/python -m ruff check src/elspeth/plugins/llm/tracing.py src/elspeth/plugins/llm/azure.py`
+Run: `.venv/bin/python -m mypy src/elspeth/plugins/llm/tracing.py src/elspeth/plugins/llm/azure.py src/elspeth/plugins/llm/azure_multi_query.py src/elspeth/plugins/llm/azure_batch.py src/elspeth/plugins/llm/openrouter.py src/elspeth/plugins/llm/openrouter_multi_query.py src/elspeth/plugins/llm/openrouter_batch.py`
 
 Expected: No errors
 
-### Step 10.3: Run full test suite
+### Step 11.2: Run ruff on all tracing files
+
+Run: `.venv/bin/python -m ruff check src/elspeth/plugins/llm/`
+
+Expected: No errors
+
+### Step 11.3: Run full test suite
 
 Run: `.venv/bin/python -m pytest tests/ -v --tb=short`
 
 Expected: All PASS
 
-### Step 10.4: Final commit (if any fixes needed)
+### Step 11.4: Final commit (if any fixes needed)
 
 ```bash
 git add -A
@@ -1808,12 +2404,16 @@ EOF
 
 ## Verification Checklist
 
+### Core Infrastructure (Tasks 1-2)
 - [ ] `TracingConfig` base class created
 - [ ] `AzureAITracingConfig` with connection_string, enable_content_recording, enable_live_metrics
 - [ ] `LangfuseTracingConfig` with public_key, secret_key, host
 - [ ] `parse_tracing_config()` function handles all cases
 - [ ] `validate_tracing_config()` checks required fields
 - [ ] Optional dependencies in pyproject.toml (tracing-azure, tracing-langfuse)
+- [ ] Package name verified: `azure-monitor-opentelemetry` (distro, not exporter)
+
+### Azure Plugins (Tasks 3-6)
 - [ ] `AzureOpenAIConfig.tracing` field added
 - [ ] `AzureLLMTransform` initializes tracing in `on_start()`
 - [ ] `AzureLLMTransform` validates config before setup
@@ -1822,11 +2422,24 @@ EOF
 - [ ] `AzureLLMTransform` flushes tracing in `close()`
 - [ ] Graceful degradation when SDK not installed (warning, not crash)
 - [ ] `AzureMultiQueryLLMTransform` has same tracing support
-- [ ] `OpenRouterLLMTransform` has Langfuse support (Azure AI rejected with warning)
+
+### OpenRouter Plugins (Task 7)
+- [ ] `OpenRouterConfig.tracing` field added
+- [ ] `OpenRouterLLMTransform` has Langfuse support
+- [ ] `OpenRouterLLMTransform` rejects Azure AI with warning
 - [ ] `OpenRouterMultiQueryLLMTransform` has Langfuse support
+
+### Batch Plugins (Task 8)
+- [ ] `AzureBatchLLMTransform` has job-level tracing (per-row not possible)
+- [ ] `OpenRouterBatchLLMTransform` has per-call Langfuse tracing
+- [ ] Batch plugin limitations documented in code comments
+
+### Testing & Documentation (Tasks 9-11)
 - [ ] Integration tests verify end-to-end tracing
+- [ ] OpenRouter-specific tracing tests created
 - [ ] Documentation covers Tier 1/Tier 2 interaction
 - [ ] Documentation covers multi-plugin scenarios
+- [ ] Documentation covers batch plugin limitations
 - [ ] All existing tests pass
 - [ ] mypy clean
 - [ ] ruff clean
@@ -1840,11 +2453,14 @@ EOF
 | `src/elspeth/plugins/llm/tracing.py` | New - config models + validation |
 | `src/elspeth/plugins/llm/azure.py` | Add tracing field, lifecycle, and Langfuse spans |
 | `src/elspeth/plugins/llm/azure_multi_query.py` | Add tracing field and lifecycle |
+| `src/elspeth/plugins/llm/azure_batch.py` | Add job-level tracing (limited) |
 | `src/elspeth/plugins/llm/openrouter.py` | Add Langfuse tracing support |
 | `src/elspeth/plugins/llm/openrouter_multi_query.py` | Add Langfuse tracing support |
+| `src/elspeth/plugins/llm/openrouter_batch.py` | Add per-call Langfuse tracing |
 | `pyproject.toml` | Add tracing optional dependencies |
 | `tests/plugins/llm/test_tracing_config.py` | New - config + validation tests |
 | `tests/plugins/llm/test_azure_tracing.py` | New - lifecycle + span tests |
+| `tests/plugins/llm/test_openrouter_tracing.py` | New - OpenRouter tracing tests |
 | `tests/plugins/llm/test_tracing_integration.py` | New - integration tests |
 | `docs/guides/tier2-tracing.md` | New - user documentation |
 
@@ -1860,8 +2476,9 @@ EOF
 | Task 4: Lifecycle | 0.5 days |
 | Task 5: Langfuse spans (CRITICAL) | 0.5 days |
 | Task 6: Multi-query | 0.5 days |
-| Task 7: OpenRouter | 0.5 days |
-| Task 8: Integration tests | 0.5 days |
-| Task 9: Documentation | 0.25 days |
-| Task 10: Final checks | 0.25 days |
-| **Total** | **4 days** |
+| Task 7: OpenRouter (expanded) | 0.75 days |
+| Task 8: Batch plugins (new) | 0.5 days |
+| Task 9: Integration tests | 0.5 days |
+| Task 10: Documentation | 0.25 days |
+| Task 11: Final checks | 0.25 days |
+| **Total** | **4.75 days** |
