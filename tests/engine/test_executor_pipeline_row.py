@@ -1,0 +1,503 @@
+"""Tests for executor PipelineRow handling.
+
+Tests that TransformExecutor:
+1. Passes PipelineRow (not dict) to transform.process()
+2. Extracts dict from PipelineRow for Landscape recording
+3. Sets ctx.contract from token.row_data.contract
+4. Creates new PipelineRow from result using correct contract
+5. Crashes if no contract available (B6 fix)
+"""
+
+from contextlib import nullcontext
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
+
+from elspeth.contracts import TransformResult
+from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+
+
+def _make_contract() -> SchemaContract:
+    """Create a simple test contract."""
+    return SchemaContract(
+        mode="FLEXIBLE",
+        fields=(
+            FieldContract(
+                normalized_name="value",
+                original_name="'value'",
+                python_type=str,
+                required=True,
+                source="declared",
+            ),
+        ),
+        locked=True,
+    )
+
+
+def _make_output_contract() -> SchemaContract:
+    """Create a contract for transform output (different from input)."""
+    return SchemaContract(
+        mode="FLEXIBLE",
+        fields=(
+            FieldContract(
+                normalized_name="value",
+                original_name="'value'",
+                python_type=str,
+                required=True,
+                source="declared",
+            ),
+            FieldContract(
+                normalized_name="processed",
+                original_name="'processed'",
+                python_type=bool,
+                required=True,
+                source="declared",
+            ),
+        ),
+        locked=True,
+    )
+
+
+class TestTransformExecutorPipelineRow:
+    """Tests for TransformExecutor with PipelineRow."""
+
+    def test_execute_transform_passes_pipeline_row_to_plugin(self) -> None:
+        """TransformExecutor should pass PipelineRow to transform.process()."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - configure spec to avoid MagicMock auto-creating 'accept' attr
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "processed"},
+            success_reason={"action": "test"},
+            contract=contract,
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        _result, _updated_token, _error_sink = executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify PipelineRow was passed to transform.process()
+        mock_transform.process.assert_called_once()
+        call_args = mock_transform.process.call_args
+        passed_row = call_args[0][0]
+        assert isinstance(passed_row, PipelineRow), f"Expected PipelineRow, got {type(passed_row)}"
+        assert passed_row["value"] == "test"
+
+    def test_execute_transform_extracts_dict_for_landscape(self) -> None:
+        """TransformExecutor should extract dict for Landscape recording."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - configure spec to avoid MagicMock auto-creating 'accept' attr
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "processed"},
+            success_reason={"action": "test"},
+            contract=contract,
+        )
+
+        # Mock recorder - capture what gets passed
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify dict was passed to begin_node_state (for Landscape recording)
+        mock_recorder.begin_node_state.assert_called_once()
+        call_kwargs = mock_recorder.begin_node_state.call_args[1]
+        input_data = call_kwargs["input_data"]
+        assert isinstance(input_data, dict), f"Expected dict for Landscape, got {type(input_data)}"
+        assert input_data == {"value": "test"}
+
+    def test_execute_transform_sets_ctx_contract(self) -> None:
+        """TransformExecutor should set ctx.contract from token.row_data.contract."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - capture the context passed to process()
+        captured_ctx = None
+
+        def capture_ctx(row_data, ctx):
+            nonlocal captured_ctx
+            captured_ctx = ctx
+            return TransformResult.success(
+                {"value": "processed"},
+                success_reason={"action": "test"},
+                contract=contract,
+            )
+
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process = capture_ctx
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context - initially no contract
+        ctx = PluginContext(run_id="run_001", config={})
+        assert ctx.contract is None
+
+        # Execute
+        executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify ctx.contract was set from token.row_data.contract
+        assert captured_ctx is not None
+        assert captured_ctx.contract is contract
+
+    def test_execute_transform_creates_pipeline_row_from_result(self) -> None:
+        """TransformExecutor should create PipelineRow from result dict + contract."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        input_contract = _make_contract()
+        output_contract = _make_output_contract()
+        row = PipelineRow({"value": "test"}, input_contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - returns different contract on output
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "processed", "processed": True},
+            success_reason={"action": "test"},
+            contract=output_contract,  # Transform provides output contract
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        _result, updated_token, _error_sink = executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify updated token has PipelineRow with output contract
+        assert isinstance(updated_token.row_data, PipelineRow)
+        assert updated_token.row_data["value"] == "processed"
+        assert updated_token.row_data["processed"] is True
+        assert updated_token.row_data.contract is output_contract
+
+    def test_execute_transform_uses_input_contract_as_fallback(self) -> None:
+        """When result has no contract, should use input token's contract."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - NO contract on result (typical passthrough transform)
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "modified"},
+            success_reason={"action": "passthrough"},
+            contract=None,  # No output contract - should use input contract
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        _result, updated_token, _error_sink = executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify updated token uses input contract as fallback
+        assert isinstance(updated_token.row_data, PipelineRow)
+        assert updated_token.row_data.contract is contract
+
+    def test_execute_transform_error_preserves_token(self) -> None:
+        """When transform returns error, token should be unchanged."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - returns error
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = "discard"  # Has error handler
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.error(
+            reason={"reason": "test_failure"},
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        _result, updated_token, _error_sink = executor.execute_transform(
+            transform=mock_transform,
+            token=token,
+            ctx=ctx,
+            step_in_pipeline=0,
+        )
+
+        # Verify token is unchanged on error
+        assert updated_token is token
+        assert updated_token.row_data is row
+
+    def test_execute_transform_hashes_dict_not_pipeline_row(self) -> None:
+        """stable_hash should be called with dict, not PipelineRow."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - configure spec to avoid MagicMock auto-creating 'accept' attr
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "processed"},
+            success_reason={"action": "test"},
+            contract=contract,
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Patch stable_hash to verify what gets passed
+        with patch("elspeth.engine.executors.stable_hash") as mock_hash:
+            mock_hash.return_value = "test_hash"
+
+            executor.execute_transform(
+                transform=mock_transform,
+                token=token,
+                ctx=ctx,
+                step_in_pipeline=0,
+            )
+
+            # First call should be for input hash - should receive dict
+            first_call_arg = mock_hash.call_args_list[0][0][0]
+            assert isinstance(first_call_arg, dict), f"stable_hash should receive dict, got {type(first_call_arg)}"
+
+    def test_execute_transform_crashes_if_no_contract_available(self) -> None:
+        """Should crash if neither result nor input has contract (B6 fix)."""
+        from elspeth.engine.executors import TransformExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow - we'll mock the contract property to return None
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock transform - returns success with NO contract
+        mock_transform = MagicMock()
+        mock_transform.name = "test_transform"
+        mock_transform.node_id = "transform_001"
+        mock_transform._on_error = None
+        # Delete accept to prevent batch transform detection
+        del mock_transform.accept
+        mock_transform.process.return_value = TransformResult.success(
+            {"value": "processed"},
+            success_reason={"action": "test"},
+            contract=None,  # No output contract
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+
+        # Mock span factory - use nullcontext for proper context manager behavior
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.transform_span.return_value = nullcontext()
+
+        # Create executor
+        executor = TransformExecutor(mock_recorder, mock_span_factory)
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Mock the contract property on row_data to return None
+        # This simulates the edge case where input token has no contract
+        with patch.object(type(token.row_data), "contract", new_callable=PropertyMock) as mock_contract:
+            mock_contract.return_value = None
+
+            # Execute - should raise ValueError
+            with pytest.raises(ValueError) as exc_info:
+                executor.execute_transform(
+                    transform=mock_transform,
+                    token=token,
+                    ctx=ctx,
+                    step_in_pipeline=0,
+                )
+
+            # Verify error message is clear
+            assert "Cannot create PipelineRow: no contract available" in str(exc_info.value)
+            assert "test_transform" in str(exc_info.value)

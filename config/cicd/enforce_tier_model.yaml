@@ -237,22 +237,22 @@ allow_hits:
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=3ccc39e943027ccc
+- key: engine/executors.py:R3:TransformExecutor:execute_transform:fp=7ca704465d0c2661
   owner: architecture
   reason: hasattr for feature detection
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=b686203861e4c982
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=3c2fc1b9b9bf76c6
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=96f37a9ed212311d
+- key: engine/executors.py:R2:TransformExecutor:execute_transform:fp=f90bccc331c84a40
   owner: architecture
   reason: getattr for optional attribute access
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=e96e562e2bf5ca09
+- key: engine/executors.py:R5:TransformExecutor:execute_transform:fp=54c52809564ace0e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern

@@ -23,8 +23,10 @@ from elspeth.contracts import (
     ExecutionError,
     NodeStateOpen,
     PendingOutcome,
+    PipelineRow,
     RoutingAction,
     RoutingSpec,
+    SchemaContract,
     TokenInfo,
 )
 from elspeth.contracts.enums import (
@@ -223,15 +225,19 @@ class TransformExecutor:
         """
         if transform.node_id is None:
             raise OrchestrationInvariantError(f"Transform '{transform.name}' executed without node_id - orchestrator bug")
-        input_hash = stable_hash(token.row_data)
 
-        # Begin node state
+        # Extract dict from PipelineRow for hashing and Landscape recording
+        # Landscape stores raw dicts, not PipelineRow objects
+        input_dict = token.row_data.to_dict()
+        input_hash = stable_hash(input_dict)
+
+        # Begin node state with dict (for Landscape recording)
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform.node_id,
             run_id=ctx.run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=input_dict,
             attempt=attempt,
         )
 
@@ -241,6 +247,10 @@ class TransformExecutor:
         ctx.node_id = transform.node_id
         # Note: call_index allocation is handled by LandscapeRecorder.allocate_call_index()
         # which automatically starts at 0 for each new state_id
+
+        # Set ctx.contract for plugins that use fallback access (dual-name resolution)
+        # This allows transforms to access original header names via ctx.contract.resolve_name()
+        ctx.contract = token.row_data.contract
 
         # Detect batch transforms (those using BatchTransformMixin)
         # They have accept() method and process() raises NotImplementedError
@@ -381,10 +391,33 @@ class TransformExecutor:
                 success_reason=result.success_reason,
                 context_after=result.context_after,
             )
-            # Update token with new row data, preserving all lineage metadata
+
+            # Update token with new PipelineRow, preserving all lineage metadata
             # For multi-row results, keep original row_data (engine will expand tokens later)
-            new_data = result.row if result.row is not None else token.row_data
-            updated_token = token.with_updated_data(new_data)
+            if result.row is not None:
+                # Single-row result: create new PipelineRow from result dict + contract
+                # Use result.contract if provided, otherwise fallback to input contract
+                output_contract: SchemaContract | None = result.contract if result.contract else token.row_data.contract
+                if output_contract is None:
+                    raise ValueError(
+                        f"Cannot create PipelineRow: no contract available. "
+                        f"TransformResult.contract is None and input token has no contract. "
+                        f"This is a bug in transform '{transform.name}' or upstream pipeline."
+                    )
+                new_row = PipelineRow(result.row, output_contract)
+
+                # B2 fix: Log PipelineRow creation for observability
+                slog.debug(
+                    "pipeline_row_created",
+                    token_id=token.token_id,
+                    transform=transform.name,
+                    contract_mode=output_contract.mode,
+                )
+
+                updated_token = token.with_updated_data(new_row)
+            else:
+                # Multi-row result: keep original row_data (engine will expand tokens later)
+                updated_token = token.with_updated_data(token.row_data)
         else:
             # Transform returned error status (not exception)
             # This is a LEGITIMATE processing failure, not a bug
@@ -422,7 +455,7 @@ class TransformExecutor:
             ctx.record_transform_error(
                 token_id=token.token_id,
                 transform_id=transform.node_id,
-                row=token.row_data,
+                row=input_dict,  # Use extracted dict for Landscape recording
                 error_details=result.reason,
                 destination=on_error,
             )
@@ -431,7 +464,7 @@ class TransformExecutor:
             if on_error != "discard":
                 ctx.route_to_sink(
                     sink_name=on_error,
-                    row=token.row_data,
+                    row=input_dict,  # Use extracted dict for sink routing
                     metadata={"transform_error": result.reason},
                 )
 
