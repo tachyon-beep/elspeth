@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -92,7 +93,7 @@ class KeywordFilter(BaseTransform):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Scan configured fields for blocked patterns.
@@ -105,13 +106,14 @@ class KeywordFilter(BaseTransform):
             TransformResult.success(row) if no patterns match
             TransformResult.error(reason) if any pattern matches
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        row_dict = row.to_dict()
+        fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row:
+            if field_name not in row_dict:
                 continue  # Skip fields not present in this row
 
-            value = row[field_name]
+            value = row_dict[field_name]
 
             # Only scan string values
             if not isinstance(value, str):
@@ -134,8 +136,9 @@ class KeywordFilter(BaseTransform):
 
         # No matches - pass through unchanged
         return TransformResult.success(
-            row,
+            row_dict,
             success_reason={"action": "filtered"},
+            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:

@@ -24,6 +24,7 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext
@@ -112,7 +113,7 @@ class JSONExplode(BaseTransform):
             allow_coercion=False,
         )
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
         """Explode array field into multiple rows.
 
         Args:
@@ -140,7 +141,8 @@ class JSONExplode(BaseTransform):
             )
 
         # Build base output (all fields except the array field)
-        base = {k: v for k, v in row.items() if k != self._array_field}
+        row_dict = row.to_dict()
+        base = {k: v for k, v in row_dict.items() if k != self._array_field}
 
         # Handle empty array - return single row, not multi
         if len(array_value) == 0:
@@ -158,6 +160,7 @@ class JSONExplode(BaseTransform):
                     "fields_added": fields_added,
                     "fields_removed": [self._array_field],
                 },
+                contract=row.contract,
             )
 
         # Explode array into multiple rows
@@ -179,6 +182,7 @@ class JSONExplode(BaseTransform):
                 "fields_added": fields_added,
                 "fields_removed": [self._array_field],
             },
+            contract=row.contract,
         )
 
     def close(self) -> None:
