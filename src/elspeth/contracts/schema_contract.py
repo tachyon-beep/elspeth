@@ -630,6 +630,39 @@ class PipelineRow:
         """
         return self._contract
 
+    def __copy__(self) -> PipelineRow:
+        """Support shallow copy - creates new PipelineRow with same data dict.
+
+        SchemaContract is immutable (frozen=True), so sharing reference is safe.
+        MappingProxyType doesn't support direct copy/pickle, so we create new one.
+
+        Returns:
+            New PipelineRow with same contract and data copy
+        """
+        return PipelineRow(dict(self._data), self._contract)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> PipelineRow:
+        """Support deep copy - creates new PipelineRow with deep copied data.
+
+        This enables fork_token and expand_token to use deepcopy() on PipelineRow
+        without hitting MappingProxyType pickle issues.
+
+        SchemaContract is immutable (frozen=True), so sharing reference is safe.
+        Only the data dict needs deep copying.
+
+        Args:
+            memo: Memoization dict for deepcopy
+
+        Returns:
+            New PipelineRow with same contract and deep copied data
+        """
+        import copy
+
+        # Deep copy the data dict (contains nested structures)
+        copied_data = copy.deepcopy(dict(self._data), memo)
+        # Contract is immutable - share reference (safe for frozen dataclass)
+        return PipelineRow(copied_data, self._contract)
+
     def to_checkpoint_format(self) -> dict[str, Any]:
         """Serialize for checkpoint storage.
 

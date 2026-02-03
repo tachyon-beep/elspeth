@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import SourceRow, TokenInfo
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.landscape import LandscapeRecorder
 
 
@@ -63,7 +64,7 @@ class TokenManager:
         run_id: str,
         source_node_id: str,
         row_index: int,
-        row_data: dict[str, Any],
+        source_row: SourceRow,
     ) -> TokenInfo:
         """Create a token for a source row.
 
@@ -71,21 +72,34 @@ class TokenManager:
             run_id: Run identifier
             source_node_id: Source node that loaded the row
             row_index: Position in source (0-indexed)
-            row_data: Row data from source
+            source_row: SourceRow from source (must have contract)
 
         Returns:
-            TokenInfo with row and token IDs
+            TokenInfo with row and token IDs, row_data as PipelineRow
+
+        Raises:
+            ValueError: If source_row has no contract
 
         Note:
             Payload persistence is now handled by LandscapeRecorder.create_row(),
             not by TokenManager. This ensures Landscape owns its audit format.
         """
-        # Create row record - recorder handles payload persistence internally
+        # Guard: source must provide contract
+        if source_row.contract is None:
+            raise ValueError(
+                "SourceRow must have contract to create token. "
+                "Source plugins must set contract on all valid rows."
+            )
+
+        # Convert to PipelineRow
+        pipeline_row = source_row.to_pipeline_row()
+
+        # Create row record - recorder stores dict representation
         row = self._recorder.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
-            data=row_data,
+            data=pipeline_row.to_dict(),
         )
 
         # Create initial token
@@ -94,13 +108,13 @@ class TokenManager:
         return TokenInfo(
             row_id=row.row_id,
             token_id=token.token_id,
-            row_data=row_data,
+            row_data=pipeline_row,
         )
 
     def create_token_for_existing_row(
         self,
         row_id: str,
-        row_data: dict[str, Any],
+        row_data: PipelineRow,
     ) -> TokenInfo:
         """Create a token for a row that already exists in the database.
 
@@ -109,7 +123,7 @@ class TokenManager:
 
         Args:
             row_id: Existing row ID in the database
-            row_data: Row data (retrieved from payload store)
+            row_data: Row data as PipelineRow (reconstructed from checkpoint)
 
         Returns:
             TokenInfo with row and token IDs
@@ -129,7 +143,7 @@ class TokenManager:
         branches: list[str],
         step_in_pipeline: int,
         run_id: str,
-        row_data: dict[str, Any] | None = None,
+        row_data: PipelineRow | None = None,
     ) -> tuple[list[TokenInfo], str]:
         """Fork a token to multiple branches.
 
@@ -143,10 +157,14 @@ class TokenManager:
             branches: List of branch names
             step_in_pipeline: Current step position in the DAG (stored in audit trail)
             run_id: Run ID (required for atomic outcome recording)
-            row_data: Optional row data (defaults to parent's data)
+            row_data: Optional PipelineRow (defaults to parent's data)
 
         Returns:
             Tuple of (child TokenInfo list, fork_group_id)
+
+        Note:
+            Contract is propagated from row_data to all children via deepcopy.
+            PipelineRow.__deepcopy__ preserves contract reference (immutable).
         """
         data = row_data if row_data is not None else parent_token.row_data
 
@@ -176,7 +194,7 @@ class TokenManager:
     def coalesce_tokens(
         self,
         parents: list[TokenInfo],
-        merged_data: dict[str, Any],
+        merged_data: PipelineRow,
         step_in_pipeline: int,
     ) -> TokenInfo:
         """Coalesce multiple tokens into one.
@@ -186,11 +204,11 @@ class TokenManager:
 
         Args:
             parents: Parent tokens to merge
-            merged_data: Merged row data
+            merged_data: Merged row data as PipelineRow (with merged contract)
             step_in_pipeline: Current step position in the DAG (stored in audit trail)
 
         Returns:
-            Merged TokenInfo
+            Merged TokenInfo with PipelineRow row_data
         """
         # Use first parent's row_id (they should all be the same)
         row_id = parents[0].row_id
@@ -211,13 +229,13 @@ class TokenManager:
     def update_row_data(
         self,
         token: TokenInfo,
-        new_data: dict[str, Any],
+        new_data: PipelineRow,
     ) -> TokenInfo:
         """Update token's row data after a transform.
 
         Args:
             token: Token to update
-            new_data: New row data
+            new_data: New PipelineRow with updated data
 
         Returns:
             Updated TokenInfo (same token_id, new row_data, all lineage preserved)
@@ -243,7 +261,7 @@ class TokenManager:
 
         Args:
             parent_token: The token being expanded
-            expanded_rows: List of output row dicts
+            expanded_rows: List of output row dicts (transforms output dicts, not PipelineRow)
             step_in_pipeline: Current step (for audit)
             run_id: Run ID (required for atomic outcome recording)
             record_parent_outcome: If True (default), record EXPANDED outcome for parent.
@@ -251,6 +269,11 @@ class TokenManager:
 
         Returns:
             Tuple of (child TokenInfo list, expand_group_id)
+
+        Note:
+            W6 fix: Parent's contract is propagated to all expanded children.
+            Expanded rows are dicts from transform output; we wrap them in PipelineRow
+            with the parent's contract.
         """
         # Delegate to recorder which handles DB operations and parent linking
         db_children, expand_group_id = self._recorder.expand_token(
@@ -262,6 +285,10 @@ class TokenManager:
             record_parent_outcome=record_parent_outcome,
         )
 
+        # CRITICAL: Propagate parent's contract to all expanded children
+        # W6 fix: Expanded rows need contract for downstream processing
+        parent_contract = parent_token.row_data.contract
+
         # CRITICAL: Use deepcopy to prevent nested mutable objects from being
         # shared across expanded children. Same reasoning as fork_token - without
         # this, mutations in one sibling leak to others, corrupting audit trail.
@@ -270,7 +297,8 @@ class TokenManager:
             TokenInfo(
                 row_id=parent_token.row_id,
                 token_id=db_child.token_id,
-                row_data=copy.deepcopy(row_data),
+                # Create PipelineRow with parent's contract
+                row_data=PipelineRow(copy.deepcopy(row_data), parent_contract),
                 branch_name=parent_token.branch_name,  # Inherit branch
                 expand_group_id=db_child.expand_group_id,
             )
