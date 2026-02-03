@@ -27,6 +27,7 @@ allowed_dict_patterns:
   - "src/elspeth/engine/tokens.py:TokenManager.expand_token:expanded_rows (list)"
   - "src/elspeth/engine/processor.py:RowProcessor.process_row:row_data"
   - "src/elspeth/engine/processor.py:RowProcessor.process_existing_row:row_data"
+  - "src/elspeth/engine/processor.py:RowProcessor.get_aggregation_checkpoint_state:return"
   - "src/elspeth/engine/expression_parser.py:_ExpressionEvaluator.__init__:row"
   - "src/elspeth/engine/expression_parser.py:ExpressionParser.evaluate:row"
   - "src/elspeth/engine/coalesce_executor.py:CoalesceExecutor._merge_data:return"
@@ -38,8 +39,8 @@ allowed_dict_patterns:
   - "src/elspeth/engine/executors.py:AggregationExecutor.restore_state:state"
   - "src/elspeth/engine/executors.py:AggregationExecutor.get_restored_state:return"
 
-  # Orchestrator - export configuration
-  - "src/elspeth/engine/orchestrator.py:Orchestrator._export_landscape:sinks"
+  # Orchestrator - checkpoint state (refactored into orchestrator/core.py)
+  - "src/elspeth/engine/orchestrator/core.py:Orchestrator._maybe_checkpoint:aggregation_state"
 
   # Protocols - row data in plugin interface
   - "src/elspeth/plugins/protocols.py:TransformProtocol.process:row"
@@ -137,6 +138,11 @@ allowed_dict_patterns:
   - "src/elspeth/cli_helpers.py:instantiate_plugins_from_config:return"
   - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
   - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
+  - "src/elspeth/cli.py:_load_raw_yaml:return"
+  - "src/elspeth/cli.py:_extract_secrets_config:raw_config"
+
+  # Security - secrets loading from config (Tier 3 external config)
+  - "src/elspeth/core/security/config_secrets.py:load_secrets_from_config:return (list)"
 
   # DAG and config - runtime configuration dicts
   - "src/elspeth/core/dag.py:ExecutionGraph.add_node:config"
@@ -158,9 +164,9 @@ allowed_dict_patterns:
   # Canonical representation - deterministic JSON for hashing
   - "src/elspeth/core/canonical.py:_edge_to_canonical_dict:return"
 
-  # Schema reconstruction - deserializing schemas from landscape database
-  - "src/elspeth/engine/orchestrator.py:Orchestrator._reconstruct_schema_from_json:schema_dict"
-  - "src/elspeth/engine/orchestrator.py:Orchestrator._json_schema_to_python_type:field_info"
+  # Schema reconstruction - deserializing schemas from landscape database (refactored into orchestrator/export.py)
+  - "src/elspeth/engine/orchestrator/export.py:reconstruct_schema_from_json:schema_dict"
+  - "src/elspeth/engine/orchestrator/export.py:_json_schema_to_python_type:field_info"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AGGREGATION STATE
@@ -199,6 +205,7 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"
+  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_secret_resolutions:resolutions (list)"
 
   # Operations tracking - source/sink I/O audit trail
   - "src/elspeth/core/operations.py:track_operation:input_data"
@@ -246,12 +253,16 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/multi_query.py:CaseStudyConfig.to_template_data:return"
   - "src/elspeth/plugins/llm/multi_query.py:CriterionConfig.to_template_data:return"
 
+  # LLM tracing config
+  - "src/elspeth/plugins/llm/tracing.py:parse_tracing_config:config"
+
   # Azure LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.accept:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.process:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.azure_config:return"
+  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._create_langfuse_trace:row_data"
 
   # Azure batch LLM
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
@@ -276,12 +287,14 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_row_internal:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_parallel:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_sequential:row"
+  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._create_langfuse_trace:row_data"
 
   # OpenRouter LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.accept:row"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.process:row"
+  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._create_langfuse_trace:row_data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
@@ -295,6 +308,9 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_json:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._serialize_jsonl:rows (list)"
   - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink.write:rows (list)"
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._get_field_names_and_display:row"
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:rows (list)"
+  - "src/elspeth/plugins/azure/blob_sink.py:AzureBlobSink._apply_display_headers:return (list)"
 
   # Azure content safety (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/transforms/azure/content_safety.py:AzureContentSafety.__init__:config"
@@ -397,6 +413,9 @@ allowed_dict_patterns:
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_recent_activity:return"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_operations:return (list)"
   - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_operation_calls:return (list)"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.get_run_contract:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.explain_field:return"
+  - "src/elspeth/mcp/server.py:LandscapeAnalyzer.list_contract_violations:return"
   - "src/elspeth/mcp/server.py:call_tool:arguments"
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -461,6 +480,7 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_sequential:row"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.accept:row"
+  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._create_langfuse_trace:row_data"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.parse_output_mapping:return"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_json_schema:return"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_response_format:return"
