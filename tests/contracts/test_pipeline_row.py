@@ -89,7 +89,11 @@ class TestPipelineRowAccess:
         assert "unknown" not in row
 
     def test_contains_with_extra_fields_in_flexible_mode(self) -> None:
-        """'in' returns True for extra fields in FLEXIBLE mode."""
+        """'in' returns False for extra fields not in contract, even if in data.
+
+        Contract defines accessibility - extras exist in underlying data but
+        are NOT accessible via PipelineRow. Use to_dict() for raw access.
+        """
         contract = SchemaContract(
             mode="FLEXIBLE",
             fields=(FieldContract("declared", "Declared", int, True, "declared"),),
@@ -98,8 +102,15 @@ class TestPipelineRowAccess:
         # Data has extra field not in contract
         row = PipelineRow({"declared": 1, "extra": "value"}, contract)
 
+        # Declared field is accessible
         assert "declared" in row
-        assert "extra" in row  # Present in data even if not in contract
+
+        # Extra field is NOT accessible via PipelineRow (not in contract)
+        assert "extra" not in row
+
+        # But extras are still in underlying data (via to_dict)
+        assert "extra" in row.to_dict()
+        assert row.to_dict()["extra"] == "value"
 
     def test_to_dict_returns_raw_data(self, sample_row: PipelineRow) -> None:
         """to_dict() returns raw data with normalized keys."""

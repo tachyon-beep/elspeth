@@ -537,7 +537,7 @@ class PipelineRow:
     def __contains__(self, key: str) -> bool:
         """Support 'if field in row' checks.
 
-        Checks if field exists in actual row data (not just in contract).
+        Checks if field is accessible via the contract AND exists in actual data.
         This enables guard patterns like 'if field in row: use(row[field])'
         to work correctly for optional fields that may be absent from data.
 
@@ -545,20 +545,24 @@ class PipelineRow:
             key: Field name (original or normalized)
 
         Returns:
-            True if field exists in actual row data
+            True if field is in the contract AND exists in actual row data.
+            Returns False if field is not in the contract, even if it exists
+            in the underlying data (use to_dict() for raw access).
 
         Note:
-            P2 fix: __contains__ must check _data after name resolution,
-            not just the contract. This matches ContractAwareRow behavior
-            and enables standard Python guard patterns for optional fields.
+            The contract defines which fields are accessible via PipelineRow.
+            In FLEXIBLE mode with declared fields, extras pass validation but
+            are NOT added to the contract, so they are NOT accessible via
+            PipelineRow (only via to_dict()). This enforces contract-based
+            access control.
         """
         try:
             resolved = self._contract.resolve_name(key)
             return resolved in self._data
         except KeyError:
-            # Field not in contract - check if it exists in data anyway
-            # (supports FLEXIBLE/OBSERVED modes with extra fields)
-            return key in self._data
+            # Field not in contract - not accessible via PipelineRow
+            # Even if it exists in _data, contract defines accessibility
+            return False
 
     def to_dict(self) -> dict[str, Any]:
         """Export raw data (normalized keys) for serialization.

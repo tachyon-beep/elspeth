@@ -1464,3 +1464,8 @@ allow_hits:
   reason: JSON Schema "format" field is optional per spec - external data at trust boundary
   safety: Missing format defaults to None, falls through to plain str return - correct behavior
   expires: null
+- key: contracts/schema_contract.py:R6:PipelineRow:__contains__:fp=1dfd54f632390fe2
+  owner: bugfix
+  reason: Standard Python __contains__ pattern - resolve_name() raises KeyError for unknown fields
+  safety: Returns False for fields not in contract - explicit result, not silent masking
+  expires: null
