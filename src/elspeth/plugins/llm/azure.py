@@ -57,6 +57,13 @@ class AzureOpenAIConfig(LLMConfig):
     api_key: str = Field(..., description="Azure OpenAI API key")
     api_version: str = Field(default="2024-10-21", description="Azure API version")
 
+    # Tier 2: Plugin-internal tracing (optional)
+    # Use environment variables for secrets: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (azure_ai, langfuse, or none)",
+    )
+
     @model_validator(mode="after")
     def _set_model_from_deployment(self) -> Self:
         """Set model to deployment_name if not explicitly provided."""
