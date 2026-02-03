@@ -22,6 +22,7 @@ import httpx
 from pydantic import Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
@@ -214,7 +215,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         )
         self._batch_initialized = True
 
-    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+    def accept(self, row: PipelineRow, ctx: PluginContext) -> None:
         """Accept a row for processing.
 
         Submits the row to the batch processing pipeline. Returns quickly
@@ -240,7 +241,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Not supported - use accept() for row-level pipelining.
@@ -257,7 +258,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def _process_row(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row. Called by worker threads.
@@ -284,7 +285,7 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
 
     def _process_single_with_state(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         state_id: str,
     ) -> TransformResult:
         """Process a single row with explicit state_id.
@@ -294,13 +295,15 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit errors (for pooled retry)
         """
-        fields_to_scan = self._get_fields_to_scan(row)
+        # Get dict representation for field scanning
+        row_dict = row.to_dict()
+        fields_to_scan = self._get_fields_to_scan(row_dict)
 
         for field_name in fields_to_scan:
-            if field_name not in row:
+            if field_name not in row_dict:
                 continue  # Skip fields not present in this row
 
-            value = row[field_name]
+            value = row_dict[field_name]
             if not isinstance(value, str):
                 continue
 
@@ -343,8 +346,9 @@ class AzurePromptShield(BaseTransform, BatchTransformMixin):
                 )
 
         return TransformResult.success(
-            row,
+            row_dict,
             success_reason={"action": "validated"},
+            contract=row.contract,
         )
 
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
