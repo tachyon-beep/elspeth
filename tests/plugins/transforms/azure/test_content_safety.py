@@ -8,6 +8,7 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -16,12 +17,28 @@ if TYPE_CHECKING:
     pass
 
 
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED contract for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},
+        row_data=_make_pipeline_row({}),
     )
 
 
@@ -347,9 +364,10 @@ class TestAzureContentSafetyTransform:
         )
 
         ctx = make_mock_context()
+        row = _make_pipeline_row({"content": "test"})
 
         with pytest.raises(NotImplementedError, match="accept"):
-            transform.process({"content": "test"}, ctx)
+            transform.process(row, ctx)
 
 
 class TestContentSafetyPoolConfig:
@@ -460,9 +478,10 @@ class TestContentSafetyBatchProcessing:
         )
 
         ctx = make_mock_context()
+        row = _make_pipeline_row({"content": "test"})
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"content": "test"}, ctx)
+            transform.accept(row, ctx)
 
     def test_connect_output_cannot_be_called_twice(self) -> None:
         """connect_output() raises if called more than once."""
@@ -521,7 +540,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "Hello world", "id": 1}
+            row_data = {"content": "Hello world", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -529,7 +549,7 @@ class TestContentSafetyBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert result.row == row
+            assert result.row == row_data
         finally:
             transform.close()
 
@@ -565,7 +585,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "Some hateful content", "id": 1}
+            row_data = {"content": "Some hateful content", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -613,7 +634,8 @@ class TestContentSafetyBatchProcessing:
 
         try:
             # Row is missing "optional_field"
-            row = {"content": "safe data", "id": 1}
+            row_data = {"content": "safe data", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -648,7 +670,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -694,7 +717,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -739,7 +763,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test", "id": 1}
+            row_data = {"content": "test", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -783,7 +808,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "completely safe content", "id": 1}
+            row_data = {"content": "completely safe content", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -792,7 +818,7 @@ class TestContentSafetyBatchProcessing:
             _, result, _ = collector.results[0]
             assert isinstance(result, TransformResult)
             assert result.status == "success"
-            assert result.row == row
+            assert result.row == row_data
         finally:
             transform.close()
 
@@ -828,7 +854,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "content with mild self-harm", "id": 1}
+            row_data = {"content": "content with mild self-harm", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -875,7 +902,8 @@ class TestContentSafetyBatchProcessing:
         transform.connect_output(collector, max_pending=10)
 
         try:
-            row = {"content": "test text", "id": 1}
+            row_data = {"content": "test text", "id": 1}
+            row = _make_pipeline_row(row_data)
             transform.accept(row, ctx)
             transform.flush_batch_processing(timeout=10.0)
 
@@ -932,15 +960,16 @@ class TestContentSafetyBatchProcessing:
 
         try:
             # Submit multiple rows with different markers
-            rows = [
+            rows_data = [
                 {"content": "row 1", "marker": "first"},
                 {"content": "row 2", "marker": "second"},
                 {"content": "row 3", "marker": "third"},
             ]
 
-            for i, row in enumerate(rows):
+            for i, row_data in enumerate(rows_data):
                 token = make_token(f"row-{i}", f"token-{i}")
                 ctx = make_mock_context(state_id=f"state-{i}", token=token)
+                row = _make_pipeline_row(row_data)
                 transform.accept(row, ctx)
 
             transform.flush_batch_processing(timeout=10.0)
@@ -951,7 +980,7 @@ class TestContentSafetyBatchProcessing:
                 assert isinstance(result, TransformResult)
                 assert result.status == "success"
                 assert result.row is not None
-                assert result.row["marker"] == rows[i]["marker"]
+                assert result.row["marker"] == rows_data[i]["marker"]
         finally:
             transform.close()
 
@@ -995,7 +1024,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
 
         with pytest.raises(CapacityError) as exc_info:
             transform._process_single_with_state(row, "test-state-id")
@@ -1027,7 +1057,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"
@@ -1056,7 +1087,8 @@ class TestContentSafetyInternalProcessing:
         ctx = make_mock_context()
         transform.on_start(ctx)
 
-        row = {"content": "test", "id": 1}
+        row_data = {"content": "test", "id": 1}
+        row = _make_pipeline_row(row_data)
         result = transform._process_single_with_state(row, "test-state-id")
 
         assert result.status == "error"

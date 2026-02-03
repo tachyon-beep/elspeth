@@ -48,3 +48,8 @@
 | 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/recorder.py | docs/bugs/generated/core/landscape/recorder.py.md |  | 2966.03 |  |
 | 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/database.py | docs/bugs/generated/core/landscape/database.py.md |  | 2966.03 |  |
 | 2026-01-30T11:40:29+00:00 | ok | src/elspeth/core/landscape/repositories.py | docs/bugs/generated/core/landscape/repositories.py.md |  | 2966.03 |  |
+| 2026-02-03T17:13:24+00:00 | ok | src/elspeth/__init__.py | docs/bugs/generated/elspeth/__init__.py.md |  | 55.67 |  |
+| 2026-02-03T17:14:19+00:00 | ok | src/elspeth/contracts/checkpoint.py | docs/bugs/generated/elspeth/contracts/checkpoint.py.md |  | 111.13 |  |
+| 2026-02-03T17:14:37+00:00 | ok | src/elspeth/contracts/config/__init__.py | docs/bugs/generated/elspeth/contracts/config/__init__.py.md |  | 128.89 |  |
+| 2026-02-03T17:15:06+00:00 | ok | src/elspeth/contracts/__init__.py | docs/bugs/generated/elspeth/contracts/__init__.py.md |  | 157.69 |  |
+| 2026-02-03T17:15:17+00:00 | ok | src/elspeth/contracts/cli.py | docs/bugs/generated/elspeth/contracts/cli.py.md |  | 168.95 |  |

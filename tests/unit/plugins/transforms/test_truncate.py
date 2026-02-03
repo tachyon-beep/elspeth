@@ -3,10 +3,29 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.transforms.truncate import Truncate
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 @pytest.fixture
@@ -31,7 +50,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "This is a very long title"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "This is a very long title"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -47,7 +66,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "Short"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "Short"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -63,7 +82,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "This is a very long title"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "This is a very long title"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -80,7 +99,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "Short"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "Short"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -96,10 +115,10 @@ class TestTruncate:
         )
 
         result = transform.process(
-            {
+            _make_pipeline_row({
                 "title": "Very long title",
                 "description": "Very long description text",
-            },
+            }),
             ctx,
         )
 
@@ -118,7 +137,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "Test"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "Test"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -135,7 +154,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "Test"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "Test"}), ctx)
 
         assert result.status == "error"
         assert result.reason is not None
@@ -151,7 +170,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"count": 12345678}, ctx)
+        result = transform.process(_make_pipeline_row({"count": 12345678}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -167,11 +186,11 @@ class TestTruncate:
         )
 
         result = transform.process(
-            {
+            _make_pipeline_row({
                 "title": "Long title here",
                 "id": 123,
                 "other": "unchanged",
-            },
+            }),
             ctx,
         )
 
@@ -201,7 +220,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": "12345"}, ctx)
+        result = transform.process(_make_pipeline_row({"title": "12345"}), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -216,7 +235,7 @@ class TestTruncate:
             }
         )
 
-        result = transform.process({"title": ""}, ctx)
+        result = transform.process(_make_pipeline_row({"title": ""}), ctx)
 
         assert result.status == "success"
         assert result.row is not None

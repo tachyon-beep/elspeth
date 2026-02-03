@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
@@ -23,6 +24,26 @@ from .conftest import (
 from .conftest import (
     make_azure_multi_query_config as make_config,
 )
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestAzureMultiQueryLLMTransformInit:
@@ -64,7 +85,7 @@ class TestAzureMultiQueryLLMTransformInit:
         ctx = make_plugin_context()
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestSingleQueryProcessing:
@@ -276,7 +297,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_sym": "case2 sym",
                 "cs2_hist": "case2 hist",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -318,7 +339,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_hist": "hist2",
                 "original_field": "preserved",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -355,7 +376,7 @@ class TestRowProcessingWithPipelining:
                 "cs2_sym": "sym",
                 "cs2_hist": "hist",
             }
-            transform.accept(row, ctx)
+            transform.accept(_make_pipeline_row(row), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -380,7 +401,7 @@ class TestRowProcessingWithPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(
         self,
@@ -459,7 +480,7 @@ class TestMultiRowPipelining:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -521,7 +542,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:
@@ -568,7 +589,7 @@ class TestMultiRowPipelining:
                         state_id=f"batch-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -667,7 +688,7 @@ class TestSequentialMode:
                     state_id="batch-seq-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -713,7 +734,7 @@ class TestSequentialMode:
                         state_id=f"batch-seq-{i:03d}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
 
@@ -781,7 +802,7 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-pool-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -849,7 +870,7 @@ class TestPoolMetadataAuditIntegration:
                     state_id="state-ordering-001",
                     token=token,
                 )
-                transform.accept(row, ctx)
+                transform.accept(_make_pipeline_row(row), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()

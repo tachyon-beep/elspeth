@@ -9,14 +9,33 @@ THREE-TIER TRUST MODEL:
 - No TransformResult.error() for type violations - they are bugs to fix
 """
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestJSONExplodeHappyPath:
@@ -43,7 +62,7 @@ class TestJSONExplodeHappyPath:
             "items": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
         }
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -81,7 +100,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "items": []}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert not result.is_multi_row  # Single row result
@@ -102,7 +121,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "tags": ["red", "green", "blue"]}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -127,7 +146,7 @@ class TestJSONExplodeHappyPath:
 
         row = {"id": 1, "items": ["a", "b"]}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -158,7 +177,7 @@ class TestJSONExplodeHappyPath:
             "items": ["x"],
         }
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.is_multi_row
@@ -206,7 +225,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1}  # Missing 'items' field
 
         with pytest.raises(KeyError, match="items"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_none_value_crashes(self, ctx: PluginContext) -> None:
         """None value for array field is upstream bug - should crash (TypeError)."""
@@ -222,7 +241,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": None}
 
         with pytest.raises(TypeError):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_string_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """String value is upstream bug - should crash with TypeError.
@@ -245,7 +264,7 @@ class TestJSONExplodeTypeViolations:
 
         # Should crash with clear error message
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_dict_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """Dict value is upstream bug - should crash with TypeError.
@@ -265,7 +284,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": {"x": 1, "y": 2}}  # Dict, not list!
 
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_tuple_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
         """Tuple value is upstream bug - should crash with TypeError.
@@ -286,7 +305,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": ("a", "b", "c")}  # Tuple, not list!
 
         with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
     def test_non_iterable_value_crashes(self, ctx: PluginContext) -> None:
         """Non-iterable value is upstream bug - should crash (TypeError)."""
@@ -302,7 +321,7 @@ class TestJSONExplodeTypeViolations:
         row = {"id": 1, "items": 42}  # int is not iterable
 
         with pytest.raises(TypeError):
-            transform.process(row, ctx)
+            transform.process(_make_pipeline_row(row), ctx)
 
 
 class TestJSONExplodeConfiguration:

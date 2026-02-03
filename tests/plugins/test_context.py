@@ -468,23 +468,41 @@ class TestTokenField:
     def test_token_accepts_token_info(self) -> None:
         """PluginContext accepts TokenInfo via token parameter."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
-        token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data={"x": 1})
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="x", original_name="x", python_type=int, required=False, source="observed"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"x": 1}, contract)
+
+        token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data=row_data)
         ctx = PluginContext(run_id="test-run", config={}, token=token)
 
         assert ctx.token is not None
         assert ctx.token is token  # Same object reference
         assert ctx.token.row_id == "row-1"
         assert ctx.token.token_id == "token-row-1"
-        assert ctx.token.row_data == {"x": 1}
+        assert ctx.token.row_data.to_dict() == {"x": 1}
 
     def test_token_identity_preserved_on_access(self) -> None:
         """Token identity is preserved - multiple accesses return same object."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
-        token = TokenInfo(row_id="row-42", token_id="token-42", row_data={"value": 100})
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="value", original_name="value", python_type=int, required=False, source="observed"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"value": 100}, contract)
+
+        token = TokenInfo(row_id="row-42", token_id="token-42", row_data=row_data)
         ctx = PluginContext(run_id="test-run", config={}, token=token)
 
         # Multiple accesses should return the exact same object
@@ -496,13 +514,22 @@ class TestTokenField:
     def test_token_can_be_mutated_after_construction(self) -> None:
         """Token field can be set after construction (engine sets it per-row)."""
         from elspeth.contracts.identity import TokenInfo
+        from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.context import PluginContext
 
         ctx = PluginContext(run_id="test-run", config={})
         assert ctx.token is None
 
+        # Create PipelineRow for TokenInfo
+        contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(FieldContract(normalized_name="data", original_name="data", python_type=str, required=False, source="observed"),),
+            locked=True,
+        )
+        row_data = PipelineRow({"data": "test"}, contract)
+
         # Engine sets token before calling batch transforms
-        token = TokenInfo(row_id="row-99", token_id="token-99", row_data={"data": "test"})
+        token = TokenInfo(row_id="row-99", token_id="token-99", row_data=row_data)
         ctx.token = token
 
         assert ctx.token is token

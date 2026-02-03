@@ -2,12 +2,14 @@
 """Tests for Azure OpenAI LLM transform with row-level pipelining."""
 
 from collections.abc import Generator
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.clients.llm import RateLimitError
@@ -21,12 +23,32 @@ from .conftest import chaosllm_azure_openai_client
 DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
+
+
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
     """Create a TokenInfo for testing."""
     return TokenInfo(
         row_id=row_id,
         token_id=token_id or f"token-{row_id}",
-        row_data={},  # Not used in these tests
+        row_data=_make_pipeline_row({}),
     )
 
 
@@ -296,7 +318,7 @@ class TestAzureLLMTransformInit:
         ctx = PluginContext(run_id="test-run", config={})
 
         with pytest.raises(NotImplementedError, match="row-level pipelining"):
-            transform.process({"text": "hello"}, ctx)
+            transform.process(_make_pipeline_row({"text": "hello"}), ctx)
 
 
 class TestAzureLLMTransformPipelining:
@@ -366,7 +388,7 @@ class TestAzureLLMTransformPipelining:
             template_override="The analysis is positive.",
             usage_override={"prompt_tokens": 10, "completion_tokens": 25},
         ):
-            transform.accept({"text": "hello world"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello world"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -395,7 +417,7 @@ class TestAzureLLMTransformPipelining:
     ) -> None:
         """deployment_name is used as model in Azure client calls."""
         with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             call_args = mock_client.chat.completions.create.call_args
@@ -411,7 +433,7 @@ class TestAzureLLMTransformPipelining:
         """Template rendering failure emits TransformResult.error()."""
         # Missing required 'text' field triggers template error
         with chaosllm_azure_openai_client(chaosllm_server):
-            transform.accept({"other_field": "value"}, ctx)
+            transform.accept(_make_pipeline_row({"other_field": "value"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -432,7 +454,7 @@ class TestAzureLLMTransformPipelining:
     ) -> None:
         """LLM client failure emits TransformResult.error()."""
         with chaosllm_azure_openai_client(chaosllm_server, side_effect=Exception("API Error")):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -463,7 +485,7 @@ class TestAzureLLMTransformPipelining:
         would re-raise this exception so RetryManager can act on it.
         """
         with chaosllm_azure_openai_client(chaosllm_server, side_effect=Exception("Rate limit exceeded 429")):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -498,7 +520,7 @@ class TestAzureLLMTransformPipelining:
             token=token,
         )
 
-        transform.accept({"text": "hello"}, ctx)
+        transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
         transform.flush_batch_processing(timeout=10.0)
 
         assert len(collector.results) == 1
@@ -542,7 +564,7 @@ class TestAzureLLMTransformPipelining:
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 call_args = mock_client.chat.completions.create.call_args
@@ -589,7 +611,7 @@ class TestAzureLLMTransformPipelining:
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
 
                 call_args = mock_client.chat.completions.create.call_args
@@ -636,7 +658,7 @@ class TestAzureLLMTransformPipelining:
                 mode="template",
                 template_override="Result",
             ):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -675,7 +697,7 @@ class TestAzureLLMTransformPipelining:
         )
 
         with pytest.raises(RuntimeError, match="connect_output"):
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
 
     def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
         """connect_output() raises if called more than once."""
@@ -720,7 +742,7 @@ class TestAzureLLMTransformPipelining:
             mock_client.chat.completions.create.return_value = mock_response
             mock_azure_class.return_value = mock_client
 
-            transform.accept({"text": "hello"}, ctx)
+            transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
             transform.flush_batch_processing(timeout=10.0)
 
             # Verify AzureOpenAI was called with correct args
@@ -802,7 +824,7 @@ class TestAzureLLMTransformIntegration:
         try:
             with chaosllm_azure_openai_client(chaosllm_server) as mock_client:
                 transform.accept(
-                    {"name": "Test Item", "score": 95, "category": "A"},
+                    _make_pipeline_row({"name": "Test Item", "score": 95, "category": "A"}),
                     ctx,
                 )
                 transform.flush_batch_processing(timeout=10.0)
@@ -854,7 +876,7 @@ class TestAzureLLMTransformIntegration:
 
         try:
             with chaosllm_azure_openai_client(chaosllm_server):
-                transform.accept({"text": "hello"}, ctx)
+                transform.accept(_make_pipeline_row({"text": "hello"}), ctx)
                 transform.flush_batch_processing(timeout=10.0)
         finally:
             transform.close()
@@ -916,7 +938,7 @@ class TestAzureLLMTransformConcurrency:
                         state_id=f"state-{i}",
                         token=token,
                     )
-                    transform.accept(row, ctx)
+                    transform.accept(_make_pipeline_row(row), ctx)
 
                 transform.flush_batch_processing(timeout=10.0)
         finally:

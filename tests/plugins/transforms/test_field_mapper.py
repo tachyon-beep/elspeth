@@ -1,12 +1,31 @@
 """Tests for FieldMapper transform."""
 
+from typing import Any
+
 import pytest
 
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
 DYNAMIC_SCHEMA = {"mode": "observed"}
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing."""
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestFieldMapper:
@@ -47,7 +66,7 @@ class TestFieldMapper:
         )
         row = {"old_name": "value", "other": 123}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"new_name": "value", "other": 123}
@@ -68,7 +87,7 @@ class TestFieldMapper:
         )
         row = {"first_name": "Alice", "last_name": "Smith", "id": 1}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"firstName": "Alice", "lastName": "Smith", "id": 1}
@@ -86,7 +105,7 @@ class TestFieldMapper:
         )
         row = {"id": 1, "name": "alice", "secret": "password", "extra": "data"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"id": 1, "name": "alice"}
@@ -106,7 +125,7 @@ class TestFieldMapper:
         )
         row = {"other_field": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "error"
         assert "required_field" in str(result.reason)
@@ -124,7 +143,7 @@ class TestFieldMapper:
         )
         row = {"other_field": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == {"other_field": "value"}
@@ -142,7 +161,7 @@ class TestFieldMapper:
         )
         row = {"exists": "value"}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
 
@@ -158,7 +177,7 @@ class TestFieldMapper:
         )
         row = {"id": 1, "meta": {"source": "api", "timestamp": 123}}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -177,7 +196,7 @@ class TestFieldMapper:
         )
         row = {"a": 1, "b": 2}
 
-        result = transform.process(row, ctx)
+        result = transform.process(_make_pipeline_row(row), ctx)
 
         assert result.status == "success"
         assert result.row == row
@@ -209,7 +228,7 @@ class TestFieldMapper:
         )
 
         with pytest.raises(ValidationError):
-            transform.process({"count": "not_an_int"}, ctx)
+            transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
 
     def test_validate_input_disabled_passes_wrong_type(self, ctx: PluginContext) -> None:
         """validate_input=False (default) passes wrong types through.
@@ -228,7 +247,7 @@ class TestFieldMapper:
         )
 
         # String passes through without validation
-        result = transform.process({"count": "not_an_int"}, ctx)
+        result = transform.process(_make_pipeline_row({"count": "not_an_int"}), ctx)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["count"] == "not_an_int"
@@ -249,7 +268,7 @@ class TestFieldMapper:
         )
 
         # Any data passes with dynamic schema
-        result = transform.process({"anything": "goes", "count": "string"}, ctx)
+        result = transform.process(_make_pipeline_row({"anything": "goes", "count": "string"}), ctx)
         assert result.status == "success"
 
 
