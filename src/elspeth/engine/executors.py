@@ -795,8 +795,9 @@ class GateExecutor:
             start = time.perf_counter()
             try:
                 parser = ExpressionParser(gate_config.condition)
-                # ExpressionParser.evaluate() expects dict, not PipelineRow
-                eval_result = parser.evaluate(input_dict)
+                # Pass PipelineRow directly - it implements __getitem__ and .get()
+                # This preserves dual-name access (normalized and original field names)
+                eval_result = parser.evaluate(token.row_data)
                 duration_ms = (time.perf_counter() - start) * 1000
             except Exception as e:
                 duration_ms = (time.perf_counter() - start) * 1000

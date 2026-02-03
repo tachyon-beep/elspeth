@@ -73,9 +73,14 @@ class ListSource(_TestSourceBase):
         if schema is not None:
             self.output_schema = schema
 
+        # Create schema contract from output_schema
+        from elspeth.contracts.transform_contract import create_output_contract_from_schema
+
+        self._schema_contract = create_output_contract_from_schema(self.output_schema)
+
     def load(self, ctx: Any) -> Any:
         for row in self._data:
-            yield SourceRow.valid(row)
+            yield SourceRow.valid(row, contract=self._schema_contract)
 
     def close(self) -> None:
         pass

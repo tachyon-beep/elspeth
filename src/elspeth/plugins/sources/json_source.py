@@ -106,12 +106,31 @@ class JSONSource(BaseSource):
         # Set output_schema for protocol compliance
         self.output_schema = self._schema_class
 
+        # Create schema contract for PipelineRow support
+        # JSON sources don't need field normalization (no headers to normalize)
+        from elspeth.contracts.contract_builder import ContractBuilder
+        from elspeth.contracts.schema_contract_factory import create_contract_from_config
+
+        initial_contract = create_contract_from_config(self._schema_config)
+
+        # For FIXED/FLEXIBLE schemas, contract is locked immediately
+        # For OBSERVED schemas, ContractBuilder will lock after first valid row
+        if initial_contract.locked:
+            self.set_schema_contract(initial_contract)
+            self._contract_builder = None
+        else:
+            self._contract_builder = ContractBuilder(initial_contract)
+            # Contract will be set after processing first valid row in load()
+
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load rows from JSON file.
 
         Each row is validated against the configured schema:
         - Valid rows are yielded as SourceRow.valid()
         - Invalid rows are yielded as SourceRow.quarantined()
+
+        For OBSERVED schemas, the first valid row locks the contract with
+        inferred types. Subsequent rows validate against the locked contract.
 
         Yields:
             SourceRow for each row (valid or quarantined).
@@ -122,6 +141,9 @@ class JSONSource(BaseSource):
         """
         if not self._path.exists():
             raise FileNotFoundError(f"JSON file not found: {self._path}")
+
+        # Track first valid row for OBSERVED mode type inference
+        self._first_valid_row_processed = False
 
         if self._format == "jsonl":
             yield from self._load_jsonl(ctx)
@@ -265,6 +287,9 @@ class JSONSource(BaseSource):
     def _validate_and_yield(self, row: dict[str, Any], ctx: PluginContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
+        For OBSERVED schemas, the first valid row triggers type inference and
+        locks the contract. Subsequent rows validate against the locked contract.
+
         Args:
             row: Row data to validate
             ctx: Plugin context for recording validation errors
@@ -275,7 +300,17 @@ class JSONSource(BaseSource):
         try:
             # Validate and potentially coerce row data
             validated = self._schema_class.model_validate(row)
-            yield SourceRow.valid(validated.to_row())
+            validated_row = validated.to_row()
+
+            # For OBSERVED schemas, process first valid row to lock contract
+            if self._contract_builder is not None and not self._first_valid_row_processed:
+                # JSON sources don't normalize field names, so identity mapping
+                field_resolution = {k: k for k in validated_row}
+                self._contract_builder.process_first_row(validated_row, field_resolution)
+                self.set_schema_contract(self._contract_builder.contract)
+                self._first_valid_row_processed = True
+
+            yield SourceRow.valid(validated_row, contract=self.get_schema_contract())
         except ValidationError as e:
             # Record validation failure in audit trail
             # This is a trust boundary: external data may be invalid

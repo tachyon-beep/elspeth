@@ -564,11 +564,11 @@ class ExpressionParser:
         # Everything else (field access, arithmetic, etc.) is not guaranteed boolean
         return False
 
-    def evaluate(self, row: dict[str, Any]) -> Any:
+    def evaluate(self, row: dict[str, Any] | "PipelineRow") -> Any:
         """Evaluate expression against row data.
 
         Args:
-            row: Row data dictionary
+            row: Row data dictionary or PipelineRow (which implements __getitem__ and .get())
 
         Returns:
             Result of expression evaluation (typically bool for gate conditions)
