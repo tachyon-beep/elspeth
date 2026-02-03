@@ -975,13 +975,26 @@ class AggregationExecutor:
         Args:
             node_id: Aggregation node ID
             token: Token with row data to buffer
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
+                This prevents silent data loss where rows are buffered but no
+                trigger evaluator exists to determine when to flush.
         """
-        if node_id not in self._buffers:
-            self._buffers[node_id] = []
-            self._buffer_tokens[node_id] = []
+        # Validate node is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        # Without this check, rows could be buffered without a trigger evaluator,
+        # meaning they'd sit in the buffer forever with no way to flush.
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"buffer_row called for node '{node_id}' which is not in aggregation_settings. "
+                f"Only configured aggregation nodes can buffer rows. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
 
         # Create batch on first row if needed
-        if self._batch_ids.get(node_id) is None:
+        # Note: We use node_id directly since we've validated it exists in aggregation_settings,
+        # which means it was initialized in __init__ with buffers and trigger evaluator.
+        if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
             batch = self._recorder.create_batch(
                 run_id=self._run_id,
                 aggregation_node_id=node_id,
@@ -1005,10 +1018,9 @@ class AggregationExecutor:
         )
         self._member_counts[batch_id] = ordinal + 1
 
-        # Update trigger evaluator
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is not None:
-            evaluator.record_accept()
+        # Update trigger evaluator - direct access since we validated node_id exists
+        # in aggregation_settings, which guarantees a trigger evaluator was created
+        self._trigger_evaluators[node_id].record_accept()
 
     def get_buffered_rows(self, node_id: NodeID) -> list[dict[str, Any]]:
         """Get currently buffered rows (does not clear buffer).
@@ -1017,8 +1029,19 @@ class AggregationExecutor:
             node_id: Aggregation node ID
 
         Returns:
-            List of buffered row dicts
+            List of buffered row dicts (empty if no rows buffered yet)
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        # This distinguishes "valid node, no rows yet" from "invalid node".
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"get_buffered_rows called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
+        # Return empty list if no rows buffered yet (valid state for configured node)
         return list(self._buffers.get(node_id, []))
 
     def get_buffered_tokens(self, node_id: NodeID) -> list[TokenInfo]:
@@ -1028,8 +1051,17 @@ class AggregationExecutor:
             node_id: Aggregation node ID
 
         Returns:
-            List of buffered TokenInfo objects
+            List of buffered TokenInfo objects (empty if no rows buffered yet)
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"get_buffered_tokens called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
         return list(self._buffer_tokens.get(node_id, []))
 
     def _get_buffered_data(self, node_id: NodeID) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
@@ -1044,7 +1076,16 @@ class AggregationExecutor:
 
         Returns:
             Tuple of (buffered_rows, buffered_tokens)
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"_get_buffered_data called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
         rows = list(self._buffers.get(node_id, []))
         tokens = list(self._buffer_tokens.get(node_id, []))
         return rows, tokens
@@ -1084,9 +1125,17 @@ class AggregationExecutor:
         if batch_id is None:
             raise RuntimeError(f"No batch exists for node {node_id} - cannot flush")
 
-        # Get buffered data
-        buffered_rows = list(self._buffers.get(node_id, []))
-        buffered_tokens = list(self._buffer_tokens.get(node_id, []))
+        # Get buffered data - use direct access since batch existence implies buffers exist
+        # (batches are created on first row buffered, so if batch_id exists, buffers must too)
+        # If KeyError here, that indicates internal state corruption in buffer_row.
+        try:
+            buffered_rows = list(self._buffers[node_id])
+            buffered_tokens = list(self._buffer_tokens[node_id])
+        except KeyError as e:
+            raise RuntimeError(
+                f"Internal state corruption: batch_id exists for node '{node_id}' "
+                f"but buffer is missing. batch_id={batch_id}, missing_key={e}"
+            ) from e
 
         if not buffered_rows:
             raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
@@ -1285,23 +1334,28 @@ class AggregationExecutor:
         self._buffer_tokens[node_id] = []
 
         # Reset trigger evaluator for next batch
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is not None:
-            evaluator.reset()
+        # Direct access since buffer_row validates node_id is in aggregation_settings,
+        # which guarantees a trigger evaluator exists
+        self._trigger_evaluators[node_id].reset()
 
         return result, buffered_tokens, flushed_batch_id
 
     def _reset_batch_state(self, node_id: NodeID) -> None:
         """Reset batch tracking state for next batch.
 
+        INTERNAL: Only called from execute_flush() which has already validated
+        that batch_id exists. Direct access ensures we detect state corruption.
+
         Args:
             node_id: Aggregation node ID
         """
-        batch_id = self._batch_ids.get(node_id)
-        if batch_id is not None:
-            del self._batch_ids[node_id]
-            if batch_id in self._member_counts:
-                del self._member_counts[batch_id]
+        # Direct access - execute_flush validated batch_id exists before calling us
+        batch_id = self._batch_ids[node_id]
+        # Type narrowing: execute_flush validates batch_id is not None before calling
+        assert batch_id is not None, f"_reset_batch_state invariant violation: batch_id is None for {node_id}"
+        del self._batch_ids[node_id]
+        # member_counts is keyed by batch_id (not node_id) - direct access
+        del self._member_counts[batch_id]
 
     def get_buffer_count(self, node_id: NodeID) -> int:
         """Get the number of rows currently buffered for an aggregation.
@@ -1310,8 +1364,17 @@ class AggregationExecutor:
             node_id: Aggregation node ID
 
         Returns:
-            Number of buffered rows, or 0 if no buffer exists
+            Number of buffered rows (0 if no rows buffered yet)
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"get_buffer_count called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
         return len(self._buffers.get(node_id, []))
 
     def get_checkpoint_state(self) -> dict[str, Any]:
@@ -1355,11 +1418,13 @@ class AggregationExecutor:
                 continue
 
             # Get trigger state for preservation (Bug #6 + P2-2026-02-01)
-            evaluator = self._trigger_evaluators.get(node_id)
-            elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
+            # If tokens exist for a node, a trigger evaluator MUST exist (created in __init__)
+            # Direct access crashes if evaluator is missing, revealing configuration bugs.
+            evaluator = self._trigger_evaluators[node_id]
+            elapsed_age_seconds = evaluator.get_age_seconds()
             # P2-2026-02-01: Preserve fire time offsets for "first to fire wins" ordering
-            count_fire_offset = evaluator.get_count_fire_offset() if evaluator is not None else None
-            condition_fire_offset = evaluator.get_condition_fire_offset() if evaluator is not None else None
+            count_fire_offset = evaluator.get_count_fire_offset()
+            condition_fire_offset = evaluator.get_condition_fire_offset()
 
             if node_id not in self._batch_ids or self._batch_ids[node_id] is None:
                 raise RuntimeError(
@@ -1472,24 +1537,37 @@ class AggregationExecutor:
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                required_fields = {"token_id", "row_id", "row_data"}
+                # All these fields are required in checkpoint format v1.1 (values can be None)
+                required_fields = {
+                    "token_id",
+                    "row_id",
+                    "row_data",
+                    "branch_name",
+                    "fork_group_id",
+                    "join_group_id",
+                    "expand_group_id",
+                }
                 missing = required_fields - set(t.keys())
                 if missing:
                     raise ValueError(
-                        f"Checkpoint token missing required fields: {missing}. Required: {required_fields}. Found: {set(t.keys())}"
+                        f"Checkpoint token missing required fields: {missing}. "
+                        f"Required in v1.1 format: {required_fields}. Found: {set(t.keys())}"
                     )
 
-                # Reconstruct with explicit handling of optional fields
-                # All lineage fields are optional per TokenInfo contract (default=None)
+                # Reconstruct TokenInfo from checkpoint data
+                # NOTE: These fields CAN be None (valid state for unforked tokens), but they
+                # are ALWAYS present in checkpoint format v1.1 - use direct access to detect
+                # corruption/missing fields. The difference between "field is None" and
+                # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
                     TokenInfo(
                         row_id=t["row_id"],
                         token_id=t["token_id"],
                         row_data=t["row_data"],
-                        branch_name=t.get("branch_name"),
-                        fork_group_id=t.get("fork_group_id"),
-                        join_group_id=t.get("join_group_id"),
-                        expand_group_id=t.get("expand_group_id"),
+                        branch_name=t["branch_name"],
+                        fork_group_id=t["fork_group_id"],
+                        join_group_id=t["join_group_id"],
+                        expand_group_id=t["expand_group_id"],
                     )
                 )
 
@@ -1513,28 +1591,38 @@ class AggregationExecutor:
             self._member_counts[batch_id] = len(reconstructed_tokens)
 
             # Restore trigger evaluator state (Bug #6 + P2-2026-02-01)
-            if node_id in self._trigger_evaluators:
-                evaluator = self._trigger_evaluators[node_id]
+            # If tokens exist for a node, a trigger evaluator MUST exist (created in __init__)
+            # Direct access crashes if evaluator is missing, revealing configuration bugs.
+            evaluator = self._trigger_evaluators[node_id]
 
-                # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
-                # The old approach called record_accept() which set fire times to current time,
-                # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-                # NOTE: All fields are required in checkpoint format v1.1 - no backwards compat
-                elapsed_seconds = node_state["elapsed_age_seconds"]
-                count_fire_offset = node_state["count_fire_offset"]
-                condition_fire_offset = node_state["condition_fire_offset"]
+            # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
+            # The old approach called record_accept() which set fire times to current time,
+            # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
+            # NOTE: All fields are required in checkpoint format v1.1 - no backwards compat
+            elapsed_seconds = node_state["elapsed_age_seconds"]
+            count_fire_offset = node_state["count_fire_offset"]
+            condition_fire_offset = node_state["condition_fire_offset"]
 
-                evaluator.restore_from_checkpoint(
-                    batch_count=len(reconstructed_tokens),
-                    elapsed_age_seconds=elapsed_seconds,
-                    count_fire_offset=count_fire_offset,
-                    condition_fire_offset=condition_fire_offset,
-                )
+            evaluator.restore_from_checkpoint(
+                batch_count=len(reconstructed_tokens),
+                elapsed_age_seconds=elapsed_seconds,
+                count_fire_offset=count_fire_offset,
+                condition_fire_offset=condition_fire_offset,
+            )
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
 
         Primarily for testing - production code accesses this via checkpoint state.
+
+        Note: Does not validate against aggregation_settings since this is a
+        testing/inspection method that needs to work with partial setups.
+
+        Args:
+            node_id: Aggregation node ID
+
+        Returns:
+            Batch ID if a batch is in progress, None otherwise
         """
         return self._batch_ids.get(node_id)
 
@@ -1546,11 +1634,19 @@ class AggregationExecutor:
 
         Returns:
             True if trigger condition is met, False otherwise
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is None:
-            return False
-        return evaluator.should_trigger()
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        # Trigger evaluators are created in __init__ for all configured nodes.
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"should_flush called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
+        # Direct access - evaluator must exist if node is in aggregation_settings
+        return self._trigger_evaluators[node_id].should_trigger()
 
     def get_trigger_type(self, node_id: NodeID) -> "TriggerType | None":
         """Get the TriggerType for the trigger that fired.
@@ -1560,11 +1656,17 @@ class AggregationExecutor:
 
         Returns:
             TriggerType enum if a trigger fired, None otherwise
+
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
         """
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is None:
-            return None
-        return evaluator.get_trigger_type()
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"get_trigger_type called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
+        return self._trigger_evaluators[node_id].get_trigger_type()
 
     def check_flush_status(self, node_id: NodeID) -> tuple[bool, "TriggerType | None"]:
         """Check flush status and get trigger type in a single operation.
@@ -1580,11 +1682,18 @@ class AggregationExecutor:
             Tuple of (should_flush, trigger_type):
             - should_flush: True if trigger condition is met
             - trigger_type: The type of trigger that fired, or None
-        """
-        evaluator = self._trigger_evaluators.get(node_id)
-        if evaluator is None:
-            return (False, None)
 
+        Raises:
+            OrchestrationInvariantError: If node_id is not a configured aggregation.
+        """
+        # Validate node_id is a configured aggregation (P2-2026-02-02: whitelist-reduction)
+        if node_id not in self._aggregation_settings:
+            raise OrchestrationInvariantError(
+                f"check_flush_status called for node '{node_id}' which is not in aggregation_settings. "
+                f"Configured nodes: {list(self._aggregation_settings.keys())}"
+            )
+        # Direct access - evaluator must exist if node is in aggregation_settings
+        evaluator = self._trigger_evaluators[node_id]
         should_flush = evaluator.should_trigger()
         trigger_type = evaluator.get_trigger_type() if should_flush else None
         return (should_flush, trigger_type)
@@ -1606,6 +1715,12 @@ class AggregationExecutor:
 
         Used by aggregation plugins during recovery to restore their
         internal state from checkpoint.
+
+        Note: This is a simple key-value lookup in _restored_states, which is
+        populated by restore_state() during crash recovery. It does NOT validate
+        against aggregation_settings because state restoration happens before
+        full configuration is available, and the method is designed to return
+        None for nodes without restored state.
 
         Args:
             node_id: Aggregation node ID

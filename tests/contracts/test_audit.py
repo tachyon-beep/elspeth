@@ -1068,7 +1068,7 @@ class TestValidationErrorRecord:
             node_id="source-node-1",
             row_hash="abc123",
             error="Field 'amount' expected int, got str",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             created_at=now,
         )
@@ -1077,7 +1077,7 @@ class TestValidationErrorRecord:
         assert record.node_id == "source-node-1"
         assert record.row_hash == "abc123"
         assert record.error == "Field 'amount' expected int, got str"
-        assert record.schema_mode == "strict"
+        assert record.schema_mode == "fixed"
         assert record.destination == "quarantine"
         assert record.created_at == now
 
@@ -1089,7 +1089,7 @@ class TestValidationErrorRecord:
             node_id="source-node-1",
             row_hash="abc123",
             error="Missing required field 'id'",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             created_at=datetime.now(UTC),
             row_data_json='{"name": "test", "amount": "invalid"}',
@@ -1104,7 +1104,7 @@ class TestValidationErrorRecord:
             node_id=None,  # Error before node assignment
             row_hash="abc123",
             error="Invalid CSV format",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="quarantine",
             created_at=datetime.now(UTC),
         )
@@ -1290,7 +1290,7 @@ class TestHashFields:
             node_id="node-1",
             row_hash=self.VALID_SHA256,
             error="test error",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             created_at=datetime.now(UTC),
         )

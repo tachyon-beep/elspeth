@@ -52,6 +52,10 @@ runs_table = Table(
     Column("exported_at", DateTime(timezone=True)),  # When export completed
     Column("export_format", String(16)),  # csv, json
     Column("export_sink", String(128)),  # Sink name used for export
+    # Schema contract for audit trail (Phase 5: Unified Schema Contracts)
+    # Stores the run-level schema contract with field resolution and types
+    Column("schema_contract_json", Text),  # Full contract with field resolution and types
+    Column("schema_contract_hash", String(16)),  # version_hash for integrity verification
 )
 
 # === Nodes (Plugin Instances) ===
@@ -71,8 +75,13 @@ nodes_table = Table(
     Column("sequence_in_pipeline", Integer),
     Column("registered_at", DateTime(timezone=True), nullable=False),
     # Schema configuration for audit trail (WP-11.99)
-    Column("schema_mode", String(16)),  # "dynamic", "strict", "free", "parse", or NULL
+    Column("schema_mode", String(16)),  # "observed", "fixed", "flexible", "parse", or NULL
     Column("schema_fields_json", Text),  # JSON array of field definitions, or NULL
+    # Schema contracts for audit trail (Phase 5: Unified Schema Contracts)
+    # Input contract: what the node requires (field names and types)
+    Column("input_contract_json", Text),
+    # Output contract: what the node guarantees (field names and types)
+    Column("output_contract_json", Text),
     # Composite PK: same node config can exist in multiple runs
     # This allows running the same pipeline multiple times against the same database
     PrimaryKeyConstraint("node_id", "run_id"),
@@ -393,9 +402,16 @@ validation_errors_table = Table(
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),  # Store the row for debugging
     Column("error", Text, nullable=False),
-    Column("schema_mode", String(16), nullable=False),  # "strict", "free", "dynamic", "parse"
+    Column("schema_mode", String(16), nullable=False),  # "fixed", "flexible", "observed", "parse"
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Schema contract violation details (Phase 5: Unified Schema Contracts)
+    # These columns provide structured violation data for auditing
+    Column("violation_type", String(32)),  # "type_mismatch", "missing_field", "extra_field"
+    Column("original_field_name", String(256)),  # "'Amount USD'" for display
+    Column("normalized_field_name", String(256)),  # "amount_usd" for code reference
+    Column("expected_type", String(32)),  # "int", "str", etc.
+    Column("actual_type", String(32)),  # Type of actual value
     # Composite FK to nodes (node_id, run_id) - nullable node_id supported
     ForeignKeyConstraint(
         ["node_id", "run_id"],
@@ -465,3 +481,25 @@ Index(
     checkpoints_table.c.run_id,
     checkpoints_table.c.sequence_number,
 )
+
+# === Secret Resolutions (P2-10: Key Vault Secret Audit Trail) ===
+# Records which secrets were loaded from where during pipeline startup.
+# NOTE: Records are inserted AFTER run is created, though secrets load before.
+# Allows auditors to answer: "Which Key Vault did this secret come from?"
+# without exposing actual secret values (stores fingerprint only).
+
+secret_resolutions_table = Table(
+    "secret_resolutions",
+    metadata,
+    Column("resolution_id", String(64), primary_key=True),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
+    Column("timestamp", Float, nullable=False),  # When secret was loaded (before run)
+    Column("env_var_name", String(256), nullable=False),  # Target environment variable
+    Column("source", String(32), nullable=False),  # 'keyvault' (env source doesn't record)
+    Column("vault_url", Text, nullable=True),  # Key Vault URL (NULL if source != keyvault)
+    Column("secret_name", String(256), nullable=True),  # Secret name in vault
+    Column("fingerprint", String(64), nullable=False),  # HMAC fingerprint of secret value
+    Column("resolution_latency_ms", Float, nullable=True),  # Time to fetch from vault
+)
+
+Index("ix_secret_resolutions_run", secret_resolutions_table.c.run_id)

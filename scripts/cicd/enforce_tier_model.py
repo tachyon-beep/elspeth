@@ -91,15 +91,46 @@ class AllowlistEntry:
 
 
 @dataclass
+class PerFileRule:
+    """A per-file rule that whitelists all patterns of specified rules for a file/directory."""
+
+    pattern: str  # Glob pattern like "plugins/llm/*" or exact path like "mcp/server.py"
+    rules: list[str]  # List of rule IDs like ["R1", "R4", "R6"]
+    reason: str
+    expires: date | None
+    matched_count: int = field(default=0, compare=False)
+
+    def matches(self, file_path: str, rule_id: str) -> bool:
+        """Check if this per-file rule matches a finding."""
+        import fnmatch
+
+        if rule_id not in self.rules:
+            return False
+        # Match against file path (supports glob patterns)
+        return fnmatch.fnmatch(file_path, self.pattern)
+
+
+@dataclass
 class Allowlist:
     """Parsed allowlist configuration."""
 
     entries: list[AllowlistEntry]
+    per_file_rules: list[PerFileRule] = field(default_factory=list)
     fail_on_stale: bool = True
     fail_on_expired: bool = True
 
-    def match(self, finding: Finding) -> AllowlistEntry | None:
-        """Check if a finding is covered by an allowlist entry."""
+    def match(self, finding: Finding) -> AllowlistEntry | PerFileRule | None:
+        """Check if a finding is covered by an allowlist entry or per-file rule.
+
+        Per-file rules are checked first (more general), then specific entries.
+        """
+        # Check per-file rules first
+        for rule in self.per_file_rules:
+            if rule.matches(finding.file_path, finding.rule_id):
+                rule.matched_count += 1
+                return rule
+
+        # Check specific entries
         for entry in self.entries:
             if entry.key == finding.canonical_key:
                 entry.matched = True
@@ -114,6 +145,15 @@ class Allowlist:
         """Return entries that have expired."""
         today = datetime.now(UTC).date()
         return [e for e in self.entries if e.expires and e.expires < today]
+
+    def get_expired_file_rules(self) -> list[PerFileRule]:
+        """Return per-file rules that have expired."""
+        today = datetime.now(UTC).date()
+        return [r for r in self.per_file_rules if r.expires and r.expires < today]
+
+    def get_unused_file_rules(self) -> list[PerFileRule]:
+        """Return per-file rules that didn't match any finding."""
+        return [r for r in self.per_file_rules if r.matched_count == 0]
 
 
 # =============================================================================
@@ -500,8 +540,32 @@ def load_allowlist(path: Path) -> Allowlist:
             )
         )
 
+    # Parse per-file rules
+    per_file_rules: list[PerFileRule] = []
+    for item in data.get("per_file_rules", []):
+        expires_str = item.get("expires")
+        expires_date = None
+        if expires_str:
+            try:
+                expires_date = datetime.strptime(expires_str, "%Y-%m-%d").replace(tzinfo=UTC).date()
+            except ValueError:
+                print(
+                    f"Warning: Invalid date format for per_file_rules expires: {expires_str}",
+                    file=sys.stderr,
+                )
+
+        per_file_rules.append(
+            PerFileRule(
+                pattern=item["pattern"],
+                rules=item.get("rules", []),
+                reason=item.get("reason", ""),
+                expires=expires_date,
+            )
+        )
+
     return Allowlist(
         entries=entries,
+        per_file_rules=per_file_rules,
         fail_on_stale=defaults.get("fail_on_stale", True),
         fail_on_expired=defaults.get("fail_on_expired", True),
     )
@@ -541,29 +605,35 @@ def report_json(
     violations: list[Finding],
     stale_entries: list[AllowlistEntry],
     expired_entries: list[AllowlistEntry],
+    expired_file_rules: list[PerFileRule] | None = None,
+    unused_file_rules: list[PerFileRule] | None = None,
 ) -> str:
     """Generate JSON report."""
-    return json.dumps(
-        {
-            "violations": [
-                {
-                    "rule_id": f.rule_id,
-                    "file": f.file_path,
-                    "line": f.line,
-                    "col": f.col,
-                    "context": list(f.symbol_context),
-                    "fingerprint": f.fingerprint,
-                    "code": f.code_snippet,
-                    "message": f.message,
-                    "key": f.canonical_key,
-                }
-                for f in violations
-            ],
-            "stale_allowlist_entries": [{"key": e.key, "owner": e.owner, "reason": e.reason} for e in stale_entries],
-            "expired_allowlist_entries": [{"key": e.key, "owner": e.owner, "expires": str(e.expires)} for e in expired_entries],
-        },
-        indent=2,
-    )
+    result: dict[str, Any] = {
+        "violations": [
+            {
+                "rule_id": f.rule_id,
+                "file": f.file_path,
+                "line": f.line,
+                "col": f.col,
+                "context": list(f.symbol_context),
+                "fingerprint": f.fingerprint,
+                "code": f.code_snippet,
+                "message": f.message,
+                "key": f.canonical_key,
+            }
+            for f in violations
+        ],
+        "stale_allowlist_entries": [{"key": e.key, "owner": e.owner, "reason": e.reason} for e in stale_entries],
+        "expired_allowlist_entries": [{"key": e.key, "owner": e.owner, "expires": str(e.expires)} for e in expired_entries],
+    }
+    if expired_file_rules:
+        result["expired_file_rules"] = [
+            {"pattern": r.pattern, "rules": r.rules, "reason": r.reason, "expires": str(r.expires)} for r in expired_file_rules
+        ]
+    if unused_file_rules:
+        result["unused_file_rules"] = [{"pattern": r.pattern, "rules": r.rules, "reason": r.reason} for r in unused_file_rules]
+    return json.dumps(result, indent=2)
 
 
 # =============================================================================
@@ -662,15 +732,21 @@ def run_check(args: argparse.Namespace) -> int:
     if args.files:
         stale_entries: list[AllowlistEntry] = []
         expired_entries: list[AllowlistEntry] = []
+        expired_file_rules: list[PerFileRule] = []
+        unused_file_rules: list[PerFileRule] = []
     else:
         stale_entries = allowlist.get_stale_entries() if allowlist.fail_on_stale else []
         expired_entries = allowlist.get_expired_entries() if allowlist.fail_on_expired else []
+        expired_file_rules = allowlist.get_expired_file_rules() if allowlist.fail_on_expired else []
+        unused_file_rules = allowlist.get_unused_file_rules() if allowlist.fail_on_stale else []
 
     # Report results
-    has_errors = bool(violations or stale_entries or expired_entries)
+    # Include unused_file_rules in error condition - stale per-file rules should fail
+    # the same way stale explicit entries do when fail_on_stale is enabled
+    has_errors = bool(violations or stale_entries or expired_entries or expired_file_rules or unused_file_rules)
 
     if args.format == "json":
-        print(report_json(violations, stale_entries, expired_entries))
+        print(report_json(violations, stale_entries, expired_entries, expired_file_rules, unused_file_rules))
     else:
         # Text format
         if violations:
@@ -695,6 +771,27 @@ def run_check(args: argparse.Namespace) -> int:
             print("=" * 60)
             for e in expired_entries:
                 print(format_expired_entry_text(e))
+
+        if expired_file_rules:
+            print(f"\n{'=' * 60}")
+            print(f"EXPIRED PER-FILE RULES: {len(expired_file_rules)}")
+            print("(These rules have passed their expiration date)")
+            print("=" * 60)
+            for r in expired_file_rules:
+                print(f"\n  Pattern: {r.pattern}")
+                print(f"  Rules: {r.rules}")
+                print(f"  Reason: {r.reason}")
+                print(f"  Expired: {r.expires}")
+
+        if unused_file_rules:
+            print(f"\n{'=' * 60}")
+            print(f"UNUSED PER-FILE RULES: {len(unused_file_rules)}")
+            print("(These rules didn't match any code - consider removing)")
+            print("=" * 60)
+            for r in unused_file_rules:
+                print(f"\n  Pattern: {r.pattern}")
+                print(f"  Rules: {r.rules}")
+                print(f"  Reason: {r.reason}")
 
         if has_errors:
             print(f"\n{'=' * 60}")

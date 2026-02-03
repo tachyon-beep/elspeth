@@ -40,7 +40,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         return CSVSource(
             {
                 "path": str(source_data),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -56,7 +56,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
             {
                 "path": str(tsv_file),
                 "delimiter": "\t",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -84,7 +84,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source = CSVSource(
             {
                 "path": str(empty_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -102,7 +102,7 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         source = CSVSource(
             {
                 "path": str(header_only),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -133,7 +133,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
             {
                 "path": str(source_data_with_invalid),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "quarantine_sink",
@@ -152,7 +152,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
             node_id="csv_source",
             sequence=0,
         )
@@ -181,7 +181,7 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
         errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
         assert len(errors) == 1
-        assert errors[0].schema_mode == "strict"
+        assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "quarantine_sink"
 
 
@@ -211,7 +211,7 @@ class TestCSVSourceDiscardContract:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
             node_id="csv_source",
             sequence=0,
         )
@@ -220,7 +220,7 @@ class TestCSVSourceDiscardContract:
             {
                 "path": str(source_data_with_invalid),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str"],
                 },
                 "on_validation_failure": "discard",
@@ -242,7 +242,7 @@ class TestCSVSourceDiscardContract:
         row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
         errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
         assert len(errors) == 1
-        assert errors[0].schema_mode == "strict"
+        assert errors[0].schema_mode == "fixed"
         assert errors[0].destination == "discard"
 
 
@@ -254,7 +254,7 @@ class TestCSVSourceFileNotFoundContract:
         source = CSVSource(
             {
                 "path": str(tmp_path / "nonexistent.csv"),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )

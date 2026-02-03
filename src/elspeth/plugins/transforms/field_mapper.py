@@ -25,7 +25,7 @@ class FieldMapperConfig(TransformDataConfig):
     """Configuration for field mapper transform.
 
     Requires 'schema' in config to define input/output expectations.
-    Use 'schema: {fields: dynamic}' for dynamic field handling.
+    Use 'schema: {mode: observed}' for dynamic field handling.
     """
 
     mapping: dict[str, str] = Field(default_factory=dict)
@@ -38,7 +38,7 @@ class FieldMapper(BaseTransform):
     """Map, rename, and select row fields.
 
     Config options:
-        schema: Required. Schema for input/output (use {fields: dynamic} for any fields)
+        schema: Required. Schema for input/output (use {mode: observed} for any fields)
         mapping: Dict of source_field -> target_field
             - Simple: {"old": "new"} renames old to new
             - Nested: {"meta.source": "origin"} extracts nested field
@@ -75,7 +75,7 @@ class FieldMapper(BaseTransform):
         # The output shape depends on config, not input schema.
         # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
         self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "FieldMapperOutputSchema",
             allow_coercion=False,
         )
@@ -95,7 +95,7 @@ class FieldMapper(BaseTransform):
                 This indicates a bug in the upstream source/transform.
         """
         # Optional input validation - crash on wrong types (source bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             self.input_schema.model_validate(row)  # Raises on failure
 
         # Start with empty or copy depending on select_only

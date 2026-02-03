@@ -73,7 +73,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "nonexistent_error_sink"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
@@ -148,7 +148,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "phantom_sink"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
@@ -227,7 +227,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "discard"  # Special value - should pass validation
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
@@ -295,7 +295,7 @@ class TestTransformErrorSinkValidation:
             # _on_error is None by default from BaseTransform
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
@@ -363,7 +363,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "error_sink"  # This sink exists in config
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})
@@ -448,7 +448,7 @@ class TestTransformErrorSinkValidation:
             _on_error = "invalid_sink_name"  # Does not exist
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 call_tracking["transform_process_called"] = True

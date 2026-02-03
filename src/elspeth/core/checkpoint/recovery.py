@@ -13,10 +13,11 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus
+from elspeth.contracts import PayloadStore, PluginSchema, ResumeCheck, ResumePoint, RowOutcome, RunStatus, SchemaContract
 from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
-from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
+from elspeth.core.checkpoint.manager import CheckpointCorruptionError, CheckpointManager, IncompatibleCheckpointError
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
     rows_table,
     runs_table,
@@ -70,6 +71,7 @@ class RecoveryManager:
         - Its status is "failed" (not "completed" or "running")
         - At least one checkpoint exists for recovery
         - The checkpoint's upstream topology is compatible with current graph
+        - The stored schema contract passes integrity verification (if present)
 
         Args:
             run_id: The run to check
@@ -78,6 +80,10 @@ class RecoveryManager:
         Returns:
             ResumeCheck with can_resume=True if resumable,
             or can_resume=False with reason explaining why not.
+
+        Raises:
+            CheckpointCorruptionError: If schema contract integrity check fails.
+                This is a Tier 1 failure - corruption cannot be silently ignored.
         """
         run = self._get_run(run_id)
         if run is None:
@@ -99,7 +105,17 @@ class RecoveryManager:
 
         # Validate topological compatibility
         validator = CheckpointCompatibilityValidator()
-        return validator.validate(checkpoint, graph)
+        topology_check = validator.validate(checkpoint, graph)
+        if not topology_check.can_resume:
+            return topology_check
+
+        # Verify schema contract integrity (Tier 1 - raises on corruption)
+        # This must happen AFTER topology validation passes, as contract
+        # corruption is a more serious failure than config mismatch.
+        # Note: Returns None if no contract stored (valid for legacy runs)
+        self.verify_contract_integrity(run_id)
+
+        return ResumeCheck(can_resume=True)
 
     def get_resume_point(self, run_id: str, graph: "ExecutionGraph") -> ResumePoint | None:
         """Get the resume point for a failed run.
@@ -380,3 +396,35 @@ class RecoveryManager:
             result = conn.execute(select(runs_table).where(runs_table.c.run_id == run_id)).fetchone()
 
         return result
+
+    def verify_contract_integrity(self, run_id: str) -> SchemaContract | None:
+        """Verify schema contract integrity for a run.
+
+        Retrieves the stored schema contract and verifies its integrity
+        via hash comparison. This is a Tier 1 check - corruption indicates
+        audit trail tampering or database corruption.
+
+        Args:
+            run_id: Run to verify
+
+        Returns:
+            SchemaContract if valid and present, None if no contract was stored.
+            Runs without contracts (legacy or OBSERVED mode before first row)
+            return None - this is valid, not an error.
+
+        Raises:
+            CheckpointCorruptionError: If contract hash mismatch detected.
+                This is a critical integrity failure - the audit trail
+                may have been tampered with or corrupted.
+        """
+        recorder = LandscapeRecorder(self._db)
+
+        try:
+            return recorder.get_run_contract(run_id)
+        except ValueError as e:
+            # get_run_contract raises ValueError when hash verification fails
+            # Convert to CheckpointCorruptionError for checkpoint-specific context
+            raise CheckpointCorruptionError(
+                f"Contract integrity verification failed for run '{run_id}': {e}. "
+                f"Resume aborted - audit trail may be corrupted or tampered with."
+            ) from e

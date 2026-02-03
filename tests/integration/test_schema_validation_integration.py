@@ -35,20 +35,20 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     csv_path.write_text("name,age\nAlice,30\nBob,25\n")
 
     # Build config with compatible plugins
-    # All plugins use dynamic schemas (fields: dynamic)
+    # All plugins use dynamic schemas (mode: observed)
     config = ElspethSettings(
         source=SourceSettings(
             plugin="csv",
             options={
                 "path": str(csv_path),
                 "on_validation_failure": "discard",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             },
         ),
         transforms=[
             TransformSettings(
                 plugin="passthrough",
-                options={"schema": {"fields": "dynamic"}},
+                options={"schema": {"mode": "observed"}},
             ),
         ],
         sinks={
@@ -56,7 +56,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
                 plugin="json",
                 options={
                     "path": str(tmp_path / "output.json"),
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "format": "jsonl",
                 },
             ),

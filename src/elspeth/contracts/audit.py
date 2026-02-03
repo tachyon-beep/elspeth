@@ -85,7 +85,7 @@ class Node:
     schema_hash: str | None = None
     sequence_in_pipeline: int | None = None
     # Schema configuration for audit trail (WP-11.99)
-    schema_mode: str | None = None  # "dynamic", "strict", "free", "parse"
+    schema_mode: str | None = None  # "observed", "fixed", "flexible", "parse"
     schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
 
     def __post_init__(self) -> None:
@@ -472,7 +472,7 @@ class ValidationErrorRecord:
     node_id: str | None
     row_hash: str
     error: str
-    schema_mode: str  # "strict", "free", "dynamic", "parse"
+    schema_mode: str  # "fixed", "flexible", "observed", "parse"
     destination: str
     created_at: datetime
     row_data_json: str | None = None
@@ -649,3 +649,37 @@ class Operation:
             "error_message": self.error_message,
             "duration_ms": self.duration_ms,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SecretResolution:
+    """Record of a secret loaded from Key Vault for audit trail.
+
+    These records enable auditors to answer: "Which Key Vault and which
+    secret was used for this pipeline run?" without exposing actual secret
+    values (only HMAC fingerprints are stored).
+
+    Secret resolutions are recorded at run start, before processing begins.
+    They capture the provenance of secrets loaded from external vaults.
+
+    Attributes:
+        resolution_id: Unique identifier for this resolution event
+        run_id: Run that used this secret
+        timestamp: When the secret was loaded (epoch seconds, may be before run start)
+        env_var_name: Environment variable the secret was injected into
+        source: Source type ('keyvault' - env source doesn't record)
+        vault_url: Key Vault URL (None if source != keyvault)
+        secret_name: Secret name in the vault
+        fingerprint: HMAC-SHA256 fingerprint of the secret value (not the value itself)
+        resolution_latency_ms: Time to fetch from vault (None if not measured)
+    """
+
+    resolution_id: str
+    run_id: str
+    timestamp: float  # Epoch seconds - may be before run start
+    env_var_name: str
+    source: str  # 'keyvault'
+    fingerprint: str  # HMAC fingerprint, NOT the secret value
+    vault_url: str | None = None
+    secret_name: str | None = None
+    resolution_latency_ms: float | None = None

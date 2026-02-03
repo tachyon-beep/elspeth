@@ -8,7 +8,8 @@ concurrent row processing with FIFO output ordering.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Self
 
@@ -23,6 +24,13 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    AzureAITracingConfig,
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -56,6 +64,13 @@ class AzureOpenAIConfig(LLMConfig):
     endpoint: str = Field(..., description="Azure OpenAI endpoint URL")
     api_key: str = Field(..., description="Azure OpenAI API key")
     api_version: str = Field(default="2024-10-21", description="Azure API version")
+
+    # Tier 2: Plugin-internal tracing (optional)
+    # Use environment variables for secrets: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (azure_ai, langfuse, or none)",
+    )
 
     @model_validator(mode="after")
     def _set_model_from_deployment(self) -> Self:
@@ -108,7 +123,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
               template: |
                 Analyze: {{ row.text }}
               schema:
-                fields: dynamic
+                mode: observed
     """
 
     name = "azure_llm"
@@ -171,7 +186,6 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,
@@ -192,6 +206,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
+
+        # Tier 2: Plugin-internal tracing
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
 
     def connect_output(
         self,
@@ -223,16 +242,118 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder, telemetry, and rate limit context.
+        """Capture recorder, telemetry, rate limit context, and initialize tracing.
 
         Called by the engine at pipeline start. Captures the landscape
         recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
+        Also initializes Tier 2 tracing if configured.
         """
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider.
+
+        Tracing is optional - if the required SDK is not installed,
+        we log a warning and continue without tracing.
+        """
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Type narrowing for mypy - caller guarantees this is not None
+        assert self._tracing_config is not None
+        tracing_config = self._tracing_config
+
+        # Validate configuration completeness
+        errors = validate_tracing_config(tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return  # Don't attempt setup with incomplete config
+
+        match tracing_config.provider:
+            case "azure_ai":
+                self._setup_azure_ai_tracing(logger, tracing_config)
+            case "langfuse":
+                self._setup_langfuse_tracing(logger, tracing_config)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_azure_ai_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Azure AI / Application Insights tracing.
+
+        Azure Monitor OpenTelemetry auto-instruments the OpenAI SDK.
+        No manual instrumentation needed after configure_azure_monitor().
+
+        WARNING: This is process-level configuration. Multiple plugins
+        with azure_ai tracing will share the same configuration.
+        """
+        try:
+            # Check for existing OTEL configuration that might conflict
+            from opentelemetry import trace as otel_trace
+
+            if otel_trace.get_tracer_provider().__class__.__name__ != "ProxyTracerProvider":
+                logger.warning(
+                    "Existing OpenTelemetry tracer detected - Azure AI tracing may conflict with Tier 1 telemetry",
+                    existing_provider=otel_trace.get_tracer_provider().__class__.__name__,
+                )
+
+            success = _configure_azure_monitor(tracing_config)
+            if success:
+                self._tracing_active = True
+                logger.info(
+                    "Azure AI tracing initialized",
+                    provider="azure_ai",
+                    content_recording=tracing_config.enable_content_recording if isinstance(tracing_config, AzureAITracingConfig) else None,
+                    live_metrics=tracing_config.enable_live_metrics if isinstance(tracing_config, AzureAITracingConfig) else None,
+                )
+
+        except ImportError:
+            logger.warning(
+                "Azure AI tracing requested but package not installed",
+                provider="azure_ai",
+                hint="Install with: uv pip install elspeth[tracing-azure]",
+            )
+
+    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Langfuse tracing.
+
+        Langfuse requires manual span creation around LLM calls.
+        The Langfuse client is stored for use in _process_row().
+        """
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+
+            if not isinstance(tracing_config, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=tracing_config.public_key,
+                secret_key=tracing_config.secret_key,
+                host=tracing_config.host,
+            )
+            self._tracing_active = True
+
+            logger.info(
+                "Langfuse tracing initialized",
+                provider="langfuse",
+                host=tracing_config.host,
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -311,28 +432,46 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             raise RuntimeError("Azure LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
+            import time
+
             llm_client = self._get_llm_client(ctx.state_id)
 
-            # 4. Call LLM (EXTERNAL - wrap)
+            # 4. Call LLM with Tier 2 tracing (EXTERNAL - wrap)
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
             # to let the engine's RetryManager handle them. Non-retryable errors
             # (ContentPolicyError, ContextLengthError) return TransformResult.error().
-            try:
-                response = llm_client.chat_completion(
-                    model=self._model,
-                    messages=messages,
-                    temperature=self._temperature,
-                    max_tokens=self._max_tokens,
-                )
-            except LLMClientError as e:
-                if e.retryable:
-                    # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
-                    raise
-                # Non-retryable error - return error result
-                return TransformResult.error(
-                    {"reason": "llm_call_failed", "error": str(e)},
-                    retryable=False,
-                )
+            token_id = ctx.token.token_id if ctx.token else "unknown"
+            start_time = time.monotonic()
+
+            with self._create_langfuse_trace(token_id, row) as trace:
+                try:
+                    response = llm_client.chat_completion(
+                        model=self._model,
+                        messages=messages,
+                        temperature=self._temperature,
+                        max_tokens=self._max_tokens,
+                    )
+                except LLMClientError as e:
+                    if e.retryable:
+                        # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
+                        raise
+                    # Non-retryable error - return error result
+                    return TransformResult.error(
+                        {"reason": "llm_call_failed", "error": str(e)},
+                        retryable=False,
+                    )
+
+                # Record in Langfuse if tracing is active
+                if trace is not None:
+                    latency_ms = (time.monotonic() - start_time) * 1000
+                    self._record_langfuse_generation(
+                        trace=trace,
+                        prompt=rendered.prompt,
+                        response_content=response.content,
+                        model=self._model,
+                        usage=response.usage,
+                        latency_ms=latency_ms,
+                    )
 
             # 5. Build output row (OUR CODE - let exceptions crash)
             output = dict(row)
@@ -414,7 +553,11 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         return self._deployment_name
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -424,3 +567,130 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         with self._llm_clients_lock:
             self._llm_clients.clear()
         self._underlying_client = None
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
+
+        # Azure Monitor handles its own batching/flushing
+        # No explicit flush needed
+
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for an LLM call.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+
+        Example:
+            with self._create_langfuse_trace(token_id, row) as trace:
+                response = await self._call_llm(...)
+                if trace:
+                    self._record_langfuse_generation(trace, prompt, response, ...)
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "deployment": self._deployment_name,
+            },
+        )
+        yield trace
+        # Note: Langfuse v2 traces auto-close when context exits
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record an LLM generation in Langfuse.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            prompt: The prompt sent to the LLM
+            response_content: The response received
+            model: Model/deployment name
+            usage: Token usage dict with prompt_tokens/completion_tokens
+            latency_ms: Call latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "llm_call",
+            "model": model,
+            "input": prompt,
+            "output": response_content,
+        }
+
+        if usage:
+            generation_kwargs["usage"] = {
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+            }
+
+        if latency_ms is not None:
+            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        # Record to Langfuse - log but don't crash on failure (telemetry is not critical path)
+        try:
+            trace.generation(**generation_kwargs)
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning(
+                "Failed to record Langfuse generation",
+                error=str(e),
+                model=model,
+            )
+
+
+def _configure_azure_monitor(config: TracingConfig) -> bool:
+    """Configure Azure Monitor (module-level to allow mocking).
+
+    Returns True on success, False on failure.
+    """
+    from azure.monitor.opentelemetry import configure_azure_monitor  # type: ignore[import-not-found,import-untyped]
+
+    if not isinstance(config, AzureAITracingConfig):
+        return False
+
+    configure_azure_monitor(
+        connection_string=config.connection_string,
+        enable_live_metrics=config.enable_live_metrics,
+    )
+    return True

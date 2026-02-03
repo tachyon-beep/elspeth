@@ -12,7 +12,7 @@ from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.payload_store import FilesystemPayloadStore
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestGetRowDataExplicitStates:

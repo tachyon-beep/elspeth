@@ -14,7 +14,7 @@ from elspeth.plugins.context import PluginContext
 # Strict schema config for tests - DataPluginConfig now requires schema
 # DatabaseSink requires fixed-column structure, so we use strict mode
 # Tests that need specific fields define their own schema
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int", "name: str"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "name: str"]}
 
 
 class TestDatabaseSink:
@@ -178,7 +178,7 @@ class TestDatabaseSink:
 
         # Strict schema with optional field 'score'
         explicit_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "score: float?"],
         }
 
@@ -220,7 +220,7 @@ class TestDatabaseSink:
 
         # Explicit schema with all supported types
         explicit_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "name: str", "score: float", "active: bool"],
         }
 
@@ -413,7 +413,6 @@ class TestDatabaseSinkSecretHandling:
 
         # Simulate dev environment: no fingerprint key, but allow raw secrets
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
         # Should not raise - dev mode allows sanitization without fingerprint
@@ -440,7 +439,6 @@ class TestDatabaseSinkSecretHandling:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         # Should raise in production mode
@@ -458,7 +456,6 @@ class TestDatabaseSinkSecretHandling:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
 
         # Should work - no password, no key needed
         sink = DatabaseSink(
@@ -596,12 +593,14 @@ class TestDatabaseSinkCanonicalHashing:
 
 
 class TestDatabaseSinkSchemaValidation:
-    """Tests for DatabaseSink schema compatibility validation.
+    """Tests for DatabaseSink schema modes using infer-and-lock pattern.
 
-    DatabaseSink requires fixed-column structure. Schemas that allow extra fields
-    (free mode, dynamic mode) are incompatible because:
-    - Table columns are fixed at table creation
-    - Extra fields would either be silently dropped (audit violation) or cause errors
+    DatabaseSink supports all schema modes:
+    - strict: columns from config, extras rejected at insert time
+    - free: declared columns + extras from first row, then locked
+    - dynamic: columns from first row, then locked
+
+    Table schema is created on first write; subsequent rows must match.
     """
 
     @pytest.fixture
@@ -609,41 +608,117 @@ class TestDatabaseSinkSchemaValidation:
         """Create a SQLite database URL."""
         return f"sqlite:///{tmp_path / 'test.db'}"
 
-    def test_rejects_free_mode_schema(self, db_url: str) -> None:
-        """DatabaseSink should reject free mode schemas at initialization.
-
-        Free mode allows extra fields, but database requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        free_schema = {"mode": "free", "fields": ["id: int"]}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            DatabaseSink({"url": db_url, "table": "output", "schema": free_schema})
-
-    def test_rejects_dynamic_schema(self, db_url: str) -> None:
-        """DatabaseSink should reject dynamic schemas at initialization.
-
-        Dynamic schemas allow any fields, but database requires fixed columns.
-        This would cause silent data loss or runtime errors.
-        """
-        from elspeth.plugins.sinks.database_sink import DatabaseSink
-
-        dynamic_schema = {"fields": "dynamic"}
-
-        with pytest.raises(ValueError, match="allows_extra_fields"):
-            DatabaseSink({"url": db_url, "table": "output", "schema": dynamic_schema})
-
     def test_accepts_strict_mode_schema(self, db_url: str) -> None:
-        """DatabaseSink should accept strict mode schemas.
-
-        Strict mode has fixed fields - compatible with database structure.
-        """
+        """DatabaseSink accepts strict mode - columns from config."""
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
-        strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "name: str"]}
 
-        # Should not raise
         sink = DatabaseSink({"url": db_url, "table": "output", "schema": strict_schema})
         assert sink is not None
+
+    def test_accepts_free_mode_schema(self, db_url: str) -> None:
+        """DatabaseSink accepts free mode - declared + first-row extras, then locked."""
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        free_schema = {"mode": "flexible", "fields": ["id: int"]}
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": free_schema})
+        assert sink is not None
+
+    def test_accepts_dynamic_schema(self, db_url: str) -> None:
+        """DatabaseSink accepts dynamic mode - columns from first row, then locked."""
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        dynamic_schema = {"mode": "observed"}
+
+        sink = DatabaseSink({"url": db_url, "table": "output", "schema": dynamic_schema})
+        assert sink is not None
+
+    def test_flexible_mode_includes_extras_from_first_row(self, db_url: str) -> None:
+        """Flexible mode includes declared fields + extras from first row.
+
+        This is the documented behavior: flexible mode should accept at least
+        the declared fields, plus any extras present in the first row.
+        """
+        from sqlalchemy import MetaData, Table, create_engine, inspect, select
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        # Schema declares only 'id', but first row has 'id', 'name', 'extra'
+        flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
+        sink = DatabaseSink(
+            {
+                "url": db_url,
+                "table": "flexible_test",
+                "schema": flexible_schema,
+                "if_exists": "replace",
+            }
+        )
+
+        # First write has declared field + two extras
+        sink.write([{"id": 1, "name": "alice", "extra": "value"}], ctx)
+        sink.close()
+
+        # Verify all columns are in table
+        engine = create_engine(db_url)
+        inspector = inspect(engine)
+        columns = {col["name"] for col in inspector.get_columns("flexible_test")}
+
+        # All three columns should be present
+        assert "id" in columns, "Declared field 'id' should be a column"
+        assert "name" in columns, "Extra field 'name' from first row should be a column"
+        assert "extra" in columns, "Extra field 'extra' from first row should be a column"
+
+        # Verify data was written correctly
+        metadata = MetaData()
+        table = Table("flexible_test", metadata, autoload_with=engine)
+        with engine.connect() as conn:
+            result = conn.execute(select(table)).fetchall()
+
+        assert len(result) == 1
+        row_dict = dict(result[0]._mapping)
+        assert row_dict["id"] == 1
+        assert row_dict["name"] == "alice"
+        assert row_dict["extra"] == "value"
+
+        engine.dispose()
+
+    def test_flexible_mode_declared_columns_have_proper_types(self, db_url: str) -> None:
+        """Flexible mode should use declared types for schema fields, String for extras."""
+        from sqlalchemy import create_engine, inspect
+
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        # Schema declares 'id' as int, 'score' as float
+        flexible_schema = {"mode": "flexible", "fields": ["id: int", "score: float"]}
+        sink = DatabaseSink(
+            {
+                "url": db_url,
+                "table": "flexible_types_test",
+                "schema": flexible_schema,
+                "if_exists": "replace",
+            }
+        )
+
+        # First row has declared fields + an extra string field
+        sink.write([{"id": 1, "score": 3.14, "extra": "text"}], ctx)
+        sink.close()
+
+        # Verify column types
+        engine = create_engine(db_url)
+        inspector = inspect(engine)
+        columns = {col["name"]: col["type"] for col in inspector.get_columns("flexible_types_test")}
+
+        # Declared fields should have proper types
+        assert "INTEGER" in str(columns["id"]).upper(), f"'id' should be INTEGER, got {columns['id']}"
+        # SQLite uses REAL/FLOAT, others may use FLOAT/DOUBLE
+        assert any(t in str(columns["score"]).upper() for t in ["FLOAT", "REAL"]), f"'score' should be FLOAT/REAL, got {columns['score']}"
+        # Extra field should be String (VARCHAR/TEXT)
+        assert any(t in str(columns["extra"]).upper() for t in ["VARCHAR", "TEXT", "STRING"]), (
+            f"'extra' should be VARCHAR/TEXT/STRING, got {columns['extra']}"
+        )
+
+        engine.dispose()

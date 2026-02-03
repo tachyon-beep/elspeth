@@ -17,7 +17,7 @@ class TestContractHelpers:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "name"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "name"]}},
         )
 
         result = graph._get_guaranteed_fields("source_1")
@@ -30,7 +30,7 @@ class TestContractHelpers:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"mode": "free", "fields": ["a: int", "b: str"]}},
+            config={"schema": {"mode": "flexible", "fields": ["a: int", "b: str"]}},
         )
 
         result = graph._get_guaranteed_fields("source_1")
@@ -43,7 +43,7 @@ class TestContractHelpers:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         result = graph._get_guaranteed_fields("source_1")
@@ -57,7 +57,7 @@ class TestContractHelpers:
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["customer_id", "amount"],
             },
         )
@@ -73,7 +73,7 @@ class TestContractHelpers:
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["x", "y"]},
+                "schema": {"mode": "observed", "required_fields": ["x", "y"]},
             },
         )
 
@@ -92,7 +92,7 @@ class TestContractHelpers:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"mode": "strict", "fields": ["id: int", "value: str"]}},
+            config={"schema": {"mode": "fixed", "fields": ["id: int", "value: str"]}},
         )
 
         # Implicit requirements are NOT returned - type validation handles these
@@ -108,7 +108,7 @@ class TestContractHelpers:
             plugin_name="csv",
             config={
                 "schema": {
-                    "fields": "dynamic",
+                    "mode": "observed",
                     "required_fields": ["customer_id", "amount"],
                 },
             },
@@ -125,7 +125,7 @@ class TestContractHelpers:
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["schema_req"]},
+                "schema": {"mode": "observed", "required_fields": ["schema_req"]},
                 "required_input_fields": ["config_req"],  # This wins
             },
         )
@@ -144,7 +144,7 @@ class TestEffectiveGuaranteedFields:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
         )
 
         result = graph._get_effective_guaranteed_fields("source_1")
@@ -157,13 +157,13 @@ class TestEffectiveGuaranteedFields:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["x", "y"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["x", "y"]}},
         )
         graph.add_node(
             "gate_1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("source_1", "gate_1", label="continue")
 
@@ -179,7 +179,7 @@ class TestEffectiveGuaranteedFields:
             "gate_1",
             node_type=NodeType.GATE,
             plugin_name="fork_gate",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common", "branch_a"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common", "branch_a"]}},
         )
 
         # Branch A source
@@ -187,7 +187,7 @@ class TestEffectiveGuaranteedFields:
             "branch_a",
             node_type=NodeType.TRANSFORM,
             plugin_name="transform_a",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common", "a_only"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common", "a_only"]}},
         )
 
         # Branch B source
@@ -195,7 +195,7 @@ class TestEffectiveGuaranteedFields:
             "branch_b",
             node_type=NodeType.TRANSFORM,
             plugin_name="transform_b",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common", "b_only"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common", "b_only"]}},
         )
 
         # Coalesce node
@@ -203,7 +203,7 @@ class TestEffectiveGuaranteedFields:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("branch_a", "coalesce_1", label="path_a")
@@ -224,14 +224,14 @@ class TestContractValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
         )
         graph.add_node(
             "transform_1",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["a"],  # Requires only 'a'
             },
         )
@@ -239,7 +239,7 @@ class TestContractValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("source_1", "transform_1", label="continue")
         graph.add_edge("transform_1", "sink_1", label="continue")
@@ -254,14 +254,14 @@ class TestContractValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a"]}},
         )
         graph.add_node(
             "transform_1",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["a", "b"],  # Requires 'b' which source doesn't have
             },
         )
@@ -269,7 +269,7 @@ class TestContractValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("source_1", "transform_1", label="continue")
         graph.add_edge("transform_1", "sink_1", label="continue")
@@ -284,14 +284,14 @@ class TestContractValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_node(
             "transform_1",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["customer_id", "order_amount"],
             },
         )
@@ -300,7 +300,7 @@ class TestContractValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("transform_1", "sink_1", label="continue")
 
@@ -319,14 +319,14 @@ class TestContractValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},  # No guarantees
+            config={"schema": {"mode": "observed"}},  # No guarantees
         )
         graph.add_node(
             "transform_1",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["required_field"],
             },
         )
@@ -335,7 +335,7 @@ class TestContractValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("transform_1", "sink_1", label="continue")
 
@@ -349,19 +349,19 @@ class TestContractValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_node(
             "transform_1",
             node_type=NodeType.TRANSFORM,
             plugin_name="passthrough",
-            config={"schema": {"fields": "dynamic"}},  # No requirements
+            config={"schema": {"mode": "observed"}},  # No requirements
         )
         graph.add_node(
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_edge("source_1", "transform_1", label="continue")
         graph.add_edge("transform_1", "sink_1", label="continue")
@@ -382,7 +382,7 @@ class TestChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
         )
 
         # Transform consumes [a], produces [a, c] (drops b, adds c)
@@ -391,7 +391,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="mapper",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "c"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "c"]},
                 "required_input_fields": ["a"],
             },
         )
@@ -402,7 +402,7 @@ class TestChainValidation:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["a", "b"]},
+                "schema": {"mode": "observed", "required_fields": ["a", "b"]},
             },
         )
 
@@ -421,7 +421,7 @@ class TestChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"mode": "free", "fields": ["id: int", "name: str"]}},
+            config={"schema": {"mode": "flexible", "fields": ["id: int", "name: str"]}},
         )
 
         # Transform requires id (which source guarantees)
@@ -430,7 +430,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["id"],
             },
         )
@@ -439,7 +439,7 @@ class TestChainValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "transform_1", label="continue")
@@ -457,7 +457,7 @@ class TestChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c"]}},
         )
 
         # Transform 1: consumes [a], produces [a, b, c] (pass-through)
@@ -466,7 +466,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t1",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c"]},
                 "required_input_fields": ["a"],
             },
         )
@@ -477,7 +477,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t2",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c"]},
                 "required_input_fields": ["b"],
             },
         )
@@ -488,7 +488,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t3",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "d"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "d"]},
                 "required_input_fields": ["c"],
             },
         )
@@ -499,7 +499,7 @@ class TestChainValidation:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["a", "b", "c"]},
+                "schema": {"mode": "observed", "required_fields": ["a", "b", "c"]},
             },
         )
 
@@ -520,7 +520,7 @@ class TestChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c"]}},
         )
 
         # Transform 1: consumes [a], adds [d], keeps all
@@ -529,7 +529,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t1",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c", "d"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c", "d"]},
                 "required_input_fields": ["a"],
             },
         )
@@ -540,7 +540,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t2",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c", "d", "e"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c", "d", "e"]},
                 "required_input_fields": ["b"],
             },
         )
@@ -551,7 +551,7 @@ class TestChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="t3",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b", "c", "d", "e", "f"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a", "b", "c", "d", "e", "f"]},
                 "required_input_fields": ["c", "d"],
             },
         )
@@ -562,7 +562,7 @@ class TestChainValidation:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["a", "b", "c", "f"]},
+                "schema": {"mode": "observed", "required_fields": ["a", "b", "c", "f"]},
             },
         )
 
@@ -587,7 +587,7 @@ class TestGatePassthrough:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["field_a"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["field_a"]}},
         )
 
         # Gate (passthrough)
@@ -595,7 +595,7 @@ class TestGatePassthrough:
             "gate_1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Sink requires field_a
@@ -604,7 +604,7 @@ class TestGatePassthrough:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["field_a"]},
+                "schema": {"mode": "observed", "required_fields": ["field_a"]},
             },
         )
 
@@ -627,7 +627,7 @@ class TestForkCoalesceContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "raw_data"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "raw_data"]}},
         )
 
         # Fork gate (passes through source guarantees to both branches)
@@ -635,7 +635,7 @@ class TestForkCoalesceContracts:
             "fork_gate",
             node_type=NodeType.GATE,
             plugin_name="fork_gate",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Branch A: adds 'classification' field
@@ -644,7 +644,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.TRANSFORM,
             plugin_name="classifier",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["id", "raw_data", "classification"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["id", "raw_data", "classification"]},
                 "required_input_fields": ["raw_data"],
             },
         )
@@ -655,7 +655,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.TRANSFORM,
             plugin_name="sentiment_analyzer",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["id", "raw_data", "sentiment"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["id", "raw_data", "sentiment"]},
                 "required_input_fields": ["raw_data"],
             },
         )
@@ -665,7 +665,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Sink requires only 'id' (which is in intersection)
@@ -674,7 +674,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["id"]},
+                "schema": {"mode": "observed", "required_fields": ["id"]},
             },
         )
 
@@ -696,7 +696,7 @@ class TestForkCoalesceContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common"]}},
         )
 
         # Branch A: guarantees common + a_only
@@ -704,7 +704,7 @@ class TestForkCoalesceContracts:
             "branch_a",
             node_type=NodeType.TRANSFORM,
             plugin_name="transform_a",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common", "a_only"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common", "a_only"]}},
         )
 
         # Branch B: guarantees common + b_only
@@ -712,7 +712,7 @@ class TestForkCoalesceContracts:
             "branch_b",
             node_type=NodeType.TRANSFORM,
             plugin_name="transform_b",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["common", "b_only"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["common", "b_only"]}},
         )
 
         # Coalesce
@@ -720,7 +720,7 @@ class TestForkCoalesceContracts:
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Sink requires 'a_only' - NOT guaranteed by coalesce (only 'common' is)
@@ -729,7 +729,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["a_only"]},
+                "schema": {"mode": "observed", "required_fields": ["a_only"]},
             },
         )
 
@@ -750,7 +750,7 @@ class TestForkCoalesceContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id"]}},
         )
 
         # Three branches with overlapping guarantees
@@ -759,7 +759,7 @@ class TestForkCoalesceContracts:
             "branch_a",
             node_type=NodeType.TRANSFORM,
             plugin_name="a",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "x", "y"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "x", "y"]}},
         )
 
         # Branch B: id, x, z
@@ -767,7 +767,7 @@ class TestForkCoalesceContracts:
             "branch_b",
             node_type=NodeType.TRANSFORM,
             plugin_name="b",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "x", "z"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "x", "z"]}},
         )
 
         # Branch C: id, y, z
@@ -775,14 +775,14 @@ class TestForkCoalesceContracts:
             "branch_c",
             node_type=NodeType.TRANSFORM,
             plugin_name="c",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "y", "z"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "y", "z"]}},
         )
 
         graph.add_node(
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Sink requires only 'id' (the only field guaranteed by ALL branches)
@@ -791,7 +791,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["id"]},
+                "schema": {"mode": "observed", "required_fields": ["id"]},
             },
         )
 
@@ -814,7 +814,7 @@ class TestForkCoalesceContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},  # No guarantees
+            config={"schema": {"mode": "observed"}},  # No guarantees
         )
 
         # Branch A: only guarantees 'a'
@@ -822,7 +822,7 @@ class TestForkCoalesceContracts:
             "branch_a",
             node_type=NodeType.TRANSFORM,
             plugin_name="a",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a"]}},
         )
 
         # Branch B: only guarantees 'b'
@@ -830,14 +830,14 @@ class TestForkCoalesceContracts:
             "branch_b",
             node_type=NodeType.TRANSFORM,
             plugin_name="b",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["b"]}},
         )
 
         graph.add_node(
             "coalesce_1",
             node_type=NodeType.COALESCE,
             plugin_name="coalesce",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Sink requires any field - will fail since intersection is empty
@@ -846,7 +846,7 @@ class TestForkCoalesceContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["any_field"]},
+                "schema": {"mode": "observed", "required_fields": ["any_field"]},
             },
         )
 

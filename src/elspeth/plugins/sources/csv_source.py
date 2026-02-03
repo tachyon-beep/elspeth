@@ -14,6 +14,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
+from elspeth.contracts.contract_builder import ContractBuilder
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.plugins.base import BaseSource
 from elspeth.plugins.config_base import TabularSourceDataConfig
 from elspeth.plugins.context import PluginContext
@@ -51,9 +53,9 @@ class CSVSource(BaseSource):
                  with normalize_fields)
 
     The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]}
-        - Free: {"mode": "free", "fields": ["id: int"]} - at least these fields
+        - Observed: {"mode": "observed"} - accept any fields
+        - Fixed: {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        - Flexible: {"mode": "flexible", "fields": ["id: int"]} - at least these fields
     """
 
     name = "csv"
@@ -94,6 +96,10 @@ class CSVSource(BaseSource):
 
         # Set output_schema for protocol compliance
         self.output_schema = self._schema_class
+
+        # Create initial schema contract (may be updated after first row)
+        # Contract creation deferred until load() when field_resolution is known
+        self._contract_builder: ContractBuilder | None = None
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load rows from CSV file with optional field normalization.
@@ -152,6 +158,16 @@ class CSVSource(BaseSource):
             )
             headers = self._field_resolution.final_headers
             expected_count = len(headers)
+
+            # Create initial contract with field resolution
+            initial_contract = create_contract_from_config(
+                self._schema_config,
+                field_resolution=self._field_resolution.resolution_mapping,
+            )
+            self._contract_builder = ContractBuilder(initial_contract)
+
+            # Track whether first valid row has been processed (for type inference)
+            first_valid_row_processed = False
 
             # Process data rows with manual iteration to catch csv.Error per row
             row_num = 0  # Logical row number (data rows only)
@@ -229,12 +245,26 @@ class CSVSource(BaseSource):
                 # Validate row against schema
                 try:
                     validated = self._schema_class.model_validate(row)
-                    yield SourceRow.valid(validated.to_row())
+                    validated_row = validated.to_row()
+
+                    # Process first valid row for type inference
+                    if not first_valid_row_processed:
+                        self._contract_builder.process_first_row(
+                            validated_row,
+                            self._field_resolution.resolution_mapping,
+                        )
+                        self.set_schema_contract(self._contract_builder.contract)
+                        first_valid_row_processed = True
+
+                    yield SourceRow.valid(
+                        validated_row,
+                        contract=self.get_schema_contract(),
+                    )
                 except ValidationError as e:
                     ctx.record_validation_error(
                         row=row,
                         error=str(e),
-                        schema_mode=self._schema_config.mode or "dynamic",
+                        schema_mode=self._schema_config.mode,
                         destination=self._on_validation_failure,
                     )
 
@@ -244,6 +274,12 @@ class CSVSource(BaseSource):
                             error=str(e),
                             destination=self._on_validation_failure,
                         )
+
+            # CRITICAL: Handle empty source case (all rows quarantined or no rows)
+            # If no valid rows were processed, the contract is still unlocked.
+            # Lock it now so downstream consumers have a consistent contract state.
+            if not first_valid_row_processed and self._contract_builder is not None:
+                self.set_schema_contract(self._contract_builder.contract.with_locked())
 
     def close(self) -> None:
         """Release resources (no-op for CSV source)."""

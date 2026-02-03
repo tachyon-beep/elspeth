@@ -50,7 +50,7 @@ class TestCheckpointRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for checkpoint/recovery tests."""
         graph = ExecutionGraph()
-        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+        graph.add_node("node-001", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
         return graph
 
     def test_full_checkpoint_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
@@ -230,7 +230,7 @@ class TestCheckpointRecoveryIntegration:
 
         # Add node to graph if it doesn't exist
         if not graph.has_node(node_id):
-            graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+            graph.add_node(node_id, node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
 
         with db.engine.connect() as conn:
             # Create run (failed status)
@@ -345,16 +345,16 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create initial graph with two nodes
         graph = ExecutionGraph()
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}})
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"version": 1, "schema": {"mode": "observed"}})
         graph.add_node(
-            "transform_a", node_type=NodeType.TRANSFORM, plugin_name="test", config={"version": 1, "schema": {"fields": "dynamic"}}
+            "transform_a", node_type=NodeType.TRANSFORM, plugin_name="test", config={"version": 1, "schema": {"mode": "observed"}}
         )
 
         # Create run
         run = recorder.begin_run(config={}, canonical_version="test-v1")
 
         # Register nodes in database
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",
@@ -406,7 +406,7 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Now modify the graph (simulating what could happen in a race condition)
         graph.add_node(
-            "transform_b", node_type=NodeType.TRANSFORM, plugin_name="new_plugin", config={"version": 2, "schema": {"fields": "dynamic"}}
+            "transform_b", node_type=NodeType.TRANSFORM, plugin_name="new_plugin", config={"version": 2, "schema": {"mode": "observed"}}
         )
 
         # Compute hash with modified graph
@@ -435,7 +435,7 @@ class TestCheckpointTopologyHashAtomicity:
         run = recorder.begin_run(config={}, canonical_version="test-v1")
 
         # Register source node
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",
@@ -477,13 +477,13 @@ class TestCheckpointTopologyHashAtomicity:
 
         # Create graph with one node
         graph = ExecutionGraph()
-        graph.add_node("existing_node", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+        graph.add_node("existing_node", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
 
         # Create minimal run
         run = recorder.begin_run(config={}, canonical_version="test-v1")
 
         # Register nodes in database (need source for row creation)
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",
@@ -550,7 +550,7 @@ class TestResumeCheckpointCleanup:
     def simple_graph(self) -> ExecutionGraph:
         """Create a simple source -> sink graph."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue")
@@ -681,15 +681,15 @@ class TestCanResumeErrorHandling:
 
         # Create graph
         graph = ExecutionGraph()
-        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"schema": {"fields": "dynamic"}})
-        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"fields": "dynamic"}})
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config={"schema": {"mode": "observed"}})
+        graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test", config={"schema": {"mode": "observed"}})
         graph.add_edge("source", "transform", label="continue")
 
         # Create run with FAILED status (required for resume eligibility)
         run = recorder.begin_run(config={}, canonical_version="test-v1")
 
         # Register nodes
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",

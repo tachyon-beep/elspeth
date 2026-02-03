@@ -22,7 +22,7 @@ class TruncateConfig(TransformDataConfig):
     """Configuration for truncate transform.
 
     Requires 'schema' in config to define input/output expectations.
-    Use 'schema: {fields: dynamic}' for dynamic field handling.
+    Use 'schema: {mode: observed}' for dynamic field handling.
     """
 
     fields: dict[str, int] = Field(
@@ -48,7 +48,7 @@ class Truncate(BaseTransform):
     - Ensure data fits within schema constraints
 
     Config options:
-        schema: Required. Schema for input/output (use {fields: dynamic} for any fields)
+        schema: Required. Schema for input/output (use {mode: observed} for any fields)
         fields: Dict of field_name -> max_length (e.g., {"title": 100, "description": 500})
         suffix: String to append when truncating (e.g., "..."). Included in max length.
         strict: If True, error on missing fields (default: False, skip missing fields)
@@ -58,7 +58,7 @@ class Truncate(BaseTransform):
         - plugin: truncate
           options:
             schema:
-              fields: dynamic
+              mode: observed
             fields:
               title: 100
               description: 500

@@ -480,7 +480,7 @@ class TestGuaranteedFieldsProperties:
     """Property tests for schema contract validation (guaranteed_fields, required_fields).
 
     NOTE: Schema config requires "fields" key. For dynamic schemas with guarantees, use:
-    {"schema": {"fields": "dynamic", "guaranteed_fields": [...]}}
+    {"schema": {"mode": "observed", "guaranteed_fields": [...]}}
     """
 
     @given(sets=superset_field_sets())
@@ -500,7 +500,7 @@ class TestGuaranteedFieldsProperties:
             "source",
             node_type="source",
             plugin_name="test_source",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(guaranteed)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
         )
 
         # Transform with required fields
@@ -536,7 +536,7 @@ class TestGuaranteedFieldsProperties:
 
         # Source with limited guarantees (or no guarantees if empty)
         if guaranteed:
-            source_config = {"schema": {"fields": "dynamic", "guaranteed_fields": list(guaranteed)}}
+            source_config = {"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}}
         else:
             source_config = {}  # No schema config = no guarantees
         graph.add_node(
@@ -613,13 +613,13 @@ class TestGuaranteedFieldsProperties:
             "branch_a",
             node_type="transform",
             plugin_name="test_transform",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(branch_a_guarantees)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_a_guarantees)}},
         )
         graph.add_node(
             "branch_b",
             node_type="transform",
             plugin_name="test_transform",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(branch_b_guarantees)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(branch_b_guarantees)}},
         )
 
         # Coalesce node (merge point)
@@ -659,7 +659,7 @@ class TestGuaranteedFieldsProperties:
             "source",
             node_type="source",
             plugin_name="test_source",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(guaranteed)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(guaranteed)}},
         )
 
         # Gate (pass-through)
@@ -703,14 +703,14 @@ class TestGuaranteedFieldsProperties:
             "source",
             node_type="source",
             plugin_name="test_source",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(g1)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(g1)}},
         )
 
         graph.add_node(
             "transform",
             node_type="transform",
             plugin_name="test_transform",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": list(g2)}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": list(g2)}},
         )
 
         graph.add_node("sink", node_type="sink", plugin_name="test_sink")
@@ -768,7 +768,7 @@ class TestGuaranteedFieldsProperties:
             "source",
             node_type="source",
             plugin_name="test_source",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["field_a", "field_b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["field_a", "field_b"]}},
         )
 
         # Transform with no requirements

@@ -25,7 +25,7 @@ class TestCLIResumeCallsConfigureForResume:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "mode": "write",
             }
         )
@@ -43,7 +43,7 @@ class TestCLIResumeCallsConfigureForResume:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "json",
             }
         )
@@ -58,7 +58,7 @@ class TestCLIResumeCallsConfigureForResume:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
             }
         )
@@ -79,7 +79,7 @@ class TestDatabaseSinkResumeCapability:
             {
                 "url": "sqlite:///:memory:",
                 "table": "test_output",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "if_exists": "replace",
             }
         )
@@ -92,7 +92,7 @@ class TestDatabaseSinkResumeCapability:
             {
                 "url": "sqlite:///:memory:",
                 "table": "test_output",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "if_exists": "replace",
             }
         )
@@ -112,7 +112,7 @@ class TestCSVSinkResumeCapability:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -123,7 +123,7 @@ class TestCSVSinkResumeCapability:
         sink = CSVSink(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "mode": "write",
             }
         )
@@ -143,7 +143,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
             }
         )
@@ -155,7 +155,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "json",
             }
         )
@@ -167,7 +167,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "json",
             }
         )
@@ -182,7 +182,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
                 "mode": "write",
             }
@@ -200,7 +200,7 @@ class TestJSONSinkResumeCapability:
         json_sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert json_sink.supports_resume is False
@@ -209,7 +209,7 @@ class TestJSONSinkResumeCapability:
         jsonl_sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert jsonl_sink.supports_resume is True

@@ -22,14 +22,13 @@ class MockTransformWithSchemaConfig:
     name = "mock_transform_with_schema"
     input_schema = None
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
         self._output_schema_config = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("field_a", "field_b"),
             audit_fields=("field_c", "field_d"),
         )
@@ -41,7 +40,7 @@ class MockTransformWithoutSchemaConfig:
     name = "mock_transform_no_schema"
     input_schema = None
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic", "guaranteed_fields": ["config_field"]}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed", "guaranteed_fields": ["config_field"]}}
 
 
 class MockSource:
@@ -49,7 +48,7 @@ class MockSource:
 
     name = "mock_source"
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
 
 
 class MockSink:
@@ -86,7 +85,7 @@ class TestOutputSchemaConfigPropagation:
         assert node_info.output_schema_config is not None
         assert node_info.output_schema_config.guaranteed_fields == ("field_a", "field_b")
         assert node_info.output_schema_config.audit_fields == ("field_c", "field_d")
-        assert node_info.output_schema_config.is_dynamic is True
+        assert node_info.output_schema_config.is_observed is True
 
     def test_transform_without_schema_config_has_none(self) -> None:
         """Verify transforms without _output_schema_config have None in NodeInfo."""
@@ -120,9 +119,8 @@ class TestGetSchemaConfigFromNodePriority:
 
         # Create schema config to put in NodeInfo
         nodeinfo_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("from_nodeinfo",),
             audit_fields=("audit_from_nodeinfo",),
         )
@@ -133,7 +131,7 @@ class TestGetSchemaConfigFromNodePriority:
             "test_node",
             node_type=NodeType.TRANSFORM,
             plugin_name="test",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["from_config_dict"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["from_config_dict"]}},
             output_schema_config=nodeinfo_schema,  # This should win
         )
 
@@ -154,7 +152,7 @@ class TestGetSchemaConfigFromNodePriority:
             "test_node",
             node_type=NodeType.TRANSFORM,
             plugin_name="test",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["from_config"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["from_config"]}},
             # No output_schema_config - should fall back to config dict
         )
 
@@ -194,9 +192,8 @@ class TestGuaranteedFieldsWithSchemaConfig:
         graph = ExecutionGraph()
 
         nodeinfo_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("response", "response_usage", "response_model"),
             audit_fields=("response_template_hash",),  # audit fields should NOT be included
         )
@@ -205,7 +202,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "llm_node",
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
             output_schema_config=nodeinfo_schema,
         )
 
@@ -228,14 +225,13 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "source",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Transform guarantees fields via output_schema_config
         transform_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("result", "result_usage"),
             audit_fields=("result_hash",),
         )
@@ -243,7 +239,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "transform",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
             output_schema_config=transform_schema,
         )
 
@@ -252,7 +248,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "sink",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "required_fields": ["result_usage"]}},
+            config={"schema": {"mode": "observed", "required_fields": ["result_usage"]}},
         )
 
         graph.add_edge("source", "transform", label="continue")
@@ -269,14 +265,13 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "source",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         # Transform has audit_fields that are NOT in guaranteed_fields
         transform_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("result",),
             audit_fields=("result_template_hash",),  # audit only
         )
@@ -284,7 +279,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "transform",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
             output_schema_config=transform_schema,
         )
 
@@ -293,7 +288,7 @@ class TestGuaranteedFieldsWithSchemaConfig:
             "sink",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "required_fields": ["result_template_hash"]}},
+            config={"schema": {"mode": "observed", "required_fields": ["result_template_hash"]}},
         )
 
         graph.add_edge("source", "transform", label="continue")
@@ -310,13 +305,12 @@ class MockAggregationTransform:
     name = "mock_agg_transform"
     input_schema = None
     output_schema = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("batch_result",),
             audit_fields=("batch_hash",),
         )
@@ -336,7 +330,7 @@ class TestAggregationSchemaConfigPropagation:
             plugin="mock_agg_transform",
             trigger=trigger,
             output_mode="transform",
-            options={"schema": {"fields": "dynamic"}},
+            options={"schema": {"mode": "observed"}},
         )
 
         graph = ExecutionGraph.from_plugin_instances(
@@ -385,15 +379,14 @@ class TestGateSchemaConfigInheritance:
             "source",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["input_field"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["input_field"]}},
         )
 
         # Transform with COMPUTED output_schema_config
         # Raw config only declares "result", but computed schema adds more
         transform_computed_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("result", "result_usage", "result_model"),
             audit_fields=None,
         )
@@ -401,17 +394,17 @@ class TestGateSchemaConfigInheritance:
             "llm_transform",
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["result"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["result"]}},
             output_schema_config=transform_computed_schema,
         )
 
         # Gate that would copy raw schema from transform (simulates from_plugin_instances)
-        # The gate gets raw schema: {"fields": "dynamic", "guaranteed_fields": ["result"]}
+        # The gate gets raw schema: {"mode": "observed", "guaranteed_fields": ["result"]}
         graph.add_node(
             "gate",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["result"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["result"]}},
             # NO output_schema_config - gate doesn't compute schema
         )
 
@@ -436,13 +429,12 @@ class TestGateSchemaConfigInheritance:
             "source",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         transform_schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("computed_a", "computed_b"),
             audit_fields=None,
         )
@@ -450,7 +442,7 @@ class TestGateSchemaConfigInheritance:
             "transform",
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
             output_schema_config=transform_schema,
         )
 
@@ -459,13 +451,13 @@ class TestGateSchemaConfigInheritance:
             "gate1",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
         graph.add_node(
             "gate2",
             node_type=NodeType.GATE,
             plugin_name="config_gate",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source", "transform", label="continue")

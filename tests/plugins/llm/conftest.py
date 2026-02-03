@@ -19,7 +19,7 @@ from elspeth.contracts.identity import TokenInfo
 from elspeth.plugins.context import PluginContext
 
 # Common schema config used across LLM tests
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def make_azure_multi_query_config(**overrides: Any) -> dict[str, Any]:

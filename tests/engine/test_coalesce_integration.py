@@ -89,7 +89,7 @@ class CollectSink(_TestSinkBase):
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
         # IMPORTANT: Must include schema for production graph builder
-        self.config: dict[str, Any] = {"schema": {"fields": "dynamic"}}
+        self.config: dict[str, Any] = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -275,7 +275,7 @@ class TestForkCoalescePipeline:
             output_schema = EnrichedSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -507,7 +507,7 @@ class TestCoalesceSuccessMetrics:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.processed_count = 0
 
             def process(self, row: dict, ctx: Any) -> TransformResult:
@@ -828,7 +828,7 @@ class TestCoalesceTimeoutIntegration:
             output_schema = _TestSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 # Fail for row id=2 - this creates the timeout scenario
@@ -1047,7 +1047,7 @@ class TestForkAggregationCoalesce:
             is_batch_aware = True
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
                 if isinstance(row, list):

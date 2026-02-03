@@ -22,6 +22,16 @@ class IncompatibleCheckpointError(Exception):
     pass
 
 
+class CheckpointCorruptionError(Exception):
+    """Raised when checkpoint data integrity verification fails.
+
+    This indicates corruption in the audit trail - a Tier 1 failure
+    that must be treated as unrecoverable per CLAUDE.md data manifesto.
+    """
+
+    pass
+
+
 class CheckpointManager:
     """Manages checkpoint creation and retrieval.
 

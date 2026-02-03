@@ -11,7 +11,7 @@ source:
   options:
     path: examples/threshold_gate/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "name: str"
@@ -35,7 +35,7 @@ sinks:
     options:
       path: examples/threshold_gate/output/normal.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "name: str"
@@ -46,7 +46,7 @@ sinks:
     options:
       path: examples/threshold_gate/output/high_values.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "name: str"

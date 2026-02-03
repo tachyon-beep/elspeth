@@ -6,11 +6,13 @@ Entry point for the elspeth CLI tool.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import typer
+import yaml
 from dynaconf.vendor.ruamel.yaml.parser import ParserError as YamlParserError
 from dynaconf.vendor.ruamel.yaml.scanner import ScannerError as YamlScannerError
 from pydantic import ValidationError
@@ -25,11 +27,13 @@ from elspeth.contracts.events import (
 )
 from elspeth.core.config import ElspethSettings, load_settings, resolve_config
 from elspeth.core.dag import ExecutionGraph, GraphValidationError
+from elspeth.core.security.config_secrets import SecretLoadError, load_secrets_from_config
 from elspeth.testing.chaosllm.cli import app as chaosllm_app
 from elspeth.testing.chaosllm.cli import mcp_app as chaosllm_mcp_app
 
 if TYPE_CHECKING:
     from elspeth.contracts.payload_store import PayloadStore
+    from elspeth.core.config import SecretsConfig
     from elspeth.core.landscape import LandscapeDB
     from elspeth.engine.orchestrator import RowPlugin
     from elspeth.plugins.manager import PluginManager
@@ -161,6 +165,158 @@ def main(
 # === Subcommand stubs (to be implemented in later tasks) ===
 
 
+def _ensure_output_directories(config: ElspethSettings) -> list[str]:
+    """Ensure required output directories exist, creating them if needed.
+
+    Creates directories BEFORE attempting to create databases or files,
+    providing clear error messages if creation fails.
+
+    Args:
+        config: Validated ElspethSettings
+
+    Returns:
+        List of error messages (empty if all directories exist or were created)
+    """
+    from sqlalchemy.engine.url import make_url
+
+    errors: list[str] = []
+
+    # 1. Ensure Landscape database directory exists (for SQLite)
+    db_url = config.landscape.url
+    parsed_url = make_url(db_url)
+
+    if parsed_url.drivername.startswith("sqlite"):
+        # Extract the file path from SQLite URL
+        # SQLite URLs: sqlite:///./path/to/file.db or sqlite:////absolute/path.db
+        db_path = parsed_url.database
+        if db_path:
+            # Handle relative paths (./foo) and absolute paths (/foo)
+            db_file = Path(db_path)
+            parent_dir = db_file.parent
+
+            # Resolve to absolute path for clearer error messages
+            resolved_parent = parent_dir.resolve()
+
+            if not parent_dir.exists():
+                try:
+                    parent_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    errors.append(f"Cannot create Landscape database directory: {resolved_parent}\n  Database URL: {db_url}\n  Error: {e}")
+            elif not parent_dir.is_dir():
+                errors.append(f"Landscape database path exists but is not a directory: {resolved_parent}\n  Database URL: {db_url}")
+            elif not os.access(parent_dir, os.W_OK):
+                errors.append(f"Landscape database directory is not writable: {resolved_parent}\n  Database URL: {db_url}")
+
+    # 2. Ensure payload store directory exists
+    payload_path = config.payload_store.base_path
+    if not payload_path.exists():
+        try:
+            payload_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            errors.append(f"Cannot create payload store directory: {payload_path.resolve()}\n  Error: {e}")
+    elif not payload_path.is_dir():
+        errors.append(f"Payload store path exists but is not a directory: {payload_path.resolve()}")
+    elif not os.access(payload_path, os.W_OK):
+        errors.append(f"Payload store directory is not writable: {payload_path.resolve()}")
+
+    # 3. Ensure sink output directories exist (for file-based sinks)
+    for sink_name, sink_config in config.sinks.items():
+        # Check if sink has a path option (CSVSink, JSONSink)
+        if hasattr(sink_config, "options") and isinstance(sink_config.options, dict):
+            sink_path = sink_config.options.get("path")
+            if sink_path:
+                sink_file = Path(sink_path)
+                sink_parent = sink_file.parent
+
+                if sink_parent and str(sink_parent) != ".":
+                    resolved_sink_parent = sink_parent.resolve()
+                    if not sink_parent.exists():
+                        try:
+                            sink_parent.mkdir(parents=True, exist_ok=True)
+                        except OSError as e:
+                            errors.append(
+                                f"Cannot create sink '{sink_name}' output directory: {resolved_sink_parent}\n  Output path: {sink_path}\n  Error: {e}"
+                            )
+                    elif not sink_parent.is_dir():
+                        errors.append(f"Sink '{sink_name}' output path parent exists but is not a directory: {resolved_sink_parent}")
+
+    return errors
+
+
+def _load_raw_yaml(config_path: Path) -> dict[str, Any]:
+    """Load YAML without environment variable resolution.
+
+    This is used to extract the secrets config before loading secrets.
+    The secrets config MUST use literal values (no ${VAR}) because
+    secrets are loaded before environment variable resolution.
+    """
+    with open(config_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _load_settings_with_secrets(
+    settings_path: Path,
+) -> tuple[ElspethSettings, list[dict[str, Any]]]:
+    """Load settings with Key Vault secret resolution.
+
+    Three-phase loading pattern:
+    1. Raw YAML parse (no ${VAR} resolution) - extract secrets config
+    2. Secret injection from Key Vault (if configured) - populate os.environ
+    3. Full Dynaconf loading (resolves ${VAR}) - now has secrets available
+
+    This function encapsulates the secret-loading flow used by run, resume,
+    and validate commands to ensure Key Vault-backed pipelines work consistently.
+
+    Args:
+        settings_path: Path to settings YAML file (must exist)
+
+    Returns:
+        Tuple of (validated ElspethSettings, list of secret resolution records)
+        Resolution records are for deferred audit recording and contain:
+        env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
+        secret_value (for fingerprinting - NOT for storage)
+
+    Raises:
+        FileNotFoundError: Settings file not found
+        yaml.YAMLError: YAML syntax error
+        ValidationError: Pydantic validation error (secrets config or full config)
+        SecretLoadError: Key Vault secret loading failed
+    """
+    from elspeth.core.config import SecretsConfig
+
+    # Phase 1: Parse YAML to extract secrets config (no ${VAR} resolution yet)
+    # NOTE: vault_url must be literal per design - ${VAR} not supported
+    raw_config = _load_raw_yaml(settings_path)
+
+    # Extract and validate secrets config
+    secrets_dict = raw_config.get("secrets", {})
+    secrets_config = SecretsConfig(**secrets_dict)
+
+    # Phase 2: Load secrets from Key Vault if configured
+    # Returns resolution records for later audit recording
+    secret_resolutions = load_secrets_from_config(secrets_config)
+
+    # Phase 3: Full config loading with Dynaconf (resolves ${VAR})
+    # Now that secrets are in os.environ, Dynaconf can resolve them
+    config = load_settings(settings_path)
+
+    return config, secret_resolutions
+
+
+def _extract_secrets_config(raw_config: dict[str, Any]) -> SecretsConfig:
+    """Extract and validate secrets config from raw YAML.
+
+    Returns SecretsConfig with defaults if not specified.
+
+    Raises:
+        ValidationError: If secrets config is invalid
+    """
+    from elspeth.core.config import SecretsConfig
+
+    secrets_dict = raw_config.get("secrets", {})
+    return SecretsConfig(**secrets_dict)
+
+
 @app.command()
 def run(
     settings: str = typer.Option(
@@ -204,15 +360,41 @@ def run(
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
+    # Two-phase loading: extract secrets config first, then full resolution
+    try:
+        # Phase 1: Parse YAML to extract secrets config (no ${VAR} resolution yet)
+        # NOTE: vault_url must be literal per design - ${VAR} not supported
+        raw_config = _load_raw_yaml(settings_path)
+    except FileNotFoundError:
+        typer.echo(f"Error: Settings file not found: {settings}", err=True)
+        raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        typer.echo(f"YAML syntax error in {settings}: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Extract and validate secrets config
+    try:
+        secrets_config = _extract_secrets_config(raw_config)
+    except ValidationError as e:
+        typer.echo("Secrets configuration errors:", err=True)
+        for error in e.errors():
+            loc = ".".join(str(x) for x in error["loc"])
+            typer.echo(f"  - secrets.{loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+
+    # Phase 2: Load secrets from Key Vault if configured
+    # Returns resolution records for later audit recording
+    try:
+        secret_resolutions = load_secrets_from_config(secrets_config)
+    except SecretLoadError as e:
+        typer.echo(f"Error loading secrets: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # Phase 3: Full config loading with Dynaconf (resolves ${VAR})
     try:
         config = load_settings(settings_path)
     except (YamlParserError, YamlScannerError) as e:
-        # YAML syntax errors (malformed YAML) - show helpful message
-        # e.problem contains the specific error (e.g., "expected ']'", "found a tab")
         typer.echo(f"YAML syntax error in {settings}: {e.problem}", err=True)
-        raise typer.Exit(1) from None
-    except FileNotFoundError:
-        typer.echo(f"Error: Settings file not found: {settings}", err=True)
         raise typer.Exit(1) from None
     except ValidationError as e:
         typer.echo("Configuration errors:", err=True)
@@ -274,6 +456,16 @@ def run(
         if dry_run or not execute:
             raise typer.Exit(1)
 
+    # Ensure output directories exist BEFORE attempting to create resources
+    # Creates directories automatically, only errors if creation fails
+    # NOTE: Only when actually executing (not dry-run or validation-only)
+    dir_errors = _ensure_output_directories(config)
+    if dir_errors:
+        typer.echo("Output directory errors:", err=True)
+        for dir_error in dir_errors:
+            typer.echo(f"\n{dir_error}", err=True)
+        raise typer.Exit(1)
+
     # Execute pipeline with pre-instantiated plugins
     try:
         _execute_pipeline_with_instances(
@@ -282,6 +474,7 @@ def run(
             plugins,
             verbose=verbose,
             output_format=output_format,
+            secret_resolutions=secret_resolutions,
         )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
@@ -797,6 +990,7 @@ def _execute_pipeline_with_instances(
     plugins: dict[str, Any],
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
+    secret_resolutions: list[dict[str, Any]] | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
 
@@ -809,6 +1003,8 @@ def _execute_pipeline_with_instances(
         plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
         verbose: Show detailed output
         output_format: 'console' or 'json'
+        secret_resolutions: Optional list of secret resolution records from
+            load_secrets_from_config(). Passed to orchestrator for audit recording.
 
     Returns:
         ExecutionResult with run_id, status, rows_processed
@@ -1056,6 +1252,7 @@ def _execute_pipeline_with_instances(
             graph=graph,
             settings=config,
             payload_store=payload_store,
+            secret_resolutions=secret_resolutions,
         )
 
         return {
@@ -1121,15 +1318,25 @@ def validate(
 
     settings_path = Path(settings).expanduser()
 
-    # Load and validate config via Pydantic
+    # Load and validate config with Key Vault secrets (same flow as 'run' command)
+    # This ensures ${VAR} placeholders are resolved correctly for keyvault-backed configs
     try:
-        config = load_settings(settings_path)
+        config, _secret_resolutions = _load_settings_with_secrets(settings_path)
     except (YamlParserError, YamlScannerError) as e:
-        # YAML syntax errors (malformed YAML) - show helpful message
+        # YAML syntax errors from Dynaconf/ruamel (malformed YAML) - show helpful message
         _format_validation_error(
             title="YAML Syntax Error",
             message=f"Failed to parse {settings_path.name}",
             details=[str(e.problem)] if hasattr(e, "problem") else None,
+            hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
+        )
+        raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        # YAML syntax errors from PyYAML (used in _load_raw_yaml) - show helpful message
+        _format_validation_error(
+            title="YAML Syntax Error",
+            message=f"Failed to parse {settings_path.name}",
+            details=[str(e)],
             hint="Check for unclosed brackets, incorrect indentation, or invalid characters.",
         )
         raise typer.Exit(1) from None
@@ -1138,6 +1345,14 @@ def validate(
             title="File Not Found",
             message=f"Settings file does not exist: {settings}",
             hint="Check the path and ensure the file exists.",
+        )
+        raise typer.Exit(1) from None
+    except SecretLoadError as e:
+        # Key Vault secret loading errors - show helpful message
+        _format_validation_error(
+            title="Secret Loading Failed",
+            message=str(e),
+            hint="Check your Azure credentials and Key Vault configuration.",
         )
         raise typer.Exit(1) from None
     except ValidationError as e:
@@ -1173,6 +1388,9 @@ def validate(
                 message=error_msg,
             )
         raise typer.Exit(1) from None
+
+    # NOTE: _secret_resolutions captured but not used for validation
+    # Validation is a dry-run check, no audit recording needed
 
     # Instantiate plugins BEFORE graph construction
     try:
@@ -1360,18 +1578,38 @@ def purge(
     config: ElspethSettings | None = None
 
     # Try loading settings.yaml first (for payload_store config)
+    # Uses _load_settings_with_secrets to support Key Vault-backed configs
     settings_path = Path("settings.yaml")
     if settings_path.exists():
         try:
-            config = load_settings(settings_path)
-        except Exception as e:
+            config, _secret_resolutions = _load_settings_with_secrets(settings_path)
+        except (YamlParserError, YamlScannerError) as e:
             if not database:
-                # Only fail if we needed settings for database URL
-                typer.echo(f"Error loading settings.yaml: {e}", err=True)
+                typer.echo(f"YAML syntax error in settings.yaml: {e.problem}", err=True)
                 typer.echo("Specify --database to provide path directly.", err=True)
                 raise typer.Exit(1) from None
-            # Otherwise warn but continue with CLI-provided database
-            typer.echo(f"Warning: Could not load settings.yaml: {e}", err=True)
+            typer.echo(f"Warning: YAML syntax error in settings.yaml: {e.problem}", err=True)
+        except yaml.YAMLError as e:
+            if not database:
+                typer.echo(f"YAML error in settings.yaml: {e}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"Warning: YAML error in settings.yaml: {e}", err=True)
+        except ValidationError as e:
+            if not database:
+                typer.echo("Configuration errors in settings.yaml:", err=True)
+                for error in e.errors():
+                    loc = ".".join(str(x) for x in error["loc"])
+                    typer.echo(f"  - {loc}: {error['msg']}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo("Warning: Configuration errors in settings.yaml (continuing with --database)", err=True)
+        except SecretLoadError as e:
+            if not database:
+                typer.echo(f"Error loading secrets: {e}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"Warning: Could not load secrets: {e}", err=True)
 
     if database:
         db_path = Path(database).expanduser().resolve()
@@ -1747,7 +1985,6 @@ def resume(
     from elspeth.core.landscape import LandscapeDB
 
     # Settings are REQUIRED for topology validation
-    settings_config: ElspethSettings | None = None
     settings_path = Path(settings_file).expanduser() if settings_file else Path("settings.yaml")
 
     if not settings_path.exists():
@@ -1755,11 +1992,28 @@ def resume(
         typer.echo("Settings are required to validate checkpoint compatibility.", err=True)
         raise typer.Exit(1)
 
+    # Load settings with Key Vault secrets (same flow as 'run' command)
+    # This ensures ${VAR} placeholders are resolved correctly for keyvault-backed configs
     try:
-        settings_config = load_settings(settings_path)
-    except Exception as e:
-        typer.echo(f"Error loading {settings_path}: {e}", err=True)
+        settings_config, _secret_resolutions = _load_settings_with_secrets(settings_path)
+    except FileNotFoundError:
+        typer.echo(f"Error: Settings file not found: {settings_path}", err=True)
         raise typer.Exit(1) from None
+    except yaml.YAMLError as e:
+        typer.echo(f"YAML syntax error in {settings_path}: {e}", err=True)
+        raise typer.Exit(1) from None
+    except ValidationError as e:
+        typer.echo("Configuration errors:", err=True)
+        for error in e.errors():
+            loc = ".".join(str(x) for x in error["loc"])
+            typer.echo(f"  - {loc}: {error['msg']}", err=True)
+        raise typer.Exit(1) from None
+    except SecretLoadError as e:
+        typer.echo(f"Error loading secrets: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NOTE: _secret_resolutions captured but not used for resume
+    # Resume inherits the original run's secret resolution audit records
 
     # Resolve database URL
     if database:

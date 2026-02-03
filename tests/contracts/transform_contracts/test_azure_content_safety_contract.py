@@ -82,7 +82,7 @@ class TestAzureContentSafetyBatchContract(BatchTransformContractTestBase):
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
             }
         )

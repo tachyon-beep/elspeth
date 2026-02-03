@@ -15,6 +15,11 @@ Model Classes:
     RoutingEvent - Gate decisions
     Batch, BatchMember, BatchOutput - Aggregation tracking
     Artifact - Output artifacts
+
+Schema Contract Audit Records (Phase 5):
+    ContractAuditRecord - Serialized schema contract for audit storage
+    FieldAuditRecord - Individual field contract information
+    ValidationErrorWithContract - Schema validation error with contract context
 """
 
 from elspeth.contracts import (
@@ -26,7 +31,10 @@ from elspeth.contracts import (
     CallStatus,
     CallType,
     Checkpoint,
+    # Schema contract audit records (Phase 5: Audit Trail Integration)
+    ContractAuditRecord,
     Edge,
+    FieldAuditRecord,
     Node,
     NodeState,
     NodeStateCompleted,
@@ -41,6 +49,7 @@ from elspeth.contracts import (
     RunStatus,
     Token,
     TokenParent,
+    ValidationErrorWithContract,
 )
 from elspeth.core.landscape.database import LandscapeDB, SchemaCompatibilityError
 from elspeth.core.landscape.exporter import LandscapeExporter
@@ -88,8 +97,11 @@ __all__ = [
     "CallStatus",
     "CallType",
     "Checkpoint",
+    # Schema contract audit records (Phase 5: Audit Trail Integration)
+    "ContractAuditRecord",
     "Edge",
     "ExportFormatter",
+    "FieldAuditRecord",
     "JSONFormatter",
     "LandscapeDB",
     "LandscapeExporter",
@@ -114,6 +126,7 @@ __all__ = [
     "SchemaCompatibilityError",
     "Token",
     "TokenParent",
+    "ValidationErrorWithContract",
     "artifacts_table",
     "batch_members_table",
     "batch_outputs_table",

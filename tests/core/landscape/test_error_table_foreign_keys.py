@@ -26,7 +26,7 @@ from elspeth.core.landscape.schema import (
 )
 
 # Shared schema config for tests
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestTransformErrorsForeignKeys:
@@ -383,7 +383,7 @@ class TestValidationErrorsForeignKeys:
                     node_id="nonexistent_node",  # ORPHAN - no such node
                     row_hash="abc123",
                     error="Validation failed",
-                    schema_mode="strict",
+                    schema_mode="fixed",
                     destination="discard",
                     created_at=datetime.now(UTC),
                 )
@@ -407,7 +407,7 @@ class TestValidationErrorsForeignKeys:
                     node_id=None,  # NULL is valid for nullable FK
                     row_hash="abc123",
                     error="Validation failed before node association",
-                    schema_mode="strict",
+                    schema_mode="fixed",
                     destination="discard",
                     created_at=datetime.now(UTC),
                 )
@@ -450,7 +450,7 @@ class TestValidationErrorsForeignKeys:
                     node_id="source_node",  # References node
                     row_hash="abc123",
                     error="Validation failed",
-                    schema_mode="strict",
+                    schema_mode="fixed",
                     destination="discard",
                     created_at=datetime.now(UTC),
                 )
@@ -492,7 +492,7 @@ class TestValidationErrorsForeignKeys:
                     node_id="source_node",  # Valid FK
                     row_hash="abc123",
                     error="Validation failed",
-                    schema_mode="strict",
+                    schema_mode="fixed",
                     destination="discard",
                     created_at=datetime.now(UTC),
                 )

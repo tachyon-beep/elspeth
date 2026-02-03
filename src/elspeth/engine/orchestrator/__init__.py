@@ -1,0 +1,39 @@
+# src/elspeth/engine/orchestrator/__init__.py
+"""Orchestrator package: Full run lifecycle management.
+
+This package has been refactored from a single 3000+ line module into
+focused modules while preserving the public API.
+
+Public API (unchanged):
+- Orchestrator: Main class for running pipelines
+- PipelineConfig: Configuration dataclass
+- RunResult: Result dataclass
+- RouteValidationError: Validation exception
+- AggregationFlushResult: Result of flushing aggregation buffers (replaces 9-tuple)
+- RowPlugin: Type alias for transform/gate plugin union
+
+Module structure:
+- core.py: Orchestrator class (main entry point)
+- types.py: PipelineConfig, RunResult, RouteValidationError, AggregationFlushResult
+- validation.py: Route and sink validation functions
+- export.py: Landscape export functionality
+- aggregation.py: Aggregation timeout/flush handling
+"""
+
+from elspeth.engine.orchestrator.core import Orchestrator
+from elspeth.engine.orchestrator.types import (
+    AggregationFlushResult,
+    PipelineConfig,
+    RouteValidationError,
+    RowPlugin,
+    RunResult,
+)
+
+__all__ = [
+    "AggregationFlushResult",
+    "Orchestrator",
+    "PipelineConfig",
+    "RouteValidationError",
+    "RowPlugin",
+    "RunResult",
+]

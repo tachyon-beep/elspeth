@@ -1,0 +1,129 @@
+{
+  "verdict": "APPROVED_WITH_REVISIONS",
+  "original_verdict": "CHANGES_REQUESTED",
+  "summary": "Design revised to address all 6 blocking issues and 8 warnings. Added: Section 5.5 (Security Controls with SSRF prevention, response size limits, redirect validation, DNS pinning), Section 6.5 (Concurrency Model with BatchTransformMixin), Section 9 (Limitations). Corrected: AuditedHTTPClient documentation, dependency list, plugin registration pattern, error classification table.",
+  "plan_file": "/home/john/elspeth-rapid/docs/plans/2026-02-03-web-scrape-transform-design.md",
+  "reviewed_at": "2026-02-03T00:00:00Z",
+  "revised_at": "2026-02-03T00:00:00Z",
+  "reviewers": ["reality", "architecture", "quality", "systems"],
+  "blocking_issues_resolved": [
+    {
+      "id": "B1",
+      "issue": "SSRF Prevention Missing",
+      "resolution": "Added Section 5.5: Security Controls with scheme whitelist, IP range blocklist, and validate_ip() implementation",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "B2",
+      "issue": "Response Size Limits Missing",
+      "resolution": "Added security.max_response_size_mb config and fetch_with_size_limit() streaming implementation",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "B3",
+      "issue": "Redirect Validation Missing",
+      "resolution": "Added validate_redirect() event hook and security.validate_redirects config",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "B4",
+      "issue": "DNS Rebinding Mitigation Missing",
+      "resolution": "Added DNS pinning documentation in Section 5.5",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "B5",
+      "issue": "Synchronous Processing Will Cause Pipeline Stalls",
+      "resolution": "Added Section 6.5: Concurrency Model with BatchTransformMixin integration and throughput table",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "B6",
+      "issue": "No Rate Limiting Integration",
+      "resolution": "Added rate_limit config in Section 1 and RateLimitRegistry integration in Section 6.5",
+      "status": "RESOLVED"
+    }
+  ],
+  "warnings_resolved": [
+    {
+      "id": "W1",
+      "issue": "beautifulsoup4 Not in Dependencies",
+      "resolution": "Added beautifulsoup4>=4.12,<5 to [web] dependency group in Section 6",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W2",
+      "issue": "respx Not in Dev Dependencies",
+      "resolution": "Added respx>=0.21,<1 to [dev] dependencies in Section 6",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W3",
+      "issue": "Plugin Registration Pattern Wrong",
+      "resolution": "Corrected registration to use TRANSFORM_REGISTRY in __init__.py, removed hookimpl.py reference",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W4",
+      "issue": "AuditedHTTPClient Only Has POST Method",
+      "resolution": "Documented that client EXISTS (not new) and needs get() method added. Updated implementation tasks.",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W5",
+      "issue": "Error Classification Incomplete",
+      "resolution": "Added 408, 425, httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, plus new security errors",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W6",
+      "issue": "Structure Fingerprint Mode Fragile",
+      "resolution": "Added '(Experimental)' label and limitations warning box to structure mode section",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W7",
+      "issue": "JavaScript-Rendered Content Silent Failure",
+      "resolution": "Added comprehensive Section 9: Limitations documenting JavaScript rendering and other gaps",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "W8",
+      "issue": "HTML Conversion Unbounded",
+      "resolution": "Added conversion timeout with signal.alarm implementation in Section 5.5 and ConversionTimeoutError",
+      "status": "RESOLVED"
+    }
+  ],
+  "new_sections_added": [
+    "Section 5.5: Security Controls (SSRF, response limits, redirects, DNS pinning, conversion timeout)",
+    "Section 6.5: Concurrency Model (BatchTransformMixin, rate limiting, telemetry)",
+    "Section 7: Extended test cases (security, timeout, encoding, redirect tests)",
+    "Section 9: Limitations (JavaScript, cookies, auth, robots.txt, proxy, caching)"
+  ],
+  "reviewer_summaries": {
+    "reality": {
+      "original_status": "ISSUES_FOUND",
+      "revised_status": "RESOLVED",
+      "blocking": 0,
+      "warnings_resolved": 3
+    },
+    "architecture": {
+      "original_status": "ISSUES_FOUND",
+      "revised_status": "RESOLVED",
+      "blocking": 0,
+      "warnings_resolved": 3
+    },
+    "quality": {
+      "original_status": "BLOCKING",
+      "revised_status": "RESOLVED",
+      "blocking_resolved": 4,
+      "warnings_resolved": 1
+    },
+    "systems": {
+      "original_status": "BLOCKING",
+      "revised_status": "RESOLVED",
+      "blocking_resolved": 2,
+      "warnings_resolved": 1
+    }
+  }
+}

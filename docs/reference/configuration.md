@@ -8,6 +8,7 @@ Complete reference for ELSPETH pipeline configuration.
 
 - [Configuration File Format](#configuration-file-format)
 - [Top-Level Settings](#top-level-settings)
+- [Secrets Settings](#secrets-settings)
 - [Source Settings](#source-settings)
 - [Sink Settings](#sink-settings)
 - [Transform Settings](#transform-settings)
@@ -68,6 +69,7 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 | `checkpoint` | object | No | (defaults) | Crash recovery settings |
 | `rate_limit` | object | No | (defaults) | External call rate limiting |
 | `telemetry` | object | No | (defaults) | Telemetry export configuration |
+| `secrets` | object | No | (defaults) | Secret loading configuration |
 
 ### Run Modes
 
@@ -76,6 +78,67 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 | `live` | Execute normally, make real external calls |
 | `replay` | Use recorded responses from a previous run |
 | `verify` | Compare new results against a previous run |
+
+---
+
+## Secrets Settings
+
+Configure how secrets (API keys, tokens) are loaded for the pipeline.
+
+```yaml
+secrets:
+  source: keyvault
+  vault_url: https://my-vault.vault.azure.net  # Must be literal URL, no ${VAR}
+  mapping:
+    AZURE_OPENAI_KEY: azure-openai-key
+    AZURE_OPENAI_ENDPOINT: openai-endpoint
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `source` | string | No | `"env"` | Secret source: `env` or `keyvault` |
+| `vault_url` | string | When `source: keyvault` | - | Azure Key Vault URL (must be literal HTTPS URL) |
+| `mapping` | object | When `source: keyvault` | - | Env var name → Key Vault secret name |
+
+### Source Options
+
+| Source | Behavior |
+|--------|----------|
+| `env` | Secrets come from environment variables / .env file (default) |
+| `keyvault` | Secrets loaded from Azure Key Vault using explicit mapping |
+
+**Important:** `vault_url` must be a **literal URL** like `https://my-vault.vault.azure.net`. Environment variable references like `${AZURE_KEYVAULT_URL}` are **not supported** because secrets must be loaded before environment variable resolution occurs.
+
+### Authentication (Key Vault)
+
+Uses Azure DefaultAzureCredential, which tries (in order):
+1. Managed Identity (Azure VMs, App Service, AKS)
+2. Azure CLI (`az login`)
+3. Environment variables (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`)
+4. Visual Studio Code Azure extension
+
+### Examples
+
+**Local Development:**
+
+```yaml
+# Use .env file for local development
+secrets:
+  source: env
+```
+
+**Production with Key Vault:**
+
+```yaml
+secrets:
+  source: keyvault
+  vault_url: https://prod-vault.vault.azure.net
+  mapping:
+    AZURE_OPENAI_KEY: azure-openai-api-key
+    AZURE_OPENAI_ENDPOINT: azure-openai-endpoint
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+```
 
 ---
 

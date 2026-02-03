@@ -39,7 +39,7 @@ Legend:
 | CFG-017 | Environment variable interpolation `${VAR}` | README.md:213-216 | ✅ IMPLEMENTED | `config.py:708-746` - `_expand_env_vars()` with `${VAR:-default}` |
 | CFG-018 | Hierarchical settings merge with precedence | README.md:188-206 | ✅ IMPLEMENTED | `config.py:1125-1131` - env > file > defaults |
 | CFG-019 | Pack defaults (`packs/llm/defaults.yaml`) | architecture.md:824 | ❌ DEFERRED | Phase 6+ feature |
-| CFG-020 | Suite configuration (`suite.yaml`) | architecture.md:823 | ❌ DEFERRED | Single settings file per run sufficient |
+| CFG-020 | Pipeline configuration (`settings.yaml`) | architecture.md:823 | ❌ DEFERRED | Single settings file per run sufficient |
 
 ### 1.2 Configuration Settings Classes
 

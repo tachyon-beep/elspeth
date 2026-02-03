@@ -38,6 +38,7 @@ from elspeth.contracts.audit import (
     Row,
     RowLineage,
     Run,
+    SecretResolution,
     Token,
     TokenOutcome,
     TokenParent,
@@ -74,6 +75,22 @@ from elspeth.contracts.config import (
     RuntimeTelemetryConfig,
     RuntimeTelemetryProtocol,
 )
+
+# Schema contracts (Phase 2: Source Integration)
+from elspeth.contracts.contract_builder import ContractBuilder
+
+# Schema contracts (Phase 3: Pipeline Integration)
+from elspeth.contracts.contract_propagation import (
+    merge_contract_with_output,
+    propagate_contract,
+)
+
+# Schema contracts (Phase 4: Audit Trail Integration)
+from elspeth.contracts.contract_records import (
+    ContractAuditRecord,
+    FieldAuditRecord,
+    ValidationErrorWithContract,
+)
 from elspeth.contracts.data import (
     CompatibilityResult,
     PluginSchema,
@@ -103,9 +120,14 @@ from elspeth.contracts.errors import (
     BatchPendingError,
     CoalesceFailureReason,
     ConfigGateReason,
+    # Schema contract violations
+    ContractMergeError,
+    ContractViolation,
     ErrorDetail,
     ExecutionError,
+    ExtraFieldViolation,
     FrameworkBugError,
+    MissingFieldViolation,
     PluginContractViolation,
     PluginGateReason,
     QueryFailureDetail,
@@ -116,7 +138,9 @@ from elspeth.contracts.errors import (
     TransformErrorCategory,
     TransformErrorReason,
     TransformSuccessReason,
+    TypeMismatchViolation,
     UsageStats,
+    violations_to_error_reason,
 )
 from elspeth.contracts.events import (
     GateEvaluated,
@@ -131,6 +155,11 @@ from elspeth.contracts.events import (
     TokenCompleted,
     TransformCompleted,
 )
+from elspeth.contracts.header_modes import (
+    HeaderMode,
+    parse_header_mode,
+    resolve_headers,
+)
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.payload_store import IntegrityError, PayloadStore
 from elspeth.contracts.results import (
@@ -143,7 +172,23 @@ from elspeth.contracts.results import (
     TransformResult,
 )
 from elspeth.contracts.routing import EdgeInfo, RoutingAction, RoutingSpec
+
+# Schema contracts (Phase 1: Core Contracts)
+from elspeth.contracts.schema_contract import (
+    FieldContract,
+    PipelineRow,
+    SchemaContract,
+)
+from elspeth.contracts.schema_contract_factory import (
+    create_contract_from_config,
+    map_schema_mode,
+)
 from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.transform_contract import (
+    create_output_contract_from_schema,
+    validate_output_against_contract,
+)
+from elspeth.contracts.type_normalization import normalize_type_for_contract
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -180,6 +225,12 @@ __all__ = [  # Grouped by category for readability
     "TransformErrorReason",
     "TransformSuccessReason",
     "UsageStats",
+    # schema contract violations
+    "ContractMergeError",
+    "ContractViolation",
+    "ExtraFieldViolation",
+    "MissingFieldViolation",
+    "TypeMismatchViolation",
     "Batch",
     "BatchMember",
     "BatchOutput",
@@ -199,6 +250,7 @@ __all__ = [  # Grouped by category for readability
     "Row",
     "RowLineage",
     "Run",
+    "SecretResolution",
     "Token",
     "TokenOutcome",
     "TokenParent",
@@ -295,4 +347,25 @@ __all__ = [  # Grouped by category for readability
     "SanitizedWebhookUrl",
     # sink
     "OutputValidationResult",
+    # schema contracts (Phase 1: Core Contracts)
+    "ContractBuilder",
+    "create_contract_from_config",
+    "FieldContract",
+    "map_schema_mode",
+    "normalize_type_for_contract",
+    "PipelineRow",
+    "SchemaContract",
+    # schema contracts (Phase 4: Audit Trail Integration)
+    "ContractAuditRecord",
+    "FieldAuditRecord",
+    "ValidationErrorWithContract",
+    # schema contracts (Phase 3: Pipeline Integration)
+    "create_output_contract_from_schema",
+    "HeaderMode",
+    "merge_contract_with_output",
+    "parse_header_mode",
+    "propagate_contract",
+    "resolve_headers",
+    "validate_output_against_contract",
+    "violations_to_error_reason",
 ]

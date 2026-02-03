@@ -53,6 +53,9 @@ class TestSourceProtocol:
             def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
                 return None  # No field normalization
 
+            def get_schema_contract(self) -> Any:
+                return None  # No schema contract
+
         source = MySource({"path": "test.csv"})
 
         # IMPORTANT: Verify protocol conformance at runtime
@@ -121,6 +124,9 @@ class TestSourceProtocol:
 
             def get_field_resolution(self) -> tuple[dict[str, str], str | None] | None:
                 return None  # No field normalization
+
+            def get_schema_contract(self) -> Any:
+                return None  # No schema contract
 
         source = MetadataSource({})
         assert isinstance(source, SourceProtocol)  # type: ignore[unreachable]

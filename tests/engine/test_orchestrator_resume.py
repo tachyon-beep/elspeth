@@ -223,7 +223,7 @@ class TestOrchestratorResumeRowProcessing:
 
         # Build graph matching the nodes created above
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -267,13 +267,13 @@ class TestOrchestratorResumeRowProcessing:
         source = NullSource({})
 
         # Use PassThrough - simple transform
-        transform = PassThrough({"schema": {"fields": "dynamic"}})
+        transform = PassThrough({"schema": {"mode": "observed"}})
 
         # Use JSONSink in append mode (JSONSink accepts dynamic schemas)
         sink = JSONSink(
             {
                 "path": str(output_path),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "mode": "append",
                 "format": "jsonl",
             }
@@ -556,7 +556,7 @@ class TestOrchestratorResumeCleanup:
             output_schema = None  # type: ignore[assignment]
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
@@ -683,7 +683,7 @@ class TestOrchestratorResumeCleanup:
 
         # Build graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source-node", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("transform-node", node_type=NodeType.TRANSFORM, plugin_name="tracking", config=schema_config)
         graph.add_node("sink-node", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -720,7 +720,7 @@ class TestOrchestratorResumeCleanup:
             transforms=[tracking_transform],
             sinks={
                 "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
                 )
             },
         )
@@ -762,7 +762,7 @@ class TestOrchestratorResumeCleanup:
             output_schema = None  # type: ignore[assignment]
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.close_called = False
                 self.on_complete_called = False
 
@@ -884,7 +884,7 @@ class TestOrchestratorResumeCleanup:
             conn.commit()
 
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source-node-fail", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("transform-node-fail", node_type=NodeType.TRANSFORM, plugin_name="failing_on_complete", config=schema_config)
         graph.add_node("sink-node-fail", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -918,7 +918,7 @@ class TestOrchestratorResumeCleanup:
             transforms=[failing_transform],
             sinks={
                 "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
                 )
             },
         )

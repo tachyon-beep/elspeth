@@ -69,7 +69,7 @@ terminal_outcomes = st.sampled_from([o for o in RowOutcome if o.is_terminal and 
 
 def create_dynamic_schema() -> SchemaConfig:
     """Create a dynamic schema config for testing."""
-    return SchemaConfig.from_dict({"fields": "dynamic"})
+    return SchemaConfig.from_dict({"mode": "observed"})
 
 
 def verify_row_exists(db: LandscapeDB, row_id: str) -> bool:

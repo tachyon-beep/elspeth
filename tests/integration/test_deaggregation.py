@@ -55,7 +55,7 @@ class TestDeaggregationPipeline:
                 "options": {
                     "path": str(input_data),
                     "schema": {
-                        "mode": "strict",
+                        "mode": "fixed",
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
@@ -68,7 +68,7 @@ class TestDeaggregationPipeline:
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             ],
@@ -77,7 +77,7 @@ class TestDeaggregationPipeline:
                     "plugin": "json",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -186,7 +186,7 @@ class TestDeaggregationAuditTrail:
                 "options": {
                     "path": str(input_data),
                     "schema": {
-                        "mode": "strict",
+                        "mode": "fixed",
                         "fields": ["order_id: int", "items: any"],
                     },
                     "on_validation_failure": "discard",
@@ -199,7 +199,7 @@ class TestDeaggregationAuditTrail:
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             ],
@@ -208,7 +208,7 @@ class TestDeaggregationAuditTrail:
                     "plugin": "json",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -355,7 +355,7 @@ class TestSourceSchemaValidation:
                 "options": {
                     "path": str(valid_and_invalid_input),
                     "schema": {
-                        "mode": "strict",
+                        "mode": "fixed",
                         "fields": ["order_id: int", "items: any"],
                     },
                     # Use discard so invalid row is dropped, not routed
@@ -369,7 +369,7 @@ class TestSourceSchemaValidation:
                         "array_field": "items",
                         "output_field": "item",
                         "include_index": True,
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             ],
@@ -378,7 +378,7 @@ class TestSourceSchemaValidation:
                     "plugin": "json",
                     "options": {
                         "path": str(output_dir / "order_items.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },

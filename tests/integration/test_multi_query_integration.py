@@ -25,7 +25,7 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_multi_query import AzureMultiQueryLLMTransform
 
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def make_full_config() -> dict[str, Any]:
@@ -62,7 +62,7 @@ Assess this case against the criterion.
             "score": {"suffix": "score", "type": "integer"},
             "rationale": {"suffix": "rationale", "type": "string"},
         },
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "required_input_fields": [],  # Explicit opt-out for this test
         "pool_size": 10,  # All 10 queries in parallel
         "temperature": 0.0,
@@ -275,7 +275,7 @@ class TestMultiQueryIntegration:
             ],
             "response_format": "standard",
             "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "required_input_fields": [],  # Explicit opt-out for this test
             "pool_size": 5,
         }

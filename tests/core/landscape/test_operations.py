@@ -33,7 +33,7 @@ from elspeth.core.operations import track_operation
 from elspeth.plugins.context import PluginContext
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 @pytest.fixture

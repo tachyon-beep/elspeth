@@ -20,7 +20,7 @@ from elspeth.plugins.llm.openrouter_multi_query import OpenRouterMultiQueryLLMTr
 from .conftest import chaosllm_openrouter_http_responses
 
 # Common schema config
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def make_config(**overrides: Any) -> dict[str, Any]:

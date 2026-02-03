@@ -11,7 +11,7 @@ from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def unique_id(prefix: str = "") -> str:
@@ -766,12 +766,18 @@ class TestAggregationExecutorCheckpoint:
                         "row_id": "row-1",
                         "row_data": {"name": "Alice", "score": 95},
                         "branch_name": "high_score",
+                        "fork_group_id": None,  # Required in v1.1 format (can be None)
+                        "join_group_id": None,  # Required in v1.1 format (can be None)
+                        "expand_group_id": None,  # Required in v1.1 format (can be None)
                     },
                     {
                         "token_id": "token-102",
                         "row_id": "row-2",
                         "row_data": {"name": "Bob", "score": 42},
-                        "branch_name": None,  # Optional field
+                        "branch_name": None,  # Can be None for unforked tokens
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
                     },
                 ],
                 "batch_id": "batch-123",
@@ -851,6 +857,9 @@ class TestAggregationExecutorCheckpoint:
                         "row_id": f"row-{i}",
                         "row_data": {"value": i},
                         "branch_name": None,
+                        "fork_group_id": None,  # Required in v1.1 format
+                        "join_group_id": None,  # Required in v1.1 format
+                        "expand_group_id": None,  # Required in v1.1 format
                     }
                     for i in range(4)
                 ],
@@ -1005,12 +1014,18 @@ class TestAggregationExecutorCheckpoint:
                         "row_id": f"{test_prefix}row-1",
                         "row_data": {"value": 10},
                         "branch_name": None,
+                        "fork_group_id": None,  # Required in v1.1 format
+                        "join_group_id": None,  # Required in v1.1 format
+                        "expand_group_id": None,  # Required in v1.1 format
                     },
                     {
                         "token_id": f"{test_prefix}token-102",
                         "row_id": f"{test_prefix}row-2",
                         "row_data": {"value": 20},
                         "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
                     },
                 ],
                 "batch_id": batch.batch_id,

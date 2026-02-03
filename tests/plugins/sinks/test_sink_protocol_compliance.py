@@ -15,8 +15,8 @@ from elspeth.plugins.protocols import SinkProtocol
 # Schema configs for tests
 # CSV and Database sinks require fixed columns (strict mode)
 # JSON sink accepts dynamic schemas
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Sink configurations for parametrized testing
 SINK_CONFIGS = [

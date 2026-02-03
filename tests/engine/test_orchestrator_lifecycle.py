@@ -57,7 +57,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
@@ -80,6 +80,7 @@ class TestLifecycleHooks:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -101,7 +102,7 @@ class TestLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -139,7 +140,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def on_start(self, ctx: Any) -> None:
                 call_order.append("on_start")
@@ -165,6 +166,7 @@ class TestLifecycleHooks:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1}), SourceRow.valid({"id": 2})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         transform = TrackedTransform()
         mock_sink = MagicMock()
@@ -185,7 +187,7 @@ class TestLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="tracked", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -224,7 +226,7 @@ class TestLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -249,6 +251,7 @@ class TestLifecycleHooks:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         transform = FailingTransform()
         mock_sink = MagicMock()
@@ -268,7 +271,7 @@ class TestLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="failing", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -341,7 +344,7 @@ class TestSourceLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="tracked_source", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
@@ -406,6 +409,7 @@ class TestSinkLifecycleHooks:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         sink = TrackedSink()
 
@@ -417,7 +421,7 @@ class TestSinkLifecycleHooks:
 
         # Minimal graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
@@ -455,7 +459,7 @@ class TestSinkLifecycleHooks:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def on_start(self, ctx: Any) -> None:
                 pass
@@ -495,6 +499,7 @@ class TestSinkLifecycleHooks:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         transform = FailingTransform()
         sink = TrackedSink()
@@ -506,7 +511,7 @@ class TestSinkLifecycleHooks:
         )
 
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="tracked_sink", config=schema_config)

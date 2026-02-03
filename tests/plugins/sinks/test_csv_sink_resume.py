@@ -3,7 +3,7 @@
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 # Strict schema for tests - CSVSink requires fixed columns
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
 
 
 def test_csv_sink_supports_resume():

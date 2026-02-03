@@ -255,6 +255,9 @@ TransformErrorCategory = Literal[
     "content_filtered",
     "content_safety_violation",
     "prompt_injection_detected",
+    # Contract violations (schema validation)
+    "contract_violation",
+    "multiple_contract_violations",
     # Generic (for tests and edge cases)
     "test_error",
     "property_test_error",
@@ -550,3 +553,251 @@ class PluginContractViolation(RuntimeError):
     """
 
     pass
+
+
+# =============================================================================
+# Schema Contract Violation Types (Tier 3 - External Data)
+# =============================================================================
+# These exceptions represent validation failures on external/user data.
+# They result in row quarantine, NOT crashes. Per CLAUDE.md Three-Tier Trust Model,
+# Tier 3 data (external) can be "literal trash" and must be handled gracefully.
+#
+# Error messages follow "'original' (normalized)" format for debuggability:
+#   "Required field 'Customer ID' (customer_id) is missing"
+# This shows both what the user sees (original) and what code uses (normalized).
+# =============================================================================
+
+
+class ContractViolation(Exception):
+    """Base exception for schema contract violations.
+
+    All schema contract violations track both the normalized field name
+    (used internally by code) and the original field name (from user's
+    perspective, e.g., CSV column headers).
+
+    Attributes:
+        normalized_name: Internal field name used by code (e.g., "customer_id")
+        original_name: Original field name from external data (e.g., "Customer ID")
+    """
+
+    def __init__(self, *, normalized_name: str, original_name: str) -> None:
+        """Initialize ContractViolation.
+
+        Args:
+            normalized_name: Internal field name used by code
+            original_name: Original field name from external data
+        """
+        self.normalized_name = normalized_name
+        self.original_name = original_name
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format the error message. Override in subclasses for specific messages."""
+        return f"Contract violation on field '{self.original_name}' ({self.normalized_name})"
+
+    def to_error_reason(self) -> dict[str, Any]:
+        """Convert violation to TransformErrorReason dict.
+
+        Returns:
+            Dict with 'reason' key suitable for TransformResult.error().
+            The violation_type is derived from the class name.
+        """
+        return {
+            "reason": "contract_violation",
+            "violation_type": self.__class__.__name__,
+            "field": self.normalized_name,
+            "original_field": self.original_name,
+        }
+
+
+class MissingFieldViolation(ContractViolation):
+    """Raised when a required field is missing from the data.
+
+    This is a Tier 3 data violation - the external data is missing a field
+    that the schema declares as required. Results in row quarantine.
+
+    Example:
+        >>> raise MissingFieldViolation(normalized_name="customer_id", original_name="Customer ID")
+        MissingFieldViolation: Required field 'Customer ID' (customer_id) is missing
+    """
+
+    def _format_message(self) -> str:
+        """Format message showing required field is missing."""
+        return f"Required field '{self.original_name}' ({self.normalized_name}) is missing"
+
+
+class TypeMismatchViolation(ContractViolation):
+    """Raised when a field value has the wrong type.
+
+    This is a Tier 3 data violation - the external data has a value that
+    doesn't match the expected type. Results in row quarantine.
+
+    Attributes:
+        expected_type: The type that was expected (e.g., int, str)
+        actual_type: The type that was received (e.g., str, float)
+        actual_value: The actual value received (for debugging)
+
+    Note:
+        The `actual_value` attribute is accessible programmatically for debugging
+        purposes, but is intentionally excluded from the error message (str/repr).
+        This prevents potentially sensitive user data from being exposed in logs,
+        audit trails, or error reports. Callers needing the value for investigation
+        should access the attribute directly.
+
+    Example:
+        >>> raise TypeMismatchViolation(
+        ...     normalized_name="amount",
+        ...     original_name="Amount",
+        ...     expected_type=int,
+        ...     actual_type=str,
+        ...     actual_value="not_a_number"
+        ... )
+        TypeMismatchViolation: Field 'Amount' (amount) expected type 'int', got 'str'
+    """
+
+    def __init__(
+        self,
+        *,
+        normalized_name: str,
+        original_name: str,
+        expected_type: type,
+        actual_type: type,
+        actual_value: Any,
+    ) -> None:
+        """Initialize TypeMismatchViolation.
+
+        Args:
+            normalized_name: Internal field name used by code
+            original_name: Original field name from external data
+            expected_type: The type that was expected
+            actual_type: The type that was received
+            actual_value: The actual value received
+        """
+        self.expected_type = expected_type
+        self.actual_type = actual_type
+        self.actual_value = actual_value
+        super().__init__(normalized_name=normalized_name, original_name=original_name)
+
+    def _format_message(self) -> str:
+        """Format message showing type mismatch."""
+        return f"Field '{self.original_name}' ({self.normalized_name}) expected type '{self.expected_type.__name__}', got '{self.actual_type.__name__}'"
+
+    def to_error_reason(self) -> dict[str, Any]:
+        """Convert violation to TransformErrorReason dict with type details.
+
+        Returns:
+            Dict with 'reason' key and type-specific fields suitable for
+            TransformResult.error(). Includes expected_type, actual_type,
+            and actual_value (as repr for safe string representation).
+        """
+        base = super().to_error_reason()
+        base.update(
+            {
+                "expected_type": self.expected_type.__name__,
+                "actual_type": self.actual_type.__name__,
+                "actual_value": repr(self.actual_value),
+            }
+        )
+        return base
+
+
+class ExtraFieldViolation(ContractViolation):
+    """Raised when an unexpected field is present in FIXED schema mode.
+
+    This is a Tier 3 data violation - the external data contains a field
+    that is not declared in the schema, and the schema is in FIXED mode
+    (no extra fields allowed). Results in row quarantine.
+
+    Example:
+        >>> raise ExtraFieldViolation(normalized_name="unknown_col", original_name="Unknown Col")
+        ExtraFieldViolation: Extra field 'Unknown Col' (unknown_col) not allowed in FIXED mode
+    """
+
+    def _format_message(self) -> str:
+        """Format message showing extra field not allowed."""
+        return f"Extra field '{self.original_name}' ({self.normalized_name}) not allowed in FIXED mode"
+
+
+class ContractMergeError(ValueError):
+    """Raised when schema contracts cannot be merged due to type conflicts.
+
+    This occurs during fork/join (coalesce) operations when parallel paths
+    produce incompatible types for the same field. This is a configuration
+    error (pipeline design issue), not a data error.
+
+    Inherits from ValueError because it represents an invalid combination
+    of schema contracts, not an external data issue.
+
+    Attributes:
+        field: The field name with conflicting types
+        type_a: The type from one path
+        type_b: The type from another path
+
+    Example:
+        >>> raise ContractMergeError(field="amount", type_a="int", type_b="str")
+        ContractMergeError: Cannot merge contracts: field 'amount' has conflicting types 'int' and 'str'
+    """
+
+    def __init__(self, *, field: str, type_a: str, type_b: str) -> None:
+        """Initialize ContractMergeError.
+
+        Args:
+            field: The field name with conflicting types
+            type_a: The type from one path
+            type_b: The type from another path
+        """
+        self.field = field
+        self.type_a = type_a
+        self.type_b = type_b
+        super().__init__(f"Cannot merge contracts: field '{field}' has conflicting types '{type_a}' and '{type_b}'")
+
+
+# =============================================================================
+# Contract Violation to Error Conversion Helpers
+# =============================================================================
+
+
+def violations_to_error_reason(violations: list[ContractViolation]) -> dict[str, Any]:
+    """Convert list of violations to TransformErrorReason.
+
+    Provides a convenient way to convert one or more contract violations
+    into a dict suitable for TransformResult.error().
+
+    Args:
+        violations: List of ContractViolation instances
+
+    Returns:
+        Single violation: its to_error_reason() directly
+        Multiple violations: wrapped dict with count and list
+
+    Raises:
+        ValueError: If violations list is empty
+
+    Example:
+        >>> violations = [
+        ...     MissingFieldViolation(normalized_name="id", original_name="ID"),
+        ...     TypeMismatchViolation(
+        ...         normalized_name="amount",
+        ...         original_name="Amount",
+        ...         expected_type=int,
+        ...         actual_type=str,
+        ...         actual_value="bad"
+        ...     ),
+        ... ]
+        >>> reason = violations_to_error_reason(violations)
+        >>> reason["reason"]
+        'multiple_contract_violations'
+        >>> reason["count"]
+        2
+    """
+    if not violations:
+        raise ValueError("violations list cannot be empty")
+
+    if len(violations) == 1:
+        return violations[0].to_error_reason()
+
+    return {
+        "reason": "multiple_contract_violations",
+        "count": len(violations),
+        "violations": [v.to_error_reason() for v in violations],
+    }

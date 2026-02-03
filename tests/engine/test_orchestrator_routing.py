@@ -139,12 +139,12 @@ class TestOrchestratorOutputSinkRouting:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "errors": SinkSettings(plugin="json", options={"path": "errors.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "errors.json", "schema": {"mode": "observed"}}),
             },
             default_sink="results",
         )
@@ -173,6 +173,7 @@ class TestOrchestratorOutputSinkRouting:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "value": "test"})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None
 
         # Mock sinks - track what gets written
         mock_results_sink = MagicMock()

@@ -40,7 +40,7 @@ from elspeth.plugins.llm.base import BaseLLMTransform
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 
 # Dynamic schema for tests
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 # Concrete subclass of BaseLLMTransform for testing
@@ -77,7 +77,7 @@ class TestLLMTransformIntegration:
         Returns:
             Tuple of (run_id, node_id, row_id, token_id, state_id)
         """
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
             run_id=run.run_id,
@@ -866,7 +866,7 @@ class TestAuditedLLMClientIntegration:
         Returns:
             Tuple of (run_id, state_id)
         """
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
             run_id=run.run_id,

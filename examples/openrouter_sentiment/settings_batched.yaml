@@ -33,7 +33,7 @@ source:
   options:
     path: examples/openrouter_sentiment/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "text: str"
@@ -64,7 +64,7 @@ aggregations:
       response_field: sentiment_analysis
       required_input_fields: [text]  # Template uses row.text
       schema:
-        fields: dynamic
+        mode: observed
 
       # === BATCH PARALLEL EXECUTION CONFIG ===
       # Process buffered rows in parallel when batch is released
@@ -80,7 +80,7 @@ sinks:
     options:
       path: examples/openrouter_sentiment/output/results_batched.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output

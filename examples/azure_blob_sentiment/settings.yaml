@@ -36,7 +36,7 @@ source:
       has_header: true
       encoding: utf-8
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "text: str"
@@ -51,7 +51,7 @@ transforms:
         - "(?i)\\bpineapple\\b"  # Case-insensitive word match
       on_error: blocked_keywords
       schema:
-        fields: dynamic
+        mode: observed
 
   # Step 2: Check content safety before sending to LLM
   - plugin: azure_content_safety
@@ -66,7 +66,7 @@ transforms:
         self_harm: 0 # Block any self-harm content
       on_error: flagged  # Route flagged content to 'flagged' sink
       schema:
-        fields: dynamic
+        mode: observed
       pool_size: 5  # Process 5 rows concurrently
 
   # Step 3: Check for prompt injection attacks
@@ -77,7 +77,7 @@ transforms:
       fields: text  # Analyze the 'text' field
       on_error: attacks  # Route detected attacks to 'attacks' sink
       schema:
-        fields: dynamic
+        mode: observed
       pool_size: 5  # Process 5 rows concurrently
 
   # Step 4: Analyze sentiment (only for content that passed all safety checks)
@@ -98,7 +98,7 @@ transforms:
       response_field: sentiment_analysis
       on_error: llm_errors  # Route LLM failures to 'llm_errors' sink
       schema:
-        fields: dynamic
+        mode: observed
       pool_size: 10  # Process 10 rows concurrently
 
 sinks:
@@ -117,7 +117,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
   # Flagged content - content that failed content safety check (hate, violence, sexual, self-harm)
   flagged:
@@ -134,7 +134,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
   # Attacks - content that failed prompt injection detection (jailbreaks, prompt injection)
   attacks:
@@ -151,7 +151,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
   # Blocked keywords - content matching blocked word patterns
   blocked_keywords:
@@ -168,7 +168,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
   # LLM errors - rows that failed during sentiment analysis
   llm_errors:
@@ -185,7 +185,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

@@ -37,7 +37,7 @@ def recorder() -> LandscapeRecorder:
         node_type=NodeType.SOURCE,
         plugin_version="1.0",
         config={},
-        schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         node_id="source_node",
         sequence=0,
     )
@@ -60,7 +60,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row=42,
             error="Expected dict, got int",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -90,7 +90,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row=row_value,
             error=error_msg,
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -104,7 +104,7 @@ class TestValidationErrorNonCanonical:
         assert record.run_id == "test-run"
         assert record.node_id == "source_node"
         assert record.error == error_msg
-        assert record.schema_mode == "dynamic"
+        assert record.schema_mode == "observed"
         assert record.destination == "discard"
 
         # Verify row_hash matches stable_hash of the primitive
@@ -128,7 +128,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row="invalid_string",
             error="Expected dict, got str",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -146,7 +146,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row=[1, 2, 3],
             error="Expected dict, got list",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -164,7 +164,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row={"value": float("nan")},
             error="Row contains NaN",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -195,7 +195,7 @@ class TestValidationErrorNonCanonical:
         ctx.record_validation_error(
             row=row_value,
             error=error_msg,
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -229,7 +229,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row={"value": float("inf")},
             error="Row contains Infinity",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -247,7 +247,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row={"value": float("-inf")},
             error="Row contains -Infinity",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -266,7 +266,7 @@ class TestValidationErrorNonCanonical:
         token = ctx.record_validation_error(
             row={"value": float("nan")},
             error="Row contains NaN",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="discard",
         )
 
@@ -314,7 +314,7 @@ class TestValidationErrorNonCanonical:
             token = ctx.record_validation_error(
                 row=row,
                 error=f"Invalid row {i}",
-                schema_mode="dynamic",
+                schema_mode="observed",
                 destination="discard",
             )
             tokens.append(token)

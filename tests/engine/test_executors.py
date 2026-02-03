@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     pass
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 # =============================================================================
@@ -454,7 +454,7 @@ class MockGate:
 
     name = "mock_gate"
     node_id: str | None = None
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema = _TestSchema
     output_schema = _TestSchema
     determinism = Determinism.DETERMINISTIC

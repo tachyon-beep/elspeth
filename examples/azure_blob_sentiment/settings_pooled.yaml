@@ -36,7 +36,7 @@ source:
       has_header: true
       encoding: utf-8
     schema:
-      mode: free
+      mode: flexible
       fields:
         - "id: int"
         - "text: str"
@@ -59,7 +59,7 @@ transforms:
       temperature: 0.0
       response_field: sentiment_analysis
       schema:
-        fields: dynamic
+        mode: observed
 
       # === POOLED EXECUTION CONFIG ===
       pool_size: 3  # Number of concurrent workers
@@ -83,7 +83,7 @@ sinks:
         encoding: utf-8
         include_header: true
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

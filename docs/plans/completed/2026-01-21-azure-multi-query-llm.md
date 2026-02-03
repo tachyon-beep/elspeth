@@ -1948,14 +1948,14 @@ git commit -m "feat: register azure_multi_query_llm plugin"
 ## Task 10: Add Example Configuration
 
 **Files:**
-- Create: `examples/multi_query_assessment/suite.yaml`
+- Create: `examples/multi_query_assessment/settings.yaml`
 - Create: `examples/multi_query_assessment/criteria_lookup.yaml`
 - Create: `examples/multi_query_assessment/README.md`
 
 **Step 1: Create example files**
 
 ```yaml
-# examples/multi_query_assessment/suite.yaml
+# examples/multi_query_assessment/settings.yaml
 name: case_study_assessment
 description: Assess multiple case studies against multiple criteria
 
@@ -2133,7 +2133,7 @@ export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
 export AZURE_OPENAI_KEY="your-api-key"
 export AZURE_OPENAI_DEPLOYMENT="gpt-4o"
 
-elspeth run --suite suite.yaml
+elspeth run --settings settings.yaml
 ```
 ```
 

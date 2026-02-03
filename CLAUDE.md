@@ -18,15 +18,6 @@ ELSPETH is built for **high-stakes accountability**. The audit trail must withst
 - The Landscape audit trail is the source of truth, not logs or metrics
 - No inference - if it's not recorded, it didn't happen
 
-**Data storage points** (non-negotiable):
-
-1. **Source entry** - Raw data stored before any processing
-2. **Transform boundaries** - Input AND output captured at every transform
-3. **External calls** - Full request AND response recorded
-4. **Sink output** - Final artifacts with content hashes
-
-This is more storage than minimal, but it means `explain()` queries are simple and complete.
-
 ## Data Manifesto: Three-Tier Trust Model
 
 ELSPETH has three fundamentally different trust tiers with distinct handling rules:
@@ -696,11 +687,45 @@ See "Settings→Runtime Configuration Pattern" in Core Architecture for full doc
 
 ### Secret Handling
 
-Never store secrets - use HMAC fingerprints:
+Never store secrets directly - use HMAC fingerprints for audit:
 
 ```python
 fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
 ```
+
+**Secret Loading:**
+
+Secrets can be loaded from environment variables (default) or Azure Key Vault:
+
+```yaml
+# Pipeline settings.yaml
+secrets:
+  source: keyvault
+  vault_url: https://my-vault.vault.azure.net  # Must be literal URL
+  mapping:
+    AZURE_OPENAI_KEY: azure-openai-key
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+```
+
+When `source: keyvault`, secrets are loaded at startup and injected into environment variables before config resolution. This means `${AZURE_OPENAI_KEY}` in your config will resolve to the Key Vault secret value.
+
+**IMPORTANT:** `vault_url` must be a literal HTTPS URL. Environment variable references like `${AZURE_KEYVAULT_URL}` are NOT supported because secrets must be loaded before environment variable resolution.
+
+**Fingerprint Key:**
+
+The `ELSPETH_FINGERPRINT_KEY` is used to compute HMAC fingerprints of secrets for the audit trail. Configure it:
+
+1. **Environment variable:** `export ELSPETH_FINGERPRINT_KEY=your-random-key`
+2. **Key Vault:** Include in your secrets mapping (recommended for production)
+
+**Audit Trail:**
+
+Secret resolutions are recorded in the `secret_resolutions` Landscape table, including:
+- Which vault the secret came from
+- The HMAC fingerprint (not the value)
+- Resolution latency
+
+**Deprecated:** `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables are no longer recognized. Use the `secrets:` configuration section instead.
 
 ### Test Path Integrity
 
@@ -759,7 +784,7 @@ def test_fork_coalesce_production_path():
 ## Configuration Precedence (High to Low)
 
 1. Runtime overrides (CLI flags, env vars)
-2. Suite configuration (`suite.yaml`)
+2. Pipeline configuration (`settings.yaml`)
 3. Profile configuration (`profiles/production.yaml`)
 4. Plugin pack defaults (`packs/llm/defaults.yaml`)
 5. System defaults
@@ -877,6 +902,18 @@ The following commands can destroy uncommitted work or rewrite history. **ALWAYS
 ### When You Think You Need a Destructive Command
 
 **Don't.** Go back and get clarification from the user.
+
+## No Git Worktrees
+
+**STRICT REQUIREMENT:** Do not use git worktrees in this project.
+
+Worktrees add complexity without benefit for our workflow:
+- They create divergence that leads to merge conflicts
+- Rebase/merge state can become corrupted across worktrees
+- "Isolation" is illusory when you still have to merge back
+- Regular branches are simpler and sufficient
+
+**If you think you need a worktree:** You don't. Use a regular branch instead.
 
 ## PROHIBITION ON "DEFENSIVE PROGRAMMING" PATTERNS
 

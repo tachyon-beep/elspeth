@@ -7,7 +7,7 @@ import pytest
 from elspeth.plugins.sinks.database_sink import DatabaseSink
 
 # Strict schema for tests - DatabaseSink requires fixed columns
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int"]}
 
 
 @pytest.fixture(autouse=True)

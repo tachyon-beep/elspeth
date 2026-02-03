@@ -13,7 +13,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
             }
         )
@@ -24,7 +24,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "json",
             }
         )
@@ -35,7 +35,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",  # .jsonl extension
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 # No format specified - auto-detect
             }
         )
@@ -46,7 +46,7 @@ class TestJSONSinkResumeCapability:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",  # .json extension
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 # No format specified - auto-detect
             }
         )
@@ -61,7 +61,7 @@ class TestJSONSinkConfigureForResume:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
                 "mode": "write",  # Explicit write mode
             }
@@ -78,7 +78,7 @@ class TestJSONSinkConfigureForResume:
         sink = JSONSink(
             {
                 "path": "/tmp/test.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "json",
             }
         )
@@ -94,7 +94,7 @@ class TestJSONSinkConfigureForResume:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "format": "jsonl",
             }
         )
@@ -113,7 +113,7 @@ class TestJSONSinkModeField:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert sink._mode == "write"
@@ -123,7 +123,7 @@ class TestJSONSinkModeField:
         sink = JSONSink(
             {
                 "path": "/tmp/test.jsonl",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "mode": "append",
             }
         )

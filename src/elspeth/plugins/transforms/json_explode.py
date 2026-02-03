@@ -35,7 +35,7 @@ class JSONExplodeConfig(DataPluginConfig):
     """Configuration for JSON explode transform.
 
     Requires 'schema' in config to define input/output expectations.
-    Use 'schema: {fields: dynamic}' for dynamic field handling.
+    Use 'schema: {mode: observed}' for dynamic field handling.
 
     Attributes:
         array_field: Name of the array field to explode (required)
@@ -57,7 +57,7 @@ class JSONExplode(BaseTransform):
     output row with parent linkage to the input token.
 
     Config options:
-        schema: Required. Schema for input/output (use {fields: dynamic} for any fields)
+        schema: Required. Schema for input/output (use {mode: observed} for any fields)
         array_field: Required. Name of the array field to explode
         output_field: Name for the exploded element (default: "item")
         include_index: Whether to include item_index field (default: True)
@@ -107,7 +107,7 @@ class JSONExplode(BaseTransform):
         # The output shape depends on config, not input schema.
         # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
         self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "JSONExplodeOutputSchema",
             allow_coercion=False,
         )

@@ -43,7 +43,7 @@ class TestFieldResolutionRecording:
             {
                 "path": str(csv_input),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -129,7 +129,7 @@ class TestFieldResolutionRecording:
             {
                 "path": str(csv_input),
                 # normalize_fields defaults to False
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -214,7 +214,7 @@ class TestFieldResolutionRecording:
             {
                 "path": str(csv_input),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )

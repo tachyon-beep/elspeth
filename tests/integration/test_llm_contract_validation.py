@@ -17,7 +17,7 @@ class TestLLMContractValidationBasics:
 
         config = LLMConfig.from_dict(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "model": "gpt-4",
                 "template": "Hello {{ row.customer_name }}",
                 "required_input_fields": ["customer_name"],
@@ -34,7 +34,7 @@ class TestLLMContractValidationBasics:
         with pytest.raises(PluginConfigError, match="valid Python identifier"):
             LLMConfig.from_dict(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "model": "gpt-4",
                     "template": "Hello",
                     "required_input_fields": ["valid", "invalid-field"],
@@ -53,7 +53,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         with pytest.raises(PluginConfigError) as exc_info:
             LLMConfig.from_dict(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "model": "gpt-4",
                     "template": "Customer: {{ row.customer_id }}, Amount: {{ row.amount }}",
                     # No required_input_fields - this is now an error
@@ -72,7 +72,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         # This should NOT raise - empty list is explicit opt-out
         config = LLMConfig.from_dict(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "model": "gpt-4",
                 "template": "Customer: {{ row.customer_id }}",
                 "required_input_fields": [],  # Explicit: "I accept runtime risk"
@@ -88,7 +88,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         # Should not raise
         config = LLMConfig.from_dict(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "model": "gpt-4",
                 "template": "Customer: {{ row.customer_id }}",
                 "required_input_fields": ["customer_id"],
@@ -104,7 +104,7 @@ class TestLLMTemplateFieldDeclarationRequired:
         # Should not raise - no row references
         config = LLMConfig.from_dict(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "model": "gpt-4",
                 "template": "Static prompt with {{ lookup.value }}",
             }
@@ -128,7 +128,7 @@ class TestDAGContractValidationWithLLMConfig:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id"]}},
         )
 
         # LLM requires 'id' and 'customer_name'
@@ -137,7 +137,7 @@ class TestDAGContractValidationWithLLMConfig:
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["id", "customer_name"],
             },
         )
@@ -146,7 +146,7 @@ class TestDAGContractValidationWithLLMConfig:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "llm_1", label="continue")
@@ -171,7 +171,7 @@ class TestDAGContractValidationWithLLMConfig:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "customer_name"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "customer_name"]}},
         )
 
         # LLM requires both
@@ -180,7 +180,7 @@ class TestDAGContractValidationWithLLMConfig:
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["id", "customer_name"],
             },
         )
@@ -189,7 +189,7 @@ class TestDAGContractValidationWithLLMConfig:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "llm_1", label="continue")
@@ -215,7 +215,7 @@ class TestDAGContractValidationWithLLMConfig:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id"]}},
         )
 
         # LLM template might reference premium, discount, but only id is REQUIRED
@@ -224,7 +224,7 @@ class TestDAGContractValidationWithLLMConfig:
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["id"],  # Explicit: only id is required
             },
         )
@@ -233,7 +233,7 @@ class TestDAGContractValidationWithLLMConfig:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "llm_1", label="continue")
@@ -258,7 +258,7 @@ class TestMultiTransformChain:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["raw_text"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["raw_text"]}},
         )
 
         # First LLM requires raw_text, produces classification
@@ -267,7 +267,7 @@ class TestMultiTransformChain:
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["raw_text", "classification"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["raw_text", "classification"]},
                 "required_input_fields": ["raw_text"],
             },
         )
@@ -278,7 +278,7 @@ class TestMultiTransformChain:
             node_type=NodeType.TRANSFORM,
             plugin_name="azure_llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["classification"],
             },
         )
@@ -287,7 +287,7 @@ class TestMultiTransformChain:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "llm_classify", label="continue")
@@ -309,7 +309,7 @@ class TestMultiTransformChain:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["a", "b"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["a", "b"]}},
         )
 
         # First transform only guarantees 'a' (effectively drops 'b')
@@ -318,7 +318,7 @@ class TestMultiTransformChain:
             node_type=NodeType.TRANSFORM,
             plugin_name="mapper",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["a"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["a"]},
                 "required_input_fields": ["a"],
             },
         )
@@ -329,7 +329,7 @@ class TestMultiTransformChain:
             node_type=NodeType.TRANSFORM,
             plugin_name="llm",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["a", "b"],
             },
         )
@@ -338,7 +338,7 @@ class TestMultiTransformChain:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "transform_1", label="continue")

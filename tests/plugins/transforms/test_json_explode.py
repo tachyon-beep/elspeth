@@ -16,7 +16,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestJSONExplodeHappyPath:
@@ -365,7 +365,7 @@ class TestJSONExplodeOutputSchema:
     so output_schema must be dynamic.
     """
 
-    def test_output_schema_is_dynamic(self) -> None:
+    def test_output_schema_is_observed(self) -> None:
         """JSONExplode uses dynamic output_schema.
 
         JSONExplode removes array_field and adds output_field/item_index.
@@ -377,7 +377,7 @@ class TestJSONExplodeOutputSchema:
         # Explicit schema with array field
         transform = JSONExplode(
             {
-                "schema": {"mode": "strict", "fields": ["id: int", "items: any"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "items: any"]},
                 "array_field": "items",
                 "output_field": "item",
             }

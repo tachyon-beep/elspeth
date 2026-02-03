@@ -118,7 +118,7 @@
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: Any `azure_multi_query_llm` run with `response_format` set (e.g., `examples/multi_query_assessment/suite.yaml`)
+- Data set or fixture: Any `azure_multi_query_llm` run with `response_format` set (e.g., `examples/multi_query_assessment/settings.yaml`)
 
 ## Agent Context (if relevant)
 
@@ -146,7 +146,7 @@
 - Config field captured in init: `src/elspeth/plugins/llm/azure_multi_query.py:101-103`
 - LLM call omits response_format: `src/elspeth/plugins/llm/azure_multi_query.py:211-217`
 - `response_format` defined in config model: `src/elspeth/plugins/llm/multi_query.py:155-158`
-- Example config uses `response_format: json`: `examples/multi_query_assessment/suite.yaml:113`
+- Example config uses `response_format: json`: `examples/multi_query_assessment/settings.yaml:113`
 
 ## Impact
 
@@ -170,7 +170,7 @@
 
 ## Architectural Deviations
 
-- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/plugins/llm/multi_query.py:130-158`, `examples/multi_query_assessment/suite.yaml:113`
+- Spec or doc reference (e.g., docs/design/architecture.md#L...): `src/elspeth/plugins/llm/multi_query.py:130-158`, `examples/multi_query_assessment/settings.yaml:113`
 - Observed divergence: Configured `response_format` is ignored during LLM calls.
 - Reason (if known): Missing parameter propagation in `_process_single_query()`.
 - Alignment plan or decision needed: Forward `response_format` to the LLM API and cover with tests.
@@ -189,4 +189,4 @@
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: `examples/multi_query_assessment/suite.yaml`
+- Related design docs: `examples/multi_query_assessment/settings.yaml`

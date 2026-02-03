@@ -6,7 +6,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestFieldMapper:
@@ -202,7 +202,7 @@ class TestFieldMapper:
 
         transform = FieldMapper(
             {
-                "schema": {"mode": "strict", "fields": ["count: int"]},
+                "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "mapping": {},
                 "validate_input": True,
             }
@@ -221,7 +221,7 @@ class TestFieldMapper:
 
         transform = FieldMapper(
             {
-                "schema": {"mode": "strict", "fields": ["count: int"]},
+                "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "mapping": {},
                 "validate_input": False,  # Explicit default
             }
@@ -242,7 +242,7 @@ class TestFieldMapper:
 
         transform = FieldMapper(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "mapping": {},
                 "validate_input": True,  # Would validate, but schema is dynamic
             }
@@ -273,7 +273,7 @@ class TestFieldMapperOutputSchema:
         # Explicit schema: expects a, b, c
         transform = FieldMapper(
             {
-                "schema": {"mode": "strict", "fields": ["a: str", "b: int", "c: float"]},
+                "schema": {"mode": "fixed", "fields": ["a: str", "b: int", "c: float"]},
                 "mapping": {"a": "a"},  # Only select field 'a'
                 "select_only": True,
             }

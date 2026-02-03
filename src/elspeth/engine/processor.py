@@ -348,6 +348,19 @@ class RowProcessor:
         """
         return self._aggregation_executor.get_buffer_count(node_id)
 
+    def get_aggregation_checkpoint_state(self) -> dict[str, Any]:
+        """Get checkpoint state for all aggregation buffers.
+
+        Returns complete state of all aggregation nodes (buffers + triggers)
+        for persistence during checkpointing. This enables crash recovery
+        without losing buffered rows.
+
+        Returns:
+            Checkpoint state dict suitable for passing to create_checkpoint().
+            Format matches AggregationExecutor.get_checkpoint_state().
+        """
+        return self._aggregation_executor.get_checkpoint_state()
+
     def process_token_from_step(
         self,
         token: TokenInfo,

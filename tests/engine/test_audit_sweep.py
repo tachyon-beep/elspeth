@@ -219,7 +219,7 @@ class _PassTransform(BaseTransform):
     output_schema = _ValueSchema
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -376,7 +376,7 @@ class TestAuditSweepErrorHandling:
             _on_error = "discard"  # Route errors to quarantine
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 if row["value"] == 2:
@@ -487,7 +487,7 @@ class TestAuditSweepForkCoalesce:
             sinks={
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}},
+                    "options": {"path": "/dev/null", "schema": {"mode": "observed"}},
                 },
             },
             coalesce=[
@@ -566,7 +566,7 @@ class TestAuditSweepForkCoalesce:
             sinks={
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}},
+                    "options": {"path": "/dev/null", "schema": {"mode": "observed"}},
                 },
             },
             coalesce=[
@@ -713,7 +713,7 @@ class TestAuditSweepForkCoalesce:
             _on_error = "discard"  # Route failures to quarantine
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 # Only fail on path_b (which is indicated by branch_name on token)
@@ -749,7 +749,7 @@ class TestAuditSweepForkCoalesce:
             sinks={
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}},
+                    "options": {"path": "/dev/null", "schema": {"mode": "observed"}},
                 },
             },
             coalesce=[
@@ -845,11 +845,11 @@ class TestAuditSweepForkCoalesce:
             sinks={
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}},
+                    "options": {"path": "/dev/null", "schema": {"mode": "observed"}},
                 },
                 "discard": {
                     "plugin": "json",
-                    "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}},
+                    "options": {"path": "/dev/null", "schema": {"mode": "observed"}},
                 },
             },
             coalesce=[

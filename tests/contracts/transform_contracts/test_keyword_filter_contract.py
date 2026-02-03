@@ -23,7 +23,7 @@ class TestKeywordFilterContract(TransformContractPropertyTestBase):
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\btest\b"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
             }
         )
@@ -42,7 +42,7 @@ class TestKeywordFilterErrorContract(TransformErrorContractTestBase):
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\bblocked\b"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
             }
         )

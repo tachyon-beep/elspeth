@@ -87,7 +87,7 @@ class TestResumeComprehensive:
 
         now = datetime.now(UTC)
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -241,7 +241,7 @@ class TestResumeComprehensive:
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
-        strict_schema = {"mode": "strict", "fields": ["id: int", "value: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": strict_schema})],
@@ -349,7 +349,7 @@ class TestResumeComprehensive:
         orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_mgr, checkpoint_config=checkpoint_config)
 
         # Use CSVSink with strict schema matching the data: {"id": int, "value": str}
-        strict_schema = {"mode": "strict", "fields": ["id: int", "value: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "value: str"]}
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": strict_schema})],
@@ -432,7 +432,7 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -543,7 +543,7 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "timestamp": datetime}
         # CSVSink stringifies datetime values automatically
-        strict_schema = {"mode": "strict", "fields": ["id: int", "timestamp: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: str"]}
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": strict_schema})],
@@ -625,7 +625,7 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -736,7 +736,7 @@ class TestResumeComprehensive:
 
         # Use CSVSink with strict schema matching the data: {"id": int, "amount": Decimal}
         # CSVSink stringifies Decimal values automatically
-        strict_schema = {"mode": "strict", "fields": ["id: int", "amount: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "amount: str"]}
         config = PipelineConfig(
             source=NullSource({}),
             transforms=[PassThrough({"schema": strict_schema})],
@@ -814,7 +814,7 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -925,16 +925,16 @@ class TestResumeComprehensive:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
+            transforms=[PassThrough({"schema": {"mode": "observed"}})],
             sinks={
                 "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
                 )
             },
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -1004,7 +1004,7 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -1115,16 +1115,16 @@ class TestResumeComprehensive:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
+            transforms=[PassThrough({"schema": {"mode": "observed"}})],
             sinks={
                 "default": JSONSink(
-                    {"path": str(output_path.with_suffix(".json")), "schema": {"fields": "dynamic"}, "mode": "append", "format": "jsonl"}
+                    {"path": str(output_path.with_suffix(".json")), "schema": {"mode": "observed"}, "mode": "append", "format": "jsonl"}
                 )
             },
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -1192,7 +1192,7 @@ class TestResumeComprehensive:
 
         # Create graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
@@ -1290,12 +1290,12 @@ class TestResumeComprehensive:
 
         config = PipelineConfig(
             source=NullSource({}),
-            transforms=[PassThrough({"schema": {"fields": "dynamic"}})],
-            sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"fields": "dynamic"}, "mode": "write", "format": "jsonl"})},
+            transforms=[PassThrough({"schema": {"mode": "observed"}})],
+            sinks={"default": JSONSink({"path": "/tmp/dummy.json", "schema": {"mode": "observed"}, "mode": "write", "format": "jsonl"})},
         )
 
         resume_graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         resume_graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         resume_graph.add_node("xform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         resume_graph.add_node("sink", node_type=NodeType.SINK, plugin_name="json", config=schema_config)

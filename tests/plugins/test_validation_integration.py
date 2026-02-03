@@ -27,7 +27,7 @@ def test_manager_validates_source_config_before_creation():
 
     # Invalid config - missing required 'path'
     invalid_config = {
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 
@@ -45,7 +45,7 @@ def test_valid_config_creates_working_plugin():
 
     valid_config = {
         "path": "/tmp/test.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 
@@ -84,7 +84,7 @@ def test_validator_provides_field_level_errors():
     invalid_config = {
         "path": "/tmp/test.csv",
         "skip_rows": "not_an_int",  # Should be int
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 

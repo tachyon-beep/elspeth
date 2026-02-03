@@ -1545,6 +1545,175 @@ class LandscapeAnalyzer:
             "runs": run_stats,
         }
 
+    # === Schema Contract Tools (Phase 5: Unified Schema Contracts) ===
+
+    def get_run_contract(self, run_id: str) -> dict[str, Any]:
+        """Get schema contract for a run.
+
+        Shows the source schema contract with field resolution:
+        - Mode (FIXED/FLEXIBLE/OBSERVED)
+        - Field mappings (original -> normalized)
+        - Inferred types
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            Contract details or {"error": "..."} if not found
+        """
+        run = self._recorder.get_run(run_id)
+        if run is None:
+            return {"error": f"Run '{run_id}' not found"}
+
+        contract = self._recorder.get_run_contract(run_id)
+        if contract is None:
+            return {"error": f"Run '{run_id}' has no contract stored"}
+
+        # Convert contract to JSON-serializable format
+        fields = [
+            {
+                "normalized_name": f.normalized_name,
+                "original_name": f.original_name,
+                "python_type": f.python_type.__name__,
+                "required": f.required,
+                "source": f.source,
+            }
+            for f in contract.fields
+        ]
+
+        return {
+            "run_id": run_id,
+            "mode": contract.mode,
+            "locked": contract.locked,
+            "fields": fields,
+            "field_count": len(fields),
+            "version_hash": contract.version_hash(),
+        }
+
+    def explain_field(self, run_id: str, field_name: str) -> dict[str, Any]:
+        """Trace a field's provenance through the pipeline.
+
+        Shows how a field was:
+        - Named at source (original)
+        - Normalized (to Python identifier)
+        - Typed (inferred or declared)
+
+        Args:
+            run_id: Run ID to query
+            field_name: Either normalized or original name
+
+        Returns:
+            Field provenance details or {"error": "..."} if not found
+        """
+        run = self._recorder.get_run(run_id)
+        if run is None:
+            return {"error": f"Run '{run_id}' not found"}
+
+        contract = self._recorder.get_run_contract(run_id)
+        if contract is None:
+            return {"error": f"Run '{run_id}' has no contract stored"}
+
+        # Try to find field by normalized or original name
+        field_contract = None
+        for f in contract.fields:
+            if f.normalized_name == field_name or f.original_name == field_name:
+                field_contract = f
+                break
+
+        if field_contract is None:
+            available_fields = [f.normalized_name for f in contract.fields]
+            return {
+                "error": f"Field '{field_name}' not found in contract",
+                "available_fields": available_fields,
+            }
+
+        return {
+            "run_id": run_id,
+            "normalized_name": field_contract.normalized_name,
+            "original_name": field_contract.original_name,
+            "python_type": field_contract.python_type.__name__,
+            "required": field_contract.required,
+            "source": field_contract.source,
+            "contract_mode": contract.mode,
+        }
+
+    def list_contract_violations(self, run_id: str, limit: int = 100) -> dict[str, Any]:
+        """List contract violations for a run.
+
+        Shows validation errors with contract details:
+        - Violation type (type_mismatch, missing_field, extra_field)
+        - Field names (original and normalized)
+        - Type information (expected vs actual)
+
+        Args:
+            run_id: Run ID to query
+            limit: Maximum violations to return (default 100)
+
+        Returns:
+            List of violations or {"error": "..."} if run not found
+        """
+        from sqlalchemy import func, select
+
+        from elspeth.core.landscape.schema import validation_errors_table
+
+        run = self._recorder.get_run(run_id)
+        if run is None:
+            return {"error": f"Run '{run_id}' not found"}
+
+        with self._db.connection() as conn:
+            # Count total violations (those with violation_type set)
+            total_count = (
+                conn.execute(
+                    select(func.count())
+                    .select_from(validation_errors_table)
+                    .where((validation_errors_table.c.run_id == run_id) & (validation_errors_table.c.violation_type.isnot(None)))
+                ).scalar()
+                or 0
+            )
+
+            # Get violations with details
+            query = (
+                select(
+                    validation_errors_table.c.error_id,
+                    validation_errors_table.c.violation_type,
+                    validation_errors_table.c.normalized_field_name,
+                    validation_errors_table.c.original_field_name,
+                    validation_errors_table.c.expected_type,
+                    validation_errors_table.c.actual_type,
+                    validation_errors_table.c.error,
+                    validation_errors_table.c.schema_mode,
+                    validation_errors_table.c.destination,
+                    validation_errors_table.c.created_at,
+                )
+                .where((validation_errors_table.c.run_id == run_id) & (validation_errors_table.c.violation_type.isnot(None)))
+                .order_by(validation_errors_table.c.created_at.desc())
+                .limit(limit)
+            )
+            rows = conn.execute(query).fetchall()
+
+        violations = [
+            {
+                "error_id": row.error_id,
+                "violation_type": row.violation_type,
+                "normalized_field_name": row.normalized_field_name,
+                "original_field_name": row.original_field_name,
+                "expected_type": row.expected_type,
+                "actual_type": row.actual_type,
+                "error": row.error,
+                "schema_mode": row.schema_mode,
+                "destination": row.destination,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+        return {
+            "run_id": run_id,
+            "total_violations": total_count,
+            "violations": violations,
+            "limit": limit,
+        }
+
 
 def create_server(database_url: str) -> Server:
     """Create MCP server with Landscape analysis tools.
@@ -1837,6 +2006,42 @@ def create_server(database_url: str) -> Server:
                     },
                 },
             ),
+            # === Schema Contract Tools (Phase 5: Unified Schema Contracts) ===
+            Tool(
+                name="get_run_contract",
+                description="Get schema contract for a run: mode, field mappings (original -> normalized), and inferred types",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string", "description": "Run ID to query"},
+                    },
+                    "required": ["run_id"],
+                },
+            ),
+            Tool(
+                name="explain_field",
+                description="Trace a field's provenance: how it was named at source, normalized, and typed",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string", "description": "Run ID to query"},
+                        "field_name": {"type": "string", "description": "Field name (normalized or original)"},
+                    },
+                    "required": ["run_id", "field_name"],
+                },
+            ),
+            Tool(
+                name="list_contract_violations",
+                description="List contract violations: type mismatches, missing fields, with field names and type info",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "run_id": {"type": "string", "description": "Run ID to query"},
+                        "limit": {"type": "integer", "description": "Max violations to return (default 100)", "default": 100},
+                    },
+                    "required": ["run_id"],
+                },
+            ),
         ]
 
     @server.call_tool()  # type: ignore[misc, untyped-decorator]
@@ -1927,6 +2132,19 @@ def create_server(database_url: str) -> Server:
             elif name == "get_recent_activity":
                 result = analyzer.get_recent_activity(
                     minutes=arguments.get("minutes", 60),
+                )
+            # === Schema Contract Tools ===
+            elif name == "get_run_contract":
+                result = analyzer.get_run_contract(arguments["run_id"])
+            elif name == "explain_field":
+                result = analyzer.explain_field(
+                    run_id=arguments["run_id"],
+                    field_name=arguments["field_name"],
+                )
+            elif name == "list_contract_violations":
+                result = analyzer.list_contract_violations(
+                    run_id=arguments["run_id"],
+                    limit=arguments.get("limit", 100),
                 )
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]

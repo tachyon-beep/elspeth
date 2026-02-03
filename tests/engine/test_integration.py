@@ -155,7 +155,7 @@ def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
 
     graph = ExecutionGraph()
 
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
 
     # Add source
     graph.add_node(
@@ -319,7 +319,7 @@ class TestEngineIntegration:
             output_schema = OutputSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -458,7 +458,7 @@ class TestEngineIntegration:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"n": row["n"] * 2}, success_reason={"action": "multiply"})
@@ -469,7 +469,7 @@ class TestEngineIntegration:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"n": row["n"] + 10}, success_reason={"action": "add"})
@@ -817,7 +817,7 @@ class TestNoSilentAuditLoss:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Intentional explosion")
@@ -902,7 +902,7 @@ class TestNoSilentAuditLoss:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -983,7 +983,7 @@ class TestAuditTrailCompleteness:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -1161,7 +1161,7 @@ class TestForkIntegration:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         gate_node = recorder.register_node(
@@ -1170,7 +1170,7 @@ class TestForkIntegration:
             node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Register path nodes for fork destinations
@@ -1180,7 +1180,7 @@ class TestForkIntegration:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         path_b_node = recorder.register_node(
             run_id=run_id,
@@ -1188,7 +1188,7 @@ class TestForkIntegration:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Register sink node (not used in processor but required for complete graph)
@@ -1198,7 +1198,7 @@ class TestForkIntegration:
             node_type=NodeType.SINK,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Register edges (including fork paths to distinct intermediate nodes)
@@ -1373,7 +1373,7 @@ class TestForkCoalescePipelineIntegration:
         run = recorder.begin_run(config={}, canonical_version="v1")
         run_id = run.run_id
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Register nodes
         source_node = recorder.register_node(
@@ -1481,7 +1481,7 @@ class TestForkCoalescePipelineIntegration:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -1495,7 +1495,7 @@ class TestForkCoalescePipelineIntegration:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -1726,7 +1726,7 @@ class TestForkCoalescePipelineIntegration:
         run = recorder.begin_run(config={}, canonical_version="v1")
         run_id = run.run_id
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Register nodes
         source_node = recorder.register_node(
@@ -1971,7 +1971,7 @@ class TestComplexDAGIntegration:
         run = recorder.begin_run(config={}, canonical_version="v1")
         run_id = run.run_id
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Register nodes for the diamond DAG
         source_node = recorder.register_node(
@@ -2088,7 +2088,7 @@ class TestComplexDAGIntegration:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -2105,7 +2105,7 @@ class TestComplexDAGIntegration:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
@@ -2384,7 +2384,7 @@ class TestComplexDAGIntegration:
             _on_error = "discard"  # Required for TransformResult.error() to work
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 3 == 0:
@@ -2617,7 +2617,7 @@ class TestRetryIntegration:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 row_value = row["value"]
@@ -2775,7 +2775,7 @@ class TestRetryIntegration:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 row_value = row["value"]
@@ -2909,7 +2909,7 @@ class TestExplainQuery:
 
         recorder = LandscapeRecorder(db)
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Start a run
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -3047,7 +3047,7 @@ class TestExplainQuery:
 
         recorder = LandscapeRecorder(db)
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Start a run
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -3162,7 +3162,7 @@ class TestExplainQuery:
 
         recorder = LandscapeRecorder(db)
 
-        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+        DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
         # Start a run
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -3422,7 +3422,7 @@ class TestErrorRecovery:
             _on_error = "discard"  # Required for TransformResult.error() to work
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:
@@ -3539,7 +3539,7 @@ class TestErrorRecovery:
             _on_error = "discard"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 if row["value"] % 2 == 0:

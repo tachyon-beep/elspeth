@@ -18,7 +18,7 @@ from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
 from .conftest import chaosllm_azure_openai_client
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:

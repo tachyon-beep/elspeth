@@ -115,7 +115,7 @@ class TestRetryAuditTrail:
         )
 
         # Create a dynamic schema config for the node
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
 
         # Register transform node
         node = recorder.register_node(
@@ -181,7 +181,7 @@ class TestRetryAuditTrail:
         # Create a source node for the token (required for row creation)
         from elspeth.contracts.schema import SchemaConfig
 
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
@@ -281,7 +281,7 @@ class TestRetryAuditTrail:
         # Create a source node for the token
         from elspeth.contracts.schema import SchemaConfig
 
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",
@@ -384,7 +384,7 @@ class TestRetryAuditTrail:
         # Create a source node for the token
         from elspeth.contracts.schema import SchemaConfig
 
-        schema_config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        schema_config = SchemaConfig(mode="observed", fields=None)
         source_node = recorder.register_node(
             run_id=run_id,
             plugin_name="test_source",

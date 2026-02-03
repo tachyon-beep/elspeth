@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestTransformErrorRecording:
@@ -34,7 +34,7 @@ class TestTransformErrorRecording:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
             node_id="source_test",
             sequence=0,
         )
@@ -67,7 +67,7 @@ class TestTransformErrorRecording:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
             node_id=transform_id,
             sequence=1,
         )

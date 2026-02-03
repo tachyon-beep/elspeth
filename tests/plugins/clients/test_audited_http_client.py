@@ -263,7 +263,6 @@ class TestAuditedHTTPClient:
         """
         # No fingerprint key, but dev mode enabled
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
         recorder = self._create_mock_recorder()

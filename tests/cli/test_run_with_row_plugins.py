@@ -16,15 +16,15 @@ from .conftest import verify_audit_trail
 runner = CliRunner()
 
 # Dynamic schema config for tests - PathConfig now requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Strict schemas for CSV sinks (CSVSink requires fixed columns)
 # Passthrough sink - same as input: id, name, score
-PASSTHROUGH_SINK_SCHEMA = {"mode": "strict", "fields": ["id: str", "name: str", "score: str"]}
+PASSTHROUGH_SINK_SCHEMA = {"mode": "fixed", "fields": ["id: str", "name: str", "score: str"]}
 # Field mapper sink - renames name→full_name, score→test_score
-FIELD_MAPPER_SINK_SCHEMA = {"mode": "strict", "fields": ["id: str", "full_name: str", "test_score: str"]}
+FIELD_MAPPER_SINK_SCHEMA = {"mode": "fixed", "fields": ["id: str", "full_name: str", "test_score: str"]}
 # Chained transforms sink - renames name→person_name
-CHAINED_SINK_SCHEMA = {"mode": "strict", "fields": ["id: str", "person_name: str", "score: str"]}
+CHAINED_SINK_SCHEMA = {"mode": "fixed", "fields": ["id: str", "person_name: str", "score: str"]}
 
 
 class TestRunWithTransforms:

@@ -1,8 +1,19 @@
 # src/elspeth/core/security/__init__.py
-"""Security utilities for ELSPETH."""
+"""Security utilities for ELSPETH.
 
+Exports:
+- secret_fingerprint: Compute HMAC-SHA256 fingerprint of a secret
+- get_fingerprint_key: Get the fingerprint key from environment
+- SecretLoadError: Raised when secret loading fails
+- load_secrets_from_config: Load secrets from pipeline config
+- Secret loader classes: For advanced use cases
+"""
+
+from elspeth.core.security.config_secrets import (
+    SecretLoadError,
+    load_secrets_from_config,
+)
 from elspeth.core.security.fingerprint import (
-    clear_fingerprint_key_cache,
     get_fingerprint_key,
     secret_fingerprint,
 )
@@ -21,10 +32,11 @@ __all__ = [
     "CompositeSecretLoader",
     "EnvSecretLoader",
     "KeyVaultSecretLoader",
+    "SecretLoadError",
     "SecretLoader",
     "SecretNotFoundError",
     "SecretRef",
-    "clear_fingerprint_key_cache",
     "get_fingerprint_key",
+    "load_secrets_from_config",
     "secret_fingerprint",
 ]

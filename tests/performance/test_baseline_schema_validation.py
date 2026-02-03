@@ -25,22 +25,22 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -48,7 +48,7 @@ sinks:
     options:
       path: output.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output
@@ -85,14 +85,14 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -100,7 +100,7 @@ sinks:
     options:
       path: output.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output
@@ -145,18 +145,18 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -164,7 +164,7 @@ sinks:
     options:
       path: output.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output

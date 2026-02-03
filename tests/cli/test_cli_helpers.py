@@ -17,14 +17,14 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -32,7 +32,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -110,7 +110,7 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 aggregations:
@@ -118,7 +118,7 @@ aggregations:
     plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
     trigger:
       count: 10
 
@@ -128,7 +128,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -161,7 +161,7 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: discard
 
 aggregations:
@@ -169,7 +169,7 @@ aggregations:
     plugin: batch_stats
     options:
       schema:
-        fields: dynamic
+        mode: observed
       value_field: amount
     trigger:
       count: 10
@@ -180,7 +180,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 

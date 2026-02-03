@@ -30,7 +30,7 @@ class TestTruncateContract(TransformContractPropertyTestBase):
         return Truncate(
             {
                 "fields": {"title": 20, "description": 50},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -50,7 +50,7 @@ class TestTruncateWithSuffixContract(TransformContractPropertyTestBase):
             {
                 "fields": {"title": 20},
                 "suffix": "...",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -70,7 +70,7 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
             {
                 "fields": {"required_field": 100},
                 "strict": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

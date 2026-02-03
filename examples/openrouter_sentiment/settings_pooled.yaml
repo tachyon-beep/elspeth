@@ -20,7 +20,7 @@ source:
   options:
     path: examples/openrouter_sentiment/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "text: str"
@@ -42,7 +42,7 @@ transforms:
       response_field: sentiment_analysis
       required_input_fields: [text]  # Template uses row.text
       schema:
-        fields: dynamic
+        mode: observed
 
       # === POOLED EXECUTION CONFIG ===
       # Process multiple rows concurrently with automatic rate limiting
@@ -58,7 +58,7 @@ sinks:
     options:
       path: examples/openrouter_sentiment/output/results_pooled.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output

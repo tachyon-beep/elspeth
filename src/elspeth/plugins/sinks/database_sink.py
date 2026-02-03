@@ -68,9 +68,9 @@ class DatabaseSink(BaseSink):
         validate_input: Validate incoming rows against schema (default: False)
 
     The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields (columns inferred from first row)
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]} - columns from schema
-        - Free: {"mode": "free", "fields": ["id: int"]} - columns from schema, extras allowed
+        - Observed: {"mode": "observed"} - accept any fields (columns inferred from first row)
+        - Fixed: {"mode": "fixed", "fields": ["id: int", "name: str"]} - columns from schema
+        - Flexible: {"mode": "flexible", "fields": ["id: int"]} - columns from schema, extras allowed
     """
 
     name = "database"
@@ -106,13 +106,12 @@ class DatabaseSink(BaseSink):
         # DataPluginConfig ensures schema_config is not None
         self._schema_config = cfg.schema_config
 
-        # Database requires fixed-column structure - reject schemas that allow extra fields
-        if self._schema_config.allows_extra_fields:
-            raise ValueError(
-                f"DatabaseSink requires fixed-column structure but schema allows_extra_fields=True "
-                f"(mode={self._schema_config.mode!r}, is_dynamic={self._schema_config.is_dynamic}). "
-                f"Use JSONSink for flexible schemas, or use mode='strict' for database output."
-            )
+        # Database supports all schema modes via infer-and-lock:
+        # - mode='fixed': columns from config, extras rejected at insert time
+        # - mode='flexible': declared columns + extras from first row, then locked
+        # - mode='observed': columns from first row, then locked
+        #
+        # Table schema is created on first write; subsequent rows must match.
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)
@@ -160,7 +159,7 @@ class DatabaseSink(BaseSink):
         existing = [col["name"] for col in columns]
 
         # Dynamic schema = no validation needed
-        if self._schema_config.is_dynamic:
+        if self._schema_config.is_observed:
             return OutputValidationResult.success(target_fields=existing)
 
         # Get expected fields from schema (guaranteed non-None when not dynamic)
@@ -170,22 +169,22 @@ class DatabaseSink(BaseSink):
         expected = [f.name for f in fields]
         existing_set, expected_set = set(existing), set(expected)
 
-        if self._schema_config.mode == "strict":
-            # Strict: exact column match (set comparison, no order)
+        if self._schema_config.mode == "fixed":
+            # Fixed: exact column match (set comparison, no order)
             if existing_set != expected_set:
                 return OutputValidationResult.failure(
-                    message="Table columns do not match schema (strict mode)",
+                    message="Table columns do not match schema (fixed mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(expected_set - existing_set),
                     extra_fields=sorted(existing_set - expected_set),
                 )
-        else:  # mode == "free"
-            # Free: schema fields must exist as columns (extras allowed)
+        else:  # mode == "flexible"
+            # Flexible: schema fields must exist as columns (extras allowed)
             missing = expected_set - existing_set
             if missing:
                 return OutputValidationResult.failure(
-                    message="Table missing required schema columns (free mode)",
+                    message="Table missing required schema columns (flexible mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(missing),
@@ -250,23 +249,37 @@ class DatabaseSink(BaseSink):
     def _create_columns_from_schema_or_row(self, row: dict[str, Any]) -> list[Column[Any]]:
         """Create SQLAlchemy columns from schema or row keys.
 
-        When schema is explicit, creates columns for ALL defined fields with
-        proper type mapping. This ensures optional fields are present.
-
-        When schema is dynamic, falls back to inferring from row keys.
+        Column creation depends on schema mode:
+        - fixed: Only declared fields with proper types
+        - flexible: Declared fields with proper types, then extras as String
+        - observed: All fields from first row as String (infer and lock)
         """
-        if not self._schema_config.is_dynamic and self._schema_config.fields:
-            # Explicit schema: use field definitions with proper types
+        if self._schema_config.is_observed:
+            # Observed mode: infer from row keys (all as String)
+            return [Column(key, String) for key in row]
+
+        if self._schema_config.fields:
+            # Explicit schema: start with declared fields and their types
             columns: list[Column[Any]] = []
+            declared_names: set[str] = set()
+
             for field_def in self._schema_config.fields:
                 sql_type = SCHEMA_TYPE_TO_SQLALCHEMY[field_def.field_type]
                 # Note: nullable=True for optional fields, but SQLAlchemy Column
                 # defaults to nullable=True anyway, so we don't need to set it
                 columns.append(Column(field_def.name, sql_type))
+                declared_names.add(field_def.name)
+
+            if self._schema_config.mode == "flexible":
+                # Flexible mode: add extra columns from row as String type
+                for key in row:
+                    if key not in declared_names:
+                        columns.append(Column(key, String))
+
             return columns
-        else:
-            # Dynamic schema: infer from row keys (all as String)
-            return [Column(key, String) for key in row]
+
+        # Fallback (shouldn't happen with valid config): use row keys
+        return [Column(key, String) for key in row]
 
     def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
         """Write a batch of rows to the database.
@@ -305,7 +318,7 @@ class DatabaseSink(BaseSink):
             )
 
         # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)

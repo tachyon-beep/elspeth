@@ -9,6 +9,7 @@ Settings are frozen (immutable) after construction.
 import re
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -20,6 +21,99 @@ from elspeth.contracts.enums import OutputMode, RunMode
 # Using these as user-defined labels would cause edge_map collisions in the orchestrator,
 # leading to routing events recorded against wrong edges (audit corruption).
 _RESERVED_EDGE_LABELS = frozenset({"continue"})
+
+
+class SecretsConfig(BaseModel):
+    """Configuration for secret loading.
+
+    Secrets can come from environment variables (default) or Azure Key Vault.
+    Key Vault authentication uses Azure DefaultAzureCredential (Managed Identity,
+    Azure CLI login, or service principal environment variables).
+
+    When using Key Vault, an explicit mapping from env var names to Key Vault
+    secret names is required.
+
+    IMPORTANT: vault_url must be a literal HTTPS URL. Environment variable
+    references like ${AZURE_KEYVAULT_URL} are NOT supported because secrets
+    must be loaded before environment variable resolution occurs.
+
+    Example (env - default):
+        secrets:
+          source: env  # Uses .env file and environment variables
+
+    Example (keyvault):
+        secrets:
+          source: keyvault
+          vault_url: https://my-vault.vault.azure.net
+          mapping:
+            AZURE_OPENAI_KEY: azure-openai-key
+            ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+    """
+
+    model_config = {"frozen": True, "extra": "forbid"}
+
+    source: Literal["env", "keyvault"] = Field(
+        default="env",
+        description="Secret source: 'env' (environment variables) or 'keyvault' (Azure Key Vault)",
+    )
+    vault_url: str | None = Field(
+        default=None,
+        description="Azure Key Vault URL - must be literal HTTPS URL, no ${VAR} allowed",
+    )
+    mapping: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping from env var names to Key Vault secret names",
+    )
+
+    @field_validator("vault_url", mode="before")
+    @classmethod
+    def validate_vault_url_format(cls, v: Any) -> Any:
+        """Validate vault_url is a valid HTTPS URL without env var references.
+
+        Note: mode="before" means this receives raw input before Pydantic type coercion.
+        The return type is Any because we pass through non-strings for Pydantic to reject.
+        """
+        if v is None:
+            return v
+
+        # Let Pydantic handle type coercion for non-strings
+        # This runs mode="before", so YAML like `vault_url: 123` arrives as int
+        if not isinstance(v, str):
+            return v  # Pydantic will reject with clean "str type expected" error
+
+        # P0-3: Reject ${VAR} references (chicken-egg problem)
+        if "${" in v:
+            raise ValueError(
+                "vault_url cannot contain ${VAR} references. "
+                "Use a literal URL like 'https://my-vault.vault.azure.net'. "
+                "Environment variables are resolved AFTER secrets are loaded."
+            )
+
+        # Validate URL format
+        try:
+            parsed = urlparse(v)
+        except Exception as e:
+            raise ValueError(f"Invalid URL: {v}") from e
+
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(f"Invalid URL: {v}")
+
+        # P0-3: Require HTTPS
+        if parsed.scheme.lower() != "https":
+            raise ValueError(f"vault_url must use HTTPS protocol, got: {parsed.scheme}://")
+
+        # Normalize: strip trailing slash
+        return v.rstrip("/")
+
+    @model_validator(mode="after")
+    def validate_keyvault_requirements(self) -> "SecretsConfig":
+        """Validate that keyvault source has required fields."""
+        if self.source == "keyvault":
+            if not self.vault_url:
+                raise ValueError("vault_url is required when source is 'keyvault'")
+            if not self.mapping:
+                raise ValueError("mapping is required when source is 'keyvault' (cannot be empty)")
+        return self
 
 
 class SecretFingerprintError(Exception):

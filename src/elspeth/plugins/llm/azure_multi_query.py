@@ -10,7 +10,8 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,6 +31,13 @@ from elspeth.plugins.llm.multi_query import (
     ResponseFormat,
 )
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    AzureAITracingConfig,
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.llm.validation import ValidationSuccess, validate_json_object_response
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -104,7 +112,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                   type: string
               pool_size: 4
               schema:
-                fields: dynamic
+                mode: observed
 
     Output fields per query:
         {case_study}_{criterion}_{json_field} for each output_mapping entry
@@ -178,7 +186,6 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
             audit_fields=tuple(set(base_audit) | all_audit),
             required_fields=schema_config.required_fields,
@@ -207,6 +214,11 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients: dict[str, AuditedLLMClient] = {}
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
+
+        # Tier 2: Plugin-internal tracing
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
@@ -247,6 +259,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""
@@ -333,6 +349,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         row: dict[str, Any],
         spec: QuerySpec,
         state_id: str,
+        token_id: str,
     ) -> TransformResult:
         """Process a single query (one case_study x criterion pair).
 
@@ -340,6 +357,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             row: Full input row
             spec: Query specification with input field mapping
             state_id: State ID for audit trail
+            token_id: Token ID for tracing correlation
 
         Returns:
             TransformResult with mapped output fields
@@ -347,6 +365,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Raises:
             CapacityError: On rate limit (for pooled retry)
         """
+        import time
+
+        start_time = time.monotonic()
         # 1. Build synthetic row for PromptTemplate
         # Templates use {{ row.input_1 }}, {{ row.criterion }}, {{ row.original }}, {{ lookup }}
         # This preserves PromptTemplate's audit metadata (template_hash, variables_hash)
@@ -391,24 +412,38 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Add response_format (standard JSON mode or structured with schema)
         llm_kwargs["response_format"] = self._response_format_dict
 
-        try:
-            response = llm_client.chat_completion(**llm_kwargs)
-        except RateLimitError as e:
-            raise CapacityError(429, str(e)) from e
-        except LLMClientError as e:
-            # Re-raise retryable errors (NetworkError, ServerError) - let pool retry
-            # Return error for non-retryable (ContentPolicyError, ContextLengthError)
-            if e.retryable:
-                raise  # Pool catches LLMClientError and applies AIMD retry
-            return TransformResult.error(
-                {
-                    "reason": "llm_call_failed",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "query": spec.output_prefix,
-                },
-                retryable=False,
-            )
+        # Wrap LLM call with Tier 2 tracing if configured
+        with self._create_langfuse_trace(token_id, row) as trace:
+            try:
+                response = llm_client.chat_completion(**llm_kwargs)
+            except RateLimitError as e:
+                raise CapacityError(429, str(e)) from e
+            except LLMClientError as e:
+                # Re-raise retryable errors (NetworkError, ServerError) - let pool retry
+                # Return error for non-retryable (ContentPolicyError, ContextLengthError)
+                if e.retryable:
+                    raise  # Pool catches LLMClientError and applies AIMD retry
+                return TransformResult.error(
+                    {
+                        "reason": "llm_call_failed",
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "query": spec.output_prefix,
+                    },
+                    retryable=False,
+                )
+
+            # Record to Langfuse after successful LLM call
+            if trace is not None:
+                latency_ms = (time.monotonic() - start_time) * 1000
+                self._record_langfuse_generation(
+                    trace=trace,
+                    prompt=rendered.prompt,
+                    response_content=response.content,
+                    model=self._model,
+                    usage=response.usage,
+                    latency_ms=latency_ms,
+                )
 
         # 6. Check for response truncation BEFORE parsing
         # If completion_tokens equals max_tokens, the response was likely truncated
@@ -590,8 +625,11 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         if ctx.state_id is None:
             raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
 
+        # Extract token_id for tracing correlation
+        token_id = ctx.token.token_id if ctx.token is not None else "unknown"
+
         try:
-            return self._process_single_row_internal(row, ctx.state_id)
+            return self._process_single_row_internal(row, ctx.state_id, token_id)
         finally:
             # Clean up cached clients for this state_id
             with self._llm_clients_lock:
@@ -601,6 +639,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self,
         row: dict[str, Any],
         state_id: str,
+        token_id: str,
     ) -> TransformResult:
         """Internal row processing with explicit state_id.
 
@@ -609,6 +648,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Args:
             row: Input row with all case study fields
             state_id: State ID for audit trail
+            token_id: Token ID for tracing correlation
 
         Returns:
             TransformResult with all query results merged, or error
@@ -617,9 +657,9 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # P3-2026-02-02: Parallel mode returns pool context for audit trail
         pool_context: dict[str, Any] | None = None
         if self._executor is not None:
-            results, pool_context = self._execute_queries_parallel(row, state_id)
+            results, pool_context = self._execute_queries_parallel(row, state_id, token_id)
         else:
-            results = self._execute_queries_sequential(row, state_id)
+            results = self._execute_queries_sequential(row, state_id, token_id)
 
         # Check for failures (all-or-nothing for this row)
         failed = [(spec, r) for spec, r in zip(self._query_specs, results, strict=True) if r.status != "success"]
@@ -670,6 +710,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self,
         row: dict[str, Any],
         state_id: str,
+        token_id: str,
     ) -> tuple[list[TransformResult], dict[str, Any]]:
         """Execute queries in parallel via PooledExecutor with AIMD retry.
 
@@ -681,6 +722,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Args:
             row: The input row data
             state_id: State ID for audit trail (shared across all queries for this row)
+            token_id: Token ID for tracing correlation
 
         Returns:
             Tuple of:
@@ -698,7 +740,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Uniqueness comes from call_index allocated by recorder
         contexts = [
             RowContext(
-                row={"original_row": row, "spec": spec},
+                row={"original_row": row, "spec": spec, "token_id": token_id},
                 state_id=state_id,
                 row_index=i,
             )
@@ -714,6 +756,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                 work["original_row"],
                 work["spec"],
                 work_state_id,
+                work["token_id"],
             ),
         )
 
@@ -744,6 +787,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self,
         row: dict[str, Any],
         state_id: str,
+        token_id: str,
     ) -> list[TransformResult]:
         """Execute queries sequentially (fallback when no executor).
 
@@ -753,6 +797,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         Args:
             row: The input row data
             state_id: State ID for audit trail
+            token_id: Token ID for tracing correlation
 
         Returns:
             List of TransformResults in query spec order
@@ -761,7 +806,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         for spec in self._query_specs:
             try:
-                result = self._process_single_query(row, spec, state_id)
+                result = self._process_single_query(row, spec, state_id, token_id)
             except CapacityError as e:
                 # No retry in sequential mode - fail immediately
                 result = TransformResult.error(
@@ -775,8 +820,87 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
         return results
 
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Type narrowing for mypy - caller guarantees this is not None
+        assert self._tracing_config is not None
+        tracing_config = self._tracing_config
+
+        errors = validate_tracing_config(tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return
+
+        match tracing_config.provider:
+            case "azure_ai":
+                self._setup_azure_ai_tracing(logger, tracing_config)
+            case "langfuse":
+                self._setup_langfuse_tracing(logger, tracing_config)
+            case "none" | _:
+                pass
+
+    def _setup_azure_ai_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Azure AI tracing."""
+        try:
+            from opentelemetry import trace as otel_trace
+
+            if otel_trace.get_tracer_provider().__class__.__name__ != "ProxyTracerProvider":
+                logger.warning(
+                    "Existing OpenTelemetry tracer detected - Azure AI tracing may conflict",
+                    existing_provider=otel_trace.get_tracer_provider().__class__.__name__,
+                )
+
+            from elspeth.plugins.llm.azure import _configure_azure_monitor
+
+            success = _configure_azure_monitor(tracing_config)
+            if success:
+                self._tracing_active = True
+                logger.info(
+                    "Azure AI tracing initialized",
+                    provider="azure_ai",
+                    content_recording=tracing_config.enable_content_recording if isinstance(tracing_config, AzureAITracingConfig) else None,
+                )
+
+        except ImportError:
+            logger.warning(
+                "Azure AI tracing requested but package not installed",
+                hint="Install with: uv pip install elspeth[tracing-azure]",
+            )
+
+    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Langfuse tracing."""
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+
+            if not isinstance(tracing_config, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=tracing_config.public_key,
+                secret_key=tracing_config.secret_key,
+                host=tracing_config.host,
+            )
+            self._tracing_active = True
+
+            logger.info("Langfuse tracing initialized", provider="langfuse", host=tracing_config.host)
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
+
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure first
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -789,3 +913,110 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         with self._llm_clients_lock:
             self._llm_clients.clear()
         self._underlying_client = None
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
+
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for an LLM call.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+
+        Example:
+            with self._create_langfuse_trace(token_id, row) as trace:
+                response = self._call_llm(...)
+                if trace:
+                    self._record_langfuse_generation(trace, prompt, response, ...)
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "model": self._model,
+            },
+        )
+        yield trace
+        # Note: Langfuse v2 traces auto-close when context exits
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record an LLM generation in Langfuse.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            prompt: The prompt sent to the LLM
+            response_content: The response received
+            model: Model/deployment name
+            usage: Token usage dict with prompt_tokens/completion_tokens
+            latency_ms: Call latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "llm_call",
+            "model": model,
+            "input": prompt,
+            "output": response_content,
+        }
+
+        if usage:
+            generation_kwargs["usage"] = {
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+            }
+
+        if latency_ms is not None:
+            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        # Record to Langfuse - log but don't crash on failure (telemetry is not critical path)
+        try:
+            trace.generation(**generation_kwargs)
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning(
+                "Failed to record Langfuse generation",
+                error=str(e),
+                model=model,
+            )

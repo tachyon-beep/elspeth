@@ -7,7 +7,8 @@ Uses BatchTransformMixin for concurrent row processing with FIFO output ordering
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,12 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.base import LLMConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
@@ -37,6 +44,9 @@ class OpenRouterConfig(LLMConfig):
     - api_key: OpenRouter API key (required)
     - base_url: API base URL (default: https://openrouter.ai/api/v1)
     - timeout_seconds: Request timeout (default: 60.0)
+
+    Tier 2 tracing:
+    - tracing: Optional Langfuse configuration (azure_ai not supported for OpenRouter)
     """
 
     api_key: str = Field(..., description="OpenRouter API key")
@@ -45,6 +55,14 @@ class OpenRouterConfig(LLMConfig):
         description="OpenRouter API base URL",
     )
     timeout_seconds: float = Field(default=60.0, gt=0, description="Request timeout")
+
+    # Tier 2: Plugin-internal tracing (optional, Langfuse only)
+    # Azure AI tracing is NOT supported - it auto-instruments the OpenAI SDK,
+    # but OpenRouter uses HTTP directly via httpx.
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (langfuse only - azure_ai not supported)",
+    )
 
 
 class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
@@ -88,7 +106,7 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
                 Analyze: {{ row.text }}
               api_key: "${OPENROUTER_API_KEY}"
               schema:
-                fields: dynamic
+                mode: observed
     """
 
     name = "openrouter_llm"
@@ -150,7 +168,6 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,
@@ -169,6 +186,11 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
 
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
+
+        # Tier 2: Plugin-internal tracing (Langfuse only)
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
 
     def connect_output(
         self,
@@ -200,16 +222,174 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder, telemetry, and rate limit context.
+        """Capture recorder, telemetry, rate limit context, and initialize tracing.
 
         Called by the engine at pipeline start. Captures the landscape
         recorder, run_id, telemetry callback, and rate limiter for use in worker threads.
+        Also initializes Tier 2 tracing if configured.
         """
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for OpenRouter service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("openrouter") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider.
+
+        OpenRouter uses HTTP directly (not the OpenAI SDK), so Azure AI
+        auto-instrumentation is NOT supported. Only Langfuse (manual spans)
+        is available.
+        """
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Type narrowing - caller ensures config is not None
+        if self._tracing_config is None:
+            return
+
+        # Validate configuration completeness
+        errors = validate_tracing_config(self._tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return  # Don't attempt setup with incomplete config
+
+        match self._tracing_config.provider:
+            case "azure_ai":
+                # Azure AI tracing NOT supported for OpenRouter
+                logger.warning(
+                    "Azure AI tracing not supported for OpenRouter - use Langfuse instead",
+                    provider="azure_ai",
+                    hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
+                )
+                return
+            case "langfuse":
+                self._setup_langfuse_tracing(logger)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_langfuse_tracing(self, logger: Any) -> None:
+        """Initialize Langfuse tracing.
+
+        Langfuse requires manual span creation around LLM calls.
+        The Langfuse client is stored for use in _process_row().
+        """
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
+
+            cfg = self._tracing_config
+            if not isinstance(cfg, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=cfg.public_key,
+                secret_key=cfg.secret_key,
+                host=cfg.host,
+            )
+            self._tracing_active = True
+
+            logger.info(
+                "Langfuse tracing initialized",
+                provider="langfuse",
+                host=cfg.host,
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
+
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for an LLM call.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+
+        Example:
+            with self._create_langfuse_trace(token_id, row) as trace:
+                response = self._call_llm(...)
+                if trace:
+                    self._record_langfuse_generation(trace, prompt, response, ...)
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "model": self._model,
+            },
+        )
+        try:
+            yield trace
+        finally:
+            # Trace auto-closes, but we ensure it's ended
+            pass
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        prompt: str,
+        response_content: str,
+        model: str,
+        usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record an LLM generation in Langfuse.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            prompt: The prompt sent to the LLM
+            response_content: The response received
+            model: Model name
+            usage: Token usage dict with prompt_tokens/completion_tokens
+            latency_ms: Call latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "llm_call",
+            "model": model,
+            "input": prompt,
+            "output": response_content,
+        }
+
+        if usage:
+            generation_kwargs["usage"] = {
+                "input": usage.get("prompt_tokens", 0),
+                "output": usage.get("completion_tokens", 0),
+                "total": usage.get("total_tokens", 0),
+            }
+
+        if latency_ms is not None:
+            generation_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+        trace.generation(**generation_kwargs)
 
     def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
         """Accept a row for processing.
@@ -296,68 +476,86 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             raise RuntimeError("OpenRouter LLM transform requires state_id. Ensure transform is executed through the engine.")
 
         try:
+            import time
+
             http_client = self._get_http_client(ctx.state_id)
 
-            # 4. Call OpenRouter API (EXTERNAL - wrap)
-            try:
-                response = http_client.post(
-                    "/chat/completions",
-                    json=request_body,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
-                # Matching Azure pattern: non-retryable errors return TransformResult.error()
-                status_code = e.response.status_code
-                if status_code == 429:
-                    raise RateLimitError(f"Rate limited: {e}") from e
-                elif status_code >= 500:
-                    raise ServerError(f"Server error ({status_code}): {e}") from e
-                # Non-retryable HTTP errors (4xx except 429) return error result
-                return TransformResult.error(
-                    {"reason": "api_call_failed", "error": str(e), "status_code": status_code},
-                    retryable=False,
-                )
-            except httpx.RequestError as e:
-                # Network errors (timeout, connection refused) are retryable
-                raise NetworkError(f"Network error: {e}") from e
+            # 4. Call OpenRouter API with Tier 2 tracing (EXTERNAL - wrap)
+            token_id = ctx.token.token_id if ctx.token else "unknown"
+            start_time = time.monotonic()
 
-            # 5. Parse JSON response (EXTERNAL DATA - wrap)
-            try:
-                data = response.json()
-            except (ValueError, TypeError) as e:
-                error_reason_json: TransformErrorReason = {
-                    "reason": "invalid_json_response",
-                    "error": f"Response is not valid JSON: {e}",
-                    "content_type": response.headers.get("content-type", "unknown"),
-                }
-                if response.text:
-                    error_reason_json["body_preview"] = response.text[:500]
-                return TransformResult.error(error_reason_json, retryable=False)
-
-            # 6. Extract content from response (EXTERNAL DATA - wrap)
-            try:
-                choices = data["choices"]
-                if not choices:
+            with self._create_langfuse_trace(token_id, row) as trace:
+                try:
+                    response = http_client.post(
+                        "/chat/completions",
+                        json=request_body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    # Retryable HTTP errors (429, 503) must RAISE exceptions for engine RetryManager
+                    # Matching Azure pattern: non-retryable errors return TransformResult.error()
+                    status_code = e.response.status_code
+                    if status_code == 429:
+                        raise RateLimitError(f"Rate limited: {e}") from e
+                    elif status_code >= 500:
+                        raise ServerError(f"Server error ({status_code}): {e}") from e
+                    # Non-retryable HTTP errors (4xx except 429) return error result
                     return TransformResult.error(
-                        {"reason": "empty_choices", "response": data},
+                        {"reason": "api_call_failed", "error": str(e), "status_code": status_code},
                         retryable=False,
                     )
-                content = choices[0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as e:
-                return TransformResult.error(
-                    {
-                        "reason": "malformed_response",
-                        "error": f"{type(e).__name__}: {e}",
-                        "response_keys": list(data.keys()) if isinstance(data, dict) else None,
-                    },
-                    retryable=False,
-                )
+                except httpx.RequestError as e:
+                    # Network errors (timeout, connection refused) are retryable
+                    raise NetworkError(f"Network error: {e}") from e
 
-            # OpenRouter can return {"usage": null} or omit usage entirely.
-            # Use `or {}` to handle both missing AND null cases.
-            usage = data.get("usage") or {}
+                # 5. Parse JSON response (EXTERNAL DATA - wrap)
+                try:
+                    data = response.json()
+                except (ValueError, TypeError) as e:
+                    error_reason_json: TransformErrorReason = {
+                        "reason": "invalid_json_response",
+                        "error": f"Response is not valid JSON: {e}",
+                        "content_type": response.headers.get("content-type", "unknown"),
+                    }
+                    if response.text:
+                        error_reason_json["body_preview"] = response.text[:500]
+                    return TransformResult.error(error_reason_json, retryable=False)
+
+                # 6. Extract content from response (EXTERNAL DATA - wrap)
+                try:
+                    choices = data["choices"]
+                    if not choices:
+                        return TransformResult.error(
+                            {"reason": "empty_choices", "response": data},
+                            retryable=False,
+                        )
+                    content = choices[0]["message"]["content"]
+                except (KeyError, IndexError, TypeError) as e:
+                    return TransformResult.error(
+                        {
+                            "reason": "malformed_response",
+                            "error": f"{type(e).__name__}: {e}",
+                            "response_keys": list(data.keys()) if isinstance(data, dict) else None,
+                        },
+                        retryable=False,
+                    )
+
+                # OpenRouter can return {"usage": null} or omit usage entirely.
+                # Use `or {}` to handle both missing AND null cases.
+                usage = data.get("usage") or {}
+
+                # Record in Langfuse if tracing is active
+                if trace is not None:
+                    latency_ms = (time.monotonic() - start_time) * 1000
+                    self._record_langfuse_generation(
+                        trace=trace,
+                        prompt=rendered.prompt,
+                        response_content=content,
+                        model=data.get("model", self._model),
+                        usage=usage,
+                        latency_ms=latency_ms,
+                    )
 
             # 7. Build output row (OUR CODE - let exceptions crash)
             output = dict(row)
@@ -409,7 +607,11 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
             return self._http_clients[state_id]
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -418,3 +620,18 @@ class OpenRouterLLMTransform(BaseTransform, BatchTransformMixin):
         # Clear cached HTTP clients
         with self._http_clients_lock:
             self._http_clients.clear()
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))

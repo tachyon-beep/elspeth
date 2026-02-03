@@ -43,12 +43,12 @@ class TestAggregationRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         agg_config = {
             "trigger": {"count": 1},
             "output_mode": "transform",
-            "options": {"schema": {"fields": "dynamic"}},
-            "schema": {"fields": "dynamic"},
+            "options": {"schema": {"mode": "observed"}},
+            "schema": {"mode": "observed"},
         }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
         graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=agg_config)
@@ -456,6 +456,7 @@ class TestAggregationRecoveryIntegration:
         assert evaluator.should_trigger() is False
 
         # Create checkpoint with aggregation state
+        # Note: token format must match v1.1 checkpoint schema (all fields required)
         sum_agg_state: dict[str, Any] = {
             "tokens": [
                 {
@@ -463,6 +464,9 @@ class TestAggregationRecoveryIntegration:
                     "row_id": t.row_id,
                     "branch_name": None,
                     "row_data": {},
+                    "fork_group_id": None,
+                    "join_group_id": None,
+                    "expand_group_id": None,
                 }
                 for t in tokens
             ],

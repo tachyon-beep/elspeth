@@ -48,7 +48,7 @@ class PassthroughTransform(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -98,7 +98,7 @@ class RecordingExporter:
 def create_minimal_graph() -> ExecutionGraph:
     """Create a minimal valid execution graph."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
     graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -124,6 +124,7 @@ def create_mock_source(rows: list[dict[str, Any]]) -> MagicMock:
 
     mock_source.load.return_value = iter([SourceRow.valid(row) for row in rows])
     mock_source.get_field_resolution.return_value = None
+    mock_source.get_schema_contract.return_value = None
 
     return mock_source
 
@@ -378,7 +379,7 @@ class TestTelemetryOnRunFailure:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Simulated transform failure")
@@ -668,9 +669,9 @@ class TestTelemetryPartialStatus:
         mock_settings.retry.max_delay_seconds = 60.0
         mock_settings.retry.exponential_base = 2.0
 
-        # Patch _export_landscape to raise an exception
+        # Patch export_landscape module function to raise an exception
         with (
-            patch.object(orchestrator, "_export_landscape", side_effect=RuntimeError("Simulated export failure")),
+            patch("elspeth.engine.orchestrator.core.export_landscape", side_effect=RuntimeError("Simulated export failure")),
             pytest.raises(RuntimeError, match="Simulated export failure"),
         ):
             orchestrator.run(config, graph=create_minimal_graph(), settings=mock_settings, payload_store=payload_store)

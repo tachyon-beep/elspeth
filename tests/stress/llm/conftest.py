@@ -24,7 +24,7 @@ from elspeth.plugins.context import PluginContext
 from tests.stress.conftest import ChaosLLMHTTPFixture
 
 # Dynamic schema for LLM transforms
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 @dataclass

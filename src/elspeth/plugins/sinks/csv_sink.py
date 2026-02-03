@@ -7,6 +7,8 @@ IMPORTANT: Sinks use allow_coercion=False to enforce that transforms
 output correct types. Wrong types = upstream bug = crash.
 """
 
+from __future__ import annotations
+
 import csv
 import hashlib
 import os
@@ -16,7 +18,9 @@ from typing import IO, TYPE_CHECKING, Any, Literal
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.header_modes import HeaderMode, resolve_headers
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
@@ -55,10 +59,10 @@ class CSVSink(BaseSink):
         validate_input: Validate incoming rows against schema (default: False)
         mode: "write" (truncate, default) or "append" (add to existing file)
 
-    The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields (headers inferred from first row)
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]} - headers from schema
-        - Free: {"mode": "free", "fields": ["id: int"]} - headers from schema, extras allowed
+    The schema can be (all use infer-and-lock pattern):
+        - Fixed: {"mode": "fixed", "fields": [...]} - columns from config, extras rejected
+        - Flexible: {"mode": "flexible", "fields": [...]} - declared + first-row extras, then locked
+        - Observed: {"mode": "observed"} - columns from first row, then locked
 
     Append mode behavior:
         - If file exists: reads headers from it and appends rows without header
@@ -80,7 +84,7 @@ class CSVSink(BaseSink):
         """
         self._mode = "append"
 
-    def validate_output_target(self) -> "OutputValidationResult":
+    def validate_output_target(self) -> OutputValidationResult:
         """Validate existing CSV file headers against configured schema.
 
         Checks that:
@@ -111,7 +115,7 @@ class CSVSink(BaseSink):
             return OutputValidationResult.success()
 
         # Dynamic schema = no validation needed
-        if self._schema_config.is_dynamic:
+        if self._schema_config.is_observed:
             return OutputValidationResult.success(target_fields=existing)
 
         # Get expected fields from schema (guaranteed non-None when not dynamic)
@@ -133,23 +137,23 @@ class CSVSink(BaseSink):
 
         existing_set, expected_set = set(existing), set(expected)
 
-        if self._schema_config.mode == "strict":
-            # Strict: exact match including order
+        if self._schema_config.mode == "fixed":
+            # Fixed: exact match including order
             if existing != expected:
                 return OutputValidationResult.failure(
-                    message="CSV headers do not match schema (strict mode)",
+                    message="CSV headers do not match schema (fixed mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(expected_set - existing_set),
                     extra_fields=sorted(existing_set - expected_set),
                     order_mismatch=(existing_set == expected_set),
                 )
-        else:  # mode == "free"
-            # Free: schema fields must exist (extras allowed)
+        else:  # mode == "flexible"
+            # Flexible: schema fields must exist (extras allowed)
             missing = expected_set - existing_set
             if missing:
                 return OutputValidationResult.failure(
-                    message="CSV missing required schema fields (free mode)",
+                    message="CSV missing required schema fields (flexible mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(missing),
@@ -167,7 +171,7 @@ class CSVSink(BaseSink):
         self._validate_input = cfg.validate_input
         self._mode = cfg.mode
 
-        # Display header configuration
+        # Display header configuration (legacy options)
         self._display_headers = cfg.display_headers
         self._restore_source_headers = cfg.restore_source_headers
         # Populated lazily on first write if restore_source_headers=True
@@ -176,17 +180,24 @@ class CSVSink(BaseSink):
         self._resolved_display_headers: dict[str, str] | None = None
         self._display_headers_resolved: bool = False  # Track if we've attempted resolution
 
+        # New header mode configuration (takes precedence over legacy options)
+        self._headers_mode: HeaderMode = cfg.headers_mode
+        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
+
+        # Output contract for header resolution (set via set_output_contract)
+        self._output_contract: SchemaContract | None = None
+
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config
 
-        # CSV requires fixed-column structure - reject schemas that allow extra fields
-        if self._schema_config.allows_extra_fields:
-            raise ValueError(
-                f"CSVSink requires fixed-column structure but schema allows_extra_fields=True "
-                f"(mode={self._schema_config.mode!r}, is_dynamic={self._schema_config.is_dynamic}). "
-                f"Use JSONSink for flexible schemas, or use mode='strict' for CSV output."
-            )
+        # CSV supports all schema modes via infer-and-lock:
+        # - mode='fixed': columns from config, extras rejected at write time
+        # - mode='flexible': declared columns + extras from first row, then locked
+        # - mode='observed': columns from first row, then locked
+        #
+        # DictWriter's default extrasaction='raise' enforces the lock - any row
+        # with fields not in the established fieldnames will error.
 
         # CRITICAL: allow_coercion=False - wrong types are bugs, not data to fix
         # Sinks receive PIPELINE DATA (already validated by source)
@@ -226,7 +237,7 @@ class CSVSink(BaseSink):
             )
 
         # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
@@ -234,6 +245,10 @@ class CSVSink(BaseSink):
         # Lazy resolution of display headers from Landscape
         # Must happen AFTER source iteration begins (when field resolution is recorded)
         self._resolve_display_headers_if_needed(ctx)
+
+        # Lazy resolution of contract from context for headers: original mode
+        # ctx.contract is set by orchestrator after first valid source row
+        self._resolve_contract_from_context_if_needed(ctx)
 
         # Lazy initialization - open file on first write
         if self._file is None:
@@ -295,7 +310,7 @@ class CSVSink(BaseSink):
             if existing_fieldnames:
                 # Validate headers against explicit schema before opening
                 # Dynamic schema = no validation (file headers are authoritative)
-                if not self._schema_config.is_dynamic:
+                if not self._schema_config.is_observed:
                     validation = self.validate_output_target()
                     if not validation.valid:
                         # Build clear error message
@@ -359,10 +374,10 @@ class CSVSink(BaseSink):
     def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:
         """Get data field names and display names for CSV output.
 
-        When schema is explicit, field names come from schema definition.
-        This ensures all defined fields (including optional ones) are present.
-
-        When schema is dynamic, falls back to inferring from row keys.
+        Field selection depends on schema mode:
+        - fixed: Only declared fields (extras rejected)
+        - flexible: Declared fields first, then extras from first row
+        - observed: All fields from first row (infer and lock)
 
         Returns:
             Tuple of (data_fields, display_fields):
@@ -370,12 +385,24 @@ class CSVSink(BaseSink):
             - display_fields: Display names for CSV header row
             When no display headers are configured, both lists are identical.
         """
-        # Get base field names from schema or row
-        if not self._schema_config.is_dynamic and self._schema_config.fields:
-            # Explicit schema: use field names from schema definition
-            data_fields = [field_def.name for field_def in self._schema_config.fields]
+        # Get base field names based on schema mode
+        if self._schema_config.is_observed:
+            # Observed mode: infer all fields from row keys
+            data_fields = list(row.keys())
+        elif self._schema_config.fields:
+            # Explicit schema: start with declared field names in schema order
+            declared_fields = [field_def.name for field_def in self._schema_config.fields]
+            declared_set = set(declared_fields)
+
+            if self._schema_config.mode == "flexible":
+                # Flexible mode: declared fields first, then extras from row
+                extras = [key for key in row if key not in declared_set]
+                data_fields = declared_fields + extras
+            else:
+                # Fixed mode: only declared fields (extras will be rejected by DictWriter)
+                data_fields = declared_fields
         else:
-            # Dynamic schema: infer from row keys
+            # Fallback (shouldn't happen with valid config): use row keys
             data_fields = list(row.keys())
 
         # Apply display header mapping if configured
@@ -391,15 +418,96 @@ class CSVSink(BaseSink):
     def _get_effective_display_headers(self) -> dict[str, str] | None:
         """Get the effective display header mapping.
 
+        Priority order:
+        1. CUSTOM mode with custom mapping from 'headers' config
+        2. ORIGINAL mode with contract - use resolve_headers()
+        3. Legacy display_headers config (explicit mapping)
+        4. Legacy restore_source_headers - resolved display headers
+        5. None (no mapping - use normalized names)
+
         Returns:
             Dict mapping normalized field name -> display name, or None if no
-            display headers are configured.
+            display headers are configured or if using NORMALIZED mode.
         """
-        if self._display_headers is not None:
-            return self._display_headers
+        # NORMALIZED mode = no display mapping
+        if self._headers_mode == HeaderMode.NORMALIZED:
+            return None
+
+        # CUSTOM mode - use custom mapping from config
+        if self._headers_mode == HeaderMode.CUSTOM:
+            if self._headers_custom_mapping is not None:
+                return self._headers_custom_mapping
+            # Fall through to legacy display_headers if custom mapping not set
+            if self._display_headers is not None:
+                return self._display_headers
+            return None
+
+        # ORIGINAL mode - use contract to resolve headers
+        # (mypy knows this is the only remaining case since HeaderMode has exactly 3 values)
+        if self._output_contract is not None:
+            # Use resolve_headers() to build mapping from contract
+            return resolve_headers(
+                contract=self._output_contract,
+                mode=HeaderMode.ORIGINAL,
+                custom_mapping=None,
+            )
+        # Fall through to legacy resolved_display_headers if no contract
         if self._resolved_display_headers is not None:
             return self._resolved_display_headers
+        # No contract and no legacy resolution - return None (fallback to normalized)
         return None
+
+    # === Contract Support ===
+
+    def set_output_contract(self, contract: SchemaContract) -> None:
+        """Set output contract for header resolution.
+
+        When headers mode is ORIGINAL, this contract is used to map
+        normalized field names back to their original source header names.
+
+        Args:
+            contract: Schema contract with field metadata including original names
+        """
+        self._output_contract = contract
+
+    def get_output_contract(self) -> SchemaContract | None:
+        """Get the output contract.
+
+        Returns:
+            The SchemaContract if set, None otherwise
+        """
+        return self._output_contract
+
+    def _resolve_contract_from_context_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve output contract from context for headers: original mode.
+
+        Called on first write() to capture ctx.contract if _output_contract is not
+        already set. This allows the new headers: original mode to work without
+        explicit orchestrator wiring of set_output_contract().
+
+        The orchestrator sets ctx.contract after the first valid source row is
+        processed (see orchestrator/core.py line ~1164). By the time write() is
+        called, the contract is available.
+
+        Note:
+            This only has effect when:
+            1. headers mode is ORIGINAL
+            2. _output_contract is not already set (via set_output_contract)
+            3. ctx.contract is available
+
+        Args:
+            ctx: Plugin context with potential contract from orchestrator
+        """
+        # Only resolve if:
+        # 1. We're in ORIGINAL mode (otherwise contract is irrelevant)
+        # 2. Contract isn't already set (explicit set_output_contract takes precedence)
+        # 3. Context has a contract to provide
+        if self._headers_mode != HeaderMode.ORIGINAL:
+            return
+        if self._output_contract is not None:
+            return  # Already set explicitly
+        if ctx.contract is not None:
+            self._output_contract = ctx.contract
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.

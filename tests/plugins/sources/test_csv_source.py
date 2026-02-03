@@ -8,7 +8,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Standard quarantine routing for tests
 QUARANTINE_SINK = "quarantine"
@@ -243,7 +243,7 @@ class TestCSVSourceQuarantineYielding:
                 "path": str(csv_file),
                 "on_validation_failure": "quarantine",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
             }
@@ -283,7 +283,7 @@ class TestCSVSourceQuarantineYielding:
                 "path": str(csv_file),
                 "on_validation_failure": "discard",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
             }
@@ -498,7 +498,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -519,7 +519,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
@@ -540,7 +540,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "columns": ["id", "name", "amount"],
             }
@@ -561,7 +561,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -580,7 +580,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
@@ -608,7 +608,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -627,7 +627,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -646,7 +646,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "columns": ["id", "name", "amount"],
             }
@@ -668,7 +668,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "columns": ["id", "name", "amount"],
             }
@@ -690,7 +690,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 # normalize_fields defaults to False
             }
@@ -710,7 +710,7 @@ class TestCSVSourceFieldNormalization:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }

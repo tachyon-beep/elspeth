@@ -115,7 +115,7 @@ class TestDatabaseConnectionErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -123,7 +123,7 @@ class TestDatabaseConnectionErrors:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -173,7 +173,7 @@ class TestDatabaseConnectionErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -181,7 +181,7 @@ class TestDatabaseConnectionErrors:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -217,7 +217,7 @@ class TestSourceFileErrors:
                 "options": {
                     "path": str(missing_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -225,7 +225,7 @@ class TestSourceFileErrors:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -259,7 +259,7 @@ class TestSourceFileErrors:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -267,7 +267,7 @@ class TestSourceFileErrors:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -303,7 +303,7 @@ class TestExitCodeConsistency:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -311,7 +311,7 @@ class TestExitCodeConsistency:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -355,7 +355,7 @@ default_sink: output
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -363,7 +363,7 @@ default_sink: output
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -409,7 +409,7 @@ class TestJsonModeErrors:
                 "options": {
                     "path": str(tmp_path / "missing.csv"),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -417,7 +417,7 @@ class TestJsonModeErrors:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },

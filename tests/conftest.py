@@ -500,7 +500,7 @@ class _TestSourceBase:
 
     # Protocol-required attributes with defaults
     # ClassVar for class-level default; __init__ creates instance attribute that shadows it
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
@@ -508,7 +508,7 @@ class _TestSourceBase:
 
     def __init__(self) -> None:
         """Initialize test source with empty config."""
-        self.config = {"schema": {"fields": "dynamic"}}
+        self.config = {"schema": {"mode": "observed"}}
 
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
@@ -531,6 +531,14 @@ class _TestSourceBase:
         """Return field resolution mapping for audit trail.
 
         Test sources don't do field normalization, so return None.
+        """
+        return None
+
+    def get_schema_contract(self) -> Any:
+        """Return schema contract for audit trail.
+
+        Test sources don't have contracts by default, so return None.
+        Override in test classes that need to provide contracts.
         """
         return None
 
@@ -647,7 +655,7 @@ class _TestSinkBase:
 
     # Protocol-required attributes with defaults
     # ClassVar for class-level default; __init__ creates instance attribute that shadows it
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     idempotent: bool = True
     node_id: str | None = None
@@ -656,7 +664,7 @@ class _TestSinkBase:
 
     def __init__(self) -> None:
         """Initialize test sink with empty config."""
-        self.config = {"schema": {"fields": "dynamic"}}
+        self.config = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
@@ -708,7 +716,7 @@ class _TestTransformBase:
 
     # Protocol-required attributes with defaults
     # ClassVar for class-level default; __init__ creates instance attribute that shadows it
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     input_schema: type[PluginSchema] = _TestSchema
     output_schema: type[PluginSchema] = _TestSchema
     node_id: str | None = None
@@ -720,7 +728,7 @@ class _TestTransformBase:
 
     def __init__(self) -> None:
         """Initialize test transform with empty config."""
-        self.config = {"schema": {"fields": "dynamic"}}
+        self.config = {"schema": {"mode": "observed"}}
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""

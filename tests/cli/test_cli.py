@@ -73,7 +73,7 @@ source:
     path: "{input_file}"
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   results:
@@ -81,7 +81,7 @@ sinks:
     options:
       path: "{output_file}"
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: str"
           - "value: str"
@@ -90,7 +90,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: results
 
@@ -133,7 +133,7 @@ source:
     path: "{input_file}"
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   results:
@@ -141,7 +141,7 @@ sinks:
     options:
       path: "{output_file}"
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: str"
           - "new_name: str"
@@ -150,7 +150,7 @@ transforms:
   - plugin: field_mapper
     options:
       schema:
-        fields: dynamic
+        mode: observed
       mapping:
         old_name: new_name
 
@@ -547,7 +547,7 @@ source:
   options:
     path: dummy.csv
     schema:
-      mode: free
+      mode: flexible
 sinks:
   output:
     plugin: csv
@@ -616,19 +616,19 @@ source:
     path: dummy.csv
     on_validation_failure: quarantine
     schema:
-      fields: dynamic
+      mode: observed
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 default_sink: output
@@ -689,19 +689,19 @@ source:
     path: dummy.csv
     on_validation_failure: quarantine
     schema:
-      fields: dynamic
+      mode: observed
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 default_sink: output
@@ -811,19 +811,19 @@ source:
     path: dummy.csv
     on_validation_failure: quarantine
     schema:
-      fields: dynamic
+      mode: observed
 transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 sinks:
   output:
     plugin: csv
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 default_sink: output

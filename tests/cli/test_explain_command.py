@@ -21,7 +21,7 @@ from elspeth.core.landscape import explain as explain_lineage
 
 runner = CliRunner()
 
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestExplainCommandBasics:

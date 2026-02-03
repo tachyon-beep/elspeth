@@ -978,16 +978,16 @@ class ExecutionGraph:
 
         # Rule 1: Dynamic schemas (None) bypass type validation
         if producer_schema is None or consumer_schema is None:
-            return  # Dynamic schema - compatible with anything
+            return  # Observed schema - compatible with anything
 
-        # Handle dynamic schemas (no explicit fields + extra='allow')
+        # Handle observed schemas (no explicit fields + extra='allow')
         # These are created by _create_dynamic_schema and accept anything
         # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
         # Direct access is correct per Tier 1 trust model - missing key would be our bug.
-        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config["extra"] == "allow"
-        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config["extra"] == "allow"
-        if producer_is_dynamic or consumer_is_dynamic:
-            return  # Dynamic schemas bypass static type validation
+        producer_is_observed = len(producer_schema.model_fields) == 0 and producer_schema.model_config["extra"] == "allow"
+        consumer_is_observed = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config["extra"] == "allow"
+        if producer_is_observed or consumer_is_observed:
+            return  # Observed schemas bypass static type validation
 
         # Rule 2: Full compatibility check (missing fields, type mismatches, extra fields)
         result = check_compatibility(producer_schema, consumer_schema)
@@ -1038,25 +1038,25 @@ class ExecutionGraph:
                 schema = self._get_effective_producer_schema(from_id)
                 all_schemas.append((from_id, schema))
 
-            # For multi-input nodes, check for mixed dynamic/explicit schemas first
+            # For multi-input nodes, check for mixed observed/explicit schemas first
             # BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
-            # Mixed dynamic/explicit branches create semantic mismatches that cause runtime failures
+            # Mixed observed/explicit branches create semantic mismatches that cause runtime failures
             if len(all_schemas) > 1:
-                dynamic_branches = [(nid, s) for nid, s in all_schemas if self._is_dynamic_schema(s)]
-                explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_dynamic_schema(s)]
+                observed_branches = [(nid, s) for nid, s in all_schemas if self._is_observed_schema(s)]
+                explicit_branches = [(nid, s) for nid, s in all_schemas if not self._is_observed_schema(s)]
 
-                if dynamic_branches and explicit_branches:
-                    # Mixed dynamic/explicit - reject with clear error
-                    dynamic_names = [nid for nid, _ in dynamic_branches]
-                    # Schema is guaranteed non-None here (explicit_branches filtered out dynamic/None)
+                if observed_branches and explicit_branches:
+                    # Mixed observed/explicit - reject with clear error
+                    observed_names = [nid for nid, _ in observed_branches]
+                    # Schema is guaranteed non-None here (explicit_branches filtered out observed/None)
                     explicit_names = [f"{nid} ({s.__name__})" for nid, s in explicit_branches if s is not None]
                     raise ValueError(
-                        f"{node_info.node_type.capitalize()} '{node_id}' has mixed dynamic/explicit schemas - "
-                        f"this is not allowed because dynamic branches may produce rows missing fields "
+                        f"{node_info.node_type.capitalize()} '{node_id}' has mixed observed/explicit schemas - "
+                        f"this is not allowed because observed branches may produce rows missing fields "
                         f"expected by downstream consumers. "
-                        f"Dynamic branches: {dynamic_names}, explicit branches: {explicit_names}. "
+                        f"Observed branches: {observed_names}, explicit branches: {explicit_names}. "
                         f"Fix: ensure all branches produce explicit schemas with compatible fields, "
-                        f"or all branches produce dynamic schemas."
+                        f"or all branches produce observed schemas."
                     )
 
                 # All explicit - verify structural compatibility
@@ -1065,38 +1065,38 @@ class ExecutionGraph:
                     for _other_id, other_schema in explicit_branches[1:]:
                         compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
                         if not compatible:
-                            # Schemas are guaranteed non-None here (explicit_branches filtered out dynamic/None)
-                            first_name = first_schema.__name__ if first_schema is not None else "dynamic"
-                            other_name = other_schema.__name__ if other_schema is not None else "dynamic"
+                            # Schemas are guaranteed non-None here (explicit_branches filtered out observed/None)
+                            first_name = first_schema.__name__ if first_schema is not None else "observed"
+                            other_name = other_schema.__name__ if other_schema is not None else "observed"
                             raise ValueError(
                                 f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
                                 f"multiple inputs - this is a graph construction bug. "
                                 f"First input: {first_name}, other input: {other_name}. {error_msg}"
                             )
 
-            # Return first schema (all are now either all-dynamic or all-explicit-compatible)
+            # Return first schema (all are now either all-observed or all-explicit-compatible)
             return all_schemas[0][1]
 
-        # Not a pass-through node and no schema - return None (dynamic)
+        # Not a pass-through node and no schema - return None (observed)
         return None
 
-    def _is_dynamic_schema(self, schema: type[PluginSchema] | None) -> bool:
-        """Check if a schema is dynamic (accepts any fields).
+    def _is_observed_schema(self, schema: type[PluginSchema] | None) -> bool:
+        """Check if a schema is observed (accepts any fields, types inferred from data).
 
-        A schema is dynamic if:
+        A schema is observed if:
         - It is None (unspecified output_schema)
-        - It has no fields and allows extra fields (structural dynamic)
+        - It has no fields and allows extra fields (structural observed)
 
         Args:
             schema: Schema class or None
 
         Returns:
-            True if schema is dynamic, False if explicit
+            True if schema is observed, False if explicit (fixed/flexible)
         """
         if schema is None:
             return True
 
-        # Structural dynamic: no fields + extra="allow"
+        # Structural observed: no fields + extra="allow"
         # NOTE: We control all schemas via PluginSchema base class which sets model_config["extra"].
         # Direct access is correct per Tier 1 trust model - missing key would be our bug.
         return len(schema.model_fields) == 0 and schema.model_config["extra"] == "allow"
@@ -1106,23 +1106,23 @@ class ExecutionGraph:
     ) -> tuple[bool, str]:
         """Check if two schemas are structurally compatible (not by class identity).
 
-        Uses check_compatibility() for structural comparison. Handles dynamic schemas
+        Uses check_compatibility() for structural comparison. Handles observed schemas
         which are compatible with anything.
 
         Args:
-            schema_a: First schema (or None for dynamic)
-            schema_b: Second schema (or None for dynamic)
+            schema_a: First schema (or None for observed)
+            schema_b: Second schema (or None for observed)
 
         Returns:
             Tuple of (is_compatible, error_message). If compatible, error_message is empty.
         """
-        # Both dynamic - compatible
-        if self._is_dynamic_schema(schema_a) and self._is_dynamic_schema(schema_b):
+        # Both observed - compatible
+        if self._is_observed_schema(schema_a) and self._is_observed_schema(schema_b):
             return True, ""
 
-        # One dynamic, one explicit - for general compatibility, allow this
+        # One observed, one explicit - for general compatibility, allow this
         # (Pass-through nodes use stricter checking via _check_passthrough_schema_homogeneity)
-        if self._is_dynamic_schema(schema_a) or self._is_dynamic_schema(schema_b):
+        if self._is_observed_schema(schema_a) or self._is_observed_schema(schema_b):
             return True, ""
 
         # Both explicit schemas - same class is trivially compatible
@@ -1173,8 +1173,8 @@ class ExecutionGraph:
             other_schema = self._get_effective_producer_schema(from_id)
             compatible, error_msg = self._schemas_structurally_compatible(first_schema, other_schema)
             if not compatible:
-                first_name = first_schema.__name__ if first_schema else "dynamic"
-                other_name = other_schema.__name__ if other_schema else "dynamic"
+                first_name = first_schema.__name__ if first_schema else "observed"
+                other_name = other_schema.__name__ if other_schema else "observed"
                 raise ValueError(
                     f"Coalesce '{coalesce_id}' receives incompatible schemas from "
                     f"multiple branches: first branch has {first_name}, "
@@ -1214,13 +1214,9 @@ class ExecutionGraph:
             return None
 
         # Parse the schema dict into SchemaConfig
-        # Handle both raw dict form and serialized form
+        # Handle raw dict form (schema_dict should always be a dict now)
         if isinstance(schema_dict, dict):
             return SchemaConfig.from_dict(schema_dict)
-
-        # Dynamic schema stored as string
-        if schema_dict == "dynamic":
-            return SchemaConfig.from_dict({"fields": "dynamic"})
 
         return None
 
@@ -1229,8 +1225,8 @@ class ExecutionGraph:
 
         Priority:
         1. Explicit guaranteed_fields in schema config
-        2. Declared fields in free/strict mode schemas
-        3. Empty set for pure dynamic schemas
+        2. Declared fields in flexible/fixed mode schemas
+        3. Empty set for observed schemas
 
         Args:
             node_id: Node ID to get guarantees from

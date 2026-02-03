@@ -3,16 +3,16 @@
 This module provides the configuration types that allow users to specify
 plugin schemas in their pipeline configuration files. Schemas can be:
 
-1. Dynamic: Accept any fields (logged for audit)
-2. Strict: Accept exactly the specified fields (no more, no less)
-3. Free: Accept at least the specified fields (extras allowed)
+1. Observed: Accept any fields, types inferred from data (logged for audit)
+2. Fixed: Accept exactly the specified fields (no more, no less)
+3. Flexible: Accept at least the specified fields (extras allowed)
 
 Example YAML:
     plugins:
       csv_source:
         path: data.csv
         schema:
-          mode: strict
+          mode: fixed
           fields:
             - "id: int"
             - "name: str"
@@ -180,7 +180,7 @@ def _validate_contract_fields_subset(
 ) -> None:
     """Validate that contract fields are subsets of declared fields.
 
-    For explicit schemas (mode=strict/free), contract fields like guaranteed_fields,
+    For explicit schemas (mode=fixed/flexible), contract fields like guaranteed_fields,
     required_fields, and audit_fields must reference fields that actually exist in
     the declared schema. Typos would otherwise create false audit claims.
 
@@ -249,8 +249,8 @@ def _normalize_field_spec(spec: Any, *, index: int) -> str:
 class SchemaConfig:
     """Configuration for a plugin's data schema.
 
-    A schema can be either dynamic (accept anything) or explicit
-    (validate against specified fields).
+    A schema can be either observed (accept anything, infer types from data)
+    or explicit (validate against specified fields).
 
     Schema Contracts (for DAG validation):
         - guaranteed_fields: Fields the producer GUARANTEES will exist AND are
@@ -260,47 +260,52 @@ class SchemaConfig:
           stability contract. These are for audit trail reconstruction and may
           change between versions. DAG validation does NOT enforce these.
 
-    For explicit schemas (mode='strict' or 'free'), the declared fields are
+    For explicit schemas (mode='fixed' or 'flexible'), the declared fields are
     implicitly guaranteed. Use guaranteed_fields/required_fields to express
-    contracts for dynamic schemas that still have known field requirements.
+    contracts for observed schemas that still have known field requirements.
 
-    Example YAML for a dynamic schema with explicit contracts:
+    Example YAML for an observed schema with explicit contracts:
         schema:
-          fields: dynamic
+          mode: observed
           guaranteed_fields: [customer_id, timestamp]  # Producer guarantees these
 
         schema:
-          fields: dynamic
+          mode: observed
           required_fields: [customer_id, amount]  # Consumer requires these
 
         schema:
-          fields: dynamic
+          mode: observed
           guaranteed_fields: [response, response_usage]  # Stable API
           audit_fields: [response_template_hash]  # May change between versions
 
     Attributes:
-        mode: "strict" (exact fields), "free" (at least these), or None (dynamic)
-        fields: List of FieldDefinitions, or None if dynamic
-        is_dynamic: True if schema accepts any fields
-        guaranteed_fields: Field names the producer guarantees (for dynamic schemas)
-        required_fields: Field names the consumer requires (for dynamic schemas)
+        mode: "fixed" (exact fields), "flexible" (at least these), or "observed" (infer from data)
+        fields: List of FieldDefinitions, or None if observed
+        is_observed: True if schema types are inferred from data
+        guaranteed_fields: Field names the producer guarantees (for observed schemas)
+        required_fields: Field names the consumer requires (for observed schemas)
         audit_fields: Field names that exist but are not part of stability contract
     """
 
-    mode: Literal["strict", "free"] | None
+    mode: Literal["fixed", "flexible", "observed"]
     fields: tuple[FieldDefinition, ...] | None
-    is_dynamic: bool
     guaranteed_fields: tuple[str, ...] | None = None
     required_fields: tuple[str, ...] | None = None
     audit_fields: tuple[str, ...] | None = None
+
+    @property
+    def is_observed(self) -> bool:
+        """True if schema types are inferred from data (OBSERVED mode)."""
+        return self.mode == "observed"
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> SchemaConfig:
         """Parse schema configuration from dict.
 
         Args:
-            config: Dict with 'fields' key (required) and optional 'mode',
-                   'guaranteed_fields', 'required_fields'
+            config: Dict with 'mode' key (required). For fixed/flexible modes,
+                   'fields' is also required. Optional: 'guaranteed_fields',
+                   'required_fields', 'audit_fields' for contracts.
 
         Returns:
             SchemaConfig instance
@@ -308,56 +313,60 @@ class SchemaConfig:
         Raises:
             ValueError: If config is invalid
         """
-        if "fields" not in config:
-            raise ValueError("'fields' key is required in schema config. Use 'fields: dynamic' or provide explicit field list.")
-
-        # Parse contract fields (valid for both dynamic and explicit schemas)
+        # Parse contract fields (valid for all schema modes)
         guaranteed_fields = _parse_field_names_list(config.get("guaranteed_fields"), "guaranteed_fields")
         required_fields = _parse_field_names_list(config.get("required_fields"), "required_fields")
         audit_fields = _parse_field_names_list(config.get("audit_fields"), "audit_fields")
 
-        # Handle serialized dynamic schema (mode="dynamic" from to_dict())
-        if config.get("mode") == "dynamic":
+        # Get mode - required for all schemas
+        mode = config.get("mode")
+
+        # Handle observed schema (mode: observed)
+        if mode == "observed":
+            # Observed schemas may have optional fields for contracts (guaranteed_fields)
+            # but don't define explicit field types
+            fields_value = config.get("fields")
+            # Allow empty list or None, but not explicit field definitions
+            if fields_value is not None and isinstance(fields_value, list) and len(fields_value) > 0:
+                raise ValueError(
+                    "Observed schemas (mode: observed) cannot have explicit field definitions. "
+                    "Use guaranteed_fields/required_fields for contracts instead."
+                )
             return cls(
-                mode=None,
+                mode="observed",
                 fields=None,
-                is_dynamic=True,
                 guaranteed_fields=guaranteed_fields,
                 required_fields=required_fields,
                 audit_fields=audit_fields,
+            )
+
+        # Explicit schema - requires mode and fields
+        if mode is None:
+            raise ValueError(
+                "'mode' key is required in schema config. "
+                "Use 'mode: observed' (infer types from data), "
+                "'mode: fixed' (exactly these fields), or "
+                "'mode: flexible' (at least these fields)."
+            )
+
+        if mode not in ("fixed", "flexible"):
+            raise ValueError(f"Invalid schema mode '{mode}'. Expected 'fixed', 'flexible', or 'observed'.")
+
+        # Explicit schemas require fields
+        if "fields" not in config:
+            raise ValueError(
+                f"'fields' key is required for mode '{mode}'. "
+                f"Provide explicit field definitions, or use 'mode: observed' to infer types from data."
             )
 
         fields_value = config["fields"]
-
-        # Dynamic schema (original input format: fields="dynamic")
-        if fields_value == "dynamic":
-            return cls(
-                mode=None,
-                fields=None,
-                is_dynamic=True,
-                guaranteed_fields=guaranteed_fields,
-                required_fields=required_fields,
-                audit_fields=audit_fields,
-            )
-
-        # Explicit schema - requires mode
-        if "mode" not in config:
-            raise ValueError(
-                "'mode' key is required when specifying explicit fields. "
-                "Use 'mode: strict' (exactly these fields) or "
-                "'mode: free' (at least these fields)."
-            )
-
-        mode = config["mode"]
-        if mode not in ("strict", "free"):
-            raise ValueError(f"Invalid schema mode '{mode}'. Expected 'strict' or 'free'.")
 
         # Parse field list
         if not isinstance(fields_value, list):
             raise ValueError(f"Schema fields must be a list, got {type(fields_value).__name__}")
 
         if len(fields_value) == 0:
-            raise ValueError("Schema must define at least one field. Use 'fields: dynamic' to accept any fields.")
+            raise ValueError("Schema must define at least one field for fixed/flexible modes. Use 'mode: observed' to accept any fields.")
 
         # Normalize field specs: accept both string and dict forms
         normalized_specs = []
@@ -384,7 +393,6 @@ class SchemaConfig:
         return cls(
             mode=mode,
             fields=parsed_fields,
-            is_dynamic=False,
             guaranteed_fields=guaranteed_fields,
             required_fields=required_fields,
             audit_fields=audit_fields,
@@ -393,17 +401,12 @@ class SchemaConfig:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for audit logging.
 
-        Note: For dynamic schemas, mode is stored as None internally but
-        serialized as "dynamic" for clarity in audit logs. This is intentional:
-        - Internal: mode=None, is_dynamic=True (distinguishes from explicit modes)
-        - Serialized: mode="dynamic" (clear in audit trail)
-
         Contract fields (guaranteed_fields, required_fields) are included
         when present, omitted when None for cleaner audit output.
         """
         result: dict[str, Any]
-        if self.is_dynamic:
-            result = {"mode": "dynamic", "fields": None}
+        if self.is_observed:
+            result = {"mode": "observed", "fields": None}
         else:
             result = {
                 "mode": self.mode,
@@ -423,14 +426,14 @@ class SchemaConfig:
     @property
     def allows_extra_fields(self) -> bool:
         """Whether extra fields beyond schema are allowed."""
-        return self.is_dynamic or self.mode == "free"
+        return self.is_observed or self.mode == "flexible"
 
     def get_effective_guaranteed_fields(self) -> frozenset[str]:
         """Get all fields this schema guarantees will exist.
 
-        For explicit schemas (strict/free mode), REQUIRED declared fields are
+        For explicit schemas (fixed/flexible mode), REQUIRED declared fields are
         implicitly guaranteed. Optional fields (marked with ?) are NOT guaranteed
-        since producers are allowed to omit them. For dynamic schemas, only
+        since producers are allowed to omit them. For observed schemas, only
         explicit guaranteed_fields are considered.
 
         Returns:
@@ -450,8 +453,8 @@ class SchemaConfig:
     def get_effective_required_fields(self) -> frozenset[str]:
         """Get all fields this schema requires in input.
 
-        For explicit schemas (strict/free mode), required declared fields
-        (not optional) are implicitly required. For dynamic schemas, only
+        For explicit schemas (fixed/flexible mode), required declared fields
+        (not optional) are implicitly required. For observed schemas, only
         explicit required_fields are considered.
 
         Returns:

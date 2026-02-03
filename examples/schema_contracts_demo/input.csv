@@ -1,0 +1,6 @@
+Customer ID!!,  Amount (USD)  ,Transaction Date/Time,Product Name,Status [Active/Inactive],NOTES & Comments
+CUST-001,150.50,2024-01-15 10:30:00,Widget Pro,Active,"First purchase, referred by friend"
+CUST-002,2500.00,2024-01-16 14:45:00,Enterprise Suite,Active,Annual subscription renewal
+CUST-003,75.25,2024-01-17 09:15:00,Basic Package,Inactive,Cancelled after trial
+CUST-004,450.00,2024-01-18 16:20:00,Deluxe Bundle,Active,Upgraded from Basic
+CUST-005,1200.00,2024-01-19 11:00:00,Widget Pro,Active,Bulk order - 10 units

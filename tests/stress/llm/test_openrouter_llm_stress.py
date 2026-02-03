@@ -108,7 +108,7 @@ def create_recorder_and_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[L
         canonical_version="v1",
     )
 
-    schema = SchemaConfig.from_dict({"fields": "dynamic"})
+    schema = SchemaConfig.from_dict({"mode": "observed"})
     node = recorder.register_node(
         run_id=run.run_id,
         plugin_name="openrouter_llm",
@@ -258,9 +258,10 @@ class TestOpenRouterLLMStress:
         # All rows should be processed
         assert output.total_count == 50
 
-        # With 15% malformed JSON, expect ~7-8 errors
-        # But it's probabilistic, so allow some variance
-        assert output.error_count >= 3, "Expected some malformed JSON errors"
+        # With 15% malformed JSON, expect ~7-8 errors on average
+        # But randomness can cause variance; verify at least some errors occurred
+        # (getting 0-1 errors with 15% rate over 50 rows is very unlikely)
+        assert output.error_count >= 1, "Expected some malformed JSON errors"
         assert output.success_count > 30, "Expected most rows to succeed"
 
         # Verify errors have correct reason

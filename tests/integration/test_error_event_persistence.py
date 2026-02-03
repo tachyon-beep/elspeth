@@ -22,7 +22,7 @@ from elspeth.core.landscape.schema import (
 from elspeth.plugins.context import PluginContext
 
 # Shared schema config for tests
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestValidationErrorPersistence:
@@ -61,7 +61,7 @@ class TestValidationErrorPersistence:
         error_token = ctx.record_validation_error(
             row={"id": "row-1", "bad_field": "not_an_int"},
             error="Field 'bad_field' expected int, got str",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine_sink",
         )
 
@@ -75,7 +75,7 @@ class TestValidationErrorPersistence:
         assert result.run_id == run_id
         assert result.node_id == "source_node"
         assert "bad_field" in result.error
-        assert result.schema_mode == "strict"
+        assert result.schema_mode == "fixed"
         assert result.destination == "quarantine_sink"
 
     def test_validation_error_with_discard_still_recorded(self, landscape_db: LandscapeDB, recorder: LandscapeRecorder) -> None:
@@ -110,7 +110,7 @@ class TestValidationErrorPersistence:
         error_token = ctx.record_validation_error(
             row={"id": "discarded-row"},
             error="Missing required field",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
         )
 
@@ -335,7 +335,7 @@ class TestErrorEventExplainQuery:
         error_token = ctx.record_validation_error(
             row=row_data,
             error="Expected int for 'value'",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
         )
 

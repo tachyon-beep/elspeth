@@ -15,7 +15,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
 
 # Common schema config for dynamic field handling
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestBatchPendingError:
@@ -1139,7 +1139,7 @@ class TestAzureBatchLLMTransformAuditRecording:
             "endpoint": "https://test.openai.azure.com",
             "api_key": "test-key",
             "template": "Analyze: {{ row.text }}",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "required_input_fields": [],  # Explicit opt-out for this test
         }
         transform = AzureBatchLLMTransform(config)
@@ -1224,7 +1224,7 @@ class TestAzureBatchLLMTransformAuditRecording:
             "endpoint": "https://test.openai.azure.com",
             "api_key": "test-key",
             "template": "Analyze: {{ row.text }}",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
         }
         transform = AzureBatchLLMTransform(config)
 

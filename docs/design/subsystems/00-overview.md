@@ -641,7 +641,7 @@ The engine must track which rows are "in flight" in aggregations for audit purpo
 ┌─────────────────────────┐
 │   Runtime overrides     │  ← Highest (CLI flags, env vars)
 ├─────────────────────────┤
-│   Suite configuration   │  ← suite.yaml
+│   Pipeline configuration │  ← settings.yaml
 ├─────────────────────────┤
 │   Profile configuration │  ← profiles/production.yaml
 ├─────────────────────────┤

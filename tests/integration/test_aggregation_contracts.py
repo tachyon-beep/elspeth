@@ -26,7 +26,7 @@ class TestAggregationInputContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["value", "timestamp"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["value", "timestamp"]}},
         )
 
         # Aggregation requires 'value' field for input
@@ -37,9 +37,9 @@ class TestAggregationInputContracts:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count", "sum"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],
                 },
             },
@@ -49,7 +49,7 @@ class TestAggregationInputContracts:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -67,7 +67,7 @@ class TestAggregationInputContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id"]}},
         )
 
         # Aggregation requires 'value' field that source doesn't provide
@@ -78,9 +78,9 @@ class TestAggregationInputContracts:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count", "sum"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],  # Source doesn't provide this!
                 },
             },
@@ -90,7 +90,7 @@ class TestAggregationInputContracts:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -112,7 +112,7 @@ class TestAggregationInputContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["id", "amount"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["id", "amount"]}},
         )
 
         # Aggregation requires multiple fields, one is missing
@@ -123,9 +123,9 @@ class TestAggregationInputContracts:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["id", "amount", "category"],  # 'category' missing!
                 },
             },
@@ -135,7 +135,7 @@ class TestAggregationInputContracts:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -156,7 +156,7 @@ class TestAggregationOutputContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["value"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["value"]}},
         )
 
         # Aggregation guarantees the fields sink needs
@@ -167,9 +167,9 @@ class TestAggregationOutputContracts:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum", "mean"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count", "sum", "mean"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],
                 },
             },
@@ -181,7 +181,7 @@ class TestAggregationOutputContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["count", "sum"]},
+                "schema": {"mode": "observed", "required_fields": ["count", "sum"]},
             },
         )
 
@@ -199,7 +199,7 @@ class TestAggregationOutputContracts:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["value"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["value"]}},
         )
 
         # Aggregation only guarantees count and sum
@@ -210,9 +210,9 @@ class TestAggregationOutputContracts:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count", "sum"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],
                 },
             },
@@ -224,7 +224,7 @@ class TestAggregationOutputContracts:
             node_type=NodeType.SINK,
             plugin_name="csv",
             config={
-                "schema": {"fields": "dynamic", "required_fields": ["count", "median"]},
+                "schema": {"mode": "observed", "required_fields": ["count", "median"]},
             },
         )
 
@@ -251,7 +251,7 @@ class TestAggregationChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["raw_value", "timestamp"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["raw_value", "timestamp"]}},
         )
 
         # Aggregation: requires raw_value, guarantees stats
@@ -262,9 +262,9 @@ class TestAggregationChainValidation:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["batch_id", "count", "sum"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["batch_id", "count", "sum"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["raw_value"],
                 },
             },
@@ -276,7 +276,7 @@ class TestAggregationChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="calculator",
             config={
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["batch_id", "count", "sum", "average"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["batch_id", "count", "sum", "average"]},
                 "required_input_fields": ["count", "sum"],
             },
         )
@@ -285,7 +285,7 @@ class TestAggregationChainValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -304,7 +304,7 @@ class TestAggregationChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["wrong_field"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["wrong_field"]}},
         )
 
         graph.add_node(
@@ -314,9 +314,9 @@ class TestAggregationChainValidation:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count", "sum"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count", "sum"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],  # Source doesn't have this
                 },
             },
@@ -326,7 +326,7 @@ class TestAggregationChainValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -343,7 +343,7 @@ class TestAggregationChainValidation:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["value"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["value"]}},
         )
 
         # Aggregation provides some stats but not all
@@ -354,9 +354,9 @@ class TestAggregationChainValidation:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic", "guaranteed_fields": ["count"]},
+                "schema": {"mode": "observed", "guaranteed_fields": ["count"]},
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],
                 },
             },
@@ -368,7 +368,7 @@ class TestAggregationChainValidation:
             node_type=NodeType.TRANSFORM,
             plugin_name="calculator",
             config={
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["count", "sum"],  # 'sum' not guaranteed by agg
             },
         )
@@ -377,7 +377,7 @@ class TestAggregationChainValidation:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -400,7 +400,7 @@ class TestAggregationDynamicSchemas:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_node(
@@ -410,8 +410,8 @@ class TestAggregationDynamicSchemas:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic"},  # No contracts
-                "options": {"schema": {"fields": "dynamic"}},
+                "schema": {"mode": "observed"},  # No contracts
+                "options": {"schema": {"mode": "observed"}},
             },
         )
 
@@ -419,7 +419,7 @@ class TestAggregationDynamicSchemas:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")
@@ -437,7 +437,7 @@ class TestAggregationDynamicSchemas:
             "source_1",
             node_type=NodeType.SOURCE,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic", "guaranteed_fields": ["value"]}},
+            config={"schema": {"mode": "observed", "guaranteed_fields": ["value"]}},
         )
 
         # Aggregation with input requirements but dynamic output
@@ -448,9 +448,9 @@ class TestAggregationDynamicSchemas:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "schema": {"fields": "dynamic"},  # No guaranteed_fields - dynamic output
+                "schema": {"mode": "observed"},  # No guaranteed_fields - dynamic output
                 "options": {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": ["value"],
                 },
             },
@@ -461,7 +461,7 @@ class TestAggregationDynamicSchemas:
             "sink_1",
             node_type=NodeType.SINK,
             plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
+            config={"schema": {"mode": "observed"}},
         )
 
         graph.add_edge("source_1", "agg_1", label="continue")

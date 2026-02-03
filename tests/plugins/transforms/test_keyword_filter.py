@@ -29,7 +29,7 @@ class TestKeywordFilterConfig:
             KeywordFilterConfig.from_dict(
                 {
                     "blocked_patterns": ["test"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "fields" in str(exc_info.value).lower()
@@ -42,7 +42,7 @@ class TestKeywordFilterConfig:
             KeywordFilterConfig.from_dict(
                 {
                     "fields": ["content"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "blocked_patterns" in str(exc_info.value).lower()
@@ -55,7 +55,7 @@ class TestKeywordFilterConfig:
             {
                 "fields": "content",
                 "blocked_patterns": ["test"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert cfg.fields == "content"
@@ -68,7 +68,7 @@ class TestKeywordFilterConfig:
             {
                 "fields": ["content", "subject"],
                 "blocked_patterns": ["test"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert cfg.fields == ["content", "subject"]
@@ -81,7 +81,7 @@ class TestKeywordFilterConfig:
             {
                 "fields": "all",
                 "blocked_patterns": ["test"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert cfg.fields == "all"
@@ -95,7 +95,7 @@ class TestKeywordFilterConfig:
                 {
                     "fields": ["content"],
                     "blocked_patterns": [],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "blocked_patterns" in str(exc_info.value).lower()
@@ -112,7 +112,7 @@ class TestKeywordFilterInstantiation:
             {
                 "fields": ["content"],
                 "blocked_patterns": ["test"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -132,7 +132,7 @@ class TestKeywordFilterInstantiation:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\bpassword\b", r"(?i)secret"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -150,7 +150,7 @@ class TestKeywordFilterInstantiation:
                 {
                     "fields": ["content"],
                     "blocked_patterns": ["[invalid(regex"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
 
@@ -166,7 +166,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\bpassword\b"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -184,7 +184,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\bpassword\b"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -205,7 +205,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"\bssn\b"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -225,7 +225,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["subject", "body"],
                 "blocked_patterns": [r"(?i)confidential"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -245,7 +245,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": "all",
                 "blocked_patterns": [r"secret"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -264,7 +264,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": "all",
                 "blocked_patterns": [r"secret"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -281,7 +281,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"Password"],  # Capital P
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -298,7 +298,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content"],
                 "blocked_patterns": [r"(?i)password"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -315,7 +315,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content", "optional_field"],
                 "blocked_patterns": [r"secret"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -333,7 +333,7 @@ class TestKeywordFilterProcessing:
             {
                 "fields": ["content", "optional_field"],
                 "blocked_patterns": [r"secret"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

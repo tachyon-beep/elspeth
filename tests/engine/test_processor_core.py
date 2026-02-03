@@ -68,7 +68,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -80,7 +80,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -162,7 +162,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -244,7 +244,7 @@ class TestRowProcessor:
             output_schema = _TestSchema
 
             def __init__(self, nid: str, on_err: str | None) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = nid
                 if on_err is not None:
                     self._on_error = on_err
@@ -444,7 +444,7 @@ class TestRowProcessorTokenIdentity:
             output_schema = _TestSchema
 
             def __init__(self, name: str, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.name = name  # type: ignore[misc]
                 self.node_id = node_id
 

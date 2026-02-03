@@ -511,13 +511,13 @@ class TestRouteLabelResolution:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "main_output": SinkSettings(plugin="json", options={"path": "main_output.json", "schema": {"fields": "dynamic"}}),
-                "review_queue": SinkSettings(plugin="json", options={"path": "review_queue.json", "schema": {"fields": "dynamic"}}),
-                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"fields": "dynamic"}}),
+                "main_output": SinkSettings(plugin="json", options={"path": "main_output.json", "schema": {"mode": "observed"}}),
+                "review_queue": SinkSettings(plugin="json", options={"path": "review_queue.json", "schema": {"mode": "observed"}}),
+                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"mode": "observed"}}),
             },
             default_sink="main_output",
             gates=[
@@ -579,12 +579,12 @@ class TestRouteLabelResolution:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "premium_sink": SinkSettings(plugin="json", options={"path": "premium.json", "schema": {"fields": "dynamic"}}),
-                "standard_sink": SinkSettings(plugin="json", options={"path": "standard.json", "schema": {"fields": "dynamic"}}),
+                "premium_sink": SinkSettings(plugin="json", options={"path": "premium.json", "schema": {"mode": "observed"}}),
+                "standard_sink": SinkSettings(plugin="json", options={"path": "standard.json", "schema": {"mode": "observed"}}),
             },
             default_sink="standard_sink",
             gates=[
@@ -712,13 +712,13 @@ class TestForkCreatesChildTokens:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "analysis_a": SinkSettings(plugin="json", options={"path": "analysis_a.json", "schema": {"fields": "dynamic"}}),
-                "analysis_b": SinkSettings(plugin="json", options={"path": "analysis_b.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "analysis_a": SinkSettings(plugin="json", options={"path": "analysis_a.json", "schema": {"mode": "observed"}}),
+                "analysis_b": SinkSettings(plugin="json", options={"path": "analysis_b.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -781,8 +781,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
             sinks={
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -866,8 +866,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
             sinks={
-                "analysis": SinkSettings(plugin="json", options={"path": "analysis.json", "schema": {"fields": "dynamic"}}),
-                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"fields": "dynamic"}}),
+                "analysis": SinkSettings(plugin="json", options={"path": "analysis.json", "schema": {"mode": "observed"}}),
+                "archive": SinkSettings(plugin="json", options={"path": "archive.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -1085,7 +1085,7 @@ class TestEndToEndPipeline:
             ],
             schema=_RawScoreSchema,
         )
-        transform = NormalizeTransform(config={"schema": {"fields": "dynamic"}})
+        transform = NormalizeTransform(config={"schema": {"mode": "observed"}})
         high_conf_sink = CollectSink()
         low_conf_sink = CollectSink()
 
@@ -1372,7 +1372,7 @@ class TestGateRuntimeErrors:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register a fake gate node for audit trail
-        schema_config = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema_config = SchemaConfig.from_dict({"mode": "observed"})
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="config_gate:missing_test",
@@ -1474,7 +1474,7 @@ class TestGateRuntimeErrors:
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register a fake gate node for audit trail
-        schema_config = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema_config = SchemaConfig.from_dict({"mode": "observed"})
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="config_gate:optional_test",
@@ -1660,10 +1660,10 @@ class TestErrorHandling:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettingsConfig(

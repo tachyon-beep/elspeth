@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, field_validator, model_validator
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, TransformResult, propagate_contract
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
@@ -253,7 +254,6 @@ class BaseLLMTransform(BaseTransform):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,
@@ -278,7 +278,7 @@ class BaseLLMTransform(BaseTransform):
         """
         ...
 
-    def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    def process(self, row: dict[str, Any] | PipelineRow, ctx: PluginContext) -> TransformResult:
         """Process a row through the LLM.
 
         Error handling follows Three-Tier Trust Model:
@@ -287,16 +287,33 @@ class BaseLLMTransform(BaseTransform):
         3. Internal logic (OUR CODE) - let it crash
 
         Args:
-            row: Input row matching input_schema
+            row: Input row matching input_schema (dict or PipelineRow)
             ctx: Plugin context with landscape and state_id
 
         Returns:
             TransformResult with processed row or error
         """
+        # Extract contract and row data
+        # Priority: PipelineRow.contract > ctx.contract > None
+        # When the engine passes a plain dict (not PipelineRow), the contract
+        # may be available via ctx.contract. This enables contract-aware template
+        # access (original header names) in normal pipeline runs.
+        input_contract: SchemaContract | None = None
+        if isinstance(row, PipelineRow):
+            input_contract = row.contract
+            row_data = row.to_dict()
+        else:
+            row_data = row
+            # Fallback: check ctx.contract when row is a plain dict
+            # This is the normal case in production - engine sets ctx.contract
+            if ctx.contract is not None:
+                input_contract = ctx.contract
+
         # 1. Render template with row data
         # This operates on THEIR DATA - wrap in try/catch
+        # Pass contract for dual-name template access (original names)
         try:
-            rendered = self._template.render_with_metadata(row)
+            rendered = self._template.render_with_metadata(row_data, contract=input_contract)
         except TemplateError as e:
             return TransformResult.error(
                 {
@@ -338,7 +355,7 @@ class BaseLLMTransform(BaseTransform):
             )
 
         # 5. Build output row (OUR CODE - let exceptions crash)
-        output = dict(row)
+        output = dict(row_data)
         output[self._response_field] = response.content
         output[f"{self._response_field}_model"] = response.model
         output[f"{self._response_field}_usage"] = response.usage
@@ -351,9 +368,19 @@ class BaseLLMTransform(BaseTransform):
         output[f"{self._response_field}_lookup_source"] = rendered.lookup_source
         output[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
 
+        # 7. Propagate contract if present (Phase 4 feature)
+        output_contract: SchemaContract | None = None
+        if input_contract is not None:
+            output_contract = propagate_contract(
+                input_contract=input_contract,
+                output_row=output,
+                transform_adds_fields=True,  # LLM transforms add response field + metadata
+            )
+
         return TransformResult.success(
             output,
             success_reason={"action": "enriched", "fields_added": [self._response_field]},
+            contract=output_contract,
         )
 
     def close(self) -> None:

@@ -10,7 +10,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.config_base import PathConfig, PluginConfig, PluginConfigError
 
 # Helper to create a dynamic schema for tests
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestPluginConfig:
@@ -217,7 +217,7 @@ class TestPluginConfigInheritance:
             {
                 "path": "test.csv",
                 "custom_field": "custom",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -238,12 +238,12 @@ class TestPluginConfigWithSchema:
         config = TestConfig.from_dict(
             {
                 "name": "test",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert config.name == "test"
         assert config.schema_config is not None
-        assert config.schema_config.is_dynamic is True
+        assert config.schema_config.is_observed is True
 
     def test_plugin_config_schema_optional_by_default(self) -> None:
         """Schema is optional in base PluginConfig."""
@@ -271,7 +271,7 @@ class TestPluginConfigWithSchema:
         config = SourceConfig.from_dict(
             {
                 "path": "data.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert config.schema_config is not None
@@ -287,14 +287,14 @@ class TestPluginConfigWithSchema:
             {
                 "path": "data.csv",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str"],
                 },
             }
         )
         assert config.schema_config is not None
-        assert config.schema_config.mode == "strict"
-        assert config.schema_config.fields is not None  # strict mode has fields
+        assert config.schema_config.mode == "fixed"
+        assert config.schema_config.fields is not None  # fixed mode has fields
         assert len(config.schema_config.fields) == 2
 
 
@@ -323,7 +323,7 @@ class TestSourceDataConfig:
 
         config = SourceDataConfig(
             path="data.csv",
-            schema_config=SchemaConfig.from_dict({"fields": ["id: int", "name: str"], "mode": "strict"}),
+            schema_config=SchemaConfig.from_dict({"fields": ["id: int", "name: str"], "mode": "fixed"}),
             on_validation_failure="quarantine_sink",
         )
 
@@ -336,7 +336,7 @@ class TestSourceDataConfig:
 
         config = SourceDataConfig(
             path="data.csv",
-            schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "free"}),
+            schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "flexible"}),
             on_validation_failure="discard",
         )
 
@@ -350,7 +350,7 @@ class TestSourceDataConfig:
         with pytest.raises(ValidationError):
             SourceDataConfig(
                 path="data.csv",
-                schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "strict"}),
+                schema_config=SchemaConfig.from_dict({"fields": ["id: int"], "mode": "fixed"}),
                 on_validation_failure="",
             )
 
@@ -361,13 +361,13 @@ class TestSourceDataConfig:
 
         config = SourceDataConfig(
             path="data/input.csv",
-            schema_config=SchemaConfig.from_dict({"fields": ["name: str"], "mode": "strict"}),
+            schema_config=SchemaConfig.from_dict({"fields": ["name: str"], "mode": "fixed"}),
             on_validation_failure="bad_rows",
         )
 
         assert config.path == "data/input.csv"
         assert config.schema_config is not None
-        assert config.schema_config.mode == "strict"
+        assert config.schema_config.mode == "fixed"
 
 
 class TestTransformDataConfig:
@@ -379,7 +379,7 @@ class TestTransformDataConfig:
         from elspeth.plugins.config_base import TransformDataConfig
 
         config = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         assert config.on_error is None
@@ -390,7 +390,7 @@ class TestTransformDataConfig:
         from elspeth.plugins.config_base import TransformDataConfig
 
         config = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"mode": "strict", "fields": ["id: int"]}),
+            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
             on_error="failed_transforms",
         )
 
@@ -402,7 +402,7 @@ class TestTransformDataConfig:
         from elspeth.plugins.config_base import TransformDataConfig
 
         config = TransformDataConfig(
-            schema_config=SchemaConfig.from_dict({"mode": "strict", "fields": ["id: int"]}),
+            schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
             on_error="discard",
         )
 
@@ -415,7 +415,7 @@ class TestTransformDataConfig:
 
         with pytest.raises(ValidationError):
             TransformDataConfig(
-                schema_config=SchemaConfig.from_dict({"mode": "strict", "fields": ["id: int"]}),
+                schema_config=SchemaConfig.from_dict({"mode": "fixed", "fields": ["id: int"]}),
                 on_error="",
             )
 

@@ -12,6 +12,7 @@ Plugins are accessed via PluginManager, not direct imports:
 For testing or advanced usage, import directly from module paths:
     from elspeth.plugins.llm.azure import AzureLLMTransform
     from elspeth.plugins.llm.templates import PromptTemplate
+    from elspeth.contracts.schema_contract import PipelineRow
 
 Metadata Field Categories
 =========================

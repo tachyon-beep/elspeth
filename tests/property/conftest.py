@@ -265,7 +265,7 @@ class PassTransform(BaseTransform):
     output_schema = PropertyTestSchema
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -284,7 +284,7 @@ class ConditionalErrorTransform(BaseTransform):
     _on_error = "discard"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         # Direct access - no defensive .get() per CLAUDE.md

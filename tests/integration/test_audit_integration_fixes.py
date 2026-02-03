@@ -15,7 +15,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.manager import PluginManager
 
 # Dynamic schema config for tests - PathConfig now requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestIntegrationAuditFixes:
@@ -61,7 +61,7 @@ class TestIntegrationAuditFixes:
         - Task 3: RoutingMode enum alignment
         """
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("src", "sink", label="continue", mode=RoutingMode.MOVE)
@@ -140,7 +140,7 @@ class TestIntegrationAuditFixes:
         Verifies Task 3: RoutingMode enum alignment.
         """
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("src", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("gate", node_type=NodeType.GATE, plugin_name="filter", config=schema_config)
         graph.add_node("sink1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)

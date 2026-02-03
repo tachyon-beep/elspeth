@@ -67,7 +67,7 @@ class SimpleTransform:
     output_schema = DynamicSchema
     plugin_version = "1.0.0"
     determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False

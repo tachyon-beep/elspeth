@@ -21,7 +21,7 @@
 - OS: unknown
 - Python version: unknown
 - Config profile / env vars: N/A
-- Data set or fixture: examples/multi_query_assessment/suite.yaml
+- Data set or fixture: examples/multi_query_assessment/settings.yaml
 
 ## Agent Context (if relevant)
 
@@ -90,7 +90,7 @@
 ## Notes / Links
 
 - Related issues/PRs: N/A
-- Related design docs: examples/multi_query_assessment/suite.yaml
+- Related design docs: examples/multi_query_assessment/settings.yaml
 
 ---
 
@@ -115,7 +115,7 @@ Bug is confirmed STILL VALID as of commit 7540e57 on branch `fix/rc1-bug-burndow
 
 3. **Documentation mismatch**:
    - Comment in `azure_multi_query.py:191` says: "Templates use {{ row.input_1 }}, {{ row.criterion }}, {{ row.original }}, {{ lookup }}"
-   - Example in `examples/multi_query_assessment/suite.yaml:52-56` uses: `{{ input_1 }}`, `{{ input_2 }}`, `{{ input_3 }}`, `{{ criterion.name }}`
+   - Example in `examples/multi_query_assessment/settings.yaml:52-56` uses: `{{ input_1 }}`, `{{ input_2 }}`, `{{ input_3 }}`, `{{ criterion.name }}`
 
 4. **Test coverage discrepancy**:
    - Unit tests (`test_azure_multi_query.py:28`) use `{{ row.input_1 }}` and `{{ row.criterion.name }}` ✓ (correct syntax)
@@ -160,14 +160,14 @@ Yes. The bug is a documentation/example mismatch with the implementation:
 - **Implementation expects**: `{{ row.input_1 }}`, `{{ row.criterion.name }}`
 - **Example shows**: `{{ input_1 }}`, `{{ criterion.name }}`
 
-The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if executed because the template uses undefined variables.
+The example in `examples/multi_query_assessment/settings.yaml` WILL FAIL if executed because the template uses undefined variables.
 
 **Recommendation:**
 
 **Keep open.** This is a real bug that will cause user frustration. The fix options are:
 
 **Option A (simpler)**: Fix the example to match implementation
-- Change `examples/multi_query_assessment/suite.yaml` to use `{{ row.input_1 }}` syntax
+- Change `examples/multi_query_assessment/settings.yaml` to use `{{ row.input_1 }}` syntax
 - Update contract tests to use correct syntax
 - Add test that verifies template actually renders (not just returns a TransformResult)
 
@@ -187,7 +187,7 @@ The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if execute
 **Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
 
 **Implementation:**
-- Updated example template syntax in `examples/multi_query_assessment/suite.yaml`
+- Updated example template syntax in `examples/multi_query_assessment/settings.yaml`
 - Changed from `{{ input_1 }}` to `{{ row.input_1 }}` (lines 52-54)
 - Changed from `{{ criterion.name }}` to `{{ row.criterion.name }}` (line 56)
 - Template now matches implementation where PromptTemplate wraps context in `row` namespace
@@ -195,7 +195,7 @@ The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if execute
 **Code review:** Approved by pr-review-toolkit:code-reviewer agent
 
 **Files changed:**
-- `examples/multi_query_assessment/suite.yaml`
+- `examples/multi_query_assessment/settings.yaml`
 
 ### Code Evidence
 
@@ -244,7 +244,7 @@ jinja2.exceptions.UndefinedError: 'input_1' is undefined
 
 **Verification:**
 ```bash
-$ grep -n "{{ row\." examples/multi_query_assessment/suite.yaml | head -5
+$ grep -n "{{ row\." examples/multi_query_assessment/settings.yaml | head -5
 52:        **Background:** {{ row.input_1 }}
 53:        **Symptoms:** {{ row.input_2 }}
 54:        **History:** {{ row.input_3 }}

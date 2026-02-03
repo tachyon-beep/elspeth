@@ -97,7 +97,7 @@ class ModelToken:
 
 def create_dynamic_schema() -> SchemaConfig:
     """Create a dynamic schema config for testing."""
-    return SchemaConfig.from_dict({"fields": "dynamic"})
+    return SchemaConfig.from_dict({"mode": "observed"})
 
 
 def count_tokens_for_run(db: LandscapeDB, run_id: str) -> int:

@@ -71,7 +71,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 attempt_count["count"] += 1
@@ -106,10 +106,10 @@ class TestOrchestratorRetry:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"fields": "dynamic"}})},
+            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"mode": "observed"}})},
             default_sink="default",
             retry=RetrySettings(
                 max_attempts=3,
@@ -183,7 +183,7 @@ class TestOrchestratorRetry:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise ConnectionError("Persistent failure")
@@ -213,10 +213,10 @@ class TestOrchestratorRetry:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"fields": "dynamic"}})},
+            sinks={"default": SinkSettings(plugin="json", options={"path": "default.json", "schema": {"mode": "observed"}})},
             default_sink="default",
             retry=RetrySettings(
                 max_attempts=2,  # Will try twice then fail

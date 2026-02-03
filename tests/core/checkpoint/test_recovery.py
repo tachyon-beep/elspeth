@@ -39,8 +39,8 @@ class TestRecoveryProtocol:
             config={
                 "trigger": {"count": 1},
                 "output_mode": "transform",
-                "options": {"schema": {"fields": "dynamic"}},
-                "schema": {"fields": "dynamic"},
+                "options": {"schema": {"mode": "observed"}},
+                "schema": {"mode": "observed"},
             },
         )
         return graph

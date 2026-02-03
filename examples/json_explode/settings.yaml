@@ -15,7 +15,7 @@ source:
   options:
     path: examples/json_explode/input.json
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "order_id: int"
         - "items: any"
@@ -28,7 +28,7 @@ transforms:
       output_field: item
       include_index: true
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -36,7 +36,7 @@ sinks:
     options:
       path: examples/json_explode/output/order_items.json
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

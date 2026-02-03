@@ -13,9 +13,10 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
-    from elspeth.contracts.errors import TransformSuccessReason
+    from elspeth.contracts.errors import ContractViolation, TransformSuccessReason
     from elspeth.contracts.payload_store import PayloadStore
     from elspeth.contracts.schema import SchemaConfig
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape.reproducibility import ReproducibilityGrade
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from elspeth.contracts import (
     CallStatus,
     CallType,
     CoalesceFailureReason,
+    ContractAuditRecord,
     Determinism,
     Edge,
     ExecutionError,
@@ -53,6 +55,7 @@ from elspeth.contracts import (
     RowOutcome,
     Run,
     RunStatus,
+    SecretResolution,
     Token,
     TokenOutcome,
     TokenParent,
@@ -60,6 +63,7 @@ from elspeth.contracts import (
     TransformErrorRecord,
     TriggerType,
     ValidationErrorRecord,
+    ValidationErrorWithContract,
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
@@ -96,6 +100,7 @@ from elspeth.core.landscape.schema import (
     routing_events_table,
     rows_table,
     runs_table,
+    secret_resolutions_table,
     token_outcomes_table,
     token_parents_table,
     tokens_table,
@@ -174,6 +179,7 @@ class LandscapeRecorder:
         reproducibility_grade: str | None = None,
         status: RunStatus = RunStatus.RUNNING,
         source_schema_json: str | None = None,
+        schema_contract: SchemaContract | None = None,
     ) -> Run:
         """Begin a new pipeline run.
 
@@ -186,6 +192,8 @@ class LandscapeRecorder:
             source_schema_json: Optional serialized source schema for resume type restoration.
                 Should be Pydantic model_json_schema() output. Required for proper resume
                 type fidelity (datetime/Decimal restoration from payload JSON strings).
+            schema_contract: Optional schema contract for audit trail field resolution.
+                Stored via ContractAuditRecord for complete field mapping traceability.
 
         Returns:
             Run model with generated run_id
@@ -194,6 +202,14 @@ class LandscapeRecorder:
         settings_json = canonical_json(config)
         config_hash = stable_hash(config)
         timestamp = now()
+
+        # Convert schema contract to audit record if provided
+        schema_contract_json: str | None = None
+        schema_contract_hash: str | None = None
+        if schema_contract is not None:
+            audit_record = ContractAuditRecord.from_contract(schema_contract)
+            schema_contract_json = audit_record.to_json()
+            schema_contract_hash = schema_contract.version_hash()
 
         run = Run(
             run_id=run_id,
@@ -215,6 +231,8 @@ class LandscapeRecorder:
                 status=run.status,
                 reproducibility_grade=run.reproducibility_grade,
                 source_schema_json=source_schema_json,
+                schema_contract_json=schema_contract_json,
+                schema_contract_hash=schema_contract_hash,
             )
         )
 
@@ -435,6 +453,168 @@ class LandscapeRecorder:
         """
         self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
 
+    def update_run_contract(self, run_id: str, contract: SchemaContract) -> None:
+        """Update run with schema contract after first-row inference.
+
+        Called when a source infers schema from the first row during OBSERVED mode.
+        The contract is then locked and stored for all subsequent rows.
+
+        Args:
+            run_id: Run to update
+            contract: SchemaContract with inferred fields (should be locked)
+
+        Note:
+            This is the only way to add a contract after begin_run().
+            Used for sources that discover schema during load() rather than from config.
+        """
+        audit_record = ContractAuditRecord.from_contract(contract)
+        schema_contract_json = audit_record.to_json()
+        schema_contract_hash = contract.version_hash()
+
+        self._ops.execute_update(
+            runs_table.update()
+            .where(runs_table.c.run_id == run_id)
+            .values(
+                schema_contract_json=schema_contract_json,
+                schema_contract_hash=schema_contract_hash,
+            )
+        )
+
+    def update_node_output_contract(
+        self,
+        run_id: str,
+        node_id: str,
+        contract: SchemaContract,
+    ) -> None:
+        """Update a node's output_contract after first-row inference.
+
+        Called when a source infers schema from the first valid row during
+        OBSERVED mode. The contract is set during node registration but is
+        None at that point for dynamic sources.
+
+        Args:
+            run_id: Run containing the node
+            node_id: Node to update (typically the source node)
+            contract: SchemaContract with inferred fields (should be locked)
+
+        Note:
+            This is the complement to update_run_contract() for node-level contracts.
+            Used for sources that discover schema during load() rather than from config.
+        """
+        audit_record = ContractAuditRecord.from_contract(contract)
+        output_contract_json = audit_record.to_json()
+
+        self._ops.execute_update(
+            nodes_table.update()
+            .where((nodes_table.c.run_id == run_id) & (nodes_table.c.node_id == node_id))
+            .values(output_contract_json=output_contract_json)
+        )
+
+    def get_run_contract(self, run_id: str) -> SchemaContract | None:
+        """Get schema contract for a run.
+
+        Retrieves the stored schema contract and verifies integrity via hash.
+
+        Args:
+            run_id: Run to query
+
+        Returns:
+            SchemaContract if stored, None if no contract was stored
+
+        Raises:
+            ValueError: If stored contract fails integrity verification
+        """
+        query = select(runs_table.c.schema_contract_json).where(runs_table.c.run_id == run_id)
+        row = self._ops.execute_fetchone(query)
+
+        if row is None:
+            return None
+
+        schema_contract_json = row.schema_contract_json
+        if schema_contract_json is None:
+            return None
+
+        # Restore via audit record (includes hash verification)
+        audit_record = ContractAuditRecord.from_json(schema_contract_json)
+        return audit_record.to_schema_contract()
+
+    def record_secret_resolutions(
+        self,
+        run_id: str,
+        resolutions: list[dict[str, Any]],
+        fingerprint_key: bytes,
+    ) -> None:
+        """Record secret resolution events from deferred records.
+
+        Called by orchestrator after run is created. The resolution records
+        were captured during load_secrets_from_config() before the run existed.
+
+        Args:
+            run_id: The run ID to associate resolutions with
+            resolutions: List of resolution records from load_secrets_from_config().
+                Each record contains: env_var_name, source, vault_url, secret_name,
+                timestamp, latency_ms, secret_value (for fingerprinting).
+            fingerprint_key: Key for computing secret fingerprints (HMAC-SHA256)
+
+        Note:
+            The secret_value in each record is used ONLY to compute the fingerprint.
+            The actual secret value is never stored in the audit database.
+        """
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
+        for rec in resolutions:
+            # Compute fingerprint (secret_value was included for this purpose)
+            # Direct access - resolutions come from load_secrets_from_config() which
+            # always includes these fields for keyvault source (our code, not user data)
+            fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
+
+            self._ops.execute_insert(
+                secret_resolutions_table.insert().values(
+                    resolution_id=generate_id(),
+                    run_id=run_id,
+                    timestamp=rec["timestamp"],
+                    env_var_name=rec["env_var_name"],
+                    source=rec["source"],
+                    vault_url=rec["vault_url"],
+                    secret_name=rec["secret_name"],
+                    fingerprint=fp,
+                    resolution_latency_ms=rec["latency_ms"],
+                )
+            )
+
+    def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
+        """Get all secret resolution records for a run.
+
+        These records document which secrets were loaded from Key Vault
+        for this run, including their HMAC fingerprints (not values).
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of SecretResolution models, ordered by timestamp
+        """
+        query = (
+            select(secret_resolutions_table)
+            .where(secret_resolutions_table.c.run_id == run_id)
+            .order_by(secret_resolutions_table.c.timestamp)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [
+            SecretResolution(
+                resolution_id=row.resolution_id,
+                run_id=row.run_id,
+                timestamp=row.timestamp,
+                env_var_name=row.env_var_name,
+                source=row.source,
+                vault_url=row.vault_url,
+                secret_name=row.secret_name,
+                fingerprint=row.fingerprint,
+                resolution_latency_ms=row.resolution_latency_ms,
+            )
+            for row in db_rows
+        ]
+
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.
 
@@ -509,6 +689,8 @@ class LandscapeRecorder:
         schema_hash: str | None = None,
         determinism: Determinism = Determinism.DETERMINISTIC,
         schema_config: SchemaConfig,
+        input_contract: SchemaContract | None = None,
+        output_contract: SchemaContract | None = None,
     ) -> Node:
         """Register a plugin instance (node) in the execution graph.
 
@@ -523,6 +705,8 @@ class LandscapeRecorder:
             schema_hash: Optional input/output schema hash
             determinism: Determinism enum (defaults to DETERMINISTIC)
             schema_config: Schema configuration for audit trail (WP-11.99)
+            input_contract: Optional input schema contract (what node requires)
+            output_contract: Optional output schema contract (what node guarantees)
 
         Returns:
             Node model
@@ -536,17 +720,22 @@ class LandscapeRecorder:
         schema_fields_json: str | None = None
         schema_fields_list: list[dict[str, object]] | None = None
 
-        if schema_config.is_dynamic:
-            schema_mode = "dynamic"
-        else:
-            # mode is non-None when is_dynamic is False
-            schema_mode = schema_config.mode or "free"  # Fallback shouldn't happen
-            if schema_config.fields:
-                # FieldDefinition.to_dict() returns dict[str, str | bool]
-                # Cast each dict to wider type for storage
-                field_dicts = [f.to_dict() for f in schema_config.fields]
-                schema_fields_list = [dict(d) for d in field_dicts]
-                schema_fields_json = canonical_json(field_dicts)
+        # Extract schema mode directly - no translation needed
+        schema_mode = schema_config.mode
+        if not schema_config.is_observed and schema_config.fields:
+            # FieldDefinition.to_dict() returns dict[str, str | bool]
+            # Cast each dict to wider type for storage
+            field_dicts = [f.to_dict() for f in schema_config.fields]
+            schema_fields_list = [dict(d) for d in field_dicts]
+            schema_fields_json = canonical_json(field_dicts)
+
+        # Convert schema contracts to audit records if provided
+        input_contract_json: str | None = None
+        output_contract_json: str | None = None
+        if input_contract is not None:
+            input_contract_json = ContractAuditRecord.from_contract(input_contract).to_json()
+        if output_contract is not None:
+            output_contract_json = ContractAuditRecord.from_contract(output_contract).to_json()
 
         node = Node(
             node_id=node_id,
@@ -579,6 +768,8 @@ class LandscapeRecorder:
                 registered_at=node.registered_at,
                 schema_mode=node.schema_mode,
                 schema_fields_json=schema_fields_json,
+                input_contract_json=input_contract_json,
+                output_contract_json=output_contract_json,
             )
         )
 
@@ -672,6 +863,43 @@ class LandscapeRecorder:
         )
         rows = self._ops.execute_fetchall(query)
         return [self._node_repo.load(row) for row in rows]
+
+    def get_node_contracts(self, run_id: str, node_id: str) -> tuple[SchemaContract | None, SchemaContract | None]:
+        """Get input and output contracts for a node.
+
+        Retrieves stored schema contracts and verifies integrity via hash.
+
+        Args:
+            run_id: Run ID the node belongs to
+            node_id: Node ID to query
+
+        Returns:
+            Tuple of (input_contract, output_contract), either may be None
+
+        Raises:
+            ValueError: If stored contract fails integrity verification
+        """
+        query = select(
+            nodes_table.c.input_contract_json,
+            nodes_table.c.output_contract_json,
+        ).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id))
+        row = self._ops.execute_fetchone(query)
+
+        if row is None:
+            return None, None
+
+        input_contract: SchemaContract | None = None
+        output_contract: SchemaContract | None = None
+
+        if row.input_contract_json is not None:
+            audit_record = ContractAuditRecord.from_json(row.input_contract_json)
+            input_contract = audit_record.to_schema_contract()
+
+        if row.output_contract_json is not None:
+            audit_record = ContractAuditRecord.from_json(row.output_contract_json)
+            output_contract = audit_record.to_schema_contract()
+
+        return input_contract, output_contract
 
     def get_edges(self, run_id: str) -> list[Edge]:
         """Get all edges for a run.
@@ -1857,6 +2085,118 @@ class LandscapeRecorder:
         db_rows = self._ops.execute_fetchall(query)
         return [self._call_repo.load(r) for r in db_rows]
 
+    # === Batch Query Methods (Bug 76r: N+1 query fix for exporter) ===
+    #
+    # These methods fetch all entities for a run in a single query,
+    # replacing the N+1 pattern where per-entity queries nested inside loops.
+
+    def get_all_tokens_for_run(self, run_id: str) -> list[Token]:
+        """Get all tokens for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Token models, ordered by row_id then created_at
+        """
+        # JOIN through rows table to filter by run_id
+        query = (
+            select(tokens_table)
+            .join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
+            .where(rows_table.c.run_id == run_id)
+            .order_by(tokens_table.c.row_id, tokens_table.c.created_at, tokens_table.c.token_id)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_repo.load(r) for r in db_rows]
+
+    def get_all_node_states_for_run(self, run_id: str) -> list[NodeState]:
+        """Get all node states for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of NodeState models, ordered by token_id then step_index then attempt
+        """
+        # node_states has run_id denormalized (per CLAUDE.md composite FK pattern)
+        query = (
+            select(node_states_table)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(
+                node_states_table.c.token_id,
+                node_states_table.c.step_index,
+                node_states_table.c.attempt,
+            )
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._node_state_repo.load(r) for r in db_rows]
+
+    def get_all_routing_events_for_run(self, run_id: str) -> list[RoutingEvent]:
+        """Get all routing events for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of RoutingEvent models, ordered by state_id then ordinal
+        """
+        # JOIN through node_states to filter by run_id
+        query = (
+            select(routing_events_table)
+            .join(node_states_table, routing_events_table.c.state_id == node_states_table.c.state_id)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(
+                routing_events_table.c.state_id,
+                routing_events_table.c.ordinal,
+                routing_events_table.c.event_id,
+            )
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._routing_event_repo.load(r) for r in db_rows]
+
+    def get_all_calls_for_run(self, run_id: str) -> list[Call]:
+        """Get all calls (state-parented) for a run (batch query).
+
+        Note: Operation-parented calls are fetched separately via get_operation_calls.
+        This method only returns calls parented by node_states.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Call models, ordered by state_id then call_index
+        """
+        # JOIN through node_states to filter by run_id
+        # Only state-parented calls (state_id IS NOT NULL)
+        query = (
+            select(calls_table)
+            .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+            .where(node_states_table.c.run_id == run_id)
+            .order_by(calls_table.c.state_id, calls_table.c.call_index)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
+
+    def get_all_token_parents_for_run(self, run_id: str) -> list[TokenParent]:
+        """Get all token parent relationships for a run (batch query).
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of TokenParent models, ordered by token_id then ordinal
+        """
+        # JOIN through tokens and rows to filter by run_id
+        query = (
+            select(token_parents_table)
+            .join(tokens_table, token_parents_table.c.token_id == tokens_table.c.token_id)
+            .join(rows_table, tokens_table.c.row_id == rows_table.c.row_id)
+            .where(rows_table.c.run_id == run_id)
+            .order_by(token_parents_table.c.token_id, token_parents_table.c.ordinal)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_parent_repo.load(r) for r in db_rows]
+
     def allocate_call_index(self, state_id: str) -> int:
         """Allocate next call index for a state_id (thread-safe).
 
@@ -2592,6 +2932,8 @@ class LandscapeRecorder:
         error: str,
         schema_mode: str,
         destination: str,
+        *,
+        contract_violation: ContractViolation | None = None,
     ) -> str:
         """Record a validation error in the audit trail.
 
@@ -2604,8 +2946,9 @@ class LandscapeRecorder:
             node_id: Node where validation failed
             row_data: The row that failed validation (may be non-dict or contain non-finite values)
             error: Error description
-            schema_mode: Schema mode that caught the error ("strict", "free", "dynamic")
+            schema_mode: Schema mode that caught the error ("fixed", "flexible", "observed")
             destination: Where row was routed ("discard" or sink name)
+            contract_violation: Optional contract violation details for structured auditing
 
         Returns:
             error_id for tracking
@@ -2632,6 +2975,21 @@ class LandscapeRecorder:
             metadata = NonCanonicalMetadata.from_error(row_data, e)
             row_data_json = json.dumps(metadata.to_dict())
 
+        # Extract contract violation details if provided
+        violation_type: str | None = None
+        normalized_field_name: str | None = None
+        original_field_name: str | None = None
+        expected_type: str | None = None
+        actual_type: str | None = None
+
+        if contract_violation is not None:
+            violation_record = ValidationErrorWithContract.from_violation(contract_violation)
+            violation_type = violation_record.violation_type
+            normalized_field_name = violation_record.normalized_field_name
+            original_field_name = violation_record.original_field_name
+            expected_type = violation_record.expected_type
+            actual_type = violation_record.actual_type
+
         self._ops.execute_insert(
             validation_errors_table.insert().values(
                 error_id=error_id,
@@ -2643,6 +3001,11 @@ class LandscapeRecorder:
                 schema_mode=schema_mode,
                 destination=destination,
                 created_at=now(),
+                violation_type=violation_type,
+                normalized_field_name=normalized_field_name,
+                original_field_name=original_field_name,
+                expected_type=expected_type,
+                actual_type=actual_type,
             )
         )
 

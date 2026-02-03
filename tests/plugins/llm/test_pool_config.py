@@ -17,7 +17,7 @@ class TestPoolConfigDefaults:
             {
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -30,7 +30,7 @@ class TestPoolConfigDefaults:
             {
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 1,
             }
@@ -49,7 +49,7 @@ class TestPoolConfigExplicit:
             {
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 10,
             }
@@ -71,7 +71,7 @@ class TestPoolConfigExplicit:
             {
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
                 "pool_size": 5,
                 "min_dispatch_delay_ms": 10,
@@ -132,7 +132,7 @@ class TestPoolConfigValidation:
                 {
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 0,
                 }
@@ -145,7 +145,7 @@ class TestPoolConfigValidation:
                 {
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 10,
                     "backoff_multiplier": 0.5,
@@ -159,7 +159,7 @@ class TestPoolConfigValidation:
                 {
                     "model": "gpt-4",
                     "template": "{{ row.text }}",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                     "pool_size": 10,
                     "max_capacity_retry_seconds": 0,

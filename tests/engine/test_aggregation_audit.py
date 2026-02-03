@@ -26,7 +26,7 @@ from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 # === Mock Transforms ===

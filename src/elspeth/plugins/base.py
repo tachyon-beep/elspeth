@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.results import (
@@ -307,6 +308,9 @@ class BaseSink(ABC):
         # Intentional no-op - most sinks don't use restore_source_headers
         _ = resolution_mapping  # Explicitly consume the argument
 
+    # Output contract for schema-aware sinks (Phase 3)
+    _output_contract: "SchemaContract | None" = None
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -314,6 +318,7 @@ class BaseSink(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self._output_contract = None
 
     @abstractmethod
     def write(
@@ -341,6 +346,27 @@ class BaseSink(ABC):
     def close(self) -> None:
         """Close and release resources."""
         ...
+
+    # === Output Contract Support (Phase 3) ===
+
+    def get_output_contract(self) -> "SchemaContract | None":
+        """Get the current output contract.
+
+        Returns:
+            SchemaContract if set, None otherwise
+        """
+        return self._output_contract
+
+    def set_output_contract(self, contract: "SchemaContract") -> None:
+        """Set or update the output contract.
+
+        Used for schema-aware sinks that need field metadata (e.g., for
+        restoring original header names in CSV output).
+
+        Args:
+            contract: The schema contract to use for output operations
+        """
+        self._output_contract = contract
 
     # === Lifecycle Hooks (Phase 3) ===
 
@@ -385,6 +411,9 @@ class BaseSource(ABC):
     # All sources must set this - config-based sources get it from SourceDataConfig
     _on_validation_failure: str
 
+    # Schema contract for row validation (Phase 2)
+    _schema_contract: "SchemaContract | None" = None
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 
@@ -392,6 +421,7 @@ class BaseSource(ABC):
             config: Plugin configuration
         """
         self.config = config
+        self._schema_contract = None
 
     @abstractmethod
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
@@ -410,6 +440,27 @@ class BaseSource(ABC):
     def close(self) -> None:
         """Clean up resources."""
         ...
+
+    # === Schema Contract Support (Phase 2) ===
+
+    def get_schema_contract(self) -> "SchemaContract | None":
+        """Get the current schema contract.
+
+        Returns:
+            SchemaContract if set, None otherwise
+        """
+        return self._schema_contract
+
+    def set_schema_contract(self, contract: "SchemaContract") -> None:
+        """Set or update the schema contract.
+
+        Called during initialization for explicit schemas (FIXED/FLEXIBLE),
+        or after first-row inference for OBSERVED mode.
+
+        Args:
+            contract: The schema contract to use for validation
+        """
+        self._schema_contract = contract
 
     # === Lifecycle Hooks (Phase 3) ===
 

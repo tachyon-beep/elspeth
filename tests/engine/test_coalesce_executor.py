@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 @pytest.fixture

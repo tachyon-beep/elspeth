@@ -13,7 +13,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestBatchReplicateHappyPath:
@@ -234,7 +234,7 @@ class TestBatchReplicateConfigValidation:
         with pytest.raises(PluginConfigError, match="default_copies"):
             BatchReplicate(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "default_copies": 0,
                 }
             )
@@ -247,7 +247,7 @@ class TestBatchReplicateConfigValidation:
         with pytest.raises(PluginConfigError, match="default_copies"):
             BatchReplicate(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "default_copies": -1,
                 }
             )
@@ -256,13 +256,13 @@ class TestBatchReplicateConfigValidation:
 class TestBatchReplicateSchemaContract:
     """Schema contract tests."""
 
-    def test_output_schema_is_dynamic_when_copy_index_enabled(self) -> None:
+    def test_output_schema_is_observed_when_copy_index_enabled(self) -> None:
         """Output schema is dynamic to accommodate copy_index field."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
         transform = BatchReplicate(
             {
-                "schema": {"fields": [{"id": "int"}], "mode": "strict"},
+                "schema": {"fields": [{"id": "int"}], "mode": "fixed"},
                 "include_copy_index": True,
             }
         )
@@ -279,7 +279,7 @@ class TestBatchReplicateSchemaContract:
 
         transform = BatchReplicate(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "include_copy_index": True,
             }
         )

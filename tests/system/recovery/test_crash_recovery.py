@@ -53,7 +53,7 @@ class _FailOnceTransform(BaseTransform):
     _fail_row_ids: ClassVar[set[str]] = set()
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     @classmethod
     def configure(cls, fail_row_ids: set[str]) -> None:
@@ -83,7 +83,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple linear graph for testing."""
     graph = ExecutionGraph()
 
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
 
     transform_ids: dict[int, NodeID] = {}
@@ -177,7 +177,7 @@ class TestResumeIdempotence:
             determinism = Determinism.DETERMINISTIC
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
                 return TransformResult.success({**row, "value": row["value"] * 2}, success_reason={"action": "doubler"})
@@ -278,7 +278,7 @@ class TestResumeIdempotence:
             config={},
             node_id="source",
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig(mode=None, fields=None, is_dynamic=True),
+            schema_config=SchemaConfig(mode="observed", fields=None),
         )
         recorder.register_node(
             run_id=run_id,
@@ -288,7 +288,7 @@ class TestResumeIdempotence:
             config={},
             node_id="transform_0",
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig(mode=None, fields=None, is_dynamic=True),
+            schema_config=SchemaConfig(mode="observed", fields=None),
         )
         recorder.register_node(
             run_id=run_id,
@@ -298,7 +298,7 @@ class TestResumeIdempotence:
             config={},
             node_id="sink_default",
             determinism=Determinism.IO_WRITE,
-            schema_config=SchemaConfig(mode=None, fields=None, is_dynamic=True),
+            schema_config=SchemaConfig(mode="observed", fields=None),
         )
         recorder.register_edge(
             run_id=run_id,
@@ -333,7 +333,7 @@ class TestResumeIdempotence:
 
         # Build graph for checkpoint
         graph_b = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph_b.add_node("source", node_type=NodeType.SOURCE, plugin_name="list_source", config=schema_config)
         graph_b.add_node("transform_0", node_type=NodeType.TRANSFORM, plugin_name="doubler", config=schema_config)
         graph_b.add_node("sink_default", node_type=NodeType.SINK, plugin_name="collect_sink", config=schema_config)
@@ -459,7 +459,7 @@ class TestRetryBehavior:
             _on_error = "discard"  # Route errors to discard (required for error results)
 
             def __init__(self, fail_ids: set[str]) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self._fail_ids = fail_ids
 
             def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
@@ -574,7 +574,7 @@ class TestCheckpointRecovery:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for checkpoint recovery tests."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="test", config=schema_config)
         return graph
@@ -873,12 +873,12 @@ class TestAggregationRecovery:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         agg_config = {
             "trigger": {"count": 1},
             "output_mode": "transform",
-            "options": {"schema": {"fields": "dynamic"}},
-            "schema": {"fields": "dynamic"},
+            "options": {"schema": {"mode": "observed"}},
+            "schema": {"mode": "observed"},
         }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
         graph.add_node("aggregator", node_type=NodeType.AGGREGATION, plugin_name="sum_agg", config=agg_config)

@@ -528,10 +528,10 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
         )
 
@@ -567,10 +567,10 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
         )
 
@@ -605,13 +605,13 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
-                TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
             ],
             default_sink="output",
         )
@@ -659,12 +659,12 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettings(
@@ -710,10 +710,10 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             gates=[
                 GateSettings(
                     name="bad_gate",
@@ -754,12 +754,12 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             default_sink="results",
         )
@@ -797,13 +797,13 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
-                TransformSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
+                TransformSettings(plugin="field_mapper", options={"schema": {"mode": "observed"}}),
             ],
             default_sink="output",
         )
@@ -840,12 +840,12 @@ class TestExecutionGraphFromConfig:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             default_sink="results",
         )
@@ -884,12 +884,12 @@ class TestExecutionGraphRouteMapping:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "flagged": SinkSettings(plugin="json", options={"path": "flagged.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettings(
@@ -937,10 +937,10 @@ class TestExecutionGraphRouteMapping:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}})},
+            sinks={"results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}})},
             gates=[
                 GateSettings(
                     name="gate",
@@ -988,12 +988,12 @@ class TestExecutionGraphRouteMapping:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output-sink": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"fields": "dynamic"}}),
+                "output-sink": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "quarantine-bucket": SinkSettings(plugin="json", options={"path": "quarantine.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettings(
@@ -1134,13 +1134,13 @@ class TestMultiEdgeScenarios:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             gates=[
                 GateSettings(
@@ -1224,11 +1224,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1289,11 +1289,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1351,12 +1351,12 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "path_a": SinkSettings(plugin="json", options={"path": "path_a.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1404,7 +1404,7 @@ class TestCoalesceNodes:
             _on_validation_failure = "discard"
 
             def __init__(self) -> None:
-                self.config = {"schema": {"fields": "dynamic"}}
+                self.config = {"schema": {"mode": "observed"}}
 
             def load(self, ctx: PluginContext) -> Any:
                 yield SourceRow.valid({"value": 1})
@@ -1427,7 +1427,7 @@ class TestCoalesceNodes:
 
             def __init__(self, name: str) -> None:
                 self.name = name
-                self.config = {"schema": {"fields": "dynamic"}}
+                self.config = {"schema": {"mode": "observed"}}
 
             def write(self, rows: Any, ctx: PluginContext) -> ArtifactDescriptor:
                 return ArtifactDescriptor.for_file(path="memory", content_hash="", size_bytes=0)
@@ -1464,7 +1464,7 @@ class TestCoalesceNodes:
             {
                 "routes": {"default": "continue"},
                 "fork_to": ["path_a", "path_a"],  # Duplicate branch - should be rejected
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1501,12 +1501,12 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "path_c": SinkSettings(plugin="json", options={"path": "path_c.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1574,11 +1574,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1647,11 +1647,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1715,11 +1715,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1781,11 +1781,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1844,11 +1844,11 @@ class TestCoalesceNodes:
                     options={
                         "path": "test.csv",
                         "on_validation_failure": "discard",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 ),
                 sinks={
-                    "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                    "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
                 },
                 default_sink="output",
                 coalesce=[
@@ -1879,12 +1879,12 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "path_b": SinkSettings(plugin="json", options={"path": "path_b.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -1942,15 +1942,15 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
             ],
             gates=[
                 GateSettings(
@@ -2039,11 +2039,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -2105,11 +2105,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -2175,11 +2175,11 @@ class TestCoalesceNodes:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -2411,7 +2411,7 @@ class TestSchemaValidation:
             FieldDefinition(name="id", field_type="int"),
             FieldDefinition(name="value", field_type="str"),
         )
-        config = SchemaConfig(mode="strict", fields=fields, is_dynamic=False)
+        config = SchemaConfig(mode="fixed", fields=fields)
 
         # Each call creates a NEW class object
         SchemaA = create_schema_from_config(config, "BranchASchema")
@@ -2474,10 +2474,10 @@ class TestSchemaValidation:
         graph.validate_edge_compatibility()
 
     def test_coalesce_accepts_dynamic_schemas_from_different_instances(self) -> None:
-        """Coalesce should accept branches with dynamic schemas from different instances.
+        """Coalesce should accept branches with observed schemas from different instances.
 
         BUG FIX: P2-2026-01-30-coalesce-schema-identity-check
-        Dynamic schemas (is_dynamic=True) are compatible with anything.
+        Observed schemas (mode="observed") are compatible with anything.
         Even if they're distinct class objects, they should pass validation.
         """
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
@@ -2485,8 +2485,8 @@ class TestSchemaValidation:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        # Create two dynamic schemas (accept anything)
-        config = SchemaConfig(mode=None, fields=None, is_dynamic=True)
+        # Create two observed schemas (accept anything)
+        config = SchemaConfig(mode="observed", fields=None)
 
         DynamicA = create_schema_from_config(config, "DynamicA")
         DynamicB = create_schema_from_config(config, "DynamicB")
@@ -2502,7 +2502,7 @@ class TestSchemaValidation:
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema=SourceOutput)
         graph.add_node("fork_gate", node_type=NodeType.GATE, plugin_name="fork_gate")
 
-        # Both branches use dynamic schemas (distinct objects)
+        # Both branches use observed schemas (distinct objects)
         graph.add_node(
             "transform_a",
             node_type=NodeType.TRANSFORM,
@@ -2539,15 +2539,15 @@ class TestSchemaValidation:
         graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
         graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
 
-        # Should PASS: dynamic schemas are compatible with anything
+        # Should PASS: observed schemas are compatible with anything
         graph.validate_edge_compatibility()
 
-    def test_coalesce_rejects_mixed_dynamic_explicit_branches(self) -> None:
-        """Coalesce must reject mixed dynamic/explicit branch schemas.
+    def test_coalesce_rejects_mixed_observed_explicit_branches(self) -> None:
+        """Coalesce must reject mixed observed/explicit branch schemas.
 
         BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
 
-        When one branch produces a dynamic schema and another produces an explicit
+        When one branch produces a observed schema and another produces an explicit
         schema, the coalesce's effective schema becomes the first branch's schema.
         This masks the mismatch: downstream consumers expect explicit fields that
         dynamic-branch rows may not have, causing runtime failures.
@@ -2559,16 +2559,16 @@ class TestSchemaValidation:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        # Create a dynamic schema (no fields, accepts anything)
+        # Create a observed schema (no fields, accepts anything)
         DynamicSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "DynamicSchema",
             allow_coercion=False,
         )
 
         # Create an explicit schema with specific fields
         ExplicitSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float", "id: int"]}),
             "ExplicitSchema",
             allow_coercion=False,
         )
@@ -2619,8 +2619,8 @@ class TestSchemaValidation:
         graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
         graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
 
-        # Should FAIL: mixed dynamic/explicit branches are not allowed
-        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+        # Should FAIL: mixed observed/explicit branches are not allowed
+        with pytest.raises(ValueError, match=r"mixed.*observed.*explicit|observed.*explicit.*mismatch"):
             graph.validate_edge_compatibility()
 
     def test_coalesce_rejects_mixed_none_explicit_branches(self) -> None:
@@ -2629,7 +2629,7 @@ class TestSchemaValidation:
         BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
 
         None (unspecified output_schema) is treated as dynamic. Mixed with explicit
-        schemas, this creates the same mismatch problem as dynamic schema classes.
+        schemas, this creates the same mismatch problem as observed schema classes.
         """
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
         from elspeth.contracts.schema import SchemaConfig
@@ -2638,7 +2638,7 @@ class TestSchemaValidation:
 
         # Create an explicit schema with specific fields
         ExplicitSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float", "id: int"]}),
             "ExplicitSchema",
             allow_coercion=False,
         )
@@ -2660,7 +2660,7 @@ class TestSchemaValidation:
             output_schema=ExplicitSchema,
         )
 
-        # Branch B: produces NONE (unspecified = dynamic)
+        # Branch B: produces NONE (unspecified = observed schema)
         graph.add_node(
             "transform_b",
             node_type=NodeType.TRANSFORM,
@@ -2690,16 +2690,16 @@ class TestSchemaValidation:
         graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
 
         # Should FAIL: mixed None/explicit branches are not allowed
-        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+        with pytest.raises(ValueError, match=r"mixed.*observed.*explicit|observed.*explicit.*mismatch"):
             graph.validate_edge_compatibility()
 
-    def test_gate_rejects_mixed_dynamic_explicit_incoming_branches(self) -> None:
-        """Gate with multiple inputs must reject mixed dynamic/explicit schemas.
+    def test_gate_rejects_mixed_observed_explicit_incoming_branches(self) -> None:
+        """Gate with multiple inputs must reject mixed observed/explicit schemas.
 
         BUG FIX: P2-2026-02-01-dynamic-branch-schema-mismatch-not-detected
 
         Gates can receive inputs from multiple sources (e.g., in complex DAGs).
-        When inputs have mixed dynamic/explicit schemas, the same mismatch problem
+        When inputs have mixed observed/explicit schemas, the same mismatch problem
         occurs as with coalesce nodes.
         """
         from elspeth.contracts import NodeType, PluginSchema, RoutingMode
@@ -2707,16 +2707,16 @@ class TestSchemaValidation:
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        # Create a dynamic schema
+        # Create a observed schema
         DynamicSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "DynamicSchema",
             allow_coercion=False,
         )
 
         # Create an explicit schema
         ExplicitSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "id: int"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float", "id: int"]}),
             "ExplicitSchema",
             allow_coercion=False,
         )
@@ -2739,7 +2739,7 @@ class TestSchemaValidation:
             output_schema=ExplicitSchema,
         )
 
-        # Transform 2 produces dynamic schema
+        # Transform 2 produces observed schema
         graph.add_node(
             "transform2",
             node_type=NodeType.TRANSFORM,
@@ -2759,8 +2759,8 @@ class TestSchemaValidation:
         graph.add_edge("transform2", "merge_gate", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("merge_gate", "sink", label="continue", mode=RoutingMode.MOVE)
 
-        # Should FAIL: mixed dynamic/explicit inputs to gate
-        with pytest.raises(ValueError, match=r"mixed.*dynamic.*explicit|dynamic.*explicit.*mismatch"):
+        # Should FAIL: mixed observed/explicit inputs to gate
+        with pytest.raises(ValueError, match=r"mixed.*observed.*explicit|observed.*explicit.*mismatch"):
             graph.validate_edge_compatibility()
 
     def test_aggregation_schema_transition_in_topology(self) -> None:
@@ -2792,10 +2792,10 @@ class TestSchemaValidation:
                 "trigger": {"count": 1},
                 "output_mode": "transform",
                 "options": {
-                    "schema": {"mode": "strict", "fields": ["value: float"]},
+                    "schema": {"mode": "fixed", "fields": ["value: float"]},
                     "value_field": "value",
                 },
-                "schema": {"mode": "strict", "fields": ["value: float"]},
+                "schema": {"mode": "fixed", "fields": ["value: float"]},
             },
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=AggregationOutput)
@@ -2838,10 +2838,10 @@ class TestSchemaValidation:
                 "trigger": {"count": 1},
                 "output_mode": "transform",
                 "options": {
-                    "schema": {"mode": "strict", "fields": ["value: float"]},
+                    "schema": {"mode": "fixed", "fields": ["value: float"]},
                     "value_field": "value",
                 },
-                "schema": {"mode": "strict", "fields": ["value: float"]},
+                "schema": {"mode": "fixed", "fields": ["value: float"]},
             },
         )
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)
@@ -2910,7 +2910,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -2919,7 +2919,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -2929,7 +2929,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -2970,7 +2970,7 @@ def test_validate_aggregation_dual_schema():
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
 
-    input_schema_config = {"mode": "strict", "fields": ["value: float"]}
+    input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
         SchemaConfig.from_dict(input_schema_config),
         "InputSchema",
@@ -2978,7 +2978,7 @@ def test_validate_aggregation_dual_schema():
     )
 
     OutputSchema = create_schema_from_config(
-        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        SchemaConfig.from_dict({"mode": "fixed", "fields": ["count: int", "sum: float"]}),
         "OutputSchema",
         allow_coercion=False,
     )
@@ -3017,7 +3017,7 @@ def test_validate_aggregation_detects_incompatibility():
     from elspeth.core.dag import ExecutionGraph
     from elspeth.plugins.schema_factory import create_schema_from_config
 
-    input_schema_config = {"mode": "strict", "fields": ["value: float"]}
+    input_schema_config = {"mode": "fixed", "fields": ["value: float"]}
     InputSchema = create_schema_from_config(
         SchemaConfig.from_dict(input_schema_config),
         "InputSchema",
@@ -3025,13 +3025,13 @@ def test_validate_aggregation_detects_incompatibility():
     )
 
     OutputSchema = create_schema_from_config(
-        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int"]}),  # Missing 'sum'
+        SchemaConfig.from_dict({"mode": "fixed", "fields": ["count: int"]}),  # Missing 'sum'
         "OutputSchema",
         allow_coercion=False,
     )
 
     SinkSchema = create_schema_from_config(
-        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        SchemaConfig.from_dict({"mode": "fixed", "fields": ["count: int", "sum: float"]}),
         "SinkSchema",
         allow_coercion=False,
     )
@@ -3067,29 +3067,29 @@ def test_validate_aggregation_detects_incompatibility():
 
 
 class TestDynamicSchemaDetection:
-    """Tests for detecting and handling dynamic schemas."""
+    """Tests for detecting and handling observed schemas."""
 
     def test_dynamic_source_to_specific_sink_should_skip_validation(self) -> None:
         """Dynamic source → specific sink should PASS (validation skipped).
 
         Manually constructed graph with dynamic output_schema and specific input_schema.
-        Validation should be skipped for dynamic schemas.
+        Validation should be skipped for observed schemas.
         """
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.core.dag import ExecutionGraph
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        # Create dynamic schema (no fields, extra='allow')
+        # Create observed schema (no fields, extra='allow')
         DynamicSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "DynamicSchema",
             allow_coercion=False,
         )
 
         # Create specific schema (has fields, extra='forbid')
         SpecificSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "name: str"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float", "name: str"]}),
             "SpecificSchema",
             allow_coercion=False,
         )
@@ -3099,14 +3099,14 @@ class TestDynamicSchemaDetection:
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SpecificSchema)
         graph.add_edge("source", "sink", label="continue")
 
-        # Should NOT raise - validation is skipped for dynamic schemas
+        # Should NOT raise - validation is skipped for observed schemas
         graph.validate()
 
     def test_specific_source_to_dynamic_sink_should_skip_validation(self) -> None:
         """Specific source → dynamic sink should PASS (validation skipped).
 
         Manually constructed graph with specific output_schema and dynamic input_schema.
-        Validation should be skipped for dynamic schemas.
+        Validation should be skipped for observed schemas.
         """
         from elspeth.contracts import NodeType
         from elspeth.contracts.schema import SchemaConfig
@@ -3115,14 +3115,14 @@ class TestDynamicSchemaDetection:
 
         # Create specific schema
         SpecificSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float"]}),
             "SpecificSchema",
             allow_coercion=False,
         )
 
-        # Create dynamic schema
+        # Create observed schema
         DynamicSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "DynamicSchema",
             allow_coercion=False,
         )
@@ -3132,47 +3132,47 @@ class TestDynamicSchemaDetection:
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=DynamicSchema)
         graph.add_edge("source", "sink", label="continue")
 
-        # Should NOT raise - validation is skipped for dynamic schemas
+        # Should NOT raise - validation is skipped for observed schemas
         graph.validate()
 
     def test_dynamic_schema_detection_in_validation(self) -> None:
-        """Dynamic schema detection correctly identifies dynamic vs explicit schemas.
+        """Observed schema detection correctly identifies dynamic vs explicit schemas.
 
-        Dynamic schemas have no fields and extra='allow', matching the detection
+        Observed schemas have no fields and extra='allow', matching the detection
         logic in ExecutionGraph._get_missing_required_fields().
         """
         from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        # Create dynamic schema
+        # Create observed schema
         DynamicSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "DynamicSchema",
             allow_coercion=False,
         )
 
         # Create explicit schema
         ExplicitSchema = create_schema_from_config(
-            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float"]}),
             "ExplicitSchema",
             allow_coercion=False,
         )
 
-        # Helper to check if schema is dynamic (matches logic in dag.py)
-        def is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
+        # Helper to check if schema is observed (matches logic in dag.py)
+        def is_observed_schema(schema: type[PluginSchema] | None) -> bool:
             if schema is None:
                 return True
             return len(schema.model_fields) == 0 and schema.model_config.get("extra") == "allow"
 
-        # Test dynamic schema detection
-        assert is_dynamic_schema(DynamicSchema) is True
+        # Test observed schema detection
+        assert is_observed_schema(DynamicSchema) is True
 
         # Test explicit schema detection
-        assert is_dynamic_schema(ExplicitSchema) is False
+        assert is_observed_schema(ExplicitSchema) is False
 
-        # Test backwards compat (None = dynamic)
-        assert is_dynamic_schema(None) is True
+        # Test backwards compat (None = observed)
+        assert is_observed_schema(None) is True
 
 
 class TestDeterministicNodeIDs:
@@ -3195,16 +3195,16 @@ class TestDeterministicNodeIDs:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             transforms=[
                 TransformSettings(
                     plugin="passthrough",
-                    options={"schema": {"fields": "dynamic"}},
+                    options={"schema": {"mode": "observed"}},
                 )
             ],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
             default_sink="out",
         )
 
@@ -3251,11 +3251,11 @@ class TestDeterministicNodeIDs:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
             default_sink="out",
         )
 
@@ -3265,11 +3265,11 @@ class TestDeterministicNodeIDs:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"mode": "strict", "fields": ["id: int"]},  # Different!
+                    "schema": {"mode": "fixed", "fields": ["id: int"]},  # Different!
                 },
             ),
             transforms=[],
-            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"fields": "dynamic"}})},
+            sinks={"out": SinkSettings(plugin="json", options={"path": "out.json", "schema": {"mode": "observed"}})},
             default_sink="out",
         )
 
@@ -3326,7 +3326,7 @@ class TestCoalesceGateIndex:
                     fork_to=["branch_a", "branch_b"],
                 ),
             ],
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
             coalesce=[
                 CoalesceSettings(
                     name="merge_branches",
@@ -3371,7 +3371,7 @@ class TestCoalesceGateIndex:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
             default_sink="output",
         )
 
