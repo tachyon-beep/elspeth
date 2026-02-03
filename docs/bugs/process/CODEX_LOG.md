@@ -53,3 +53,27 @@
 | 2026-02-03T17:14:37+00:00 | ok | src/elspeth/contracts/config/__init__.py | docs/bugs/generated/elspeth/contracts/config/__init__.py.md |  | 128.89 |  |
 | 2026-02-03T17:15:06+00:00 | ok | src/elspeth/contracts/__init__.py | docs/bugs/generated/elspeth/contracts/__init__.py.md |  | 157.69 |  |
 | 2026-02-03T17:15:17+00:00 | ok | src/elspeth/contracts/cli.py | docs/bugs/generated/elspeth/contracts/cli.py.md |  | 168.95 |  |
+| 2026-02-03T17:16:36+00:00 | ok | src/elspeth/cli.py | docs/bugs/generated/elspeth/cli.py.md |  | 248.07 |  |
+| 2026-02-03T17:17:33+00:00 | ok | src/elspeth/contracts/config/defaults.py | docs/bugs/generated/elspeth/contracts/config/defaults.py.md |  | 304.53 |  |
+| 2026-02-03T17:17:41+00:00 | ok | src/elspeth/contracts/config/alignment.py | docs/bugs/generated/elspeth/contracts/config/alignment.py.md |  | 312.53 |  |
+| 2026-02-03T17:17:55+00:00 | ok | src/elspeth/contracts/audit.py | docs/bugs/generated/elspeth/contracts/audit.py.md |  | 326.67 |  |
+| 2026-02-03T17:19:37+00:00 | ok | src/elspeth/cli_helpers.py | docs/bugs/generated/elspeth/cli_helpers.py.md |  | 428.89 |  |
+| 2026-02-03T17:22:50+00:00 | ok | src/elspeth/contracts/errors.py | docs/bugs/generated/elspeth/contracts/errors.py.md |  | 192.97 |  |
+| 2026-02-03T17:24:24+00:00 | ok | src/elspeth/contracts/engine.py | docs/bugs/generated/elspeth/contracts/engine.py.md |  | 286.68 | evidence_gate=1 |
+| 2026-02-03T17:24:35+00:00 | ok | src/elspeth/contracts/events.py | docs/bugs/generated/elspeth/contracts/events.py.md |  | 297.79 |  |
+| 2026-02-03T17:25:03+00:00 | ok | src/elspeth/contracts/config/protocols.py | docs/bugs/generated/elspeth/contracts/config/protocols.py.md |  | 325.57 | evidence_gate=1 |
+| 2026-02-03T17:25:27+00:00 | ok | src/elspeth/contracts/enums.py | docs/bugs/generated/elspeth/contracts/enums.py.md |  | 350.39 | evidence_gate=1 |
+| 2026-02-03T17:26:08+00:00 | ok | src/elspeth/contracts/contract_records.py | docs/bugs/generated/elspeth/contracts/contract_records.py.md |  | 390.53 |  |
+| 2026-02-03T17:26:22+00:00 | ok | src/elspeth/contracts/contract_builder.py | docs/bugs/generated/elspeth/contracts/contract_builder.py.md |  | 405.10 | evidence_gate=1 |
+| 2026-02-03T17:26:40+00:00 | ok | src/elspeth/contracts/data.py | docs/bugs/generated/elspeth/contracts/data.py.md |  | 422.71 | evidence_gate=1 |
+| 2026-02-03T17:27:05+00:00 | ok | src/elspeth/contracts/config/runtime.py | docs/bugs/generated/elspeth/contracts/config/runtime.py.md |  | 447.84 |  |
+| 2026-02-03T17:28:10+00:00 | ok | src/elspeth/contracts/contract_propagation.py | docs/bugs/generated/elspeth/contracts/contract_propagation.py.md |  | 512.73 |  |
+| 2026-02-03T17:30:01+00:00 | ok | src/elspeth/contracts/sink.py | docs/bugs/generated/elspeth/contracts/sink.py.md |  | 111.28 | evidence_gate=1 |
+| 2026-02-03T17:30:25+00:00 | ok | src/elspeth/contracts/payload_store.py | docs/bugs/generated/elspeth/contracts/payload_store.py.md |  | 134.91 |  |
+| 2026-02-03T17:31:55+00:00 | ok | src/elspeth/contracts/routing.py | docs/bugs/generated/elspeth/contracts/routing.py.md |  | 225.71 |  |
+| 2026-02-03T17:32:07+00:00 | ok | src/elspeth/contracts/identity.py | docs/bugs/generated/elspeth/contracts/identity.py.md |  | 237.41 |  |
+| 2026-02-03T17:32:33+00:00 | ok | src/elspeth/contracts/header_modes.py | docs/bugs/generated/elspeth/contracts/header_modes.py.md |  | 262.86 |  |
+| 2026-02-03T17:33:56+00:00 | ok | src/elspeth/contracts/schema.py | docs/bugs/generated/elspeth/contracts/schema.py.md |  | 346.65 |  |
+| 2026-02-03T17:34:33+00:00 | ok | src/elspeth/contracts/transform_contract.py | docs/bugs/generated/elspeth/contracts/transform_contract.py.md |  | 383.01 |  |
+| 2026-02-03T17:35:03+00:00 | ok | src/elspeth/contracts/schema_contract_factory.py | docs/bugs/generated/elspeth/contracts/schema_contract_factory.py.md |  | 412.78 |  |
+| 2026-02-03T17:36:14+00:00 | ok | src/elspeth/contracts/results.py | docs/bugs/generated/elspeth/contracts/results.py.md |  | 484.53 |  |
