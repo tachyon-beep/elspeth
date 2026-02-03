@@ -226,10 +226,10 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 pass  # No tracing
 
     def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing.
+        """Initialize Langfuse tracing (v3 API).
 
-        Langfuse requires manual span creation around LLM calls.
-        The Langfuse client is stored for use in _process_single_row().
+        Langfuse v3 uses OpenTelemetry-based context managers for lifecycle.
+        The Langfuse client is stored for use in _record_langfuse_trace().
         """
         try:
             from langfuse import Langfuse  # type: ignore[import-not-found,import-untyped]
@@ -242,13 +242,15 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 public_key=cfg.public_key,
                 secret_key=cfg.secret_key,
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
             self._tracing_active = True
 
             logger.info(
-                "Langfuse tracing initialized",
+                "Langfuse tracing initialized (v3)",
                 provider="langfuse",
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
 
         except ImportError:
@@ -258,7 +260,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 hint="Install with: uv pip install elspeth[tracing-langfuse]",
             )
 
-    def _record_langfuse_generation(
+    def _record_langfuse_trace(
         self,
         idx: int,
         prompt: str,
@@ -268,7 +270,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         latency_ms: float | None = None,
         error: str | None = None,
     ) -> None:
-        """Record an LLM generation in Langfuse.
+        """Record LLM call to Langfuse using v3 nested context managers.
 
         Unlike Azure Batch, OpenRouter batch processes rows via synchronous
         HTTP calls in a ThreadPoolExecutor, so we CAN trace each call.
@@ -286,44 +288,52 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             return
 
         try:
-            trace = self._langfuse_client.trace(
-                name=f"elspeth.{self.name}",
-                metadata={
-                    "row_index": idx,
-                    "plugin": self.name,
-                    "model": model,
-                },
-            )
-
-            generation_kwargs: dict[str, Any] = {
-                "name": "llm_call",
-                "model": model,
-                "input": prompt,
-                "output": response_content if not error else None,
-            }
-
-            if usage:
-                generation_kwargs["usage"] = {
-                    "input": usage.get("prompt_tokens", 0),
-                    "output": usage.get("completion_tokens", 0),
-                    "total": usage.get("total_tokens", 0),
+            with (
+                self._langfuse_client.start_as_current_observation(
+                    as_type="span",
+                    name=f"elspeth.{self.name}",
+                    metadata={
+                        "row_index": idx,
+                        "plugin": self.name,
+                        "model": model,
+                    },
+                ),
+                self._langfuse_client.start_as_current_observation(
+                    as_type="generation",
+                    name="llm_call",
+                    model=model,
+                    input=[{"role": "user", "content": prompt}],
+                ) as generation,
+            ):
+                update_kwargs: dict[str, Any] = {
+                    "output": response_content if not error else None,
                 }
 
-            metadata: dict[str, Any] = {"row_index": idx}
-            if latency_ms is not None:
-                metadata["latency_ms"] = latency_ms
-            if error:
-                metadata["error"] = error
-                generation_kwargs["level"] = "ERROR"
-            generation_kwargs["metadata"] = metadata
+                if usage:
+                    # Validate types at external boundary (Tier 3 data from LLM API)
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+                        update_kwargs["usage_details"] = {
+                            "input": prompt_tokens,
+                            "output": completion_tokens,
+                        }
 
-            trace.generation(**generation_kwargs)
+                metadata: dict[str, Any] = {"row_index": idx}
+                if latency_ms is not None:
+                    metadata["latency_ms"] = latency_ms
+                if error:
+                    metadata["error"] = error
+                    update_kwargs["level"] = "ERROR"
+                update_kwargs["metadata"] = metadata
+
+                generation.update(**update_kwargs)
 
         except Exception as e:
             import structlog
 
             logger = structlog.get_logger(__name__)
-            logger.warning("Failed to record Langfuse generation", error=str(e))
+            logger.warning("Failed to record Langfuse trace", error=str(e))
 
     def process(
         self,
@@ -565,7 +575,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 provider="openrouter",
             )
             # Record error to Langfuse
-            self._record_langfuse_generation(
+            self._record_langfuse_trace(
                 idx=idx,
                 prompt=rendered.prompt,
                 response_content="",
@@ -593,7 +603,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 provider="openrouter",
             )
             # Record error to Langfuse
-            self._record_langfuse_generation(
+            self._record_langfuse_trace(
                 idx=idx,
                 prompt=rendered.prompt,
                 response_content="",
@@ -699,7 +709,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         )
 
         # Record to Langfuse (per-call tracing - unlike Azure Batch, we control each call)
-        self._record_langfuse_generation(
+        self._record_langfuse_trace(
             idx=idx,
             prompt=rendered.prompt,
             response_content=content,

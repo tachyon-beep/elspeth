@@ -245,7 +245,7 @@ class AzureBatchLLMTransform(BaseTransform):
                 pass  # No tracing
 
     def _setup_langfuse_tracing(self, logger: Any) -> None:
-        """Initialize Langfuse tracing for batch job tracking.
+        """Initialize Langfuse tracing for batch job tracking (v3 API).
 
         Langfuse can trace batch jobs at the job level (submit/complete),
         not per-row (since rows are processed by Azure infrastructure).
@@ -261,13 +261,15 @@ class AzureBatchLLMTransform(BaseTransform):
                 public_key=cfg.public_key,
                 secret_key=cfg.secret_key,
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
             )
             self._tracing_active = True
 
             logger.info(
-                "Langfuse tracing initialized for Azure Batch",
+                "Langfuse tracing initialized for Azure Batch (v3)",
                 provider="langfuse",
                 host=cfg.host,
+                tracing_enabled=cfg.tracing_enabled,
                 note="Job-level tracing only - individual row tracing not available",
             )
 
@@ -286,7 +288,7 @@ class AzureBatchLLMTransform(BaseTransform):
         status: str,
         error: str | None = None,
     ) -> None:
-        """Record a batch job in Langfuse.
+        """Record a batch job in Langfuse using v3 nested context managers.
 
         Azure Batch API processes rows asynchronously in Azure's infrastructure,
         so we cannot trace individual LLM calls. We record the job as a single
@@ -303,29 +305,30 @@ class AzureBatchLLMTransform(BaseTransform):
             return
 
         try:
-            trace = self._langfuse_client.trace(
+            with self._langfuse_client.start_as_current_observation(
+                as_type="span",
                 name=f"elspeth.{self.name}",
                 metadata={
                     "batch_id": batch_id,
                     "plugin": self.name,
                     "model": self._deployment_name,
                 },
-            )
+            ):
+                span_metadata: dict[str, Any] = {
+                    "batch_id": batch_id,
+                    "row_count": row_count,
+                    "latency_ms": latency_ms,
+                    "status": status,
+                    "note": "Individual row tracing not available for Azure Batch API",
+                }
+                if error:
+                    span_metadata["error"] = error
 
-            span_metadata: dict[str, Any] = {
-                "batch_id": batch_id,
-                "row_count": row_count,
-                "latency_ms": latency_ms,
-                "status": status,
-                "note": "Individual row tracing not available for Azure Batch API",
-            }
-            if error:
-                span_metadata["error"] = error
-
-            trace.span(
-                name="azure_batch_job",
-                metadata=span_metadata,
-            )
+                with self._langfuse_client.start_as_current_observation(
+                    as_type="span",
+                    name="azure_batch_job",
+                ) as inner_span:
+                    inner_span.update(metadata=span_metadata)
 
         except Exception as e:
             import structlog
