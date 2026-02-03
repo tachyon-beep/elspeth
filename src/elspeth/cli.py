@@ -275,10 +275,6 @@ def run(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # NOTE: secret_resolutions will be passed to orchestrator in Task 7 for deferred audit recording
-    # For now, the variable is captured but not yet used
-    _ = secret_resolutions  # Silence unused variable warning until Task 7
-
     # NEW: Instantiate plugins BEFORE graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
@@ -340,6 +336,7 @@ def run(
             plugins,
             verbose=verbose,
             output_format=output_format,
+            secret_resolutions=secret_resolutions,
         )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
@@ -855,6 +852,7 @@ def _execute_pipeline_with_instances(
     plugins: dict[str, Any],
     verbose: bool = False,
     output_format: Literal["console", "json"] = "console",
+    secret_resolutions: list[dict[str, Any]] | None = None,
 ) -> ExecutionResult:
     """Execute pipeline using pre-instantiated plugin instances.
 
@@ -867,6 +865,8 @@ def _execute_pipeline_with_instances(
         plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
         verbose: Show detailed output
         output_format: 'console' or 'json'
+        secret_resolutions: Optional list of secret resolution records from
+            load_secrets_from_config(). Passed to orchestrator for audit recording.
 
     Returns:
         ExecutionResult with run_id, status, rows_processed
@@ -1114,6 +1114,7 @@ def _execute_pipeline_with_instances(
             graph=graph,
             settings=config,
             payload_store=payload_store,
+            secret_resolutions=secret_resolutions,
         )
 
         return {

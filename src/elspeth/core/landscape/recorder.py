@@ -99,6 +99,7 @@ from elspeth.core.landscape.schema import (
     routing_events_table,
     rows_table,
     runs_table,
+    secret_resolutions_table,
     token_outcomes_table,
     token_parents_table,
     tokens_table,
@@ -535,6 +536,50 @@ class LandscapeRecorder:
         # Restore via audit record (includes hash verification)
         audit_record = ContractAuditRecord.from_json(schema_contract_json)
         return audit_record.to_schema_contract()
+
+    def record_secret_resolutions(
+        self,
+        run_id: str,
+        resolutions: list[dict[str, Any]],
+        fingerprint_key: bytes,
+    ) -> None:
+        """Record secret resolution events from deferred records.
+
+        Called by orchestrator after run is created. The resolution records
+        were captured during load_secrets_from_config() before the run existed.
+
+        Args:
+            run_id: The run ID to associate resolutions with
+            resolutions: List of resolution records from load_secrets_from_config().
+                Each record contains: env_var_name, source, vault_url, secret_name,
+                timestamp, latency_ms, secret_value (for fingerprinting).
+            fingerprint_key: Key for computing secret fingerprints (HMAC-SHA256)
+
+        Note:
+            The secret_value in each record is used ONLY to compute the fingerprint.
+            The actual secret value is never stored in the audit database.
+        """
+        from elspeth.core.security.fingerprint import secret_fingerprint
+
+        for rec in resolutions:
+            # Compute fingerprint (secret_value was included for this purpose)
+            # Direct access - resolutions come from load_secrets_from_config() which
+            # always includes these fields for keyvault source (our code, not user data)
+            fp = secret_fingerprint(rec["secret_value"], key=fingerprint_key)
+
+            self._ops.execute_insert(
+                secret_resolutions_table.insert().values(
+                    resolution_id=generate_id(),
+                    run_id=run_id,
+                    timestamp=rec["timestamp"],
+                    env_var_name=rec["env_var_name"],
+                    source=rec["source"],
+                    vault_url=rec["vault_url"],
+                    secret_name=rec["secret_name"],
+                    fingerprint=fp,
+                    resolution_latency_ms=rec["latency_ms"],
+                )
+            )
 
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.
