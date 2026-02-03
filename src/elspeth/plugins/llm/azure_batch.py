@@ -31,6 +31,12 @@ from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm import get_llm_audit_fields, get_llm_guaranteed_fields
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.schema_factory import create_schema_from_config
 
 
@@ -75,6 +81,14 @@ class AzureBatchConfig(TransformDataConfig):
     template_source: str | None = Field(None, description="Template file path for audit (None if inline)")
     lookup_source: str | None = Field(None, description="Lookup file path for audit (None if no lookup)")
     system_prompt_source: str | None = Field(None, description="System prompt file path for audit (None if inline)")
+
+    # Tier 2: Plugin-internal tracing (optional, Langfuse only)
+    # Azure AI tracing is NOT supported for batch API - it auto-instruments the OpenAI SDK
+    # for real-time calls, but batch jobs run asynchronously in Azure's infrastructure.
+    tracing: dict[str, Any] | None = Field(
+        default=None,
+        description="Tier 2 tracing configuration (langfuse only - azure_ai not supported for batch API)",
+    )
 
 
 class AzureBatchLLMTransform(BaseTransform):
@@ -180,6 +194,144 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Azure OpenAI client (lazy init)
         self._client: Any = None
+
+        # Tier 2: Plugin-internal tracing (Langfuse only for batch API)
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
+
+    def on_start(self, ctx: PluginContext) -> None:
+        """Initialize tracing if configured.
+
+        Called by the engine at pipeline start. Initializes Tier 2 tracing.
+        """
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider.
+
+        Azure Batch API submits jobs asynchronously - we can only trace at
+        the job level, not individual LLM calls. Azure AI auto-instrumentation
+        is NOT supported because the OpenAI SDK isn't used for the actual
+        LLM inference (that happens in Azure's batch infrastructure).
+        """
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        if self._tracing_config is None:
+            return
+
+        # Validate configuration completeness
+        errors = validate_tracing_config(self._tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return
+
+        match self._tracing_config.provider:
+            case "azure_ai":
+                # Azure AI tracing NOT supported for batch API
+                logger.warning(
+                    "Azure AI tracing not supported for Azure Batch API",
+                    provider="azure_ai",
+                    hint="Azure Batch jobs run asynchronously in Azure infrastructure - use Langfuse for job-level tracing instead",
+                )
+                return
+            case "langfuse":
+                self._setup_langfuse_tracing(logger)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_langfuse_tracing(self, logger: Any) -> None:
+        """Initialize Langfuse tracing for batch job tracking.
+
+        Langfuse can trace batch jobs at the job level (submit/complete),
+        not per-row (since rows are processed by Azure infrastructure).
+        """
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found]
+
+            cfg = self._tracing_config
+            if not isinstance(cfg, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=cfg.public_key,
+                secret_key=cfg.secret_key,
+                host=cfg.host,
+            )
+            self._tracing_active = True
+
+            logger.info(
+                "Langfuse tracing initialized for Azure Batch",
+                provider="langfuse",
+                host=cfg.host,
+                note="Job-level tracing only - individual row tracing not available",
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
+
+    def _record_langfuse_batch_job(
+        self,
+        batch_id: str,
+        row_count: int,
+        latency_ms: float,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """Record a batch job in Langfuse.
+
+        Azure Batch API processes rows asynchronously in Azure's infrastructure,
+        so we cannot trace individual LLM calls. We record the job as a single
+        span with aggregate metadata.
+
+        Args:
+            batch_id: Azure batch job ID
+            row_count: Number of rows in the batch
+            latency_ms: Total job latency in milliseconds
+            status: Job completion status ("completed", "failed", etc.)
+            error: Error message if job failed
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            return
+
+        try:
+            trace = self._langfuse_client.trace(
+                name=f"elspeth.{self.name}",
+                metadata={
+                    "batch_id": batch_id,
+                    "plugin": self.name,
+                    "model": self._deployment_name,
+                },
+            )
+
+            span_metadata: dict[str, Any] = {
+                "batch_id": batch_id,
+                "row_count": row_count,
+                "latency_ms": latency_ms,
+                "status": status,
+                "note": "Individual row tracing not available for Azure Batch API",
+            }
+            if error:
+                span_metadata["error"] = error
+
+            trace.span(
+                name="azure_batch_job",
+                metadata=span_metadata,
+            )
+
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning("Failed to record Langfuse batch job", error=str(e))
 
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
@@ -599,6 +751,22 @@ class AzureBatchLLMTransform(BaseTransform):
             )
 
         if batch.status == "completed":
+            # Calculate latency from submission to completion
+            submitted_at_str = checkpoint.get("submitted_at")
+            if submitted_at_str:
+                submitted_at = datetime.fromisoformat(submitted_at_str)
+                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
+            else:
+                latency_ms = 0.0
+
+            # Record to Langfuse (job-level tracing)
+            self._record_langfuse_batch_job(
+                batch_id=batch_id,
+                row_count=checkpoint.get("row_count", len(rows)),
+                latency_ms=latency_ms,
+                status="completed",
+            )
+
             # Download results and assemble output
             return self._download_results(batch, checkpoint, rows, ctx)
 
@@ -610,14 +778,50 @@ class AzureBatchLLMTransform(BaseTransform):
                 "reason": "batch_failed",
                 "batch_id": batch_id,
             }
+            error_message = None
             if hasattr(batch, "errors") and batch.errors:
                 error_info["errors"] = [{"message": e.message, "error_type": e.code} for e in batch.errors.data]
+                error_message = "; ".join(e.message for e in batch.errors.data)
+
+            # Calculate latency for failed batch
+            submitted_at_str = checkpoint.get("submitted_at")
+            if submitted_at_str:
+                submitted_at = datetime.fromisoformat(submitted_at_str)
+                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
+            else:
+                latency_ms = 0.0
+
+            # Record failure to Langfuse
+            self._record_langfuse_batch_job(
+                batch_id=batch_id,
+                row_count=checkpoint.get("row_count", len(rows)),
+                latency_ms=latency_ms,
+                status="failed",
+                error=error_message,
+            )
 
             return TransformResult.error(error_info)
 
         elif batch.status == "cancelled":
             # Batch was cancelled - clear checkpoint and return error
             self._clear_checkpoint(ctx)
+
+            # Calculate latency for cancelled batch
+            submitted_at_str = checkpoint.get("submitted_at")
+            if submitted_at_str:
+                submitted_at = datetime.fromisoformat(submitted_at_str)
+                latency_ms = (datetime.now(UTC) - submitted_at).total_seconds() * 1000
+            else:
+                latency_ms = 0.0
+
+            # Record cancellation to Langfuse
+            self._record_langfuse_batch_job(
+                batch_id=batch_id,
+                row_count=checkpoint.get("row_count", len(rows)),
+                latency_ms=latency_ms,
+                status="cancelled",
+            )
+
             return TransformResult.error(
                 {
                     "reason": "batch_cancelled",
@@ -976,5 +1180,24 @@ class AzureBatchLLMTransform(BaseTransform):
         return self._deployment_name
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         self._client = None
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
