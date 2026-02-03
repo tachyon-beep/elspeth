@@ -7,6 +7,7 @@ import pytest
 
 from elspeth.contracts.enums import Determinism, NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
 
@@ -17,6 +18,26 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 def unique_id(prefix: str = "") -> str:
     """Generate unique ID for test data to avoid collisions when sharing database."""
     return f"{prefix}{uuid.uuid4().hex[:8]}"
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="observed",
+        )
+        for key in data.keys()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TestAggregationExecutorOldInterfaceDeleted:
@@ -250,13 +271,13 @@ class TestAggregationExecutorBuffering:
             token = TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data={"value": i},
+                row_data=_make_pipeline_row({"value": i}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -306,13 +327,13 @@ class TestAggregationExecutorBuffering:
             token = TokenInfo(
                 row_id=f"{test_prefix}row-{i}",
                 token_id=f"{test_prefix}token-{i}",
-                row_data={"value": i},
+                row_data=_make_pipeline_row({"value": i}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -366,13 +387,13 @@ class TestAggregationExecutorBuffering:
             token = TokenInfo(
                 row_id=f"{test_prefix}row-{i}",
                 token_id=f"{test_prefix}token-{i}",
-                row_data={"value": i * 10},
+                row_data=_make_pipeline_row({"value": i * 10}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -425,13 +446,13 @@ class TestAggregationExecutorBuffering:
         token = TokenInfo(
             row_id=f"{test_prefix}row-0",
             token_id=f"{test_prefix}token-0",
-            row_data={"value": 42},
+            row_data=_make_pipeline_row({"value": 42}),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=agg_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -485,13 +506,13 @@ class TestAggregationExecutorBuffering:
             token = TokenInfo(
                 row_id=f"{test_prefix}row-{i}",
                 token_id=f"{test_prefix}token-{i}",
-                row_data={"value": i},
+                row_data=_make_pipeline_row({"value": i}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -503,13 +524,13 @@ class TestAggregationExecutorBuffering:
         token = TokenInfo(
             row_id=f"{test_prefix}row-2",
             token_id=f"{test_prefix}token-2",
-            row_data={"value": 2},
+            row_data=_make_pipeline_row({"value": 2}),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=agg_node.node_id,
             row_index=2,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -555,12 +576,12 @@ class TestAggregationExecutorBuffering:
         token1 = TokenInfo(
             row_id=f"{test_prefix}row-1",
             token_id=f"{test_prefix}token-1",
-            row_data={"x": 1},
+            row_data=_make_pipeline_row({"x": 1}),
         )
         token2 = TokenInfo(
             row_id=f"{test_prefix}row-2",
             token_id=f"{test_prefix}token-2",
-            row_data={"x": 2},
+            row_data=_make_pipeline_row({"x": 2}),
         )
 
         for i, token in enumerate([token1, token2]):
@@ -568,7 +589,7 @@ class TestAggregationExecutorBuffering:
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -633,13 +654,13 @@ class TestAggregationExecutorCheckpoint:
         token1 = TokenInfo(
             row_id=f"{test_prefix}row-1",
             token_id=f"{test_prefix}token-101",
-            row_data={"name": "Alice", "score": 95},
+            row_data=_make_pipeline_row({"name": "Alice", "score": 95}),
             branch_name="high_score",
         )
         token2 = TokenInfo(
             row_id=f"{test_prefix}row-2",
             token_id=f"{test_prefix}token-102",
-            row_data={"name": "Bob", "score": 42},
+            row_data=_make_pipeline_row({"name": "Bob", "score": 42}),
             branch_name=None,  # Optional field
         )
 
@@ -649,7 +670,7 @@ class TestAggregationExecutorCheckpoint:
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -769,6 +790,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format (can be None)
                         "join_group_id": None,  # Required in v2.0 format (can be None)
                         "expand_group_id": None,  # Required in v2.0 format (can be None)
+                        "contract_version": "93577787f8ffd7ee",  # v2.0: contract hash (name+score fields)
                     },
                     {
                         "token_id": "token-102",
@@ -778,9 +800,11 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": "93577787f8ffd7ee",  # v2.0: contract hash (name+score fields)
                     },
                 ],
                 "batch_id": "batch-123",
+                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "93577787f8ffd7ee", "fields": [{"normalized_name": "name", "original_name": "name", "python_type": "object", "required": False, "source": "observed"}, {"normalized_name": "score", "original_name": "score", "python_type": "object", "required": False, "source": "observed"}]},
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -797,14 +821,14 @@ class TestAggregationExecutorCheckpoint:
         assert isinstance(token1, TokenInfo)
         assert token1.token_id == "token-101"
         assert token1.row_id == "row-1"
-        assert token1.row_data == {"name": "Alice", "score": 95}
+        assert token1.row_data.to_dict() == {"name": "Alice", "score": 95}
         assert token1.branch_name == "high_score"
 
         token2 = executor._buffer_tokens[node_id][1]
         assert isinstance(token2, TokenInfo)
         assert token2.token_id == "token-102"
         assert token2.row_id == "row-2"
-        assert token2.row_data == {"name": "Bob", "score": 42}
+        assert token2.row_data.to_dict() == {"name": "Bob", "score": 42}
         assert token2.branch_name is None
 
         # VERIFY: _buffers also populated with row_data
@@ -860,10 +884,12 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
+                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
                     }
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
+                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "acaff3625e64c8a6", "fields": [{"normalized_name": "value", "original_name": "value", "python_type": "object", "required": False, "source": "observed"}]},
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -922,13 +948,13 @@ class TestAggregationExecutorCheckpoint:
             token = TokenInfo(
                 row_id=f"{test_prefix}row-{i}",
                 token_id=f"{test_prefix}token-{i}",
-                row_data={"value": i * 10},
+                row_data=_make_pipeline_row({"value": i * 10}),
             )
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
                 row_index=i,
-                data=token.row_data,
+                data=token.row_data.to_dict(),
                 row_id=token.row_id,
             )
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1017,6 +1043,7 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,  # Required in v2.0 format
                         "join_group_id": None,  # Required in v2.0 format
                         "expand_group_id": None,  # Required in v2.0 format
+                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
                     },
                     {
                         "token_id": f"{test_prefix}token-102",
@@ -1026,9 +1053,11 @@ class TestAggregationExecutorCheckpoint:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": "acaff3625e64c8a6",  # v2.0: contract hash (value field)
                     },
                 ],
                 "batch_id": batch.batch_id,
+                "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "acaff3625e64c8a6", "fields": [{"normalized_name": "value", "original_name": "value", "python_type": "object", "required": False, "source": "observed"}]},
                 "elapsed_age_seconds": 0.0,  # Required in v2.0 format
                 "count_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
                 "condition_fire_offset": None,  # P2-2026-02-01: Required in v2.0 format
@@ -1196,7 +1225,7 @@ class TestAggregationExecutorCheckpoint:
                 TokenInfo(
                     row_id=f"row-{i}",
                     token_id=f"token-{i}",
-                    row_data=row_data,
+                    row_data=_make_pipeline_row(row_data),
                     branch_name=None,
                 )
             )
@@ -1268,7 +1297,7 @@ class TestAggregationExecutorCheckpoint:
                 TokenInfo(
                     row_id=f"row-{i}",
                     token_id=f"token-{i}",
-                    row_data=row_data,
+                    row_data=_make_pipeline_row(row_data),
                     branch_name=None,
                 )
             )
@@ -1319,7 +1348,7 @@ class TestAggregationExecutorCheckpoint:
             TokenInfo(
                 row_id=f"row-{i}",
                 token_id=f"token-{i}",
-                row_data=very_large_row_data,
+                row_data=_make_pipeline_row(very_large_row_data),
                 branch_name=None,
             )
             for i in range(6000)
@@ -1387,7 +1416,7 @@ class TestAggregationExecutorCheckpoint:
                 TokenInfo(
                     row_id=f"row-{i}",
                     token_id=f"token-{i}",
-                    row_data=row_data,
+                    row_data=_make_pipeline_row(row_data),
                     branch_name=None,
                 )
             )
@@ -1458,7 +1487,7 @@ class TestAggregationExecutorCheckpoint:
                 TokenInfo(
                     row_id=f"row-{i}",
                     token_id=f"token-{i}",
-                    row_data=row_data,
+                    row_data=_make_pipeline_row(row_data),
                     branch_name=None,
                 )
             )
@@ -1554,9 +1583,11 @@ class TestAggregationExecutorCheckpoint:
                             "row_id": 1,
                             # "row_data" is MISSING
                             "branch_name": None,
+                            "contract_version": "807f89f2eb82f40b",  # v2.0: contract hash (empty fields)
                         }
                     ],
                     "batch_id": None,
+                    "contract": {"mode": "OBSERVED", "locked": True, "version_hash": "807f89f2eb82f40b", "fields": []},
                 },
                 r"missing required fields.*row_data",
                 id="missing_token_fields",
