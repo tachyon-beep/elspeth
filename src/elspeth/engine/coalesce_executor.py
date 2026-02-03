@@ -9,8 +9,12 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from elspeth.contracts import TokenInfo
 from elspeth.contracts.enums import NodeStateStatus, RowOutcome
+from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.clock import DEFAULT_CLOCK
@@ -19,6 +23,8 @@ from elspeth.engine.spans import SpanFactory
 if TYPE_CHECKING:
     from elspeth.engine.clock import Clock
     from elspeth.engine.tokens import TokenManager
+
+slog = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -207,7 +213,7 @@ class CoalesceExecutor:
                 node_id=node_id,
                 run_id=self._run_id,
                 step_index=step_in_pipeline,
-                input_data=token.row_data,
+                input_data=token.row_data.to_dict(),  # Recorder expects dict
             )
             self._recorder.complete_node_state(
                 state_id=state.state_id,
@@ -259,7 +265,7 @@ class CoalesceExecutor:
             node_id=node_id,
             run_id=self._run_id,
             step_index=step_in_pipeline,
-            input_data=token.row_data,
+            input_data=token.row_data.to_dict(),  # Recorder expects dict
         )
         pending.pending_state_ids[token.branch_name] = state.state_id
 
@@ -315,6 +321,19 @@ class CoalesceExecutor:
         """Execute the merge and create merged token."""
         now = self._clock.monotonic()
 
+        # ─────────────────────────────────────────────────────────────────────
+        # Defensive check: crash if any token has no contract
+        # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+        # A token with None contract is a bug in upstream code (fork/transform).
+        # ─────────────────────────────────────────────────────────────────────
+        for branch, token in pending.arrived.items():
+            if token.row_data.contract is None:
+                raise ValueError(
+                    f"Token {token.token_id} on branch '{branch}' has no contract. "
+                    f"Cannot coalesce without contracts on all parents. "
+                    f"This indicates a bug in fork or transform execution."
+                )
+
         # Validate select_branch is present for select merge strategy
         # (Bug 2ho fix: reject instead of silent fallback)
         if settings.merge == "select" and settings.select_branch not in pending.arrived:
@@ -358,8 +377,40 @@ class CoalesceExecutor:
                 outcomes_recorded=True,  # Bug 9z8 fix: token outcomes already recorded above
             )
 
-        # Merge row data according to strategy
-        merged_data = self._merge_data(settings, pending.arrived)
+        # ─────────────────────────────────────────────────────────────────────
+        # Merge contracts from all branches at coalesce point
+        # ─────────────────────────────────────────────────────────────────────
+        contracts: list[SchemaContract] = [t.row_data.contract for t in pending.arrived.values()]
+        merged_contract = contracts[0]
+        for c in contracts[1:]:
+            try:
+                merged_contract = merged_contract.merge(c)
+            except Exception as e:
+                # Contract merge failure is an orchestration invariant violation
+                # Contracts with conflicting types cannot be merged
+                slog.error(
+                    "contract_merge_failed",
+                    coalesce_name=coalesce_name,
+                    branches=list(pending.arrived.keys()),
+                    error=str(e),
+                )
+                raise OrchestrationInvariantError(
+                    f"Contract merge failed at coalesce point '{coalesce_name}'. Branches: {list(pending.arrived.keys())}. Error: {e}"
+                ) from e
+
+        # Log successful merge (B2 fix: observability)
+        slog.info(
+            "contract_merge_success",
+            coalesce_name=coalesce_name,
+            branch_count=len(pending.arrived),
+            branches=list(pending.arrived.keys()),
+        )
+
+        # Merge row data according to strategy (returns dict)
+        merged_data_dict = self._merge_data(settings, pending.arrived)
+
+        # Create PipelineRow with merged contract
+        merged_data = PipelineRow(merged_data_dict, merged_contract)
 
         # Get list of consumed tokens
         consumed_tokens = list(pending.arrived.values())
@@ -436,18 +487,22 @@ class CoalesceExecutor:
         settings: CoalesceSettings,
         arrived: dict[str, TokenInfo],
     ) -> dict[str, Any]:
-        """Merge row data from arrived tokens based on strategy."""
+        """Merge row data from arrived tokens based on strategy.
+
+        Note: row_data is PipelineRow, so we use to_dict() to get raw dict.
+        """
         if settings.merge == "union":
             # Combine all fields (later branches override earlier)
             merged: dict[str, Any] = {}
             for branch_name in settings.branches:
                 if branch_name in arrived:
-                    merged.update(arrived[branch_name].row_data)
+                    # PipelineRow requires to_dict() for dict operations
+                    merged.update(arrived[branch_name].row_data.to_dict())
             return merged
 
         elif settings.merge == "nested":
-            # Each branch as nested object
-            return {branch_name: arrived[branch_name].row_data for branch_name in settings.branches if branch_name in arrived}
+            # Each branch as nested object (use to_dict() for serializable dict)
+            return {branch_name: arrived[branch_name].row_data.to_dict() for branch_name in settings.branches if branch_name in arrived}
 
         # settings.merge == "select":
         # Take specific branch output
@@ -464,7 +519,8 @@ class CoalesceExecutor:
                 f"select_branch '{settings.select_branch}' not in arrived branches {list(arrived.keys())}. "
                 f"This indicates a bug in _execute_merge validation (Bug 2ho fix should have caught this)."
             )
-        return arrived[settings.select_branch].row_data.copy()
+        # Return copy of dict (to_dict() returns a copy already)
+        return arrived[settings.select_branch].row_data.to_dict()
 
     def check_timeouts(
         self,

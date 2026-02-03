@@ -108,6 +108,71 @@ class TokenManager:
             row_data=pipeline_row,
         )
 
+    def create_quarantine_token(
+        self,
+        run_id: str,
+        source_node_id: str,
+        row_index: int,
+        source_row: SourceRow,
+    ) -> TokenInfo:
+        """Create a token for a quarantined row.
+
+        Quarantined rows are invalid data that failed source validation.
+        They don't have contracts (SourceRow.quarantined sets contract=None).
+        They are routed directly to a quarantine sink for investigation.
+
+        Creates a minimal PipelineRow with an empty OBSERVED contract for audit
+        trail consistency, but the data is not validated or transformed.
+
+        Args:
+            run_id: Run identifier
+            source_node_id: Source node that loaded the row
+            row_index: Position in source (0-indexed)
+            source_row: Quarantined SourceRow (contract=None is expected)
+
+        Returns:
+            TokenInfo with row and token IDs
+
+        Raises:
+            ValueError: If source_row is not quarantined
+        """
+        if not source_row.is_quarantined:
+            raise ValueError("create_quarantine_token requires a quarantined SourceRow")
+
+        # For quarantine rows, row may not be a dict (could be malformed external data)
+        # Ensure we have a dict for the audit trail
+        row_data: dict[str, Any] = source_row.row if isinstance(source_row.row, dict) else {"_raw": source_row.row}
+
+        # Create minimal OBSERVED contract for audit consistency
+        # Quarantine rows don't go through transforms, but audit trail needs a contract
+        from elspeth.contracts.schema_contract import SchemaContract
+
+        quarantine_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(),  # Empty - no declared fields
+            locked=False,  # Not locked - quarantine doesn't validate types
+        )
+
+        # Create PipelineRow with minimal contract
+        pipeline_row = PipelineRow(row_data, quarantine_contract)
+
+        # Create row record
+        row = self._recorder.create_row(
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=row_index,
+            data=pipeline_row.to_dict(),
+        )
+
+        # Create initial token
+        token = self._recorder.create_token(row_id=row.row_id)
+
+        return TokenInfo(
+            row_id=row.row_id,
+            token_id=token.token_id,
+            row_data=pipeline_row,
+        )
+
     def create_token_for_existing_row(
         self,
         row_id: str,

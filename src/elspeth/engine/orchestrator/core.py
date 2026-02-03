@@ -1081,12 +1081,13 @@ class Orchestrator:
                                 )
 
                             # Destination validated - proceed with routing
-                            # Create a token for the quarantined row
-                            quarantine_token = processor.token_manager.create_initial_token(
+                            # Create a token for the quarantined row using specialized method
+                            # (quarantine rows don't have contracts - they failed validation)
+                            quarantine_token = processor.token_manager.create_quarantine_token(
                                 run_id=run_id,
                                 source_node_id=source_id,
                                 row_index=row_index,
-                                row_data=source_item.row,
+                                source_row=source_item,
                             )
 
                             # Emit RowCreated telemetry AFTER Landscape recording succeeds
@@ -1138,9 +1139,6 @@ class Orchestrator:
                             ctx.operation_id = source_operation_id
                             # Skip normal processing - row is already handled
                             continue
-
-                        # Extract row data from SourceRow (all source items are SourceRow)
-                        row_data: dict[str, Any] = source_item.row
 
                         # ─────────────────────────────────────────────────────────────────
                         # Record schema contract after first VALID row
@@ -1204,7 +1202,7 @@ class Orchestrator:
 
                         results = processor.process_row(
                             row_index=row_index,
-                            row_data=row_data,
+                            source_row=source_item,
                             transforms=config.transforms,
                             ctx=ctx,
                         )

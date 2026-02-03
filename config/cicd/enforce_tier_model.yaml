@@ -1484,3 +1484,8 @@ allow_hits:
   reason: Standard Python __contains__ pattern - resolve_name() raises KeyError for unknown fields
   safety: Returns False for fields not in contract - explicit result, not silent masking
   expires: null
+- key: engine/tokens.py:R5:TokenManager:create_quarantine_token:fp=7f596eb3e5eb2722
+  owner: P1-2026-02-03
+  reason: Tier-3 boundary - quarantined source_row.row may not be dict (malformed external data)
+  safety: 'isinstance() check normalizes non-dict external data to {_raw: value} for audit consistency'
+  expires: null

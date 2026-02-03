@@ -16,7 +16,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from elspeth.contracts import RowOutcome, RowResult, TokenInfo, TransformResult
+from elspeth.contracts import RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.types import BranchName, CoalesceName, GateName, NodeID
 
 if TYPE_CHECKING:
@@ -84,7 +84,7 @@ class RowProcessor:
 
         result = processor.process_row(
             row_index=0,
-            row_data={"value": 42},
+            source_row=SourceRow.valid({"value": 42}, contract=contract),
             transforms=[transform1, transform2],
             ctx=ctx,
         )
@@ -1253,7 +1253,7 @@ class RowProcessor:
     def process_row(
         self,
         row_index: int,
-        row_data: dict[str, Any],
+        source_row: SourceRow,
         transforms: list[Any],
         ctx: PluginContext,
         *,
@@ -1268,7 +1268,7 @@ class RowProcessor:
 
         Args:
             row_index: Position in source
-            row_data: Initial row data
+            source_row: SourceRow from source (must have contract)
             transforms: List of transform plugins
             ctx: Plugin context
             coalesce_at_step: Step index at which fork children should coalesce
@@ -1277,12 +1277,13 @@ class RowProcessor:
         Returns:
             List of RowResults, one per terminal token (parent + children)
         """
-        # Create initial token
+        # Create initial token from SourceRow
+        # TokenManager.create_initial_token() expects SourceRow and converts to PipelineRow
         token = self._token_manager.create_initial_token(
             run_id=self._run_id,
             source_node_id=self._source_node_id,
             row_index=row_index,
-            row_data=row_data,
+            source_row=source_row,
         )
 
         # Initialize work queue with initial token starting at step 0
