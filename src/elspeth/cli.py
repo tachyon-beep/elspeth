@@ -403,10 +403,6 @@ def run(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # NOTE: secret_resolutions will be passed to orchestrator in Task 7 for deferred audit recording
-    # For now, the variable is captured but not yet used
-    _ = secret_resolutions  # Silence unused variable warning until Task 7
-
     # NEW: Instantiate plugins BEFORE graph construction
     try:
         plugins = instantiate_plugins_from_config(config)
