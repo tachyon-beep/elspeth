@@ -674,7 +674,7 @@ def _configure_azure_monitor(config: TracingConfig) -> bool:
 
     Returns True on success, False on failure.
     """
-    from azure.monitor.opentelemetry import configure_azure_monitor
+    from azure.monitor.opentelemetry import configure_azure_monitor  # type: ignore[import-not-found]
 
     if not isinstance(config, AzureAITracingConfig):
         return False

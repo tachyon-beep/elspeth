@@ -775,7 +775,11 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         return results
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure first
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -788,3 +792,18 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         with self._llm_clients_lock:
             self._llm_clients.clear()
         self._underlying_client = None
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
