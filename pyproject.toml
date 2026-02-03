@@ -122,8 +122,9 @@ tracing-langfuse = [
     # Tier 2: Langfuse tracing for LLM plugins
     # No conflicts with Tier 1 telemetry - recommended for dual-tier setups
     # Version 2.50+ required for stable trace() context manager API
+    # NOTE: v3.x has breaking changes (requires explicit .end() calls) - stay on v2 for now
     # Ref: https://langfuse.com/docs/sdk/python
-    "langfuse>=2.50,<3",  # Langfuse SDK - v2.50+ has stable trace/generation API
+    "langfuse>=2.50,<3",  # Langfuse SDK v2 - v3 migration requires code changes
 ]
 
 tracing = [
