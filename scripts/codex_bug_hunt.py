@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from codex_audit_common import (  # type: ignore[import-not-found]
+    AsyncTqdm,
     chunked,
     ensure_log_file,
     extract_section,
@@ -336,26 +337,20 @@ async def _run_batches(
     deduplicate: bool,
 ) -> dict[str, int]:
     """Run analysis in batches. Returns statistics."""
-    import time as time_module
-
     log_lock = asyncio.Lock()
     failed_files: list[tuple[Path, Exception]] = []
     total_merged = 0
     total_gated = 0
-    completed_count = 0
 
     # Use pyrate-limiter for rate limiting
     rate_limiter = Limiter(Rate(rate_limit, Duration.MINUTE)) if rate_limit else None
 
-    # Print header
-    print(f"\n{'─' * 60}", file=sys.stderr)
-    print(f"🔍 Codex Bug Hunt: {len(files)} files to analyze", file=sys.stderr)
-    print(f"{'─' * 60}\n", file=sys.stderr)
+    # Progress bar
+    pbar = AsyncTqdm(total=len(files), desc="Analyzing files", unit="file")
 
     for batch in chunked(files, batch_size):
         tasks: list[asyncio.Task[dict[str, int]]] = []
         batch_files: list[Path] = []
-        task_to_file: dict[asyncio.Task[dict[str, int]], tuple[Path, float]] = {}
 
         for file_path in batch:
             relative = file_path.relative_to(root_dir)
@@ -363,17 +358,11 @@ async def _run_batches(
             output_path = output_path.with_suffix(output_path.suffix + ".md")
 
             if skip_existing and output_path.exists():
-                completed_count += 1
-                rel_display = file_path.relative_to(repo_root)
-                print(f"  ⏭️  [{completed_count}/{len(files)}] {rel_display} (cached)", file=sys.stderr)
+                pbar.update(1)
                 continue
 
             prompt = _build_prompt(file_path, prompt_template, context)
             batch_files.append(file_path)
-
-            # Print start message
-            rel_display = file_path.relative_to(repo_root)
-            print(f"  🔄 [{completed_count + len(batch_files)}/{len(files)}] {rel_display} ...", file=sys.stderr)
 
             task = asyncio.create_task(
                 run_codex_with_retry_and_logging(
@@ -391,23 +380,15 @@ async def _run_batches(
                 )
             )
             tasks.append(task)
-            task_to_file[task] = (file_path, time_module.monotonic())
 
-        # Process results as they complete (not waiting for all)
+        # Wait for all tasks in batch to complete
         if tasks:
-            for completed_task in asyncio.as_completed(tasks):
-                file_path, start_time = task_to_file[completed_task]
-                rel_display = file_path.relative_to(repo_root)
-                duration = time_module.monotonic() - start_time
-
-                try:
-                    result = await completed_task
-                    completed_count += 1
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for file_path, result in zip(batch_files, results, strict=False):
+                if isinstance(result, Exception):
+                    failed_files.append((file_path, result))
+                elif isinstance(result, dict):
                     total_gated += result["gated"]
-
-                    # Status indicator based on evidence gate
-                    status = "✅" if result["gated"] == 0 else f"⚠️  (gated:{result['gated']})"
-                    print(f"  {status} [{completed_count}/{len(files)}] {rel_display} ({duration:.1f}s)", file=sys.stderr)
 
                     # Deduplicate after successful run
                     if deduplicate and bugs_open_dir and bugs_open_dir.exists():
@@ -416,13 +397,10 @@ async def _run_batches(
                         output_path = output_path.with_suffix(output_path.suffix + ".md")
                         merged_count = _deduplicate_and_merge(output_path, bugs_open_dir, repo_root)
                         total_merged += merged_count
-                        if merged_count > 0:
-                            print(f"      🔗 Merged {merged_count} duplicate(s)", file=sys.stderr)
 
-                except Exception as exc:
-                    completed_count += 1
-                    failed_files.append((file_path, exc))
-                    print(f"  ❌ [{completed_count}/{len(files)}] {rel_display} ({duration:.1f}s) - {str(exc)[:50]}", file=sys.stderr)
+                pbar.update(1)
+
+    pbar.close()
 
     print(f"\n{'─' * 60}", file=sys.stderr)
 
