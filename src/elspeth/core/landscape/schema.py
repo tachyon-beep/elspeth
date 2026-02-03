@@ -481,3 +481,25 @@ Index(
     checkpoints_table.c.run_id,
     checkpoints_table.c.sequence_number,
 )
+
+# === Secret Resolutions (P2-10: Key Vault Secret Audit Trail) ===
+# Records which secrets were loaded from where during pipeline startup.
+# NOTE: Records are inserted AFTER run is created, though secrets load before.
+# Allows auditors to answer: "Which Key Vault did this secret come from?"
+# without exposing actual secret values (stores fingerprint only).
+
+secret_resolutions_table = Table(
+    "secret_resolutions",
+    metadata,
+    Column("resolution_id", String(64), primary_key=True),
+    Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False, index=True),
+    Column("timestamp", Float, nullable=False),  # When secret was loaded (before run)
+    Column("env_var_name", String(256), nullable=False),  # Target environment variable
+    Column("source", String(32), nullable=False),  # 'keyvault' (env source doesn't record)
+    Column("vault_url", Text, nullable=True),  # Key Vault URL (NULL if source != keyvault)
+    Column("secret_name", String(256), nullable=True),  # Secret name in vault
+    Column("fingerprint", String(64), nullable=False),  # HMAC fingerprint of secret value
+    Column("resolution_latency_ms", Float, nullable=True),  # Time to fetch from vault
+)
+
+Index("ix_secret_resolutions_run", secret_resolutions_table.c.run_id)

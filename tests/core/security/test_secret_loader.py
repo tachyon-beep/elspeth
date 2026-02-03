@@ -530,53 +530,44 @@ class TestCachedSecretLoader:
         assert value == "now-exists"
 
 
-class TestBackwardCompatibility:
-    """Test backward compatibility with existing get_fingerprint_key() interface."""
+class TestFingerprintKeySimplified:
+    """Test get_fingerprint_key() now only uses env var.
 
-    def test_get_fingerprint_key_uses_secret_loader_with_caching(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """get_fingerprint_key() should use the new SecretLoader with caching."""
-        from elspeth.core.security.fingerprint import (
-            clear_fingerprint_key_cache,
-            get_fingerprint_key,
-        )
+    BREAKING CHANGE: The old ELSPETH_KEYVAULT_URL approach is removed.
+    get_fingerprint_key() now ONLY reads from ELSPETH_FINGERPRINT_KEY.
+    Key Vault secrets must be loaded via the YAML secrets config.
+    """
 
-        # Clear any cached values from previous tests
-        clear_fingerprint_key_cache()
-
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://test-vault.vault.azure.net")
-
-        mock_secret = MagicMock()
-        mock_secret.value = "cached-fingerprint-key"
-
-        mock_client = MagicMock()
-        mock_client.get_secret.return_value = mock_secret
-
-        with patch(
-            "elspeth.core.security.secret_loader._get_keyvault_client",
-            return_value=mock_client,
-        ):
-            # Call multiple times
-            key1 = get_fingerprint_key()
-            key2 = get_fingerprint_key()
-            key3 = get_fingerprint_key()
-
-            # All should return same value
-            assert key1 == key2 == key3 == b"cached-fingerprint-key"
-
-            # Key Vault should only be called ONCE (caching works)
-            assert mock_client.get_secret.call_count == 1
-
-        # Clean up
-        clear_fingerprint_key_cache()
-
-    def test_env_var_still_takes_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """ELSPETH_FINGERPRINT_KEY env var should still take precedence."""
+    def test_get_fingerprint_key_uses_env_var_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_fingerprint_key() reads from ELSPETH_FINGERPRINT_KEY only."""
         from elspeth.core.security.fingerprint import get_fingerprint_key
 
-        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "env-key")
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://test-vault.vault.azure.net")
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "my-fingerprint-key")
 
         key = get_fingerprint_key()
 
-        assert key == b"env-key"
+        assert key == b"my-fingerprint-key"
+
+    def test_get_fingerprint_key_raises_when_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_fingerprint_key() raises ValueError when env var not set."""
+        from elspeth.core.security.fingerprint import get_fingerprint_key
+
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+
+        with pytest.raises(ValueError, match="ELSPETH_FINGERPRINT_KEY"):
+            get_fingerprint_key()
+
+    def test_keyvault_url_env_var_no_longer_used(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ELSPETH_KEYVAULT_URL no longer triggers Key Vault lookup from fingerprint.
+
+        BREAKING CHANGE: Users must migrate to YAML secrets config.
+        """
+        from elspeth.core.security.fingerprint import get_fingerprint_key
+
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        # Even with ELSPETH_KEYVAULT_URL set, fingerprint.py won't use it
+        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://test-vault.vault.azure.net")
+
+        # Should raise because ELSPETH_FINGERPRINT_KEY is not set
+        with pytest.raises(ValueError, match="ELSPETH_FINGERPRINT_KEY"):
+            get_fingerprint_key()

@@ -413,7 +413,6 @@ class TestDatabaseSinkSecretHandling:
 
         # Simulate dev environment: no fingerprint key, but allow raw secrets
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
 
         # Should not raise - dev mode allows sanitization without fingerprint
@@ -440,7 +439,6 @@ class TestDatabaseSinkSecretHandling:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
         monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
 
         # Should raise in production mode
@@ -458,7 +456,6 @@ class TestDatabaseSinkSecretHandling:
         from elspeth.plugins.sinks.database_sink import DatabaseSink
 
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
 
         # Should work - no password, no key needed
         sink = DatabaseSink(

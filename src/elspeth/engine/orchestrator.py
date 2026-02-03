@@ -537,6 +537,7 @@ class Orchestrator:
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         *,
         payload_store: PayloadStore,
+        secret_resolutions: list[dict[str, Any]] | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -551,6 +552,11 @@ class Orchestrator:
             payload_store: PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
+            secret_resolutions: Optional list of secret resolution records from
+                load_secrets_from_config(). When provided, these are recorded
+                in the audit trail after run creation. Each record contains
+                env_var_name, source, vault_url, secret_name, timestamp, latency_ms,
+                and secret_value (for fingerprinting, never stored).
 
         Raises:
             ValueError: If graph or payload_store is not provided
@@ -585,6 +591,18 @@ class Orchestrator:
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
             )
+
+            # Record secret resolutions in audit trail (deferred from pre-run loading)
+            # This records which secrets were loaded from where, with fingerprints (not values)
+            if secret_resolutions:
+                from elspeth.core.security.fingerprint import get_fingerprint_key
+
+                fingerprint_key = get_fingerprint_key()
+                recorder.record_secret_resolutions(
+                    run_id=run.run_id,
+                    resolutions=secret_resolutions,
+                    fingerprint_key=fingerprint_key,
+                )
 
             # Emit telemetry AFTER Landscape succeeds - Landscape is the legal record
             self._emit_telemetry(

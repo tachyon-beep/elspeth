@@ -1811,17 +1811,22 @@ allow_hits:
   safety: Exhaustive isinstance() chain with else branch; required for polymorphic serialization
   expires: null
 # Pre-existing recorder.py patterns (payload retrieval and Tier-3 validation)
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=9d5e1d0e48e6babd
+- key: core/landscape/recorder.py:R5:LandscapeRecorder:complete_node_state:fp=21eee54dcfec7c50
+  owner: architecture
+  reason: Discriminated union - NodeState subtype determines terminal state recording
+  safety: Exhaustive isinstance() chain required for polymorphic state completion
+  expires: null
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:explain_row:fp=4f48ff6119732dc0
   owner: architecture
   reason: Payload may be purged per retention policy - KeyError/OSError/JSONDecodeError are expected
   safety: Returns payload_available=False to caller; explicit state communication, not silent failure
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=a70928bc72c11c14
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:record_validation_error:fp=e8c26e9a22bfc51c
   owner: architecture
   reason: External row data (Tier-3) may contain non-canonical values (NaN, Infinity)
   safety: Logs warning with details, falls back to repr() hash per CLAUDE.md tier model guidelines
   expires: null
-- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=dec3fb64532671b8
+- key: core/landscape/recorder.py:R6:LandscapeRecorder:get_call_response_data:fp=158b76f7cf1fc655
   owner: architecture
   reason: Payload may be purged per retention policy - KeyError is expected for missing content
   safety: Returns None to caller as documented Optional return type; explicit contract
@@ -1837,4 +1842,10 @@ allow_hits:
   owner: architecture
   reason: Optional lookup for original name - field may not have been in input contract
   safety: Fallback to output field's original_name is correct behavior for new fields
+  expires: null
+# Key Vault secrets config loading
+- key: cli.py:R1:_extract_secrets_config:fp=c6597edf28bc5ebd
+  owner: feature
+  reason: Raw YAML config is Tier 3 external data - secrets section is optional in user config
+  safety: Missing 'secrets' key defaults to empty dict, then Pydantic validates with SecretsConfig()
   expires: null

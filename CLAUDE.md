@@ -687,11 +687,45 @@ See "Settings→Runtime Configuration Pattern" in Core Architecture for full doc
 
 ### Secret Handling
 
-Never store secrets - use HMAC fingerprints:
+Never store secrets directly - use HMAC fingerprints for audit:
 
 ```python
 fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
 ```
+
+**Secret Loading:**
+
+Secrets can be loaded from environment variables (default) or Azure Key Vault:
+
+```yaml
+# Pipeline settings.yaml
+secrets:
+  source: keyvault
+  vault_url: https://my-vault.vault.azure.net  # Must be literal URL
+  mapping:
+    AZURE_OPENAI_KEY: azure-openai-key
+    ELSPETH_FINGERPRINT_KEY: elspeth-fingerprint-key
+```
+
+When `source: keyvault`, secrets are loaded at startup and injected into environment variables before config resolution. This means `${AZURE_OPENAI_KEY}` in your config will resolve to the Key Vault secret value.
+
+**IMPORTANT:** `vault_url` must be a literal HTTPS URL. Environment variable references like `${AZURE_KEYVAULT_URL}` are NOT supported because secrets must be loaded before environment variable resolution.
+
+**Fingerprint Key:**
+
+The `ELSPETH_FINGERPRINT_KEY` is used to compute HMAC fingerprints of secrets for the audit trail. Configure it:
+
+1. **Environment variable:** `export ELSPETH_FINGERPRINT_KEY=your-random-key`
+2. **Key Vault:** Include in your secrets mapping (recommended for production)
+
+**Audit Trail:**
+
+Secret resolutions are recorded in the `secret_resolutions` Landscape table, including:
+- Which vault the secret came from
+- The HMAC fingerprint (not the value)
+- Resolution latency
+
+**Deprecated:** `ELSPETH_KEYVAULT_URL` and `ELSPETH_KEYVAULT_SECRET_NAME` environment variables are no longer recognized. Use the `secrets:` configuration section instead.
 
 ### Test Path Integrity
 

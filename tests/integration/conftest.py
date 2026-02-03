@@ -10,6 +10,7 @@ The shared database contains data from all tests in the module, but each
 test's queries should filter by its own run_id.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,28 @@ import pytest
 
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Add command line options for integration tests."""
+    parser.addoption(
+        "--keyvault-url",
+        action="store",
+        default=None,
+        help="Azure Key Vault URL for integration tests",
+    )
+
+
+@pytest.fixture
+def keyvault_url(request: pytest.FixtureRequest) -> str:
+    """Get Key Vault URL from command line or environment."""
+    url = request.config.getoption("--keyvault-url") or os.environ.get("TEST_KEYVAULT_URL")
+    if not url:
+        pytest.skip(
+            "Key Vault URL not configured. Pass --keyvault-url or set TEST_KEYVAULT_URL. "
+            "Note: ELSPETH_KEYVAULT_URL is no longer used for fingerprint keys."
+        )
+    return url
 
 
 @pytest.fixture(scope="module")

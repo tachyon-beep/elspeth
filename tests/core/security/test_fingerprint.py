@@ -66,7 +66,6 @@ class TestSecretFingerprint:
     def test_fingerprint_without_key_raises_if_env_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError if no key provided and env var missing."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
 
         with pytest.raises(ValueError, match="ELSPETH_FINGERPRINT_KEY"):
             secret_fingerprint("my-secret")
@@ -86,119 +85,6 @@ class TestGetFingerprintKey:
     def test_get_key_raises_if_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Raises ValueError if env var not set."""
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
 
         with pytest.raises(ValueError):
-            get_fingerprint_key()
-
-
-class TestKeyVaultIntegration:
-    """Test Azure Key Vault integration for fingerprint key."""
-
-    @pytest.fixture(autouse=True)
-    def clear_cache(self) -> None:
-        """Clear fingerprint key cache before each test."""
-        from elspeth.core.security.fingerprint import clear_fingerprint_key_cache
-
-        clear_fingerprint_key_cache()
-        yield
-        clear_fingerprint_key_cache()
-
-    def test_keyvault_used_when_env_var_missing_and_vault_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When ELSPETH_FINGERPRINT_KEY is missing but ELSPETH_KEYVAULT_URL is set, uses Key Vault."""
-        from unittest.mock import MagicMock, patch
-
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://my-vault.vault.azure.net")
-
-        # Mock the SecretClient to avoid real Azure calls
-        mock_secret = MagicMock()
-        mock_secret.value = "keyvault-secret-value"
-        mock_client = MagicMock()
-        mock_client.get_secret.return_value = mock_secret
-
-        with patch(
-            "elspeth.core.security.secret_loader._get_keyvault_client",
-            return_value=mock_client,
-        ):
-            key = get_fingerprint_key()
-
-        assert key == b"keyvault-secret-value"
-        mock_client.get_secret.assert_called_once_with("elspeth-fingerprint-key")
-
-    def test_keyvault_uses_custom_secret_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """ELSPETH_KEYVAULT_SECRET_NAME overrides the default secret name."""
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://my-vault.vault.azure.net")
-        monkeypatch.setenv("ELSPETH_KEYVAULT_SECRET_NAME", "custom-key-name")
-
-        mock_secret = type("MockSecret", (), {"value": "custom-secret"})()
-
-        from unittest.mock import MagicMock, patch
-
-        mock_client = MagicMock()
-        mock_client.get_secret.return_value = mock_secret
-
-        with patch(
-            "elspeth.core.security.secret_loader._get_keyvault_client",
-            return_value=mock_client,
-        ):
-            key = get_fingerprint_key()
-
-        mock_client.get_secret.assert_called_once_with("custom-key-name")
-        assert key == b"custom-secret"
-
-    def test_env_var_takes_precedence_over_keyvault(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """ELSPETH_FINGERPRINT_KEY env var takes precedence over Key Vault."""
-        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "env-var-key")
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://my-vault.vault.azure.net")
-
-        key = get_fingerprint_key()
-
-        # Should use env var, not Key Vault
-        assert key == b"env-var-key"
-
-    def test_raises_when_neither_env_nor_keyvault_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError when neither env var nor Key Vault is configured."""
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
-
-        with pytest.raises(ValueError, match=r"ELSPETH_FINGERPRINT_KEY.*ELSPETH_KEYVAULT_URL"):
-            get_fingerprint_key()
-
-    def test_keyvault_error_includes_helpful_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Key Vault errors are wrapped with helpful context."""
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://my-vault.vault.azure.net")
-
-        from unittest.mock import MagicMock, patch
-
-        mock_client = MagicMock()
-        mock_client.get_secret.side_effect = Exception("Azure auth failed")
-
-        with (
-            patch(
-                "elspeth.core.security.secret_loader._get_keyvault_client",
-                return_value=mock_client,
-            ),
-            pytest.raises(ValueError, match="Failed to retrieve fingerprint key from Key Vault"),
-        ):
-            get_fingerprint_key()
-
-    def test_keyvault_raises_when_secret_value_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Raises ValueError when Key Vault secret has no value."""
-        from unittest.mock import MagicMock, patch
-
-        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
-        monkeypatch.setenv("ELSPETH_KEYVAULT_URL", "https://my-vault.vault.azure.net")
-
-        mock_secret = MagicMock()
-        mock_secret.value = None
-        mock_client = MagicMock()
-        mock_client.get_secret.return_value = mock_secret
-
-        with (
-            patch("elspeth.core.security.secret_loader._get_keyvault_client", return_value=mock_client),
-            pytest.raises(ValueError, match="has no value"),
-        ):
             get_fingerprint_key()
