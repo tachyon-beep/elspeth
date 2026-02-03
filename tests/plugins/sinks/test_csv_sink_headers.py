@@ -160,7 +160,7 @@ class TestCSVSinkHeaderModes:
             }
         )
 
-        # Provide contract to sink
+        # Provide contract to sink via explicit set_output_contract
         sink.set_output_contract(sample_contract)
 
         sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
@@ -172,6 +172,38 @@ class TestCSVSinkHeaderModes:
         assert "Customer ID" in content
         # Should NOT have normalized headers in header row
         # Note: normalized names will be in data row (as values), but header should be original
+        lines = content.strip().split("\n")
+        header_line = lines[0]
+        assert "'Amount USD'" in header_line
+        assert "Customer ID" in header_line
+
+    def test_original_headers_from_ctx_contract(self, output_path: Path, sample_contract: SchemaContract, ctx: PluginContext) -> None:
+        """headers: original resolves from ctx.contract if _output_contract not set.
+
+        This tests the production path where orchestrator sets ctx.contract
+        but doesn't explicitly call sink.set_output_contract(). The sink
+        should lazily capture the contract on first write().
+        """
+        sink = CSVSink(
+            {
+                "path": str(output_path),
+                "schema": STRICT_SCHEMA,
+                "headers": "original",
+            }
+        )
+
+        # Simulate orchestrator behavior: set contract on context, not sink
+        ctx.contract = sample_contract
+        assert sink._output_contract is None  # Not explicitly set
+
+        sink.write([{"amount_usd": 100, "customer_id": "C001"}], ctx)
+        sink.close()
+
+        # Contract should have been captured from context
+        assert sink._output_contract is sample_contract
+
+        content = output_path.read_text()
+        # Should have original headers from contract
         lines = content.strip().split("\n")
         header_line = lines[0]
         assert "'Amount USD'" in header_line

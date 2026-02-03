@@ -15,7 +15,9 @@ from typing import IO, TYPE_CHECKING, Any, Literal
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 
 if TYPE_CHECKING:
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
+from elspeth.contracts.header_modes import HeaderMode, resolve_headers
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import SinkPathConfig
 from elspeth.plugins.context import PluginContext
@@ -185,7 +187,7 @@ class JSONSink(BaseSink):
         self._indent = cfg.indent
         self._validate_input = cfg.validate_input
 
-        # Display header configuration
+        # Display header configuration (legacy options)
         self._display_headers = cfg.display_headers
         self._restore_source_headers = cfg.restore_source_headers
         # Populated lazily on first write if restore_source_headers=True
@@ -193,6 +195,13 @@ class JSONSink(BaseSink):
         # which happens after on_start() is called.
         self._resolved_display_headers: dict[str, str] | None = None
         self._display_headers_resolved: bool = False  # Track if we've attempted resolution
+
+        # New header mode configuration (takes precedence over legacy options)
+        self._headers_mode: HeaderMode = cfg.headers_mode
+        self._headers_custom_mapping: dict[str, str] | None = cfg.headers_mapping
+
+        # Output contract for header resolution (set via set_output_contract)
+        self._output_contract: SchemaContract | None = None
 
         # Auto-detect format from extension if not specified
         fmt = cfg.format
@@ -254,6 +263,10 @@ class JSONSink(BaseSink):
         # Lazy resolution of display headers from Landscape
         # Must happen AFTER source iteration begins (when field resolution is recorded)
         self._resolve_display_headers_if_needed(ctx)
+
+        # Lazy resolution of contract from context for headers: original mode
+        # ctx.contract is set by orchestrator after first valid source row
+        self._resolve_contract_from_context_if_needed(ctx)
 
         # Apply display header mapping to row keys if configured
         output_rows = self._apply_display_headers(rows)
@@ -338,14 +351,43 @@ class JSONSink(BaseSink):
     def _get_effective_display_headers(self) -> dict[str, str] | None:
         """Get the effective display header mapping.
 
+        Priority order:
+        1. CUSTOM mode with custom mapping from 'headers' config
+        2. ORIGINAL mode with contract - use resolve_headers()
+        3. Legacy display_headers config (explicit mapping)
+        4. Legacy restore_source_headers - resolved display headers
+        5. None (no mapping - use normalized names)
+
         Returns:
             Dict mapping normalized field name -> display name, or None if no
-            display headers are configured.
+            display headers are configured or if using NORMALIZED mode.
         """
-        if self._display_headers is not None:
-            return self._display_headers
+        # NORMALIZED mode = no display mapping
+        if self._headers_mode == HeaderMode.NORMALIZED:
+            return None
+
+        # CUSTOM mode - use custom mapping from config
+        if self._headers_mode == HeaderMode.CUSTOM:
+            if self._headers_custom_mapping is not None:
+                return self._headers_custom_mapping
+            # Fall through to legacy display_headers if custom mapping not set
+            if self._display_headers is not None:
+                return self._display_headers
+            return None
+
+        # ORIGINAL mode - use contract to resolve headers
+        # (mypy knows this is the only remaining case since HeaderMode has exactly 3 values)
+        if self._output_contract is not None:
+            # Use resolve_headers() to build mapping from contract
+            return resolve_headers(
+                contract=self._output_contract,
+                mode=HeaderMode.ORIGINAL,
+                custom_mapping=None,
+            )
+        # Fall through to legacy resolved_display_headers if no contract
         if self._resolved_display_headers is not None:
             return self._resolved_display_headers
+        # No contract and no legacy resolution - return None (fallback to normalized)
         return None
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
@@ -370,6 +412,58 @@ class JSONSink(BaseSink):
         # Build reverse mapping: normalized -> original (display name)
         self._resolved_display_headers = {v: k for k, v in resolution_mapping.items()}
         self._display_headers_resolved = True
+
+    # === Contract Support ===
+
+    def set_output_contract(self, contract: "SchemaContract") -> None:
+        """Set output contract for header resolution.
+
+        When headers mode is ORIGINAL, this contract is used to map
+        normalized field names back to their original source header names.
+
+        Args:
+            contract: Schema contract with field metadata including original names
+        """
+        self._output_contract = contract
+
+    def get_output_contract(self) -> "SchemaContract | None":
+        """Get the output contract.
+
+        Returns:
+            The SchemaContract if set, None otherwise
+        """
+        return self._output_contract
+
+    def _resolve_contract_from_context_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve output contract from context for headers: original mode.
+
+        Called on first write() to capture ctx.contract if _output_contract is not
+        already set. This allows the new headers: original mode to work without
+        explicit orchestrator wiring of set_output_contract().
+
+        The orchestrator sets ctx.contract after the first valid source row is
+        processed (see orchestrator/core.py line ~1164). By the time write() is
+        called, the contract is available.
+
+        Note:
+            This only has effect when:
+            1. headers mode is ORIGINAL
+            2. _output_contract is not already set (via set_output_contract)
+            3. ctx.contract is available
+
+        Args:
+            ctx: Plugin context with potential contract from orchestrator
+        """
+        # Only resolve if:
+        # 1. We're in ORIGINAL mode (otherwise contract is irrelevant)
+        # 2. Contract isn't already set (explicit set_output_contract takes precedence)
+        # 3. Context has a contract to provide
+        if self._headers_mode != HeaderMode.ORIGINAL:
+            return
+        if self._output_contract is not None:
+            return  # Already set explicitly
+        if ctx.contract is not None:
+            self._output_contract = ctx.contract
 
     def _resolve_display_headers_if_needed(self, ctx: PluginContext) -> None:
         """Lazily resolve display headers from Landscape if restore_source_headers=True.

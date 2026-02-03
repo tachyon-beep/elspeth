@@ -246,6 +246,10 @@ class CSVSink(BaseSink):
         # Must happen AFTER source iteration begins (when field resolution is recorded)
         self._resolve_display_headers_if_needed(ctx)
 
+        # Lazy resolution of contract from context for headers: original mode
+        # ctx.contract is set by orchestrator after first valid source row
+        self._resolve_contract_from_context_if_needed(ctx)
+
         # Lazy initialization - open file on first write
         if self._file is None:
             self._open_file(rows)
@@ -473,6 +477,37 @@ class CSVSink(BaseSink):
             The SchemaContract if set, None otherwise
         """
         return self._output_contract
+
+    def _resolve_contract_from_context_if_needed(self, ctx: PluginContext) -> None:
+        """Lazily resolve output contract from context for headers: original mode.
+
+        Called on first write() to capture ctx.contract if _output_contract is not
+        already set. This allows the new headers: original mode to work without
+        explicit orchestrator wiring of set_output_contract().
+
+        The orchestrator sets ctx.contract after the first valid source row is
+        processed (see orchestrator/core.py line ~1164). By the time write() is
+        called, the contract is available.
+
+        Note:
+            This only has effect when:
+            1. headers mode is ORIGINAL
+            2. _output_contract is not already set (via set_output_contract)
+            3. ctx.contract is available
+
+        Args:
+            ctx: Plugin context with potential contract from orchestrator
+        """
+        # Only resolve if:
+        # 1. We're in ORIGINAL mode (otherwise contract is irrelevant)
+        # 2. Contract isn't already set (explicit set_output_contract takes precedence)
+        # 3. Context has a contract to provide
+        if self._headers_mode != HeaderMode.ORIGINAL:
+            return
+        if self._output_contract is not None:
+            return  # Already set explicitly
+        if ctx.contract is not None:
+            self._output_contract = ctx.contract
 
     def set_resume_field_resolution(self, resolution_mapping: dict[str, str]) -> None:
         """Set field resolution mapping for resume validation.
