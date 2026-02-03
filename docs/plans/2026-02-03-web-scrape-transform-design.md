@@ -1,8 +1,9 @@
 # Web Scrape Transform Design
 
 **Date:** 2026-02-03
-**Status:** Draft - Ready for Implementation
+**Status:** Draft - Revised per review feedback (2026-02-03)
 **Author:** Brainstorming session
+**Review:** [2026-02-03-web-scrape-transform-design.review.json](./2026-02-03-web-scrape-transform-design.review.json)
 
 ## Overview
 
@@ -50,7 +51,8 @@ transforms:
 
       # HTTP settings
       http:
-        timeout: 30                        # seconds
+        timeout: 30                        # seconds (read timeout)
+        connect_timeout: 10                # seconds (connection timeout)
         follow_redirects: true
         max_redirects: 5
         retries: 3
@@ -63,6 +65,32 @@ transforms:
         # Optional additional headers
         headers:
           User-Agent: "ELSPETH-Compliance/1.0"
+
+      # Security settings (SSRF prevention)
+      security:
+        max_response_size_mb: 10           # Abort if response exceeds this (default: 10MB)
+        allowed_schemes:                   # Whitelist (default: [https, http])
+          - https
+          - http
+        blocked_ip_ranges:                 # CIDR ranges to block (defaults below)
+          - "127.0.0.0/8"                  # Loopback
+          - "10.0.0.0/8"                   # Private Class A
+          - "172.16.0.0/12"                # Private Class B
+          - "192.168.0.0/16"               # Private Class C
+          - "169.254.0.0/16"               # Link-local (includes cloud metadata)
+          - "::1/128"                      # IPv6 loopback
+          - "fc00::/7"                     # IPv6 private
+        validate_redirects: true           # Re-validate each redirect target (default: true)
+        verify_ssl: true                   # Verify SSL certificates (default: true)
+
+      # Concurrency settings (for high-volume scraping)
+      concurrency:
+        pool_size: 10                      # Max concurrent fetches (default: 10)
+
+      # Rate limiting (integrates with ELSPETH's RateLimitRegistry)
+      rate_limit:
+        requests_per_minute: 60            # Per-domain limit
+        burst: 10                          # Burst allowance
 
       # Error routing (standard ELSPETH pattern)
       on_error: quarantine  # or: discard, or sink name
@@ -77,6 +105,9 @@ transforms:
 | `fingerprint_field` | Required - explicit output field naming |
 | `http.abuse_contact` | Required - must be valid email format |
 | `http.scraping_reason` | Required - minimum 10 characters |
+| `security.max_response_size_mb` | Optional - defaults to 10MB |
+| `security.blocked_ip_ranges` | Optional - defaults to private/loopback ranges |
+| `rate_limit.requests_per_minute` | Optional - defaults to 60 |
 
 ### Responsible Scraping Headers
 
@@ -269,7 +300,9 @@ def compute_fingerprint(content: str, mode: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 ```
 
-### Structure Mode
+### Structure Mode (Experimental)
+
+> ⚠️ **Limitations:** Structure mode is sensitive to DOM changes that may not reflect meaningful content changes (e.g., adding `<span>` wrappers for styling, reordering `<div>` sections). It may produce false positives for cosmetic changes and false negatives for text-only policy changes. **Recommended for:** Detecting major layout changes (sections added/removed). **Not recommended for:** Compliance monitoring where text changes matter.
 
 Extracts the DOM "skeleton" - tag hierarchy without text content:
 
@@ -335,17 +368,26 @@ gates:
 
 Following the established pattern from `LLMClientError`:
 
-| HTTP Status | Error Type | Retryable? | Behavior |
-|-------------|------------|------------|----------|
+| HTTP Status / Exception | Error Type | Retryable? | Behavior |
+|-------------------------|------------|------------|----------|
 | 429 | `RateLimitError` | ✅ Yes | Re-raise for engine RetryManager |
+| 408 (Request Timeout) | `TimeoutError` | ✅ Yes | Re-raise for engine RetryManager |
+| 425 (Too Early) | `ServerError` | ✅ Yes | Re-raise for engine RetryManager |
 | 500, 502, 503, 504 | `ServerError` | ✅ Yes | Re-raise for engine RetryManager |
-| Timeout / Connection refused | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
+| `httpx.TimeoutException` | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
+| `httpx.ConnectError` | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
+| `httpx.ReadTimeout` | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
+| Connection refused | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
+| DNS resolution failure | `NetworkError` | ✅ Yes | Re-raise for engine RetryManager |
 | 404 | `NotFoundError` | ❌ No | `TransformResult.error()` |
 | 403 | `ForbiddenError` | ❌ No | `TransformResult.error()` |
 | 401 | `UnauthorizedError` | ❌ No | `TransformResult.error()` |
 | SSL/TLS failure | `SSLError` | ❌ No | `TransformResult.error()` |
 | Invalid URL | `InvalidURLError` | ❌ No | `TransformResult.error()` |
+| SSRF blocked (private IP) | `SSRFBlockedError` | ❌ No | `TransformResult.error()` |
+| Response too large | `ResponseTooLargeError` | ❌ No | `TransformResult.error()` |
 | Malformed response | `ParseError` | ❌ No | `TransformResult.error()` |
+| HTML conversion timeout | `ConversionTimeoutError` | ❌ No | `TransformResult.error()` |
 
 ### Error Hierarchy
 
@@ -391,6 +433,26 @@ class InvalidURLError(WebScrapeError):
 class ParseError(WebScrapeError):
     def __init__(self, message: str) -> None:
         super().__init__(message, retryable=False)
+
+class SSRFBlockedError(WebScrapeError):
+    """URL resolves to blocked IP range (private, loopback, cloud metadata)."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+class ResponseTooLargeError(WebScrapeError):
+    """Response exceeds max_response_size_mb limit."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+class ConversionTimeoutError(WebScrapeError):
+    """HTML-to-text/markdown conversion exceeded timeout."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=False)
+
+class TimeoutError(WebScrapeError):
+    """HTTP 408 Request Timeout."""
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
 ```
 
 ### Process Method Pattern
@@ -432,6 +494,186 @@ When `on_error` routes to a sink, the error row contains:
 
 ---
 
+## Section 5.5: Security Controls
+
+Web scraping introduces significant security risks. This section documents mandatory security controls.
+
+### SSRF (Server-Side Request Forgery) Prevention
+
+**Threat:** Attacker provides malicious URL to access internal systems, cloud metadata, or local files.
+
+**Controls:**
+
+1. **Scheme Whitelist** - Only `http` and `https` allowed:
+   ```python
+   ALLOWED_SCHEMES = {"http", "https"}
+
+   def validate_scheme(url: str) -> None:
+       parsed = urllib.parse.urlparse(url)
+       if parsed.scheme.lower() not in ALLOWED_SCHEMES:
+           raise SSRFBlockedError(f"Forbidden scheme: {parsed.scheme}")
+   ```
+
+2. **IP Range Blocklist** - Block private, loopback, and cloud metadata IPs:
+   ```python
+   import ipaddress
+   import socket
+
+   BLOCKED_RANGES = [
+       ipaddress.ip_network("127.0.0.0/8"),      # Loopback
+       ipaddress.ip_network("10.0.0.0/8"),       # Private Class A
+       ipaddress.ip_network("172.16.0.0/12"),    # Private Class B
+       ipaddress.ip_network("192.168.0.0/16"),   # Private Class C
+       ipaddress.ip_network("169.254.0.0/16"),   # Link-local (AWS/Azure/GCP metadata)
+       ipaddress.ip_network("::1/128"),          # IPv6 loopback
+       ipaddress.ip_network("fc00::/7"),         # IPv6 private
+   ]
+
+   def validate_ip(hostname: str) -> str:
+       """Resolve hostname and validate IP is not blocked. Returns resolved IP."""
+       try:
+           ip_str = socket.gethostbyname(hostname)
+       except socket.gaierror as e:
+           raise NetworkError(f"DNS resolution failed: {hostname}: {e}")
+
+       ip = ipaddress.ip_address(ip_str)
+       for blocked in BLOCKED_RANGES:
+           if ip in blocked:
+               raise SSRFBlockedError(f"Blocked IP range: {ip_str} in {blocked}")
+
+       return ip_str
+   ```
+
+3. **DNS Pinning** - Prevent DNS rebinding attacks:
+   ```python
+   # Resolve DNS once, use resolved IP for the request
+   resolved_ip = validate_ip(parsed.hostname)
+
+   # Use httpx transport with pre-resolved IP
+   # This prevents TOCTOU where DNS changes between validation and request
+   transport = httpx.HTTPTransport(local_address=None)
+   # ... or use resolved IP directly in URL (with Host header preserved)
+   ```
+
+### Redirect Validation
+
+**Threat:** Initial URL passes validation, then redirects to forbidden target.
+
+**Control:** Validate each redirect destination before following:
+
+```python
+def validate_redirect(response: httpx.Response) -> None:
+    """Event hook called on each redirect."""
+    if response.is_redirect:
+        location = response.headers.get("location")
+        if location:
+            # Parse and validate redirect target
+            parsed = urllib.parse.urlparse(location)
+            validate_scheme(location)
+            if parsed.hostname:
+                validate_ip(parsed.hostname)
+
+# Configure httpx to call hook on redirects
+client = httpx.Client(
+    event_hooks={"response": [validate_redirect]},
+    follow_redirects=True,
+    max_redirects=5,
+)
+```
+
+### Response Size Limits
+
+**Threat:** Attacker provides URL to massive file, causing memory exhaustion.
+
+**Control:** Stream response and abort if size exceeded:
+
+```python
+async def fetch_with_size_limit(
+    client: httpx.Client,
+    url: str,
+    max_size_bytes: int,
+) -> bytes:
+    """Fetch URL with response size limit."""
+    # Check Content-Length header first (if available)
+    head_response = client.head(url)
+    content_length = head_response.headers.get("content-length")
+    if content_length and int(content_length) > max_size_bytes:
+        raise ResponseTooLargeError(
+            f"Content-Length {content_length} exceeds limit {max_size_bytes}"
+        )
+
+    # Stream response and count bytes
+    chunks = []
+    total_size = 0
+    with client.stream("GET", url) as response:
+        for chunk in response.iter_bytes():
+            total_size += len(chunk)
+            if total_size > max_size_bytes:
+                raise ResponseTooLargeError(
+                    f"Response size {total_size} exceeds limit {max_size_bytes}"
+                )
+            chunks.append(chunk)
+
+    return b"".join(chunks)
+```
+
+### HTML Conversion Timeout
+
+**Threat:** Malicious HTML causes html2text/BeautifulSoup to hang or consume excessive CPU.
+
+**Control:** Wrap conversion in timeout:
+
+```python
+import signal
+from contextlib import contextmanager
+
+@contextmanager
+def timeout(seconds: int):
+    """Context manager for timeout (Unix only)."""
+    def handler(signum, frame):
+        raise ConversionTimeoutError(f"HTML conversion exceeded {seconds}s timeout")
+
+    old_handler = signal.signal(signal.SIGALRM, handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+# Usage
+CONVERSION_TIMEOUT_SECONDS = 30
+
+with timeout(CONVERSION_TIMEOUT_SECONDS):
+    markdown = html2text.handle(html_content)
+```
+
+### Certificate Validation
+
+**Control:** Always verify SSL certificates (httpx default):
+
+```python
+# httpx verifies certificates by default
+# Explicitly document this is REQUIRED
+client = httpx.Client(
+    verify=True,  # Default, but explicit for clarity
+    # NEVER set verify=False in production
+)
+```
+
+### Security Configuration Summary
+
+| Control | Config Key | Default | Description |
+|---------|------------|---------|-------------|
+| Scheme whitelist | `security.allowed_schemes` | `["https", "http"]` | Reject `file://`, `ftp://`, etc. |
+| IP blocklist | `security.blocked_ip_ranges` | Private + loopback | Prevent SSRF to internal systems |
+| Response size limit | `security.max_response_size_mb` | `10` | Abort if response exceeds limit |
+| Redirect validation | `security.validate_redirects` | `true` | Re-validate each redirect target |
+| SSL verification | `security.verify_ssl` | `true` | Verify certificates (never disable) |
+| Conversion timeout | `security.conversion_timeout_s` | `30` | Abort HTML conversion if slow |
+
+---
+
 ## Section 6: Dependencies and Implementation
 
 ### New Dependencies
@@ -439,7 +681,9 @@ When `on_error` routes to a sink, the error row contains:
 | Package | Version | Purpose | Size |
 |---------|---------|---------|------|
 | `html2text` | `>=2024.2.26` | HTML→Markdown conversion | ~50KB |
-| `httpx` | `>=0.27` | Modern async-capable HTTP client | ~200KB |
+| `beautifulsoup4` | `>=4.12,<5` | HTML parsing for text extraction and structure fingerprinting | ~500KB |
+| `httpx` | `>=0.27` | Modern async-capable HTTP client | Already in core deps |
+| `respx` | `>=0.21,<1` | httpx mocking for tests | Dev dependency |
 
 **Why httpx over requests:**
 - Built-in timeout handling (requests is notorious for hanging)
@@ -448,75 +692,93 @@ When `on_error` routes to a sink, the error row contains:
 - Same API style, easier testing with respx
 - Future-proofs for async parallelization
 
-**Note:** `beautifulsoup4` is already in ELSPETH's dependencies.
+**Note:** `httpx` is already in ELSPETH's core dependencies. `beautifulsoup4` and `html2text` are new additions for the `[web]` optional dependency group.
 
 ### File Structure
 
 ```
 src/elspeth/plugins/
 ├── transforms/
-│   └── web_scrape.py           # Main transform
+│   └── web_scrape.py           # Main transform (new)
 ├── clients/
-│   └── http.py                 # AuditedHTTPClient (new)
+│   └── http.py                 # AuditedHTTPClient (EXISTS - needs GET method)
 ```
 
 ### AuditedHTTPClient
 
-Following the `AuditedLLMClient` pattern - wraps httpx with audit recording:
+> **Note:** `AuditedHTTPClient` already exists at `src/elspeth/plugins/clients/http.py` (413 lines). It currently only has a `post()` method. **Implementation task:** Add a `get()` method following the same audit pattern.
+
+The existing client already provides:
+- Request/response recording to Landscape via `calls` table
+- Auth header fingerprinting (HMAC)
+- Latency measurement
+- Error recording
+- Telemetry emission
+- Rate limiting support via `limiter` parameter
+
+**Required addition - `get()` method:**
 
 ```python
-class AuditedHTTPClient:
-    """HTTP client with automatic audit trail recording."""
+def get(
+    self,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
+) -> HTTPResponse:
+    """Fetch URL with full audit recording.
 
-    def __init__(
-        self,
-        recorder: LandscapeRecorder,
-        state_id: str,
-        run_id: str,
-        payload_store: PayloadStore,
-        *,
-        timeout: float = 30.0,
-        max_redirects: int = 5,
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self._recorder = recorder
-        self._state_id = state_id
-        self._run_id = run_id
-        self._payload_store = payload_store
+    Follows same pattern as existing post() method:
+    1. Record call start time
+    2. Make request
+    3. Record call to Landscape with request/response data
+    4. Emit telemetry
+    5. Return response or raise typed error
+    """
+    # Implementation mirrors post() but uses GET method
+    ...
+```
 
-        self._client = httpx.Client(
-            timeout=timeout,
-            follow_redirects=True,
-            max_redirects=max_redirects,
-            headers=headers,
-        )
+**Security integration** - The `get()` method must integrate with security controls:
 
-    def get(self, url: str) -> HTTPResponse:
-        """Fetch URL with full audit recording."""
-        # Store request payload
-        # Make request
-        # Store response payload
-        # Record call in Landscape
-        # Return response or raise typed error
+```python
+def get(self, url: str, ...) -> HTTPResponse:
+    # 1. Validate URL scheme
+    validate_scheme(url)
+
+    # 2. Resolve DNS and validate IP (SSRF prevention)
+    parsed = urllib.parse.urlparse(url)
+    resolved_ip = validate_ip(parsed.hostname)
+
+    # 3. Make request with redirect validation hook
+    # 4. Stream response with size limit
+    # 5. Record to Landscape
+    # 6. Return response
 ```
 
 ### Registration
 
+Plugins are registered via the `pluggy` hook system in `src/elspeth/plugins/manager.py`. The `PluginManager` discovers plugins via the `elspeth_get_transforms` hook.
+
 ```python
-# src/elspeth/plugins/transforms/hookimpl.py
+# src/elspeth/plugins/transforms/__init__.py
+# Add to the TRANSFORM_REGISTRY dict:
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 
-class ElspethBuiltinTransforms:
-    @hookimpl
-    def elspeth_get_transforms(self) -> list[type[Any]]:
-        return [..., WebScrapeTransform]
-
-# src/elspeth/cli.py
-TRANSFORM_PLUGINS: dict[str, type[BaseTransform]] = {
-    ...,
+TRANSFORM_REGISTRY: dict[str, type[BaseTransform]] = {
+    # ... existing transforms ...
     "web_scrape": WebScrapeTransform,
 }
+
+# The PluginManager in manager.py loads transforms from this registry
+# No separate hookimpl.py file is needed
 ```
+
+**Plugin discovery flow:**
+1. `PluginManager.get_transform(name)` is called with `"web_scrape"`
+2. Manager looks up in `TRANSFORM_REGISTRY`
+3. Returns `WebScrapeTransform` class
+4. Engine instantiates with config options
 
 ### Optional Dependency Group
 
@@ -525,14 +787,145 @@ TRANSFORM_PLUGINS: dict[str, type[BaseTransform]] = {
 [project.optional-dependencies]
 web = [
     "html2text>=2024.2.26",
-    "httpx>=0.27",
+    "beautifulsoup4>=4.12,<5",
 ]
+# Note: httpx is already in core dependencies
+
+dev = [
+    # ... existing dev deps ...
+    "respx>=0.21,<1",  # httpx mocking for web scrape tests
+]
+
 all = [
-    "elspeth[llm,azure,web]",  # Add to 'all' group
+    "elspeth[llm,azure,web]",  # Add web to 'all' group
 ]
 ```
 
 Install with: `uv pip install -e ".[web]"`
+
+---
+
+## Section 6.5: Concurrency Model
+
+Web scraping is I/O-bound. Without concurrency, 10,000 URLs at 3 seconds average = **8.3 hours**. This section documents the required concurrency architecture.
+
+### BatchTransformMixin Integration
+
+Following the pattern from LLM transforms (`azure_batch_llm.py`), `WebScrapeTransform` must inherit from `BatchTransformMixin` for concurrent processing:
+
+```python
+from elspeth.plugins.batching import BatchTransformMixin
+from elspeth.plugins.pooling import PooledExecutor
+
+class WebScrapeTransform(BatchTransformMixin, BaseTransform):
+    """Web scraping transform with concurrent fetch support."""
+
+    def __init__(self, options: dict[str, Any]) -> None:
+        super().__init__(options)
+        self._pool_size = options.get("concurrency", {}).get("pool_size", 10)
+
+    def get_pool_executor(self) -> PooledExecutor:
+        """Return thread pool for concurrent fetches."""
+        return PooledExecutor(
+            max_workers=self._pool_size,
+            thread_name_prefix="web_scrape",
+        )
+
+    def process_batch(
+        self,
+        rows: list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> list[TransformResult]:
+        """Process multiple URLs concurrently."""
+        with self.get_pool_executor() as executor:
+            futures = [
+                executor.submit(self._fetch_and_extract, row, ctx)
+                for row in rows
+            ]
+            return [f.result() for f in futures]
+```
+
+### Throughput Expectations
+
+| Configuration | URLs/hour | 10,000 URLs |
+|---------------|-----------|-------------|
+| Sequential (no batching) | ~1,200 | 8.3 hours |
+| `pool_size: 5` | ~6,000 | 1.7 hours |
+| `pool_size: 10` (default) | ~12,000 | 50 minutes |
+| `pool_size: 20` | ~24,000 | 25 minutes |
+
+> ⚠️ **Warning:** Higher pool sizes increase load on target servers. Always combine with rate limiting.
+
+### Rate Limiting Integration
+
+Rate limiting is **mandatory** for responsible scraping. The transform integrates with ELSPETH's `RateLimitRegistry`:
+
+```python
+from elspeth.core.rate_limit import RateLimitRegistry
+
+class WebScrapeTransform(BatchTransformMixin, BaseTransform):
+    def __init__(self, options: dict[str, Any]) -> None:
+        super().__init__(options)
+
+        # Get rate limiter from registry
+        rate_config = options.get("rate_limit", {})
+        self._limiter = RateLimitRegistry.get_or_create(
+            service_name="web_scrape",
+            requests_per_minute=rate_config.get("requests_per_minute", 60),
+            burst=rate_config.get("burst", 10),
+        )
+
+    def _fetch_and_extract(
+        self,
+        row: dict[str, Any],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        url = row[self._url_field]
+
+        # Wait for rate limit token before making request
+        self._limiter.acquire()
+
+        # Create audited client with limiter
+        client = AuditedHTTPClient(
+            recorder=ctx.recorder,
+            state_id=ctx.state_id,
+            run_id=ctx.run_id,
+            limiter=self._limiter,  # Pass limiter to client
+            # ... other params
+        )
+
+        return self._do_fetch(client, url, row, ctx)
+```
+
+### Telemetry Integration
+
+The transform emits telemetry events for operational visibility:
+
+```python
+# On fetch start
+ctx.telemetry_emit({
+    "event": "web_scrape.fetch_start",
+    "url_domain": parsed.hostname,
+    "pool_position": pool_position,
+})
+
+# On fetch complete
+ctx.telemetry_emit({
+    "event": "web_scrape.fetch_complete",
+    "url_domain": parsed.hostname,
+    "status_code": response.status_code,
+    "duration_ms": duration_ms,
+    "response_size_bytes": len(response.content),
+})
+
+# On fetch error
+ctx.telemetry_emit({
+    "event": "web_scrape.fetch_error",
+    "url_domain": parsed.hostname,
+    "error_type": type(e).__name__,
+    "retryable": e.retryable if isinstance(e, WebScrapeError) else False,
+})
+```
 
 ---
 
@@ -713,6 +1106,181 @@ def test_real_http_against_local_server(local_http_server):
     assert result.is_success
 ```
 
+### Security Tests (SSRF Prevention)
+
+```python
+@respx.mock
+def test_ssrf_blocks_private_ip():
+    """Verify private IPs are blocked."""
+    # Mock DNS to return private IP
+    with patch("socket.gethostbyname", return_value="192.168.1.1"):
+        transform = make_transform()
+        result = transform.process({"url": "https://evil.com/page"}, ctx)
+
+        assert result.is_error
+        assert result.error["reason"] == "SSRFBlockedError"
+
+def test_ssrf_blocks_file_scheme():
+    """Verify file:// URLs are rejected."""
+    transform = make_transform()
+    result = transform.process({"url": "file:///etc/passwd"}, ctx)
+
+    assert result.is_error
+    assert result.error["reason"] == "SSRFBlockedError"
+
+def test_ssrf_blocks_cloud_metadata():
+    """Verify cloud metadata endpoints are blocked."""
+    with patch("socket.gethostbyname", return_value="169.254.169.254"):
+        transform = make_transform()
+        result = transform.process(
+            {"url": "http://metadata.google.internal/computeMetadata/v1/"},
+            ctx,
+        )
+
+        assert result.is_error
+        assert result.error["reason"] == "SSRFBlockedError"
+
+@respx.mock
+def test_ssrf_blocks_redirect_to_private_ip():
+    """Verify redirects to private IPs are blocked."""
+    # First request returns redirect
+    respx.get("https://example.com/page").mock(
+        return_value=Response(302, headers={"Location": "http://192.168.1.1/admin"})
+    )
+
+    transform = make_transform()
+    result = transform.process({"url": "https://example.com/page"}, ctx)
+
+    assert result.is_error
+    assert result.error["reason"] == "SSRFBlockedError"
+```
+
+### Response Size Limit Tests
+
+```python
+@respx.mock
+def test_response_too_large_aborted():
+    """Verify large responses are aborted."""
+    # Create response larger than limit
+    large_content = "x" * (11 * 1024 * 1024)  # 11MB
+    respx.get("https://example.com/huge").mock(
+        return_value=Response(200, content=large_content)
+    )
+
+    transform = make_transform(security={"max_response_size_mb": 10})
+    result = transform.process({"url": "https://example.com/huge"}, ctx)
+
+    assert result.is_error
+    assert result.error["reason"] == "ResponseTooLargeError"
+```
+
+### Timeout and Network Tests
+
+```python
+@respx.mock
+def test_connect_timeout_is_retryable():
+    """Verify connection timeout raises retryable error."""
+    respx.get("https://slow.example.com/").mock(
+        side_effect=httpx.ConnectTimeout("Connection timed out")
+    )
+
+    transform = make_transform()
+
+    with pytest.raises(NetworkError) as exc:
+        transform.process({"url": "https://slow.example.com/"}, ctx)
+
+    assert exc.value.retryable is True
+
+@respx.mock
+def test_read_timeout_is_retryable():
+    """Verify read timeout raises retryable error."""
+    respx.get("https://slow.example.com/").mock(
+        side_effect=httpx.ReadTimeout("Read timed out")
+    )
+
+    transform = make_transform()
+
+    with pytest.raises(NetworkError) as exc:
+        transform.process({"url": "https://slow.example.com/"}, ctx)
+
+    assert exc.value.retryable is True
+```
+
+### Encoding and Edge Case Tests
+
+```python
+def test_malformed_html_handled():
+    """Verify malformed HTML doesn't crash."""
+    html = "<html><body><p>Unclosed tag<div>Nested wrong</html>"
+
+    # Should not raise
+    result = extract_content(html, format="text")
+    assert isinstance(result, str)
+
+def test_empty_response_handled():
+    """Verify empty 200 OK is handled gracefully."""
+    respx.get("https://example.com/empty").mock(
+        return_value=Response(200, content=b"")
+    )
+
+    transform = make_transform()
+    result = transform.process({"url": "https://example.com/empty"}, ctx)
+
+    assert result.is_success
+    assert result.row["page_content"] == ""
+
+def test_charset_detection():
+    """Verify charset is detected from Content-Type header."""
+    respx.get("https://example.com/latin").mock(
+        return_value=Response(
+            200,
+            content="Héllo wörld".encode("iso-8859-1"),
+            headers={"Content-Type": "text/html; charset=iso-8859-1"},
+        )
+    )
+
+    transform = make_transform()
+    result = transform.process({"url": "https://example.com/latin"}, ctx)
+
+    assert result.is_success
+    assert "Héllo" in result.row["page_content"]
+```
+
+### Redirect Chain Tests
+
+```python
+@respx.mock
+def test_redirect_chain_captured():
+    """Verify final URL is captured after redirects."""
+    respx.get("https://old.example.com/page").mock(
+        return_value=Response(301, headers={"Location": "https://new.example.com/page"})
+    )
+    respx.get("https://new.example.com/page").mock(
+        return_value=Response(200, html="<p>Content</p>")
+    )
+
+    transform = make_transform()
+    result = transform.process({"url": "https://old.example.com/page"}, ctx)
+
+    assert result.is_success
+    assert result.row["fetch_url_final"] == "https://new.example.com/page"
+
+@respx.mock
+def test_max_redirects_exceeded():
+    """Verify redirect limit is enforced."""
+    # Create redirect loop
+    for i in range(10):
+        respx.get(f"https://example.com/r{i}").mock(
+            return_value=Response(302, headers={"Location": f"https://example.com/r{i+1}"})
+        )
+
+    transform = make_transform(http={"max_redirects": 5})
+    result = transform.process({"url": "https://example.com/r0"}, ctx)
+
+    assert result.is_error
+    # httpx raises TooManyRedirects
+```
+
 ---
 
 ## Section 8: Summary and Next Steps
@@ -798,32 +1366,42 @@ default_sink: compliant
 
 ### Implementation Tasks
 
-1. **Create `AuditedHTTPClient`** in `src/elspeth/plugins/clients/http.py`
-   - Follow `AuditedLLMClient` pattern
-   - Payload storage for request/response
-   - Error classification (retryable vs non-retryable)
+1. **Add `get()` method to `AuditedHTTPClient`** in `src/elspeth/plugins/clients/http.py`
+   - Client already exists (413 lines) with `post()` method
+   - Add `get()` following same audit pattern
+   - Integrate SSRF prevention (URL validation, IP blocklist, redirect validation)
+   - Add response size streaming with limit check
 
 2. **Create `WebScrapeTransform`** in `src/elspeth/plugins/transforms/web_scrape.py`
-   - Config validation (mandatory fields)
-   - Content extraction (markdown/text/raw)
+   - Inherit from `BatchTransformMixin` for concurrent processing
+   - Config validation (mandatory fields, security settings)
+   - Content extraction (markdown/text/raw) with conversion timeout
    - Fingerprinting (content/full/structure modes)
-   - Integration with AuditedHTTPClient
+   - Integration with `AuditedHTTPClient.get()` and `RateLimitRegistry`
+   - Telemetry emission for operational visibility
 
-3. **Create error hierarchy** in `src/elspeth/plugins/clients/http.py`
+3. **Create error hierarchy** in `src/elspeth/plugins/transforms/web_scrape.py`
    - `WebScrapeError` base with `retryable` flag
-   - Typed subclasses for each error category
+   - Typed subclasses for each error category (see Section 5)
+   - Include new security errors: `SSRFBlockedError`, `ResponseTooLargeError`, `ConversionTimeoutError`
 
 4. **Add dependencies** to `pyproject.toml`
-   - `html2text>=2024.2.26`
-   - `httpx>=0.27`
-   - New `[web]` optional dependency group
+   - `html2text>=2024.2.26` to `[web]` group
+   - `beautifulsoup4>=4.12,<5` to `[web]` group
+   - `respx>=0.21,<1` to `[dev]` group
+   - Add `[web]` to `[all]` group
 
-5. **Register plugin** in hookimpl.py and cli.py
+5. **Register plugin** in `src/elspeth/plugins/transforms/__init__.py`
+   - Add to `TRANSFORM_REGISTRY` dict
+   - No separate hookimpl.py needed
 
 6. **Write tests**
    - Unit tests with respx mocking
-   - Contract tests (inherit from base)
+   - Contract tests (inherit from `TransformContractPropertyTestBase`)
    - Fingerprint stability tests
+   - Security tests (SSRF, response size, redirects)
+   - Timeout and network error tests
+   - Encoding edge case tests
    - Integration tests with local HTTP server
 
 ### Open Questions (Resolved)
@@ -839,16 +1417,104 @@ default_sink: compliant
 
 ---
 
-## Appendix: Rate Limiting Consideration
+## Section 9: Limitations
 
-For high-volume scraping, integrate with ELSPETH's existing rate limiting:
+This section documents known limitations and out-of-scope features.
 
-```yaml
-rate_limit:
-  enabled: true
-  services:
-    web_scrape:
-      requests_per_minute: 60  # Respectful default
+### JavaScript-Rendered Content (Not Supported)
+
+**Limitation:** This transform fetches raw HTML. Single-Page Applications (SPAs) built with React, Vue, Angular, etc., render content via JavaScript after page load. The transform will capture only the initial HTML skeleton.
+
+**Symptoms:**
+- Content field contains minimal text (e.g., "Loading..." or framework boilerplate)
+- Fingerprints are stable but useless (always the same skeleton)
+- No errors are raised - this is a silent data quality issue
+
+**Detection heuristic (future enhancement):**
+```python
+# Detect SPA skeletons - emit warning if content looks like framework boilerplate
+SPA_INDICATORS = [
+    '<div id="root"></div>',
+    '<div id="app"></div>',
+    'window.__INITIAL_STATE__',
+    'ng-app',
+]
+
+if any(indicator in html for indicator in SPA_INDICATORS):
+    ctx.warn("Possible SPA detected - JavaScript rendering not supported")
 ```
 
-The `AuditedHTTPClient` should accept an optional `limiter` parameter (like `AuditedLLMClient`) to throttle requests per configured policy.
+**Workaround:** For JavaScript-heavy sites, use a headless browser solution (Playwright, Puppeteer) outside ELSPETH, then feed the rendered HTML to a file-based source.
+
+**Future consideration:** A `WebScrapeBrowserTransform` using Playwright could be added as a separate plugin in a `[web-browser]` optional dependency group.
+
+### Cookie and Session Handling (Not Supported)
+
+**Limitation:** Each request is stateless. Cookies are not persisted between requests, and session-based authentication is not supported.
+
+**Impact:**
+- Sites requiring login will return login pages, not content
+- Sites with cookie-based consent banners may show consent pages
+- Multi-step navigation (click this, then click that) is not possible
+
+**Workaround:** For authenticated sites, consider:
+1. Using API endpoints instead of web pages (if available)
+2. Manual cookie injection via custom headers (not recommended for compliance)
+3. External session capture with cookie export
+
+### Authentication (Not Supported)
+
+**Limitation:** No built-in support for:
+- Basic Auth
+- OAuth / OAuth2
+- API keys in query params
+- Form-based login
+
+**Workaround:** Basic Auth could be added via the `headers` config:
+```yaml
+http:
+  headers:
+    Authorization: "Basic base64encodedcredentials"
+```
+
+This is not recommended for compliance monitoring scenarios.
+
+### robots.txt Compliance (Not Enforced)
+
+**Limitation:** The transform does not check or respect `robots.txt` directives.
+
+**Rationale:** Compliance monitoring of public government transparency statements typically does not require robots.txt compliance (monitoring your own pages or pages you have legal authority to access).
+
+**Future consideration:** An optional `respect_robots_txt: true` config could be added for general-purpose scraping.
+
+### HTTP Proxy Support (Not Implemented)
+
+**Limitation:** No proxy configuration. All requests are made directly.
+
+**Future consideration:** httpx supports proxies natively:
+```python
+client = httpx.Client(proxies="http://proxy.example.com:8080")
+```
+
+Could be exposed via config if needed.
+
+### Caching (Not Implemented)
+
+**Limitation:** No response caching. Each pipeline run fetches fresh content.
+
+**Rationale:** For compliance monitoring, fresh content is typically required. Caching would complicate audit trail interpretation.
+
+**Future consideration:** HTTP-standard caching (ETag, If-Modified-Since) could reduce bandwidth for unchanged pages.
+
+### Summary of Limitations
+
+| Feature | Status | Workaround Available? |
+|---------|--------|----------------------|
+| JavaScript rendering | ❌ Not supported | External headless browser |
+| Cookie persistence | ❌ Not supported | Manual header injection |
+| Session authentication | ❌ Not supported | None |
+| Basic Auth | ⚠️ Manual via headers | Yes (not recommended) |
+| OAuth | ❌ Not supported | None |
+| robots.txt | ❌ Not checked | N/A for compliance use case |
+| HTTP proxy | ❌ Not implemented | httpx supports it natively |
+| Response caching | ❌ Not implemented | N/A for compliance use case |
