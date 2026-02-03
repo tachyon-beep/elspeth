@@ -903,6 +903,18 @@ The following commands can destroy uncommitted work or rewrite history. **ALWAYS
 
 **Don't.** Go back and get clarification from the user.
 
+## No Git Worktrees
+
+**STRICT REQUIREMENT:** Do not use git worktrees in this project.
+
+Worktrees add complexity without benefit for our workflow:
+- They create divergence that leads to merge conflicts
+- Rebase/merge state can become corrupted across worktrees
+- "Isolation" is illusory when you still have to merge back
+- Regular branches are simpler and sufficient
+
+**If you think you need a worktree:** You don't. Use a regular branch instead.
+
 ## PROHIBITION ON "DEFENSIVE PROGRAMMING" PATTERNS
 
 No Bug-Hiding Patterns: This codebase prohibits defensive patterns that mask bugs instead of fixing them. Do not use .get(), getattr(), hasattr(), isinstance(), or silent exception handling to suppress errors from nonexistent attributes, malformed data, or incorrect types. A common anti-pattern is when an LLM hallucinates a variable or field name, the code fails, and the "fix" is wrapping it in getattr(obj, "hallucinated_field", None) to silence the error—this hides the real bug. When code fails, fix the actual cause: correct the field name, migrate the data source to emit proper types, or fix the broken integration. Typed dataclasses with discriminator fields serve as contracts; access fields directly (obj.field) not defensively (obj.get("field")). If code would fail without a defensive pattern, that failure is a bug to fix, not a symptom to suppress.
