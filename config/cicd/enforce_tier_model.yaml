@@ -95,6 +95,18 @@ per_file_rules:
   reason: Jinja2 template AST walker requires isinstance() for node type traversal - fundamental
     to field extraction
   expires: null
+- pattern: core/config.py
+  rules:
+  - R1
+  - R5
+  - R6
+  reason: Configuration loading parses user YAML (Tier 3) - defensive type checking and optional field access required
+  expires: null
+- pattern: core/security/*
+  rules:
+  - R1
+  reason: Security utilities access optional environment variables (Tier 3) - defensive access for missing keys
+  expires: null
 allow_hits:
 - key: contracts/contract_builder.py:R1:ContractBuilder:process_first_row:fp=29c35e215d63cfbc
   owner: feature
