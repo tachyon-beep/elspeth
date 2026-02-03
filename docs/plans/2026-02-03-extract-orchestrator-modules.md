@@ -12,7 +12,7 @@
 - `aggregation.py` - Aggregation timeout/flush handling
 - `core.py` - Orchestrator class, `__init__`, `run()`, `resume()`
 
-**Tech Stack:** Python 3.11+, no new dependencies (pure refactoring)
+**Tech Stack:** Python 3.12+, no new dependencies (pure refactoring)
 
 ---
 
@@ -28,6 +28,11 @@ Before starting, verify:
 
 # Note the current line count
 wc -l src/elspeth/engine/orchestrator.py  # Should be ~3148
+
+# IMPORTANT: Capture import time baseline for regression detection
+# Record this value and compare after Task 5
+echo "Import time baseline:"
+time python -c "from elspeth.engine.orchestrator import Orchestrator"
 ```
 
 ---
@@ -67,6 +72,16 @@ These types define the interface for pipeline execution:
 - RunResult: Output statistics from a run
 - RouteValidationError: Configuration validation failure
 - AggregationFlushResult: Result of flushing aggregation buffers
+
+IMPORTANT: Import Cycle Prevention
+----------------------------------
+This module is a LEAF MODULE - it must NOT import from other orchestrator
+submodules (validation.py, export.py, aggregation.py, core.py).
+
+Other modules import FROM here (e.g., validation.py imports RouteValidationError).
+If types.py were to import from those modules, a circular import would occur.
+
+Keep types.py as pure data definitions with minimal dependencies.
 """
 
 from __future__ import annotations
@@ -77,16 +92,17 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
-    from elspeth.plugins.protocols import GateProtocol, SinkProtocol, SourceProtocol, TransformProtocol
+    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 from elspeth.contracts import RunStatus
-
+# Import protocols at runtime (not TYPE_CHECKING) because RowPlugin type alias
+# is used in runtime annotations and isinstance() checks
+from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
 # NOTE: BaseAggregation was DELETED - aggregation is now handled by
 # batch-aware transforms (is_batch_aware=True on TransformProtocol)
-# Using protocols instead of base classes to support protocol-only plugins.
-RowPlugin = "TransformProtocol | GateProtocol"
+RowPlugin = TransformProtocol | GateProtocol
 """Union of all row-processing plugin types for pipeline transforms list."""
 
 
@@ -260,6 +276,167 @@ Temporary orchestrator_legacy.py maintains compatibility during refactor."
 
 ---
 
+## Task 1.5: Add AggregationFlushResult Tests
+
+**CRITICAL:** The AggregationFlushResult dataclass replaces a 9-element tuple. Field ordering errors would be **silent** - counts could swap between `rows_succeeded` and `rows_failed` without obvious test failures. This task adds explicit verification before proceeding with further extraction.
+
+**Files:**
+- Create: `tests/engine/orchestrator/test_types.py`
+
+**Step 1: Create test file with field mapping and immutability tests**
+
+```python
+# tests/engine/orchestrator/test_types.py
+"""Tests for orchestrator types module.
+
+These tests verify the AggregationFlushResult dataclass:
+1. All fields are accessible by name (prevents field omission)
+2. Fields map to correct values (prevents ordering bugs)
+3. Frozen dataclass is immutable (prevents mutation bugs)
+4. __add__ operator is commutative (prevents ordering-dependent bugs)
+"""
+
+import pytest
+from dataclasses import FrozenInstanceError
+
+from elspeth.engine.orchestrator.types import AggregationFlushResult
+
+
+class TestAggregationFlushResult:
+    """Test AggregationFlushResult dataclass correctness."""
+
+    def test_all_fields_accessible_by_name(self) -> None:
+        """Verify each field is accessible - catches field omission during refactor."""
+        result = AggregationFlushResult(
+            rows_succeeded=1,
+            rows_failed=2,
+            rows_routed=3,
+            rows_quarantined=4,
+            rows_coalesced=5,
+            rows_forked=6,
+            rows_expanded=7,
+            rows_buffered=8,
+            routed_destinations={"sink1": 9},
+        )
+        # All fields must be accessible by name
+        assert result.rows_succeeded == 1
+        assert result.rows_failed == 2
+        assert result.rows_routed == 3
+        assert result.rows_quarantined == 4
+        assert result.rows_coalesced == 5
+        assert result.rows_forked == 6
+        assert result.rows_expanded == 7
+        assert result.rows_buffered == 8
+        assert result.routed_destinations == {"sink1": 9}
+
+    def test_frozen_dataclass_immutability(self) -> None:
+        """Verify frozen=True prevents mutation - catches accidental mutability."""
+        result = AggregationFlushResult(rows_succeeded=5)
+
+        with pytest.raises(FrozenInstanceError):
+            result.rows_succeeded = 10  # type: ignore[misc]
+
+    def test_default_values(self) -> None:
+        """Verify default values are 0 for counts and empty dict for destinations."""
+        result = AggregationFlushResult()
+
+        assert result.rows_succeeded == 0
+        assert result.rows_failed == 0
+        assert result.rows_routed == 0
+        assert result.rows_quarantined == 0
+        assert result.rows_coalesced == 0
+        assert result.rows_forked == 0
+        assert result.rows_expanded == 0
+        assert result.rows_buffered == 0
+        assert result.routed_destinations == {}
+
+    def test_addition_operator_sums_all_fields(self) -> None:
+        """Verify __add__ correctly sums all fields."""
+        result1 = AggregationFlushResult(
+            rows_succeeded=1, rows_failed=2, rows_routed=3,
+            rows_quarantined=4, rows_coalesced=5, rows_forked=6,
+            rows_expanded=7, rows_buffered=8,
+            routed_destinations={"sink1": 10},
+        )
+        result2 = AggregationFlushResult(
+            rows_succeeded=10, rows_failed=20, rows_routed=30,
+            rows_quarantined=40, rows_coalesced=50, rows_forked=60,
+            rows_expanded=70, rows_buffered=80,
+            routed_destinations={"sink1": 5, "sink2": 15},
+        )
+
+        combined = result1 + result2
+
+        assert combined.rows_succeeded == 11
+        assert combined.rows_failed == 22
+        assert combined.rows_routed == 33
+        assert combined.rows_quarantined == 44
+        assert combined.rows_coalesced == 55
+        assert combined.rows_forked == 66
+        assert combined.rows_expanded == 77
+        assert combined.rows_buffered == 88
+        assert combined.routed_destinations == {"sink1": 15, "sink2": 15}
+
+    def test_addition_operator_commutative(self) -> None:
+        """Verify a + b == b + a (commutativity)."""
+        result1 = AggregationFlushResult(
+            rows_succeeded=5, rows_failed=3,
+            routed_destinations={"sink1": 10},
+        )
+        result2 = AggregationFlushResult(
+            rows_succeeded=7, rows_failed=2,
+            routed_destinations={"sink2": 20},
+        )
+
+        combined_ab = result1 + result2
+        combined_ba = result2 + result1
+
+        # All fields should be equal regardless of order
+        assert combined_ab.rows_succeeded == combined_ba.rows_succeeded
+        assert combined_ab.rows_failed == combined_ba.rows_failed
+        assert combined_ab.routed_destinations == combined_ba.routed_destinations
+
+    def test_addition_with_zero_result(self) -> None:
+        """Verify adding zero-result is identity operation."""
+        result = AggregationFlushResult(
+            rows_succeeded=5, rows_failed=3,
+            routed_destinations={"sink1": 10},
+        )
+        zero = AggregationFlushResult()
+
+        combined = result + zero
+
+        assert combined.rows_succeeded == 5
+        assert combined.rows_failed == 3
+        assert combined.routed_destinations == {"sink1": 10}
+```
+
+**Step 2: Create the test directory if needed**
+
+```bash
+mkdir -p tests/engine/orchestrator
+touch tests/engine/orchestrator/__init__.py
+```
+
+**Step 3: Run the new tests**
+
+```bash
+.venv/bin/python -m pytest tests/engine/orchestrator/test_types.py -v
+```
+Expected: All tests pass
+
+**Step 4: Commit**
+
+```bash
+git add tests/engine/orchestrator/
+git commit -m "test(engine): add AggregationFlushResult field mapping tests
+
+Verify dataclass fields are correctly named, immutable, and __add__ is commutative.
+These tests catch silent field ordering bugs during tuple→dataclass migration."
+```
+
+---
+
 ## Task 2: Extract Validation Functions
 
 **Files:**
@@ -327,9 +504,10 @@ def validate_route_destinations(
 
     # Add config gates to the lookup
     if config_gate_id_map and config_gates:
+        from elspeth.contracts.types import GateName
         for gate_config in config_gates:
             # Graph must have ID for every config gate - crash if missing
-            node_id = config_gate_id_map[gate_config.name]
+            node_id = config_gate_id_map[GateName(gate_config.name)]
             node_id_to_gate_name[node_id] = gate_config.name
 
     # Check each route destination
@@ -1353,13 +1531,27 @@ def _flush_remaining_aggregation_buffers(
 ) -> AggregationFlushResult:
     """Delegate to aggregation module."""
     # Create checkpoint callback if enabled
+    #
+    # IMPORTANT: State Capture Pattern
+    # ---------------------------------
+    # The closure captures `last_node_id` from the enclosing scope.
+    # This is INTENTIONAL and SAFE because:
+    # 1. `last_node_id` is passed as a parameter to THIS method (value, not reference)
+    # 2. The value is frozen at closure creation time
+    # 3. The closure is called within the same method invocation (no async drift)
+    #
+    # If last_node_id were a mutable object or read from self.* after closure
+    # creation, we would risk recording incorrect checkpoint state (audit violation).
+    #
     checkpoint_callback = None
     if checkpoint and last_node_id is not None:
+        # Capture last_node_id by closure - value is frozen at this point
+        captured_node_id = last_node_id  # Explicit capture for clarity
         def checkpoint_callback(run_id: str, token_id: str, agg_state: dict) -> None:
             self._maybe_checkpoint(
                 run_id=run_id,
                 token_id=token_id,
-                node_id=last_node_id,
+                node_id=captured_node_id,  # Use captured value, not last_node_id
                 aggregation_state=agg_state,
             )
 
@@ -1416,6 +1608,24 @@ Replace 9-element tuple with AggregationFlushResult dataclass for type safety."
 - Create: `src/elspeth/engine/orchestrator/core.py`
 - Modify: `src/elspeth/engine/orchestrator/__init__.py`
 - Delete: `src/elspeth/engine/orchestrator_legacy.py`
+
+**CONSIDERATION: Fail-Fast Signing Key Validation**
+
+Currently, signing key validation (`ELSPETH_SIGNING_KEY`) happens during export - AFTER the entire pipeline run completes. This means a missing signing key is discovered only after all processing is done.
+
+For better fail-fast behavior, consider adding validation to `Orchestrator.__init__` or `run()` when `settings.landscape.export.sign=True`:
+
+```python
+# In Orchestrator.__init__ or run(), after settings are available:
+if settings and settings.landscape.export.enabled and settings.landscape.export.sign:
+    if "ELSPETH_SIGNING_KEY" not in os.environ:
+        raise ValueError(
+            "ELSPETH_SIGNING_KEY required when landscape.export.sign=true. "
+            "Set the environment variable or disable signed export."
+        )
+```
+
+This is optional but recommended for production deployments.
 
 **Step 1: Create core.py with the Orchestrator class**
 
@@ -1715,10 +1925,12 @@ class Orchestrator:
         checkpoint: bool = True,
         last_node_id: str | None = None,
     ) -> AggregationFlushResult:
+        # See Task 4 for detailed documentation on checkpoint callback state capture pattern
         checkpoint_callback = None
         if checkpoint and last_node_id is not None:
+            captured_node_id = last_node_id  # Explicit capture for audit trail integrity
             def checkpoint_callback(rid: str, tid: str, agg_state: dict) -> None:
-                self._maybe_checkpoint(run_id=rid, token_id=tid, node_id=last_node_id, aggregation_state=agg_state)
+                self._maybe_checkpoint(run_id=rid, token_id=tid, node_id=captured_node_id, aggregation_state=agg_state)
         return flush_remaining_aggregation_buffers(
             config, processor, ctx, pending_tokens, default_sink_name,
             run_id, recorder, checkpoint_callback
@@ -1843,7 +2055,20 @@ Expected: No new errors
 ```
 Expected: All tests pass, coverage shows new modules are exercised
 
-**Step 4: Commit any fixes**
+**Step 4: Verify import time regression**
+
+Compare against baseline from Pre-Flight Checks:
+```bash
+echo "Import time after refactor:"
+time python -c "from elspeth.engine.orchestrator import Orchestrator"
+```
+
+If import time increased by >2x from baseline, investigate:
+- Circular import resolution overhead
+- Missing lazy imports
+- Unnecessary eager imports in __init__.py
+
+**Step 5: Commit any fixes**
 
 ```bash
 git add -A
@@ -1854,7 +2079,21 @@ git commit -m "fix(engine): resolve any type errors from orchestrator refactor"
 
 ## Task 7: Final Verification and Cleanup
 
-**Step 1: Verify no imports break**
+**Step 1: Verify legacy file is deleted (CRITICAL - No Legacy Code Policy)**
+
+```bash
+# CRITICAL: Verify orchestrator_legacy.py does not exist
+# This is a BLOCKING check - do NOT proceed if this file exists
+if [ -f src/elspeth/engine/orchestrator_legacy.py ]; then
+    echo "ERROR: orchestrator_legacy.py still exists!"
+    echo "This violates the No Legacy Code Policy."
+    echo "All migration tasks (1-5) must complete before merge."
+    exit 1
+fi
+echo "✓ Legacy file correctly deleted"
+```
+
+**Step 1a: Verify no imports break**
 
 ```bash
 # Check nothing imports the old file path directly
@@ -1916,19 +2155,26 @@ git checkout HEAD~N -- src/elspeth/engine/orchestrator.py
 | Task | Description | Lines Extracted |
 |------|-------------|-----------------|
 | 1 | Create package + types.py + AggregationFlushResult | ~120 |
+| 1.5 | Add AggregationFlushResult field mapping tests | ~100 (tests) |
 | 2 | Extract validation.py | ~120 |
 | 3 | Extract export.py | ~200 |
 | 4 | Extract aggregation.py | ~350 |
 | 5 | Create core.py | ~1800 |
-| 6 | Update imports, type check | - |
-| 7 | Final verification | - |
+| 6 | Update imports, type check, verify import time | - |
+| 7 | Final verification (including legacy file check) | - |
 
-**Total: 7 tasks, ~2600 lines across 5 modules (down from 3148 in one file)**
+**Total: 8 tasks, ~2600 lines across 5 modules (down from 3148 in one file)**
 
-**Key improvements over original plan:**
+**Key improvements from plan review (2026-02-03):**
 1. Fixed Task 1 step ordering (rename before creating __init__.py)
 2. Added AggregationFlushResult dataclass to replace fragile 9-element tuple
-3. Complete aggregation.py code shown (all 4 functions)
-4. Task 5 has clear structure showing delegation pattern
-5. Accurate line count estimates
-6. Documented the `_transform_id_map` unused parameter situation
+3. **NEW: Task 1.5** - Explicit tests for AggregationFlushResult field mapping and immutability
+4. **NEW: Pre-flight import time baseline** - Detect import time regression after refactor
+5. **NEW: Legacy file check in Task 7** - Explicit verification orchestrator_legacy.py is deleted
+6. **NEW: Checkpoint callback state capture documentation** - Prevent audit trail corruption
+7. **NEW: types.py leaf module warning** - Prevent circular import cycles
+8. **NEW: Fail-fast signing key validation consideration** - Optional improvement for production
+9. Complete aggregation.py code shown (all 4 functions)
+10. Task 5 has clear structure showing delegation pattern
+11. Accurate line count estimates
+12. Documented the `_transform_id_map` unused parameter situation
