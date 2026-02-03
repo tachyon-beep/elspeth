@@ -281,3 +281,151 @@ class TestLangfuseSpanCreation:
         )
         # If we get here without error and _langfuse_client is None, test passes
         assert transform._langfuse_client is None
+
+
+class TestLangfuseFailedCallTracing:
+    """Tests for Langfuse tracing of failed LLM calls.
+
+    Verifies that failed LLM calls (rate limit, policy errors, etc.) are
+    still traced to Langfuse with level="ERROR" for observability.
+    """
+
+    def _create_transform_with_langfuse(self) -> tuple[AzureLLMTransform, MagicMock, list[dict[str, Any]]]:
+        """Create transform with mocked Langfuse client (v3 pattern)."""
+        config = _make_base_config()
+        config["tracing"] = {
+            "provider": "langfuse",
+            "public_key": "pk-xxx",
+            "secret_key": "sk-xxx",
+        }
+        transform = AzureLLMTransform(config)
+
+        captured_observations: list[dict[str, Any]] = []
+
+        @contextmanager
+        def mock_start_observation(**kwargs: Any):
+            obs = MagicMock()
+            obs_record = {"kwargs": kwargs, "updates": []}
+            captured_observations.append(obs_record)
+            obs.update = lambda **uk: obs_record["updates"].append(uk)
+            yield obs
+
+        mock_langfuse = MagicMock()
+        mock_langfuse.start_as_current_observation = mock_start_observation
+        mock_langfuse.flush = MagicMock()
+
+        transform._langfuse_client = mock_langfuse
+        transform._tracing_active = True
+
+        return transform, mock_langfuse, captured_observations
+
+    def test_langfuse_trace_records_failed_call_with_error_level(self) -> None:
+        """Failed LLM call records trace with level=ERROR for observability."""
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
+
+        ctx = _make_mock_ctx()
+
+        # Record failed trace
+        transform._record_langfuse_trace_for_error(
+            ctx=ctx,
+            token_id="test-token",
+            prompt="Hello world",
+            error_message="Rate limit exceeded",
+            latency_ms=50.0,
+        )
+
+        # Verify observations were created (span + generation)
+        assert len(captured_observations) == 2
+        assert captured_observations[0]["kwargs"]["as_type"] == "span"
+        assert captured_observations[1]["kwargs"]["as_type"] == "generation"
+
+        # Verify generation was updated with ERROR level
+        gen_record = captured_observations[1]
+        assert len(gen_record["updates"]) == 1
+        assert gen_record["updates"][0]["level"] == "ERROR"
+        assert "Rate limit exceeded" in gen_record["updates"][0]["status_message"]
+
+    def test_langfuse_trace_error_includes_metadata(self) -> None:
+        """Failed LLM trace includes latency metadata."""
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
+
+        ctx = _make_mock_ctx()
+
+        transform._record_langfuse_trace_for_error(
+            ctx=ctx,
+            token_id="test-token",
+            prompt="Test prompt",
+            error_message="Content policy violation",
+            latency_ms=25.0,
+        )
+
+        # Verify metadata includes latency
+        gen_record = captured_observations[1]
+        update = gen_record["updates"][0]
+        assert update.get("metadata", {}).get("latency_ms") == 25.0
+
+    def test_process_row_records_error_trace_on_llm_failure(self) -> None:
+        """_process_row records Langfuse trace when LLM call fails."""
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
+
+        # Set up recorder and run_id (required for _get_llm_client)
+        transform._recorder = MagicMock()
+        transform._run_id = "test-run"
+
+        ctx = _make_mock_ctx()
+        ctx.state_id = "test-state"
+        ctx.token = MagicMock()
+        ctx.token.token_id = "test-token-id"
+
+        # Mock _get_llm_client to return a client that raises an error
+        mock_client = MagicMock()
+        mock_client.chat_completion.side_effect = LLMClientError("Content policy violation", retryable=False)
+
+        with patch.object(transform, "_get_llm_client", return_value=mock_client):
+            result = transform._process_row({"name": "test"}, ctx)
+
+        # Should return error result
+        assert result.status == "error"
+        assert result.reason["reason"] == "llm_call_failed"
+
+        # And also have recorded the error trace in Langfuse
+        assert len(captured_observations) == 2  # span + generation
+        gen_record = captured_observations[1]
+        assert gen_record["kwargs"]["as_type"] == "generation"
+        assert len(gen_record["updates"]) == 1
+        assert gen_record["updates"][0]["level"] == "ERROR"
+        assert "Content policy violation" in gen_record["updates"][0]["status_message"]
+
+    def test_process_row_records_error_trace_on_retryable_failure(self) -> None:
+        """_process_row records Langfuse trace even for retryable errors before re-raising."""
+        from elspeth.plugins.clients.llm import LLMClientError
+
+        transform, _mock_langfuse, captured_observations = self._create_transform_with_langfuse()
+
+        # Set up recorder and run_id (required for _get_llm_client)
+        transform._recorder = MagicMock()
+        transform._run_id = "test-run"
+
+        ctx = _make_mock_ctx()
+        ctx.state_id = "test-state"
+        ctx.token = MagicMock()
+        ctx.token.token_id = "test-token-id"
+
+        # Mock _get_llm_client to return a client that raises a retryable error
+        mock_client = MagicMock()
+        mock_client.chat_completion.side_effect = LLMClientError("Rate limit exceeded", retryable=True)
+
+        with patch.object(transform, "_get_llm_client", return_value=mock_client):
+            try:
+                transform._process_row({"name": "test"}, ctx)
+                raise AssertionError("Should have raised LLMClientError")
+            except LLMClientError:
+                pass  # Expected
+
+        # Error trace should still have been recorded before re-raising
+        assert len(captured_observations) == 2  # span + generation
+        gen_record = captured_observations[1]
+        assert gen_record["updates"][0]["level"] == "ERROR"
+        assert "Rate limit exceeded" in gen_record["updates"][0]["status_message"]

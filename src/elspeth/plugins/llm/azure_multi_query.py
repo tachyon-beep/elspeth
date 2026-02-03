@@ -415,8 +415,27 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         try:
             response = llm_client.chat_completion(**llm_kwargs)
         except RateLimitError as e:
+            # Record error trace before raising for retry
+            latency_ms = (time.monotonic() - start_time) * 1000
+            self._record_langfuse_trace_for_error(
+                token_id=token_id,
+                query_prefix=spec.output_prefix,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                latency_ms=latency_ms,
+            )
             raise CapacityError(429, str(e)) from e
         except LLMClientError as e:
+            # Record error trace before re-raising or returning error
+            latency_ms = (time.monotonic() - start_time) * 1000
+            self._record_langfuse_trace_for_error(
+                token_id=token_id,
+                query_prefix=spec.output_prefix,
+                prompt=rendered.prompt,
+                error_message=str(e),
+                latency_ms=latency_ms,
+            )
+
             # Re-raise retryable errors (NetworkError, ServerError) - let pool retry
             # Return error for non-retryable (ContentPolicyError, ContextLengthError)
             if e.retryable:
@@ -994,3 +1013,57 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
 
             logger = structlog.get_logger(__name__)
             logger.warning("Failed to record Langfuse trace", error=str(e), query=query_prefix)
+
+    def _record_langfuse_trace_for_error(
+        self,
+        token_id: str,
+        query_prefix: str,
+        prompt: str,
+        error_message: str,
+        latency_ms: float | None,
+    ) -> None:
+        """Record failed LLM call to Langfuse with ERROR level.
+
+        Called when an LLM call fails (rate limit, policy error, etc.) to ensure
+        failed attempts are visible in Langfuse for debugging and correlation.
+
+        Args:
+            token_id: Token ID for correlation
+            query_prefix: Query identifier (e.g., "cs1_diag")
+            prompt: The prompt that was sent (or attempted)
+            error_message: Error description
+            latency_ms: Time elapsed before failure in milliseconds
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            return
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            return
+
+        try:
+            with (
+                self._langfuse_client.start_as_current_observation(
+                    as_type="span",
+                    name=f"elspeth.{self.name}",
+                    metadata={"token_id": token_id, "plugin": self.name, "query": query_prefix},
+                ),
+                self._langfuse_client.start_as_current_observation(
+                    as_type="generation",
+                    name="llm_call",
+                    model=self._model,
+                    input=[{"role": "user", "content": prompt}],
+                ) as generation,
+            ):
+                update_kwargs: dict[str, Any] = {
+                    "level": "ERROR",
+                    "status_message": error_message,
+                }
+
+                if latency_ms is not None:
+                    update_kwargs["metadata"] = {"latency_ms": latency_ms}
+
+                generation.update(**update_kwargs)
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning("Failed to record Langfuse error trace", error=str(e), query=query_prefix)
