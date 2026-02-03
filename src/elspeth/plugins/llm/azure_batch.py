@@ -1072,41 +1072,70 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Success - extract response
                 response = result["response"]
                 body = response["body"]
-                choices = body.get("choices", [])
 
-                if choices:
-                    content = choices[0].get("message", {}).get("content", "")
-                    usage = body.get("usage", {})
-
-                    output_row = dict(row)
-                    output_row[self._response_field] = content
-
-                    # Retrieve variables_hash from checkpoint
-                    row_info = row_mapping[custom_id]
-                    variables_hash = row_info["variables_hash"]
-
-                    # Guaranteed fields (contract-stable)
-                    output_row[f"{self._response_field}_usage"] = usage
-                    output_row[f"{self._response_field}_model"] = body.get("model", self._deployment_name)
-
-                    # Audit fields (provenance metadata)
-                    output_row[f"{self._response_field}_template_hash"] = self._template.template_hash
-                    output_row[f"{self._response_field}_variables_hash"] = variables_hash
-                    output_row[f"{self._response_field}_template_source"] = self._template.template_source
-                    output_row[f"{self._response_field}_lookup_hash"] = self._template.lookup_hash
-                    output_row[f"{self._response_field}_lookup_source"] = self._template.lookup_source
-                    output_row[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
-
-                    output_rows.append(output_row)
-                else:
-                    # No choices in response
+                # Tier 3 boundary validation: Azure API response structure
+                # Validate expected fields exist with correct types before accessing
+                choices = body.get("choices")
+                if not isinstance(choices, list) or len(choices) == 0:
+                    # Missing or empty choices - record as validation error
                     output_row = dict(row)
                     output_row[self._response_field] = None
                     output_row[f"{self._response_field}_error"] = {
-                        "reason": "no_choices_in_response",
+                        "reason": "invalid_response_structure",
+                        "error": "Azure API response missing 'choices' array",
                     }
                     output_rows.append(output_row)
                     row_errors.append({"row_index": idx, "reason": "no_choices_in_response"})
+                    continue
+
+                first_choice = choices[0]
+                if not isinstance(first_choice, dict):
+                    output_row = dict(row)
+                    output_row[self._response_field] = None
+                    output_row[f"{self._response_field}_error"] = {
+                        "reason": "invalid_response_structure",
+                        "error": f"choices[0] is not a dict, got {type(first_choice).__name__}",
+                    }
+                    output_rows.append(output_row)
+                    row_errors.append({"row_index": idx, "reason": "invalid_choice_structure"})
+                    continue
+
+                message = first_choice.get("message")
+                if not isinstance(message, dict):
+                    output_row = dict(row)
+                    output_row[self._response_field] = None
+                    output_row[f"{self._response_field}_error"] = {
+                        "reason": "invalid_response_structure",
+                        "error": f"choices[0].message is not a dict, got {type(message).__name__}",
+                    }
+                    output_rows.append(output_row)
+                    row_errors.append({"row_index": idx, "reason": "invalid_message_structure"})
+                    continue
+
+                # Boundary validation passed - now we trust these fields
+                content = message.get("content", "")  # content can be empty string, that's valid
+                usage = body.get("usage", {})  # usage is optional in Azure API
+
+                output_row = dict(row)
+                output_row[self._response_field] = content
+
+                # Retrieve variables_hash from checkpoint
+                row_info = row_mapping[custom_id]
+                variables_hash = row_info["variables_hash"]
+
+                # Guaranteed fields (contract-stable)
+                output_row[f"{self._response_field}_usage"] = usage
+                output_row[f"{self._response_field}_model"] = body.get("model", self._deployment_name)
+
+                # Audit fields (provenance metadata)
+                output_row[f"{self._response_field}_template_hash"] = self._template.template_hash
+                output_row[f"{self._response_field}_variables_hash"] = variables_hash
+                output_row[f"{self._response_field}_template_source"] = self._template.template_source
+                output_row[f"{self._response_field}_lookup_hash"] = self._template.lookup_hash
+                output_row[f"{self._response_field}_lookup_source"] = self._template.lookup_source
+                output_row[f"{self._response_field}_system_prompt_source"] = self._system_prompt_source
+
+                output_rows.append(output_row)
 
         # Record per-row LLM calls against the batch's state
         # Uses existing state_id from context (set by AggregationExecutor)

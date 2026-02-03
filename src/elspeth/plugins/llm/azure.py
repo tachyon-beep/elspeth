@@ -623,11 +623,8 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 "deployment": self._deployment_name,
             },
         )
-        try:
-            yield trace
-        finally:
-            # Trace auto-closes, but we ensure it's ended
-            pass
+        yield trace
+        # Note: Langfuse v2 traces auto-close when context exits
 
     def _record_langfuse_generation(
         self,
@@ -668,7 +665,18 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
         if latency_ms is not None:
             generation_kwargs["metadata"] = {"latency_ms": latency_ms}
 
-        trace.generation(**generation_kwargs)
+        # Record to Langfuse - log but don't crash on failure (telemetry is not critical path)
+        try:
+            trace.generation(**generation_kwargs)
+        except Exception as e:
+            import structlog
+
+            logger = structlog.get_logger(__name__)
+            logger.warning(
+                "Failed to record Langfuse generation",
+                error=str(e),
+                model=model,
+            )
 
 
 def _configure_azure_monitor(config: TracingConfig) -> bool:

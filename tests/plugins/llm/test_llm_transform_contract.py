@@ -68,6 +68,9 @@ class TestLLMTransformContract:
         ctx.run_id = "test-run"
         ctx.state_id = "test-state"
         ctx.landscape = MagicMock()
+        # Explicitly set contract to None to test dict-without-contract cases
+        # (MagicMock would return another MagicMock for unset attributes)
+        ctx.contract = None
         return ctx
 
     def test_process_with_pipeline_row(

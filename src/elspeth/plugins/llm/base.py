@@ -293,13 +293,21 @@ class BaseLLMTransform(BaseTransform):
         Returns:
             TransformResult with processed row or error
         """
-        # Extract contract and row data if input is PipelineRow
+        # Extract contract and row data
+        # Priority: PipelineRow.contract > ctx.contract > None
+        # When the engine passes a plain dict (not PipelineRow), the contract
+        # may be available via ctx.contract. This enables contract-aware template
+        # access (original header names) in normal pipeline runs.
         input_contract: SchemaContract | None = None
         if isinstance(row, PipelineRow):
             input_contract = row.contract
             row_data = row.to_dict()
         else:
             row_data = row
+            # Fallback: check ctx.contract when row is a plain dict
+            # This is the normal case in production - engine sets ctx.contract
+            if ctx.contract is not None:
+                input_contract = ctx.contract
 
         # 1. Render template with row data
         # This operates on THEIR DATA - wrap in try/catch

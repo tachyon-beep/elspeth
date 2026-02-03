@@ -55,6 +55,7 @@ from elspeth.contracts import (
     RowOutcome,
     Run,
     RunStatus,
+    SecretResolution,
     Token,
     TokenOutcome,
     TokenParent,
@@ -580,6 +581,39 @@ class LandscapeRecorder:
                     resolution_latency_ms=rec["latency_ms"],
                 )
             )
+
+    def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
+        """Get all secret resolution records for a run.
+
+        These records document which secrets were loaded from Key Vault
+        for this run, including their HMAC fingerprints (not values).
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of SecretResolution models, ordered by timestamp
+        """
+        query = (
+            select(secret_resolutions_table)
+            .where(secret_resolutions_table.c.run_id == run_id)
+            .order_by(secret_resolutions_table.c.timestamp)
+        )
+        db_rows = self._ops.execute_fetchall(query)
+        return [
+            SecretResolution(
+                resolution_id=row.resolution_id,
+                run_id=row.run_id,
+                timestamp=row.timestamp,
+                env_var_name=row.env_var_name,
+                source=row.source,
+                vault_url=row.vault_url,
+                secret_name=row.secret_name,
+                fingerprint=row.fingerprint,
+                resolution_latency_ms=row.resolution_latency_ms,
+            )
+            for row in db_rows
+        ]
 
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.

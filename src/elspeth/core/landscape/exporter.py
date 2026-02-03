@@ -31,6 +31,7 @@ class LandscapeExporter:
 
     Record types:
     - run: Run metadata (one per export)
+    - secret_resolution: Key Vault secret provenance (run-level)
     - node: Registered plugins
     - edge: Graph edges
     - operation: Source/sink I/O operations
@@ -182,6 +183,21 @@ class LandscapeExporter:
             "settings": json.loads(run.settings_json),
             "reproducibility_grade": run.reproducibility_grade,
         }
+
+        # Secret resolutions (run-level provenance for Key Vault secrets)
+        for resolution in self._recorder.get_secret_resolutions_for_run(run_id):
+            yield {
+                "record_type": "secret_resolution",
+                "run_id": run_id,
+                "resolution_id": resolution.resolution_id,
+                "timestamp": resolution.timestamp,
+                "env_var_name": resolution.env_var_name,
+                "source": resolution.source,
+                "vault_url": resolution.vault_url,
+                "secret_name": resolution.secret_name,
+                "fingerprint": resolution.fingerprint,
+                "resolution_latency_ms": resolution.resolution_latency_ms,
+            }
 
         # Nodes
         for node in self._recorder.get_nodes(run_id):

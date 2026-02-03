@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from elspeth.contracts import Call, CallStatus, CallType, PayloadStore, TransformErrorReason
     from elspeth.contracts.config.runtime import RuntimeConcurrencyConfig
     from elspeth.contracts.identity import TokenInfo
+    from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.core.landscape.recorder import LandscapeRecorder
     from elspeth.core.rate_limit import RateLimitRegistry
     from elspeth.plugins.clients.http import AuditedHTTPClient
@@ -99,6 +100,13 @@ class PluginContext:
     # IMPORTANT: This is derivative state - the executor must keep it synchronized
     # with the authoritative token flowing through the pipeline.
     token: "TokenInfo | None" = field(default=None)
+
+    # === Schema Contract (Phase 3: Transform/Sink Integration) ===
+    # Set by executor when processing transforms to enable contract-aware template
+    # access (original header names). When transforms receive a plain dict (not
+    # PipelineRow), they can still access the contract via ctx.contract.
+    # This allows templates using {{ row["Original Header"] }} to resolve correctly.
+    contract: "SchemaContract | None" = field(default=None)
 
     # === Phase 6: State & Call Recording ===
     # Set by executor to enable transforms to record external calls

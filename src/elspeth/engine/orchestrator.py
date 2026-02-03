@@ -1340,6 +1340,9 @@ class Orchestrator:
                                 recorder.update_run_contract(run_id, schema_contract)
                                 # Update source node's output_contract (was NULL at registration)
                                 recorder.update_node_output_contract(run_id, source_id, schema_contract)
+                                # Make contract available to transforms via context
+                                # This enables contract-aware template access (original header names)
+                                ctx.contract = schema_contract
 
                         # ─────────────────────────────────────────────────────────────────
                         # CRITICAL: Clear operation_id now that source item is fetched.
@@ -2307,6 +2310,10 @@ class Orchestrator:
             concurrency_config=self._concurrency_config,
             telemetry_emit=self._emit_telemetry,
         )
+
+        # Restore contract from run for transforms (was recorded during original run)
+        # This enables contract-aware template access (original header names) during resume
+        ctx.contract = recorder.get_run_contract(run_id)
 
         # Call on_start for transforms and sinks.
         # Source's on_start/on_complete are intentionally skipped because:
