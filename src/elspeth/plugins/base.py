@@ -25,6 +25,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema, SourceRow
+from elspeth.contracts.schema_contract import PipelineRow
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
@@ -51,9 +52,9 @@ class BaseTransform(ABC):
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: dict, ctx: PluginContext) -> TransformResult:
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
                 return TransformResult.success(
-                    {**row, "new_field": "value"},
+                    {**row.to_dict(), "new_field": "value"},
                     success_reason={"action": "processed"},
                 )
     """
@@ -95,17 +96,17 @@ class BaseTransform(ABC):
     @abstractmethod
     def process(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> TransformResult:
         """Process a single row.
 
         Args:
-            row: Input row matching input_schema
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            TransformResult with processed row or error
+            TransformResult with processed row dict or error
         """
         ...
 
@@ -146,13 +147,13 @@ class BaseGate(ABC):
             input_schema = RowSchema
             output_schema = RowSchema
 
-            def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 if self._is_suspicious(row):
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.route("suspicious"),  # Resolved via routes config
                     )
-                return GateResult(row=row, action=RoutingAction.route("normal"))
+                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
     """
 
     name: str
@@ -181,13 +182,13 @@ class BaseGate(ABC):
     @abstractmethod
     def evaluate(
         self,
-        row: dict[str, Any],
+        row: PipelineRow,
         ctx: PluginContext,
     ) -> GateResult:
         """Evaluate a row and decide routing.
 
         Args:
-            row: Input row
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:

@@ -21,6 +21,7 @@ from elspeth.contracts import Determinism
 
 if TYPE_CHECKING:
     from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.contracts.schema_contract import PipelineRow
     from elspeth.contracts.sink import OutputValidationResult
     from elspeth.plugins.context import PluginContext
     from elspeth.plugins.results import GateResult, TransformResult
@@ -143,7 +144,7 @@ class TransformProtocol(Protocol):
     """Protocol for stateless row transforms.
 
     Transforms process rows and emit results. They can operate in two modes:
-    - Single row: process(row: dict, ctx) -> TransformResult
+    - Single row: process(row: PipelineRow, ctx) -> TransformResult
     - Batch: process(rows: list[dict], ctx) -> TransformResult (if is_batch_aware=True)
 
     The engine decides which mode to use based on:
@@ -171,8 +172,8 @@ class TransformProtocol(Protocol):
             input_schema = InputSchema
             output_schema = OutputSchema
 
-            def process(self, row: dict, ctx: PluginContext) -> TransformResult:
-                enriched = {**row, "timestamp": datetime.now().isoformat()}
+            def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+                enriched = {**row.to_dict(), "timestamp": datetime.now().isoformat()}
                 return TransformResult.success(
                     enriched,
                     success_reason={"action": "enriched", "fields_added": ["timestamp"]},
@@ -209,17 +210,17 @@ class TransformProtocol(Protocol):
 
     def process(
         self,
-        row: dict[str, Any],
+        row: "PipelineRow",
         ctx: "PluginContext",
     ) -> "TransformResult":
         """Process a single row.
 
         Args:
-            row: Input row matching input_schema
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            TransformResult with processed row or error
+            TransformResult with processed row dict or error
         """
         ...
 
@@ -268,14 +269,14 @@ class GateProtocol(Protocol):
                 self.fork_to = config.get("fork_to")  # None is valid (most gates don't fork)
                 self.node_id = None
 
-            def evaluate(self, row: dict, ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 # Direct field access - schema guarantees field exists
                 if row["suspicious"]:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.route("review"),  # Resolved via routes config
                     )
-                return GateResult(row=row, action=RoutingAction.route("normal"))
+                return GateResult(row=row.to_dict(), action=RoutingAction.route("normal"))
     """
 
     name: str
@@ -297,17 +298,17 @@ class GateProtocol(Protocol):
 
     def evaluate(
         self,
-        row: dict[str, Any],
+        row: "PipelineRow",
         ctx: "PluginContext",
     ) -> "GateResult":
         """Evaluate a row and decide routing.
 
         Args:
-            row: Input row
+            row: Input row as PipelineRow (immutable, supports dual-name access)
             ctx: Plugin context
 
         Returns:
-            GateResult with (possibly modified) row and routing action
+            GateResult with (possibly modified) row dict and routing action
         """
         ...
 
