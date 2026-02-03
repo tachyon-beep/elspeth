@@ -1,12 +1,28 @@
-# PipelineRow Migration Implementation Plan
+# PipelineRow Migration Implementation Plan (Revised)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Migrate plugin input signatures from `dict[str, Any]` to `PipelineRow`, enabling immutable row access, dual-name field resolution, and proper contract propagation.
+**Goal:** Complete the migration of plugin input signatures from `dict[str, Any]` to `PipelineRow`, enabling immutable row access, dual-name field resolution, and proper contract propagation throughout the pipeline.
 
-**Architecture:** Change `TokenInfo.row_data` from `dict[str, Any]` to `PipelineRow`. Update all plugin base classes (`BaseTransform.process()`, `BaseGate.evaluate()`) to accept `PipelineRow`. Keep sink signatures as `list[dict]` since sinks serialize data. Remove the `ctx.contract` shim after migration.
+**Current State (as of 2026-02-03):**
+- `PipelineRow` class: ✅ Complete with immutable design via `MappingProxyType`
+- `SchemaContract`: ✅ Complete with field resolution, merging, validation, checkpoint support
+- `TransformResult.contract`: ✅ Already has contract field
+- `GateResult.contract`: ❌ Missing - needs adding (Task 1)
+- `TokenInfo.row_data`: ❌ Still `dict[str, Any]` - **this is the critical blocker**
+- Plugin base signatures: ❌ Still expect `dict[str, Any]`
+- LLM plugins: ⚠️ Already accept union `dict[str, Any] | PipelineRow` (transitional)
+- `ctx.contract`: ✅ Working production mechanism - **do NOT remove**
+- Contract propagation utilities: ✅ Ready to use in `contracts/contract_propagation.py`
 
-**Tech Stack:** Python dataclasses, frozen types, SchemaContract, PipelineRow (already implemented in `contracts/schema_contract.py`)
+**Architecture Decision: Keep ctx.contract**
+
+The original plan incorrectly called `ctx.contract` a "shim to be removed." It is the **production mechanism** for contract propagation when plugins receive plain dicts. After this migration:
+- Transforms receiving `PipelineRow` use `row.contract` directly
+- `ctx.contract` remains as backup for edge cases and compatibility
+- Both access patterns are valid and should work
+
+**Tech Stack:** Python dataclasses, frozen types, SchemaContract, PipelineRow (in `contracts/schema_contract.py`)
 
 ---
 
@@ -21,15 +37,15 @@
 > ```
 >
 > **If ANY task fails:** Stop immediately. Assess whether to continue or revert to rollback branch.
-> Partial migration is NOT possible - either ALL 19 tasks succeed or EVERYTHING reverts.
+> Partial migration is NOT possible - either ALL tasks succeed or EVERYTHING reverts.
 
 ---
 
 ## Mypy Expectation
 
-> **Note:** Mypy will report type errors from Task 2 through Task 9. This is expected behavior
-> during the migration. Use a feature branch where mypy failures are accepted until Task 9 completes.
-> After Task 9, mypy should pass for engine code. After Task 16, mypy should pass for all code.
+> **Note:** Mypy will report type errors from Task 2 through Task 7. This is expected behavior
+> during the migration. Use a feature branch where mypy failures are accepted until Task 7 completes.
+> After Task 7, mypy should pass for engine code. After Task 10, mypy should pass for all code.
 
 ---
 
@@ -43,33 +59,13 @@
 > - Immutability (data is being written out, not processed further)
 >
 > SinkExecutor calls `token.row_data.to_dict()` before `sink.write()` for efficiency.
-> If future sinks need contract access (e.g., CSV with original headers), this can be revisited.
-
----
-
-## Pre-Implementation: Revert the ctx.contract Shim
-
-Before starting, revert the temporary `ctx.contract` changes that were the wrong approach:
-
-```bash
-# Check what needs reverting
-git diff src/elspeth/plugins/context.py
-git diff src/elspeth/plugins/llm/base.py
-git diff src/elspeth/engine/orchestrator.py
-
-# Revert only Issue 2 changes (keep Issue 1 SecretResolution)
-git checkout HEAD -- src/elspeth/plugins/context.py
-git checkout HEAD -- src/elspeth/engine/orchestrator.py
-
-# For llm/base.py, manually revert only the ctx.contract fallback logic
-```
 
 ---
 
 ## Task 1: Add contract Field to GateResult
 
 **Files:**
-- Modify: `src/elspeth/contracts/results.py:304-318`
+- Modify: `src/elspeth/contracts/results.py:303-318`
 - Test: `tests/contracts/test_gate_result_contract.py` (create)
 
 **Step 1: Write the failing test**
@@ -153,7 +149,7 @@ Expected: FAIL - `GateResult.__init__() got an unexpected keyword argument 'cont
 
 **Step 3: Implement the contract field**
 
-Modify `src/elspeth/contracts/results.py`, update the GateResult dataclass:
+Modify `src/elspeth/contracts/results.py`, update the GateResult dataclass (around line 303):
 
 ```python
 @dataclass
@@ -190,7 +186,7 @@ class GateResult:
         return PipelineRow(self.row, self.contract)
 ```
 
-Add the import at top of file:
+Add the import at top of file (if not present):
 
 ```python
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
@@ -225,7 +221,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ## Task 2: Change TokenInfo.row_data Type to PipelineRow
 
 **Files:**
-- Modify: `src/elspeth/contracts/identity.py:11-50`
+- Modify: `src/elspeth/contracts/identity.py:10-51`
 - Test: `tests/contracts/test_token_info_pipeline_row.py` (create)
 
 **Step 1: Write the failing test**
@@ -329,13 +325,10 @@ class TestTokenInfoPipelineRow:
         assert result["nested"] == {"a": 1}
 ```
 
-**Step 2: Run test to verify it fails**
+**Step 2: Run test to verify current state**
 
 Run: `.venv/bin/python -m pytest tests/contracts/test_token_info_pipeline_row.py -v`
-Expected: Could pass if PipelineRow duck-types as dict, but mypy will fail
-
-Run: `.venv/bin/python -m mypy src/elspeth/contracts/identity.py`
-Expected: Type errors when we change the annotation
+Expected: Tests may partially pass due to duck-typing, but mypy will fail after type change
 
 **Step 3: Update TokenInfo type annotation**
 
@@ -431,7 +424,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ## Task 3: Update TokenManager for PipelineRow
 
 **Files:**
-- Modify: `src/elspeth/engine/tokens.py:61-284`
+- Modify: `src/elspeth/engine/tokens.py`
 - Test: `tests/engine/test_token_manager_pipeline_row.py` (create)
 
 **Step 1: Write the failing test**
@@ -571,16 +564,14 @@ Expected: FAIL - signature mismatch or TypeError
 
 **Step 3: Update TokenManager methods**
 
-Modify `src/elspeth/engine/tokens.py`. Key changes:
+Key changes to `src/elspeth/engine/tokens.py`:
 
 1. `create_initial_token()` - Accept SourceRow, create PipelineRow
-2. `create_token_for_existing_row()` - Accept PipelineRow
-3. `fork_token()` - Propagate contract to children
-4. `coalesce_tokens()` - Accept PipelineRow for merged data
-5. `update_row_data()` - Accept PipelineRow
-6. `expand_token()` - Propagate contract to expanded rows
+2. `fork_token()` - Propagate contract to children
+3. `coalesce_tokens()` - Accept PipelineRow for merged data
+4. `expand_token()` - Propagate contract to expanded rows
 
-The full implementation is extensive - see the actual file for complete changes. Key pattern:
+The critical pattern:
 
 ```python
 def create_initial_token(
@@ -704,7 +695,7 @@ class BaseSink(ABC):
     @abstractmethod
     def write(
         self,
-        rows: list[dict[str, Any]],  # KEEP as dict - sinks serialize (see rationale above)
+        rows: list[dict[str, Any]],  # KEEP as dict - sinks serialize
         ctx: PluginContext,
     ) -> ArtifactDescriptor:
         """Write a batch of rows to the sink.
@@ -719,16 +710,9 @@ class BaseSink(ABC):
         ...
 ```
 
-**Step 4: Update protocols.py**
+**Step 4: Update protocols.py with matching signatures**
 
-Modify `src/elspeth/plugins/protocols.py` with matching signatures.
-
-**Step 5: Run mypy to see type errors**
-
-Run: `.venv/bin/python -m mypy src/elspeth/plugins/`
-Expected: Type errors in all plugin implementations (expected)
-
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/elspeth/plugins/base.py src/elspeth/plugins/protocols.py
@@ -747,85 +731,10 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 ---
 
-## Task 5: Update BatchTransformMixin
-
-**Files:**
-- Modify: `src/elspeth/plugins/batching/mixin.py`
-- Test: `tests/plugins/batching/test_mixin_pipeline_row.py` (create)
-
-**Step 1: Write the test**
-
-Create `tests/plugins/batching/test_mixin_pipeline_row.py`:
-
-```python
-"""Tests for BatchTransformMixin with PipelineRow support."""
-
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
-
-def _make_contract() -> SchemaContract:
-    """Create a minimal schema contract for testing."""
-    return SchemaContract(
-        mode="OBSERVED",
-        fields=(
-            FieldContract(
-                normalized_name="value",
-                original_name="value",
-                python_type=int,
-                required=True,
-                source="declared",
-            ),
-        ),
-        locked=True,
-    )
-
-
-class TestBatchTransformMixinPipelineRow:
-    """Tests for BatchTransformMixin with PipelineRow."""
-
-    def test_accept_row_with_pipeline_row(self) -> None:
-        """accept_row should accept PipelineRow and pass it through unchanged."""
-        # This test verifies the signature accepts PipelineRow
-        # Full integration testing happens in batch plugin tests
-        contract = _make_contract()
-        pipeline_row = PipelineRow({"value": 42}, contract)
-
-        # Verify PipelineRow can be accessed as expected by mixin
-        assert pipeline_row["value"] == 42
-        assert pipeline_row.contract is contract
-```
-
-**Step 2: Update accept_row signature**
-
-```python
-def accept_row(
-    self,
-    row: PipelineRow,  # CHANGED from dict[str, Any]
-    ctx: PluginContext,
-    processor: Callable[[PipelineRow, PluginContext], TransformResult],
-) -> None:
-    """Accept a row for async processing."""
-    # ... implementation unchanged, row is just passed through
-```
-
-**Step 3: Commit**
-
-```bash
-git add src/elspeth/plugins/batching/mixin.py tests/plugins/batching/test_mixin_pipeline_row.py
-git commit -m "feat(batching): update BatchTransformMixin for PipelineRow
-
-Part of PipelineRow migration (Phase 2).
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-```
-
----
-
-## Task 6: Update Engine Executors
+## Task 5: Update Engine Executors
 
 **Files:**
 - Modify: `src/elspeth/engine/executors.py`
-- This is the largest single task - update all executor classes
 
 **Key patterns to apply throughout:**
 
@@ -833,17 +742,11 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 2. **Landscape recording**: `input_data=token.row_data.to_dict()`
 3. **Plugin calls**: Pass `token.row_data` directly (now PipelineRow)
 4. **Token updates**: Create new PipelineRow from result dict + contract
-5. **Logging**: Add DEBUG logging for contract propagation (observability)
+5. **ctx.contract**: Set `ctx.contract = token.row_data.contract` for fallback access
 
-**Step 1: Update TransformExecutor**
-
-Key changes in `execute_transform()`:
+**Key changes in TransformExecutor.execute_transform():**
 
 ```python
-import structlog
-
-logger = structlog.get_logger()
-
 # Hash input data
 input_hash = stable_hash(token.row_data.to_dict())
 
@@ -857,6 +760,9 @@ state = self._recorder.begin_node_state(
     attempt=attempt,
 )
 
+# Set ctx.contract for plugins that use it
+ctx.contract = token.row_data.contract
+
 # Call transform with PipelineRow
 result = transform.process(token.row_data, ctx)
 
@@ -865,70 +771,26 @@ if result.status == "success" and result.row is not None:
     output_contract = result.contract if result.contract else token.row_data.contract
     new_row = PipelineRow(result.row, output_contract)
     updated_token = token.with_updated_data(new_row)
-
-    # Log contract propagation at DEBUG level
-    logger.debug(
-        "contract_propagated",
-        transform=transform.node_id,
-        token_id=token.token_id,
-        contract_mode=output_contract.mode,
-        field_count=len(output_contract.fields),
-    )
 ```
 
-**Step 2: Update GateExecutor**
-
-Similar pattern for `execute_gate()` and `execute_config_gate()`.
-
-Add improved error handling for dual-name resolution failures:
+**Similar pattern for GateExecutor and SinkExecutor:**
 
 ```python
-try:
-    result = gate.evaluate(token.row_data, ctx)
-except KeyError as e:
-    # Provide diagnostic error message for field access failures
-    available_fields = list(token.row_data.to_dict().keys())
-    contract_fields = [f.normalized_name for f in token.row_data.contract.fields]
-    logger.warning(
-        "gate_field_access_failed",
-        gate=gate.node_id,
-        missing_field=str(e),
-        available_fields=available_fields,
-        contract_fields=contract_fields,
-    )
-    raise
-```
-
-**Step 3: Update SinkExecutor**
-
-```python
-# Extract dicts for sink write
+# SinkExecutor - extract dicts for sink write
 rows = [t.row_data.to_dict() for t in tokens]
 artifact_info = sink.write(rows, ctx)
 ```
 
-**Step 4: Update AggregationExecutor**
-
-Change buffer type:
-
-```python
-self._buffers: dict[NodeID, list[PipelineRow]] = {}
-
-def accept_row(self, node_id: NodeID, token: TokenInfo) -> ...:
-    self._buffers[node_id].append(token.row_data)  # Now PipelineRow
-```
-
-**Step 5: Commit**
+**Step: Commit**
 
 ```bash
 git add src/elspeth/engine/executors.py
 git commit -m "feat(engine): update executors for PipelineRow
 
 - TransformExecutor: Extract dict for landscape, pass PipelineRow to plugins
-- GateExecutor: Same pattern, improved KeyError diagnostics
+- GateExecutor: Same pattern
 - SinkExecutor: Extract dicts before sink.write()
-- AggregationExecutor: Store PipelineRow in buffers
-- Added DEBUG logging for contract propagation
+- Set ctx.contract from token.row_data.contract for fallback access
 
 Part of PipelineRow migration (Phase 3).
 
@@ -937,195 +799,29 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 ---
 
-## Task 7: Update RowProcessor
+## Task 6: Update RowProcessor and CoalesceExecutor
 
 **Files:**
 - Modify: `src/elspeth/engine/processor.py`
-
-**Key changes:**
-
-1. Update calls to `token_manager.create_initial_token()` to pass SourceRow
-2. Update all `token.row_data` accesses where dict was expected
-3. Ensure fork/coalesce operations propagate contracts
-
-**Step 1: Update initial token creation**
-
-```python
-# OLD:
-token = token_manager.create_initial_token(
-    run_id=run_id,
-    source_node_id=source_node_id,
-    row_index=row_index,
-    row_data=row_data,
-)
-
-# NEW:
-token = token_manager.create_initial_token(
-    run_id=run_id,
-    source_node_id=source_node_id,
-    row_index=row_index,
-    source_row=source_row,  # Pass SourceRow directly
-)
-```
-
-**Step 2: Commit**
-
-```bash
-git add src/elspeth/engine/processor.py
-git commit -m "feat(engine): update RowProcessor for PipelineRow
-
-- Pass SourceRow to create_initial_token()
-- Update all token.row_data accesses
-
-Part of PipelineRow migration (Phase 3).
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-```
-
----
-
-## Task 8: Update CoalesceExecutor
-
-**Files:**
 - Modify: `src/elspeth/engine/coalesce_executor.py`
-- Test: `tests/engine/test_coalesce_contract_merge.py` (create)
 
-**Step 1: Write the contract merge failure tests**
+**RowProcessor changes:**
+- Update calls to `token_manager.create_initial_token()` to pass SourceRow
+- Update all `token.row_data` accesses
 
-Create `tests/engine/test_coalesce_contract_merge.py`:
-
-```python
-"""Tests for CoalesceExecutor contract merge behavior."""
-
-import pytest
-
-from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
-
-def _make_contract(mode: str = "FIXED", fields: tuple[FieldContract, ...] | None = None) -> SchemaContract:
-    """Create a schema contract for testing."""
-    if fields is None:
-        fields = (
-            FieldContract(
-                normalized_name="amount",
-                original_name="amount",
-                python_type=int,
-                required=True,
-                source="declared",
-            ),
-        )
-    return SchemaContract(mode=mode, fields=fields, locked=True)
-
-
-class TestCoalesceContractMerge:
-    """Tests for contract merge behavior at coalesce points."""
-
-    def test_coalesce_with_none_contract_raises(self) -> None:
-        """Coalesce should raise clear error if any parent has None contract.
-
-        This validates the defensive assertion - if a buggy transform
-        produces a token with None contract, we crash immediately at
-        coalesce with actionable error rather than propagating None.
-        """
-        contract = _make_contract()
-
-        # Parent with valid contract
-        valid_token = TokenInfo(
-            row_id="row_001",
-            token_id="token_a",
-            row_data=PipelineRow({"amount": 100}, contract),
-            branch_name="branch_a",
-        )
-
-        # Parent with None contract (bug scenario)
-        # In real code, PipelineRow requires contract, so this simulates
-        # a situation where contract became None through some edge case
-        # We test the defensive check in _perform_merge
-
-        # The actual test would be against CoalesceExecutor._perform_merge
-        # verifying it raises ValueError for None contract
-        pass  # Implementation test added in Step 2
-
-    def test_coalesce_contract_merge_incompatible_modes(self) -> None:
-        """Merging FIXED and OBSERVED mode contracts should handle gracefully.
-
-        SchemaContract.merge() should define the merge semantics.
-        This test documents the expected behavior.
-        """
-        fixed_contract = _make_contract(mode="FIXED")
-        observed_contract = _make_contract(mode="OBSERVED")
-
-        # Test that SchemaContract.merge() handles mode differences
-        # The merge policy should be documented in SchemaContract
-        merged = fixed_contract.merge(observed_contract)
-
-        # Document expected behavior - FIXED should dominate
-        # (or raise if incompatible - depends on SchemaContract.merge impl)
-        assert merged is not None
-
-    def test_coalesce_contract_merge_conflicting_types(self) -> None:
-        """Merging contracts with conflicting field types should raise.
-
-        If branch A says field 'x' is int and branch B says 'x' is str,
-        the merge should fail with a clear error.
-        """
-        contract_a = _make_contract(
-            fields=(
-                FieldContract(
-                    normalized_name="value",
-                    original_name="value",
-                    python_type=int,
-                    required=True,
-                    source="declared",
-                ),
-            )
-        )
-        contract_b = _make_contract(
-            fields=(
-                FieldContract(
-                    normalized_name="value",
-                    original_name="value",
-                    python_type=str,  # Conflicting type!
-                    required=True,
-                    source="declared",
-                ),
-            )
-        )
-
-        # SchemaContract.merge() should raise on type conflict
-        # or have documented merge semantics
-        with pytest.raises((ValueError, TypeError)):
-            contract_a.merge(contract_b)
-
-    def test_coalesce_logs_merge_operation(self) -> None:
-        """Contract merge should log at DEBUG level for observability."""
-        # This is validated by checking log output in integration tests
-        pass
-```
-
-**Step 2: Implement with defensive assertions**
-
-Key changes:
-
-1. Merge contracts from all branches at coalesce
-2. Add defensive assertion for None contracts
-3. Create PipelineRow with merged contract
-4. Add logging for merge operations
+**CoalesceExecutor changes:**
+- Merge contracts from all branches at coalesce point
+- Add defensive assertion: crash if any contract is None
+- Create PipelineRow with merged contract
 
 ```python
-import structlog
-
-logger = structlog.get_logger()
-
 def _perform_merge(self, pending: _PendingCoalesce, ...) -> TokenInfo:
-    # Defensive check - crash early with clear message if any contract is None
+    # Defensive check - crash early if any contract is None
     for branch, token in pending.arrived.items():
         if token.row_data.contract is None:
             raise ValueError(
                 f"Token {token.token_id} on branch '{branch}' has no contract. "
-                f"Cannot coalesce without contracts on all parents. "
-                f"This indicates a bug in an upstream transform."
+                f"Cannot coalesce without contracts on all parents."
             )
 
     # Merge contracts from all arrived branches
@@ -1133,15 +829,6 @@ def _perform_merge(self, pending: _PendingCoalesce, ...) -> TokenInfo:
     merged_contract = contracts[0]
     for c in contracts[1:]:
         merged_contract = merged_contract.merge(c)
-
-    # Log merge operation
-    logger.debug(
-        "contract_merge_at_coalesce",
-        coalesce_id=pending.coalesce_id,
-        branch_count=len(pending.arrived),
-        branches=list(pending.arrived.keys()),
-        merged_field_count=len(merged_contract.fields),
-    )
 
     # Merge row data
     merged_data = self._merge_rows(pending.arrived, strategy)
@@ -1156,16 +843,14 @@ def _perform_merge(self, pending: _PendingCoalesce, ...) -> TokenInfo:
     )
 ```
 
-**Step 3: Commit**
+**Step: Commit**
 
 ```bash
-git add src/elspeth/engine/coalesce_executor.py tests/engine/test_coalesce_contract_merge.py
-git commit -m "feat(engine): update CoalesceExecutor for PipelineRow
+git add src/elspeth/engine/processor.py src/elspeth/engine/coalesce_executor.py
+git commit -m "feat(engine): update RowProcessor and CoalesceExecutor for PipelineRow
 
-- Merge contracts from all branches at coalesce point
-- Add defensive assertion: crash with clear error if any contract is None
-- Create PipelineRow with merged contract
-- Add DEBUG logging for contract merge operations
+- RowProcessor: Pass SourceRow to create_initial_token()
+- CoalesceExecutor: Merge contracts at coalesce, create PipelineRow
 
 Part of PipelineRow migration (Phase 3).
 
@@ -1174,210 +859,30 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 
 ---
 
-## Task 9: Update Expression Parser
+## Task 7: Update Core Plugin Implementations
 
-**Files:**
-- Modify: `src/elspeth/engine/expression_parser.py`
+**Files to update (one commit for all):**
+- `src/elspeth/plugins/transforms/passthrough.py`
+- `src/elspeth/plugins/transforms/field_mapper.py`
+- `src/elspeth/plugins/transforms/truncate.py`
+- `src/elspeth/plugins/transforms/keyword_filter.py`
+- `src/elspeth/plugins/transforms/json_explode.py`
+- `src/elspeth/plugins/transforms/batch_stats.py`
+- `src/elspeth/plugins/transforms/batch_replicate.py`
+- `src/elspeth/plugins/gates/` (all gate implementations)
 
-**Step 1: Update evaluate signature**
-
-```python
-def evaluate(self, row: PipelineRow | dict[str, Any]) -> Any:
-    """Evaluate expression against row data.
-
-    Args:
-        row: Row data (PipelineRow or dict for backwards compatibility)
-
-    PipelineRow implements __getitem__ so expression evaluation works.
-    """
-    evaluator = _ExpressionEvaluator(row)
-    return evaluator.visit(self._ast)
-```
-
-**Step 2: Commit**
-
-```bash
-git add src/elspeth/engine/expression_parser.py
-git commit -m "feat(engine): update expression parser for PipelineRow
-
-Accept PipelineRow in evaluate() - uses __getitem__ protocol.
-
-Part of PipelineRow migration (Phase 3).
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-```
-
----
-
-## Task 10: Add Checkpoint Version for PipelineRow Compatibility
-
-**Files:**
-- Modify: `src/elspeth/engine/executors.py` (AggregationExecutor checkpoint methods)
-- Test: `tests/engine/test_aggregation_checkpoint_version.py` (create)
-
-> **CRITICAL:** This task prevents data corruption when resuming checkpoints across versions.
-
-**Step 1: Write the checkpoint version tests**
-
-Create `tests/engine/test_aggregation_checkpoint_version.py`:
-
-```python
-"""Tests for AggregationExecutor checkpoint version compatibility."""
-
-import pytest
-
-from elspeth.contracts.identity import TokenInfo
-from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-
-
-def _make_contract() -> SchemaContract:
-    """Create a minimal schema contract for testing."""
-    return SchemaContract(
-        mode="OBSERVED",
-        fields=(
-            FieldContract(
-                normalized_name="value",
-                original_name="value",
-                python_type=int,
-                required=True,
-                source="declared",
-            ),
-        ),
-        locked=True,
-    )
-
-
-class TestAggregationCheckpointVersion:
-    """Tests for checkpoint version compatibility."""
-
-    def test_checkpoint_includes_version(self) -> None:
-        """Checkpoint state should include version field."""
-        # AggregationExecutor.get_checkpoint_state() should return
-        # {"version": 2, "buffers": {...}, ...}
-        pass  # Implemented by checking actual checkpoint output
-
-    def test_restore_rejects_incompatible_version(self) -> None:
-        """restore_from_checkpoint should reject old version checkpoints.
-
-        Old checkpoints (version 1) store dict row_data.
-        New checkpoints (version 2) store PipelineRow-compatible data.
-        Attempting to restore v1 checkpoint with v2 code should raise.
-        """
-        old_checkpoint = {
-            "version": 1,  # Old format
-            "buffers": {
-                "agg_001": [{"value": 42}]  # dict, not PipelineRow
-            }
-        }
-
-        # Should raise clear error
-        # with pytest.raises(CheckpointVersionError, match="incompatible"):
-        #     executor.restore_from_checkpoint(old_checkpoint)
-        pass  # Implemented in Step 2
-
-    def test_checkpoint_round_trip_preserves_pipeline_row(self) -> None:
-        """Checkpoint and restore should preserve PipelineRow state.
-
-        This validates that:
-        1. PipelineRow is correctly serialized to checkpoint
-        2. PipelineRow is correctly restored from checkpoint
-        3. Contract is preserved through round-trip
-        """
-        contract = _make_contract()
-        pipeline_row = PipelineRow({"value": 42}, contract)
-
-        token = TokenInfo(
-            row_id="row_001",
-            token_id="token_001",
-            row_data=pipeline_row,
-        )
-
-        # Full integration test with actual AggregationExecutor
-        # 1. Accept 3 rows into aggregation buffer
-        # 2. Get checkpoint state
-        # 3. Create new executor, restore from checkpoint
-        # 4. Verify buffer contains valid PipelineRow with correct contract
-        pass  # Full implementation in integration test
-```
-
-**Step 2: Add checkpoint version to AggregationExecutor**
-
-```python
-# In executors.py, AggregationExecutor class
-
-CHECKPOINT_VERSION = 2  # Increment when checkpoint format changes
-
-class CheckpointVersionError(Exception):
-    """Raised when checkpoint version is incompatible."""
-    pass
-
-def get_checkpoint_state(self) -> dict[str, Any]:
-    """Get current state for checkpointing."""
-    return {
-        "version": CHECKPOINT_VERSION,
-        "buffers": {
-            node_id: [row.to_dict() for row in rows]
-            for node_id, rows in self._buffers.items()
-        },
-        "contracts": {
-            node_id: rows[0].contract.to_dict() if rows else None
-            for node_id, rows in self._buffers.items()
-        },
-        # ... other state
-    }
-
-def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
-    """Restore state from checkpoint."""
-    version = state.get("version", 1)  # Default to v1 for old checkpoints
-
-    if version < CHECKPOINT_VERSION:
-        raise CheckpointVersionError(
-            f"Checkpoint version {version} is incompatible with code version {CHECKPOINT_VERSION}. "
-            f"Cannot resume pipeline checkpointed before PipelineRow migration. "
-            f"Please re-run the pipeline from source."
-        )
-
-    # Restore buffers with PipelineRow
-    contracts = state.get("contracts", {})
-    for node_id, rows in state["buffers"].items():
-        contract = SchemaContract.from_dict(contracts[node_id])
-        self._buffers[node_id] = [
-            PipelineRow(row, contract) for row in rows
-        ]
-```
-
-**Step 3: Commit**
-
-```bash
-git add src/elspeth/engine/executors.py tests/engine/test_aggregation_checkpoint_version.py
-git commit -m "feat(engine): add checkpoint version for PipelineRow compatibility
-
-- Add CHECKPOINT_VERSION = 2 constant
-- get_checkpoint_state() includes version and serialized contracts
-- restore_from_checkpoint() rejects incompatible versions with clear error
-- Prevents data corruption when resuming across PipelineRow migration
-
-Part of PipelineRow migration (Phase 3).
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
-```
-
----
-
-## Task 11-17: Update Plugin Implementations
-
-For each plugin, apply this pattern:
+**Pattern for each plugin:**
 
 ```python
 def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
-    # Access via dual-name
+    # Access via dual-name (PipelineRow supports __getitem__)
     value = row["field_name"]
 
-    # Create output dict
+    # Create output dict (transforms output dict, not PipelineRow)
     output = row.to_dict()
     output["computed"] = value * 2
 
-    # Propagate contract
+    # Propagate contract through result
     return TransformResult.success(
         output,
         success_reason={"action": "computed"},
@@ -1385,94 +890,113 @@ def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
     )
 ```
 
-**Plugins to update (one commit each):**
-
-- Task 11: `passthrough.py`, `field_mapper.py`
-- Task 12: `truncate.py`, `keyword_filter.py`
-- Task 13: `json_explode.py`
-- Task 14: `batch_stats.py`, `batch_replicate.py`
-- Task 15: `azure/content_safety.py`, `azure/prompt_shield.py`
-- Task 16: `llm/base.py`, `llm/azure.py`
-- Task 17: `llm/openrouter.py` and all OpenRouter variants
-
----
-
-## Task 18: Remove ctx.contract Shim
-
-**Files:**
-- Modify: `src/elspeth/plugins/context.py`
-- Modify: `src/elspeth/engine/orchestrator.py`
-
-**Step 1: Remove contract field from PluginContext**
-
-Delete these lines from `context.py`:
-
-```python
-# DELETE:
-# contract: "SchemaContract | None" = field(default=None)
-```
-
-**Step 2: Remove ctx.contract assignments from orchestrator**
-
-Delete these lines from `orchestrator.py`:
-
-```python
-# DELETE:
-# ctx.contract = schema_contract
-# ctx.contract = recorder.get_run_contract(run_id)
-```
-
-**Step 3: Commit**
+**Step: Commit**
 
 ```bash
-git add src/elspeth/plugins/context.py src/elspeth/engine/orchestrator.py
-git commit -m "refactor(plugins): remove ctx.contract shim
+git add src/elspeth/plugins/transforms/ src/elspeth/plugins/gates/
+git commit -m "feat(plugins): update core transforms and gates for PipelineRow
 
-Contract is now always available via row.contract (PipelineRow).
+Update process() and evaluate() signatures to accept PipelineRow.
+Propagate contract through TransformResult/GateResult.
 
-Completes PipelineRow migration (Phase 5).
+Part of PipelineRow migration (Phase 4).
 
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Task 19: Update Tests
+## Task 8: Update LLM Plugin Signatures
+
+**Files:**
+- `src/elspeth/plugins/llm/base.py` (already accepts union - simplify to PipelineRow only)
+- `src/elspeth/plugins/llm/azure.py`
+- `src/elspeth/plugins/llm/azure_batch.py`
+- `src/elspeth/plugins/llm/azure_multi_query.py`
+- `src/elspeth/plugins/llm/openrouter.py`
+- `src/elspeth/plugins/llm/openrouter_batch.py`
+- `src/elspeth/plugins/llm/openrouter_multi_query.py`
+
+**Note:** The LLM base class already accepts `dict[str, Any] | PipelineRow`. Simplify to `PipelineRow` only:
+
+```python
+def process(self, row: PipelineRow, ctx: PluginContext) -> TransformResult:
+    """Process a row through the LLM.
+
+    Args:
+        row: Input row as PipelineRow
+        ctx: Plugin context
+    """
+    # Contract always available from row
+    input_contract = row.contract
+    row_data = row.to_dict()
+
+    # ... rest of processing
+```
+
+**Step: Commit**
+
+```bash
+git add src/elspeth/plugins/llm/
+git commit -m "feat(llm): update LLM plugins for PipelineRow
+
+Simplify process() signature from union type to PipelineRow only.
+Remove fallback to ctx.contract since row.contract always available.
+
+Part of PipelineRow migration (Phase 4).
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+```
+
+---
+
+## Task 9: Update Azure Content Safety Plugins
+
+**Files:**
+- `src/elspeth/plugins/azure/content_safety.py`
+- `src/elspeth/plugins/azure/prompt_shield.py`
+
+Same pattern as Task 7.
+
+**Step: Commit**
+
+```bash
+git add src/elspeth/plugins/azure/
+git commit -m "feat(azure): update Azure plugins for PipelineRow
+
+Part of PipelineRow migration (Phase 4).
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+```
+
+---
+
+## Task 10: Update Tests
 
 Update all tests that:
 1. Create TokenInfo with dict row_data → use PipelineRow
 2. Call transform.process() with dict → use PipelineRow
-3. Mock PluginContext with contract field → remove
+3. Check ctx.contract → verify it's still set (NOT removed)
 
-**Split by subsystem for tracking:**
+**Split by subsystem:**
 
-### Task 19a: Update contracts tests (~15 files)
+### Task 10a: Update contracts tests (~15 files)
+- `tests/contracts/test_results.py`
+- `tests/contracts/test_identity.py`
 
-Files in `tests/contracts/`:
-- `test_results.py` - TransformResult, GateResult
-- `test_identity.py` - TokenInfo
-- `test_source_row.py` - SourceRow integration
+### Task 10b: Update engine tests (~25 files)
+- `tests/engine/test_tokens.py`
+- `tests/engine/test_executors.py`
+- `tests/engine/test_processor.py`
+- `tests/engine/test_coalesce*.py`
 
-### Task 19b: Update engine tests (~25 files)
+### Task 10c: Update plugin tests (~40 files)
+- `tests/plugins/test_*.py`
+- `tests/plugins/llm/`
+- `tests/plugins/azure/`
 
-Files in `tests/engine/`:
-- `test_tokens.py` - TokenManager
-- `test_executors.py` - All executor tests
-- `test_processor.py` - RowProcessor
-- `test_coalesce*.py` - Coalesce tests
-
-### Task 19c: Update plugin tests (~40 files)
-
-Files in `tests/plugins/`:
-- `test_passthrough.py`, `test_field_mapper.py`, etc.
-- `tests/plugins/llm/` - All LLM plugin tests
-- `tests/plugins/azure/` - Azure plugin tests
-
-### Task 19d: Update integration tests (~15 files)
-
-Files in `tests/integration/`:
-- Full pipeline tests
-- Fork/coalesce integration tests
+### Task 10d: Update integration tests (~15 files)
+- `tests/integration/`
 
 Run full test suite and fix failures iteratively.
 
@@ -1495,48 +1019,9 @@ cd examples/openrouter_multi_query_assessment
 elspeth run --settings settings.yaml --execute
 
 # Validate contract propagation via landscape MCP
-# After pipeline runs, verify no NULL contracts in completed states:
 elspeth-mcp &
-# Then query:
-# get_node_states(run_id, status="completed") -> verify all have contracts
+# Then query to verify contracts flow through:
 # explain_token(run_id, token_id) -> verify contract present at each step
-```
-
-### Contract Propagation Validation
-
-After running the example pipeline, use the Landscape MCP to verify contracts flowed through the entire DAG:
-
-```python
-# Using MCP query tool
-result = query("""
-    SELECT ns.state_id, ns.status, ns.node_id
-    FROM node_states ns
-    WHERE ns.run_id = ?
-    AND ns.status = 'completed'
-""", [run_id])
-
-# For each completed state, verify via explain_token that contract is present
-for state in result:
-    lineage = explain_token(run_id, token_id=state.token_id)
-    assert lineage.contract is not None, f"NULL contract at {state.node_id}"
-```
-
----
-
-## Performance Benchmark (Optional)
-
-Before and after the migration, run this benchmark to measure PipelineRow overhead:
-
-```bash
-# Create benchmark script: scripts/benchmark_pipeline_row.py
-.venv/bin/python scripts/benchmark_pipeline_row.py
-
-# Expected output:
-# dict-based fork (1000 rows, 5 branches): X.XX ms
-# PipelineRow fork (1000 rows, 5 branches): Y.YY ms
-# Overhead: Z%
-
-# If overhead > 100%, investigate structural sharing options
 ```
 
 ---
@@ -1549,18 +1034,34 @@ Before and after the migration, run this benchmark to measure PipelineRow overhe
 | 2 | Change TokenInfo.row_data type | identity.py | 1 |
 | 3 | Update TokenManager | tokens.py | 1 |
 | 4 | Update plugin base classes | base.py, protocols.py | 2 |
-| 5 | Update BatchTransformMixin | batching/mixin.py | 2 |
-| 6 | Update engine executors | executors.py | 3 |
-| 7 | Update RowProcessor | processor.py | 3 |
-| 8 | Update CoalesceExecutor | coalesce_executor.py | 3 |
-| 9 | Update expression parser | expression_parser.py | 3 |
-| 10 | Add checkpoint version | executors.py | 3 |
-| 11-17 | Update plugin implementations | ~17 plugin files | 4 |
-| 18 | Remove ctx.contract shim | context.py, orchestrator.py | 5 |
-| 19a-d | Update tests | ~95 test files | 6 |
+| 5 | Update engine executors | executors.py | 3 |
+| 6 | Update RowProcessor + Coalesce | processor.py, coalesce_executor.py | 3 |
+| 7 | Update core plugins | ~15 transform/gate files | 4 |
+| 8 | Update LLM plugins | ~7 LLM files | 4 |
+| 9 | Update Azure plugins | ~2 Azure files | 4 |
+| 10a-d | Update tests | ~95 test files | 5 |
 
 **Phase boundaries for testing:**
 - After Phase 1 (Tasks 1-3): Run `pytest tests/contracts/ tests/engine/test_tokens.py`
-- After Phase 3 (Tasks 6-10): Run `pytest tests/engine/`
-- After Phase 4 (Tasks 11-17): Run `pytest tests/plugins/`
-- After Phase 6 (Task 19): Run full `pytest tests/` and `mypy src/`
+- After Phase 3 (Tasks 5-6): Run `pytest tests/engine/`
+- After Phase 4 (Tasks 7-9): Run `pytest tests/plugins/`
+- After Phase 5 (Task 10): Run full `pytest tests/` and `mypy src/`
+
+---
+
+## Changelog from Original Plan
+
+**Removed:**
+- "Pre-Implementation: Revert the ctx.contract Shim" section - ctx.contract is production infrastructure
+- Task 18 "Remove ctx.contract shim" - WRONG, ctx.contract stays as fallback
+- Tasks 5 (BatchTransformMixin), 9 (expression parser), 10 (checkpoint version) - merged into other tasks or no longer needed
+- Tasks 11-17 individual plugin tasks - consolidated into Tasks 7-9
+
+**Updated:**
+- Architecture description now correctly describes ctx.contract as production mechanism
+- LLM plugin section updated to reflect existing `dict | PipelineRow` union type
+- Task count reduced from 19 to 10 (plus test subtasks)
+- Line numbers updated to current codebase state
+- Removed obsolete rollback instructions for ctx.contract changes
+
+**Key insight:** The original plan assumed ctx.contract was temporary. It's actually the correct pattern - executors set it from `token.row_data.contract` before calling plugins, enabling both access patterns.

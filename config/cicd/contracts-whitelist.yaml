@@ -262,7 +262,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.process:row"
   - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform.azure_config:return"
-  - "src/elspeth/plugins/llm/azure.py:AzureLLMTransform._create_langfuse_trace:row_data"
 
   # Azure batch LLM
   - "src/elspeth/plugins/llm/azure_batch.py:AzureBatchLLMTransform.__init__:config"
@@ -287,14 +286,12 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._process_single_row_internal:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_parallel:row"
   - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._execute_queries_sequential:row"
-  - "src/elspeth/plugins/llm/azure_multi_query.py:AzureMultiQueryLLMTransform._create_langfuse_trace:row_data"
 
   # OpenRouter LLM (refactored: batching mixin handles buffering via accept())
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.__init__:config"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.accept:row"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform.process:row"
-  - "src/elspeth/plugins/llm/openrouter.py:OpenRouterLLMTransform._create_langfuse_trace:row_data"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AZURE PLUGINS - External cloud service trust boundary
@@ -480,7 +477,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._execute_queries_sequential:row"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._process_row:row"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform.accept:row"
-  - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryLLMTransform._create_langfuse_trace:row_data"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.parse_output_mapping:return"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_json_schema:return"
   - "src/elspeth/plugins/llm/openrouter_multi_query.py:OpenRouterMultiQueryConfig.build_response_format:return"
