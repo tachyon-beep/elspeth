@@ -1,13 +1,12 @@
 """Tests for gate executor."""
 
-from typing import Any
-
 import pytest
 
 from elspeth.contracts import NodeID, RoutingMode
 from elspeth.contracts.audit import NodeStateFailed
 from elspeth.contracts.enums import NodeStateStatus, NodeType
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.engine.expression_parser import ExpressionEvaluationError
 from tests.conftest import as_gate
 
@@ -18,6 +17,20 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 # Gate type identifiers for parametrization
 PLUGIN_GATE = "plugin"
 CONFIG_GATE = "config"
+
+
+def _make_contract() -> SchemaContract:
+    """Create a flexible schema contract for testing.
+
+    The flexible mode allows any fields, so tests can use whatever
+    field names they need (value, priority, score, etc.) without
+    declaring them all upfront.
+    """
+    return SchemaContract(
+        mode="FLEXIBLE",
+        fields=(),  # Empty fields - flexible mode accepts any field
+        locked=True,
+    )
 
 
 class TestGateExecutorParametrized:
@@ -71,13 +84,13 @@ class TestGateExecutorParametrized:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -89,9 +102,9 @@ class TestGateExecutorParametrized:
                 name = "pass_through"
                 node_id = gate_node.node_id
 
-                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.continue_(),
                     )
 
@@ -121,7 +134,7 @@ class TestGateExecutorParametrized:
         assert outcome.result.action.kind == "continue"
         assert outcome.sink_name is None
         assert outcome.child_tokens == []
-        assert outcome.updated_token.row_data == {"value": 42}
+        assert outcome.updated_token.row_data.to_dict() == {"value": 42}
 
         # Verify audit fields populated
         assert outcome.result.input_hash is not None
@@ -193,13 +206,13 @@ class TestGateExecutorParametrized:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 150},  # Above threshold / low confidence
+            row_data=PipelineRow({"value": 150}, _make_contract()),  # Above threshold / low confidence
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -211,16 +224,16 @@ class TestGateExecutorParametrized:
                 name = "threshold_gate"
                 node_id = gate_node.node_id
 
-                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                     if row.get("value", 0) > 100:
                         return GateResult(
-                            row=row,
+                            row=row.to_dict(),
                             action=RoutingAction.route(
                                 "above",  # Route label
                                 reason={"rule": "threshold_exceeded", "matched_value": row["value"]},
                             ),
                         )
-                    return GateResult(row=row, action=RoutingAction.continue_())
+                    return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
             gate = ThresholdGate()
             outcome = executor.execute_gate(
@@ -329,13 +342,13 @@ class TestGateExecutorParametrized:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -347,9 +360,9 @@ class TestGateExecutorParametrized:
                 name = "splitter"
                 node_id = gate_node.node_id
 
-                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.fork_to_paths(
                             ["path_a", "path_b"],
                             reason={"rule": "parallel processing", "matched_value": "split"},
@@ -392,7 +405,7 @@ class TestGateExecutorParametrized:
         # Verify all child tokens share the same row_id
         for child in outcome.child_tokens:
             assert child.row_id == token.row_id
-            assert child.row_data == {"value": 42}
+            assert child.row_data.to_dict() == {"value": 42}
 
         # Verify routing events recorded
         states = recorder.get_node_states_for_token(token.token_id)
@@ -471,13 +484,13 @@ class TestGateExecutorParametrized:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -489,9 +502,9 @@ class TestGateExecutorParametrized:
                 name = "splitter"
                 node_id = gate_node.node_id
 
-                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.fork_to_paths(["path_a", "path_b"]),
                     )
 
@@ -562,13 +575,13 @@ class TestGateExecutorParametrized:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -582,9 +595,9 @@ class TestGateExecutorParametrized:
                 name = "broken_gate"
                 node_id = gate_node.node_id
 
-                def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+                def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                     return GateResult(
-                        row=row,
+                        row=row.to_dict(),
                         action=RoutingAction.route("nonexistent_label"),
                     )
 
@@ -657,7 +670,7 @@ class TestPluginGateExecutor:
             name = "exploding_gate"
             node_id = gate_node.node_id
 
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 raise RuntimeError("gate evaluation failed!")
 
         gate = ExplodingGate()
@@ -667,13 +680,13 @@ class TestPluginGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -738,7 +751,7 @@ class TestPluginGateExecutor:
             name = "api_gate"
             node_id = gate_node.node_id
 
-            def evaluate(self, row: dict[str, Any], ctx: PluginContext) -> GateResult:
+            def evaluate(self, row: PipelineRow, ctx: PluginContext) -> GateResult:
                 # Gate makes external API call to decide routing
                 ctx.record_call(
                     call_type=CallType.HTTP,
@@ -747,7 +760,7 @@ class TestPluginGateExecutor:
                     response_data={"decision": "continue"},
                     latency_ms=50.0,
                 )
-                return GateResult(row=row, action=RoutingAction.continue_())
+                return GateResult(row=row.to_dict(), action=RoutingAction.continue_())
 
         gate = APIGate()
         ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
@@ -756,13 +769,13 @@ class TestPluginGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -844,13 +857,13 @@ class TestConfigGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"priority": 8},  # High priority
+            row_data=PipelineRow({"priority": 8}, _make_contract()),  # High priority
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -901,13 +914,13 @@ class TestConfigGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},
+            row_data=PipelineRow({"value": 42}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -961,13 +974,13 @@ class TestConfigGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"value": 42},  # No 'nonexistent' field
+            row_data=PipelineRow({"value": 42}, _make_contract()),  # No 'nonexistent' field
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
@@ -1037,13 +1050,13 @@ class TestConfigGateExecutor:
         token = TokenInfo(
             row_id="row-1",
             token_id="token-1",
-            row_data={"score": 150},
+            row_data=PipelineRow({"score": 150}, _make_contract()),
         )
         row = recorder.create_row(
             run_id=run.run_id,
             source_node_id=gate_node.node_id,
             row_index=0,
-            data=token.row_data,
+            data=token.row_data.to_dict(),
             row_id=token.row_id,
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
