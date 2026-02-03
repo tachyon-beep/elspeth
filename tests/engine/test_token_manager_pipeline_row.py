@@ -111,7 +111,7 @@ class TestTokenManagerForkToken:
             row_data=parent_row,
         )
 
-        children, fork_group_id = manager.fork_token(
+        children, _fork_group_id = manager.fork_token(
             parent_token=parent_token,
             branches=["branch_a", "branch_b"],
             step_in_pipeline=1,
@@ -156,7 +156,7 @@ class TestTokenManagerExpandToken:
             {"amount": 100, "split": 2},
         ]
 
-        children, expand_group_id = manager.expand_token(
+        children, _expand_group_id = manager.expand_token(
             parent_token=parent_token,
             expanded_rows=expanded_rows,
             step_in_pipeline=1,

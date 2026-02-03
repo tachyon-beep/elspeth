@@ -86,10 +86,7 @@ class TokenManager:
         """
         # Guard: source must provide contract
         if source_row.contract is None:
-            raise ValueError(
-                "SourceRow must have contract to create token. "
-                "Source plugins must set contract on all valid rows."
-            )
+            raise ValueError("SourceRow must have contract to create token. Source plugins must set contract on all valid rows.")
 
         # Convert to PipelineRow
         pipeline_row = source_row.to_pipeline_row()

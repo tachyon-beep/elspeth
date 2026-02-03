@@ -254,9 +254,8 @@ class TestTokenManagerForkIsolation:
         child_a = children[0]
         child_b = children[1]
 
-        # Get dict copies - PipelineRow is immutable so we verify via to_dict()
+        # Get dict copy from child_a - PipelineRow is immutable so we verify via to_dict()
         dict_a = child_a.row_data.to_dict()
-        dict_b = child_b.row_data.to_dict()
 
         # Mutate dict_a's nested data
         dict_a["payload"]["x"] = 999
