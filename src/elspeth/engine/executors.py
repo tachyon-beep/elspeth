@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from elspeth.contracts import (
     Artifact,
     BatchPendingError,
@@ -70,6 +72,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+slog = structlog.get_logger(__name__)
 
 
 class MissingEdgeError(Exception):
@@ -1459,7 +1462,8 @@ class AggregationExecutor:
         # Checkpoint format version
         # v1.0: Initial format with elapsed_age_seconds
         # v1.1: Added count_fire_offset/condition_fire_offset for trigger ordering (P2-2026-02-01)
-        state["_version"] = "1.1"
+        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
+        state["_version"] = "2.0"
 
         # Size validation (on serialized checkpoint)
         serialized = json.dumps(state)
@@ -1490,10 +1494,13 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
-                    "_version": "1.0",
+                    "_version": "2.0",
                     "node_id": {
-                        "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
-                        "batch_id": str
+                        "tokens": [{"token_id", "row_id", "branch_name", "row_data", ...}],
+                        "batch_id": str,
+                        "elapsed_age_seconds": float,
+                        "count_fire_offset": float | None,
+                        "condition_fire_offset": float | None
                     }
                 }
 
@@ -1501,10 +1508,19 @@ class AggregationExecutor:
             ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
         # Validate checkpoint version (Bug #12 fix)
-        CHECKPOINT_VERSION = "1.1"
+        # v1.1: Pre-PipelineRow migration format
+        # v2.0: PipelineRow migration - row_data will be PipelineRow with contract
+        CHECKPOINT_VERSION = "2.0"
         version = state.get("_version")
 
         if version != CHECKPOINT_VERSION:
+            # Log checkpoint rejection for observability
+            slog.warning(
+                "checkpoint_version_rejected",
+                found_version=version,
+                expected_version=CHECKPOINT_VERSION,
+                reason="incompatible_checkpoint_version",
+            )
             raise ValueError(
                 f"Incompatible checkpoint version: {version!r}. "
                 f"Expected: {CHECKPOINT_VERSION!r}. "
@@ -1537,7 +1553,7 @@ class AggregationExecutor:
             reconstructed_tokens = []
             for t in tokens_data:
                 # Validate required fields (crash on missing - per CLAUDE.md)
-                # All these fields are required in checkpoint format v1.1 (values can be None)
+                # All these fields are required in checkpoint format v2.0 (values can be None)
                 required_fields = {
                     "token_id",
                     "row_id",
@@ -1551,12 +1567,12 @@ class AggregationExecutor:
                 if missing:
                     raise ValueError(
                         f"Checkpoint token missing required fields: {missing}. "
-                        f"Required in v1.1 format: {required_fields}. Found: {set(t.keys())}"
+                        f"Required in v2.0 format: {required_fields}. Found: {set(t.keys())}"
                     )
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
-                # are ALWAYS present in checkpoint format v1.1 - use direct access to detect
+                # are ALWAYS present in checkpoint format v2.0 - use direct access to detect
                 # corruption/missing fields. The difference between "field is None" and
                 # "field is missing" matters: the former is valid, the latter is corruption.
                 reconstructed_tokens.append(
@@ -1598,7 +1614,7 @@ class AggregationExecutor:
             # P2-2026-02-01: Use dedicated restore API that preserves fire time ordering
             # The old approach called record_accept() which set fire times to current time,
             # then rewound _first_accept_time, causing incorrect "first to fire wins" ordering.
-            # NOTE: All fields are required in checkpoint format v1.1 - no backwards compat
+            # NOTE: All fields are required in checkpoint format v2.0 - no backwards compat
             elapsed_seconds = node_state["elapsed_age_seconds"]
             count_fire_offset = node_state["count_fire_offset"]
             condition_fire_offset = node_state["condition_fire_offset"]
@@ -1608,6 +1624,14 @@ class AggregationExecutor:
                 elapsed_age_seconds=elapsed_seconds,
                 count_fire_offset=count_fire_offset,
                 condition_fire_offset=condition_fire_offset,
+            )
+
+            # Log successful checkpoint restoration for observability
+            slog.info(
+                "checkpoint_restored",
+                node_id=str(node_id),
+                token_count=len(reconstructed_tokens),
+                checkpoint_version=CHECKPOINT_VERSION,
             )
 
     def get_batch_id(self, node_id: NodeID) -> str | None:

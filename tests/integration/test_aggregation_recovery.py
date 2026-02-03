@@ -476,7 +476,7 @@ class TestAggregationRecoveryIntegration:
             "condition_fire_offset": evaluator.get_condition_fire_offset(),  # P2-2026-02-01
         }
         agg_state: dict[str, Any] = {
-            "_version": "1.1",  # Required checkpoint version
+            "_version": "2.0",  # Required checkpoint version
             "sum_aggregator": sum_agg_state,
         }
 

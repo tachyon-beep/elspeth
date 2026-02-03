@@ -281,9 +281,9 @@ class TestProcessorBatchTransforms:
         # Note: _version field required since Bug #12 checkpoint versioning fix
         # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
         # Note: fire_offset fields required since P2-2026-02-01 trigger ordering fix
-        # Note: All lineage fields required in v1.1 format (values can be None)
+        # Note: All lineage fields required in v2.0 format (values can be None)
         restored_buffer_state = {
-            "_version": "1.1",
+            "_version": "2.0",
             sum_node.node_id: {
                 "tokens": [
                     {
