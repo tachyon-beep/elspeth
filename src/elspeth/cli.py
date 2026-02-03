@@ -162,23 +162,23 @@ def main(
 # === Subcommand stubs (to be implemented in later tasks) ===
 
 
-def _validate_output_directories(config: ElspethSettings) -> list[str]:
-    """Validate that required output directories exist or can be created.
+def _ensure_output_directories(config: ElspethSettings) -> list[str]:
+    """Ensure required output directories exist, creating them if needed.
 
-    Checks directories BEFORE attempting to create databases or files,
-    providing clear error messages instead of cryptic SQLite errors.
+    Creates directories BEFORE attempting to create databases or files,
+    providing clear error messages if creation fails.
 
     Args:
         config: Validated ElspethSettings
 
     Returns:
-        List of error messages (empty if all directories are valid)
+        List of error messages (empty if all directories exist or were created)
     """
     from sqlalchemy.engine.url import make_url
 
     errors: list[str] = []
 
-    # 1. Check Landscape database directory (for SQLite)
+    # 1. Ensure Landscape database directory exists (for SQLite)
     db_url = config.landscape.url
     parsed_url = make_url(db_url)
 
@@ -195,20 +195,18 @@ def _validate_output_directories(config: ElspethSettings) -> list[str]:
             resolved_parent = parent_dir.resolve()
 
             if not parent_dir.exists():
-                errors.append(
-                    f"Landscape database directory does not exist: {resolved_parent}\n"
-                    f"  Database URL: {db_url}\n"
-                    f"  Create the directory with: mkdir -p {resolved_parent}"
-                )
+                try:
+                    parent_dir.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    errors.append(f"Cannot create Landscape database directory: {resolved_parent}\n  Database URL: {db_url}\n  Error: {e}")
             elif not parent_dir.is_dir():
                 errors.append(f"Landscape database path exists but is not a directory: {resolved_parent}\n  Database URL: {db_url}")
             elif not os.access(parent_dir, os.W_OK):
                 errors.append(f"Landscape database directory is not writable: {resolved_parent}\n  Database URL: {db_url}")
 
-    # 2. Check payload store directory
+    # 2. Ensure payload store directory exists
     payload_path = config.payload_store.base_path
     if not payload_path.exists():
-        # Try to create it - this is more permissive than the database
         try:
             payload_path.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -218,7 +216,7 @@ def _validate_output_directories(config: ElspethSettings) -> list[str]:
     elif not os.access(payload_path, os.W_OK):
         errors.append(f"Payload store directory is not writable: {payload_path.resolve()}")
 
-    # 3. Check sink output directories (for file-based sinks)
+    # 3. Ensure sink output directories exist (for file-based sinks)
     for sink_name, sink_config in config.sinks.items():
         # Check if sink has a path option (CSVSink, JSONSink)
         if hasattr(sink_config, "options") and isinstance(sink_config.options, dict):
@@ -230,11 +228,12 @@ def _validate_output_directories(config: ElspethSettings) -> list[str]:
                 if sink_parent and str(sink_parent) != ".":
                     resolved_sink_parent = sink_parent.resolve()
                     if not sink_parent.exists():
-                        errors.append(
-                            f"Sink '{sink_name}' output directory does not exist: {resolved_sink_parent}\n"
-                            f"  Output path: {sink_path}\n"
-                            f"  Create the directory with: mkdir -p {resolved_sink_parent}"
-                        )
+                        try:
+                            sink_parent.mkdir(parents=True, exist_ok=True)
+                        except OSError as e:
+                            errors.append(
+                                f"Cannot create sink '{sink_name}' output directory: {resolved_sink_parent}\n  Output path: {sink_path}\n  Error: {e}"
+                            )
                     elif not sink_parent.is_dir():
                         errors.append(f"Sink '{sink_name}' output path parent exists but is not a directory: {resolved_sink_parent}")
 
@@ -354,11 +353,10 @@ def run(
         if dry_run or not execute:
             raise typer.Exit(1)
 
-    # Validate output directories BEFORE attempting to create resources
-    # This catches missing directories early with clear error messages
-    # instead of cryptic database or filesystem errors later
-    # NOTE: Only validated when actually executing (not dry-run or validation-only)
-    dir_errors = _validate_output_directories(config)
+    # Ensure output directories exist BEFORE attempting to create resources
+    # Creates directories automatically, only errors if creation fails
+    # NOTE: Only when actually executing (not dry-run or validation-only)
+    dir_errors = _ensure_output_directories(config)
     if dir_errors:
         typer.echo("Output directory errors:", err=True)
         for dir_error in dir_errors:
