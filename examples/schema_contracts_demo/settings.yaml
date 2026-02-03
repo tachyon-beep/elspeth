@@ -14,7 +14,7 @@
 #   NOTES & Comments           -> notes_comments
 #
 # Run with:
-#   uv run elspeth run -s examples/schema_contracts_demo/suite.yaml --execute
+#   uv run elspeth run -s examples/schema_contracts_demo/settings.yaml --execute
 #
 # After running, inspect the audit trail:
 #   uv run elspeth-mcp --database sqlite:///examples/schema_contracts_demo/runs/audit.db
@@ -30,7 +30,7 @@ source:
     schema:
       # Use free mode with type declarations for numeric comparison
       # The contract captures both original names AND types
-      mode: free
+      mode: flexible
       fields:
         - "customer_id: str"          # Original: Customer ID!!
         - "amount_usd: float"         # Original:   Amount (USD)
@@ -48,7 +48,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -56,7 +56,7 @@ sinks:
     options:
       path: examples/schema_contracts_demo/output/processed.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "customer_id: str"
           - "amount_usd: float"
@@ -71,7 +71,7 @@ sinks:
     options:
       path: examples/schema_contracts_demo/output/high_value.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "customer_id: str"
           - "amount_usd: float"

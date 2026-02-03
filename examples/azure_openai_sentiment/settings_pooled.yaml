@@ -22,7 +22,7 @@ source:
   options:
     path: examples/azure_openai_sentiment/input.csv
     schema:
-      mode: free
+      mode: flexible
       fields:
         - "id: int"
         - "text: str"
@@ -45,7 +45,7 @@ transforms:
       temperature: 0.0  # Deterministic for consistent results
       response_field: sentiment_analysis
       schema:
-        fields: dynamic
+        mode: observed
 
       # === POOLED EXECUTION CONFIG ===
       # Process multiple rows concurrently with automatic rate limiting
@@ -61,7 +61,7 @@ sinks:
     options:
       path: examples/azure_openai_sentiment/output/results_pooled.csv
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

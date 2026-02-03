@@ -39,7 +39,7 @@ export OPENROUTER_API_KEY="your-openrouter-api-key"
 
 ```bash
 # Execute the pipeline
-uv run elspeth run -s examples/schema_contracts_llm_assessment/suite.yaml --execute
+uv run elspeth run -s examples/schema_contracts_llm_assessment/settings.yaml --execute
 
 # Inspect the audit trail
 uv run elspeth-mcp --database sqlite:///examples/schema_contracts_llm_assessment/runs/audit.db
@@ -149,7 +149,7 @@ In healthcare AI systems:
 | File | Purpose |
 |------|---------|
 | `input.csv` | Medical case studies with crazy headers |
-| `suite.yaml` | Pipeline with `normalize_fields: true` |
+| `settings.yaml` | Pipeline with `normalize_fields: true` |
 | `criteria_lookup.yaml` | Assessment criteria definitions |
 | `output/results.csv` | LLM assessment results |
 | `runs/audit.db` | Full audit trail with contracts |

@@ -35,7 +35,7 @@ class TestRunCommand:
                 "options": {
                     "path": str(sample_data),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -43,7 +43,7 @@ class TestRunCommand:
                     "plugin": "json",
                     "options": {
                         "path": str(output_file),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -105,7 +105,7 @@ source:
     path: input.csv
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   results:
@@ -113,7 +113,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -203,7 +203,7 @@ source:
   options:
     path: {csv_file}
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: quarantine
 
 sinks:
@@ -212,7 +212,7 @@ sinks:
     options:
       path: {tmp_path / "output.csv"}
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
 
@@ -246,7 +246,7 @@ source:
   options:
     path: {csv_file}
     schema:
-      fields: dynamic
+      mode: observed
     on_validation_failure: quarantine
 
 sinks:
@@ -255,7 +255,7 @@ sinks:
     options:
       path: {tmp_path / "results.csv"}
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
   flagged:
@@ -263,7 +263,7 @@ sinks:
     options:
       path: {tmp_path / "flagged.csv"}
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
 
@@ -311,7 +311,7 @@ class TestRunCommandResourceCleanup:
                 "options": {
                     "path": str(csv_file),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -319,7 +319,7 @@ class TestRunCommandResourceCleanup:
                     "plugin": "json",
                     "options": {
                         "path": str(output_file),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -368,7 +368,7 @@ class TestRunCommandResourceCleanup:
                 "options": {
                     "path": str(tmp_path / "nonexistent.csv"),  # Will fail
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -376,7 +376,7 @@ class TestRunCommandResourceCleanup:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -435,7 +435,7 @@ class TestRunCommandProgress:
                 "options": {
                     "path": str(multi_row_data),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -443,7 +443,7 @@ class TestRunCommandProgress:
                     "plugin": "json",
                     "options": {
                         "path": str(output_file),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -505,7 +505,7 @@ source:
     path: {csv_file}
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   default:
@@ -513,7 +513,7 @@ sinks:
     options:
       path: {output_file}
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: default
 landscape:
@@ -574,7 +574,7 @@ source:
     path: {csv_file}
     on_validation_failure: discard
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   default:
@@ -582,7 +582,7 @@ sinks:
     options:
       path: {output_file}
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: default
 landscape:
@@ -656,14 +656,14 @@ class TestRunCommandPayloadStorage:
                 "plugin": "csv",
                 "options": {
                     "path": str(csv_file),
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "discard",
                 },
             },
             "sinks": {
                 "default": {
                     "plugin": "json",
-                    "options": {"path": str(output_file), "schema": {"fields": "dynamic"}},
+                    "options": {"path": str(output_file), "schema": {"mode": "observed"}},
                 },
             },
             "default_sink": "default",
@@ -702,3 +702,130 @@ class TestRunCommandPayloadStorage:
                 assert row_data.state == RowDataState.AVAILABLE, f"Row {row.row_id} payload not retrievable: {row_data.state}"
         finally:
             db.close()
+
+
+class TestRunCommandDirectoryValidation:
+    """Tests for directory validation before pipeline execution.
+
+    The CLI validates that output directories exist before attempting
+    to create databases or write files, providing clear error messages.
+    """
+
+    def test_run_rejects_nonexistent_landscape_directory(self, tmp_path: Path) -> None:
+        """Run fails with clear error when landscape database directory doesn't exist."""
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id,name\n1,alice\n")
+        output_file = tmp_path / "output.json"
+
+        # Point to a non-existent directory for landscape
+        nonexistent_dir = tmp_path / "nonexistent_subdir" / "audit.db"
+
+        settings = {
+            "source": {
+                "plugin": "csv",
+                "options": {
+                    "path": str(csv_file),
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            "sinks": {
+                "default": {
+                    "plugin": "json",
+                    "options": {
+                        "path": str(output_file),
+                        "schema": {"mode": "observed"},
+                    },
+                },
+            },
+            "default_sink": "default",
+            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+        }
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(yaml.dump(settings))
+
+        result = runner.invoke(app, ["run", "-s", str(settings_file), "--execute"])
+
+        assert result.exit_code == 1
+        assert "directory" in result.output.lower()
+        assert "does not exist" in result.output.lower()
+        assert "nonexistent_subdir" in result.output
+
+    def test_run_dry_run_skips_directory_validation(self, tmp_path: Path) -> None:
+        """Dry run mode doesn't require directories to exist.
+
+        This allows users to validate config syntax without having
+        the full directory structure set up.
+        """
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id,name\n1,alice\n")
+
+        # Point to a non-existent directory - should be OK in dry run
+        nonexistent_dir = tmp_path / "nonexistent" / "audit.db"
+
+        settings = {
+            "source": {
+                "plugin": "csv",
+                "options": {
+                    "path": str(csv_file),
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            "sinks": {
+                "default": {
+                    "plugin": "json",
+                    "options": {
+                        "path": str(tmp_path / "output.json"),
+                        "schema": {"mode": "observed"},
+                    },
+                },
+            },
+            "default_sink": "default",
+            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+        }
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(yaml.dump(settings))
+
+        result = runner.invoke(app, ["run", "-s", str(settings_file), "--dry-run"])
+
+        # Dry run should succeed even with non-existent directory
+        assert result.exit_code == 0
+        assert "dry run" in result.output.lower() or "would" in result.output.lower()
+
+    def test_run_shows_mkdir_suggestion(self, tmp_path: Path) -> None:
+        """Error message includes mkdir command to create directory."""
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id,name\n1,alice\n")
+
+        nonexistent_dir = tmp_path / "missing_dir" / "audit.db"
+
+        settings = {
+            "source": {
+                "plugin": "csv",
+                "options": {
+                    "path": str(csv_file),
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "observed"},
+                },
+            },
+            "sinks": {
+                "default": {
+                    "plugin": "json",
+                    "options": {
+                        "path": str(tmp_path / "output.json"),
+                        "schema": {"mode": "observed"},
+                    },
+                },
+            },
+            "default_sink": "default",
+            "landscape": {"url": f"sqlite:///{nonexistent_dir}"},
+        }
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(yaml.dump(settings))
+
+        result = runner.invoke(app, ["run", "-s", str(settings_file), "--execute"])
+
+        assert result.exit_code == 1
+        # Should show helpful mkdir -p suggestion
+        assert "mkdir -p" in result.output

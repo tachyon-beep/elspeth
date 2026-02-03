@@ -58,7 +58,7 @@ class TestDatabaseSinkProperties:
                 {
                     "url": url,
                     "table": table_name,
-                    "schema": {"mode": "strict", "fields": ["id: int", "name: str", "score: float?"]},
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
             ctx = PluginContext(run_id="test-run", config={})

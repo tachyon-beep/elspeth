@@ -151,7 +151,7 @@ class TestValidationErrorRecording:
         token = ctx.record_validation_error(
             row={"id": 42, "invalid": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
         )
 
@@ -172,7 +172,7 @@ class TestValidationErrorRecording:
             token = ctx.record_validation_error(
                 row={"id": 42, "invalid": "data"},
                 error="validation failed",
-                schema_mode="strict",
+                schema_mode="fixed",
                 destination="discard",
             )
 
@@ -191,7 +191,7 @@ class TestValidationErrorRecording:
         token = ctx.record_validation_error(
             row={"id": "row-42", "invalid": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
         )
 
@@ -206,7 +206,7 @@ class TestValidationErrorRecording:
         token = ctx.record_validation_error(
             row={"no_id_field": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
         )
 
@@ -234,7 +234,7 @@ class TestValidationErrorRecording:
         token = ctx.record_validation_error(
             row={"id": 42, "invalid": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine_sink",
         )
 
@@ -245,7 +245,7 @@ class TestValidationErrorRecording:
         assert call_kwargs["node_id"] == "source_node"
         assert call_kwargs["row_data"] == {"id": 42, "invalid": "data"}
         assert call_kwargs["error"] == "validation failed"
-        assert call_kwargs["schema_mode"] == "strict"
+        assert call_kwargs["schema_mode"] == "fixed"
         assert call_kwargs["destination"] == "quarantine_sink"
 
         # Token should have error_id from landscape
@@ -286,7 +286,7 @@ class TestValidationErrorDestination:
         token = ctx.record_validation_error(
             row={"id": 1, "bad": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine_sink",
         )
 
@@ -301,7 +301,7 @@ class TestValidationErrorDestination:
         token = ctx.record_validation_error(
             row={"id": 1, "bad": "data"},
             error="validation failed",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
         )
 

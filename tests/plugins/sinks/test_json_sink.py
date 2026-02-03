@@ -13,7 +13,7 @@ import pytest
 from elspeth.plugins.context import PluginContext
 
 # Dynamic schema config for tests - PathConfig now requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestJSONSink:

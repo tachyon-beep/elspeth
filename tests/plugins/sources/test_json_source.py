@@ -9,7 +9,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - SourceDataConfig requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Standard quarantine routing for tests
 QUARANTINE_SINK = "quarantine"
@@ -318,7 +318,7 @@ class TestJSONSourceQuarantineYielding:
                 "path": str(json_file),
                 "on_validation_failure": "quarantine",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
             }
@@ -365,7 +365,7 @@ class TestJSONSourceQuarantineYielding:
                 "path": str(json_file),
                 "on_validation_failure": "discard",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
             }
@@ -395,7 +395,7 @@ class TestJSONSourceQuarantineYielding:
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
             }
@@ -443,7 +443,7 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -479,7 +479,7 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "discard",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -504,7 +504,7 @@ class TestJSONSourceParseErrors:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -530,7 +530,7 @@ class TestJSONSourceParseErrors:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -558,7 +558,7 @@ class TestJSONSourceParseErrors:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "discard",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -607,7 +607,7 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -648,7 +648,7 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -676,7 +676,7 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(json_file),
                 "format": "json",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -699,7 +699,7 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "discard",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -724,7 +724,7 @@ class TestJSONSourceNonFiniteConstants:
                 "path": str(jsonl_file),
                 "format": "jsonl",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -771,7 +771,7 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Expects object with "results" key
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -805,7 +805,7 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Key doesn't exist
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -839,7 +839,7 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",  # Points to object, not list
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -867,7 +867,7 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",
                 "on_validation_failure": "discard",  # Don't yield quarantined
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -898,7 +898,7 @@ class TestJSONSourceDataKeyStructuralErrors:
                 "format": "json",
                 "data_key": "results",
                 "on_validation_failure": "quarantine",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

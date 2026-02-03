@@ -93,7 +93,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 Analyze: {{ row.text }}
               pool_size: 5  # Parallel workers
               schema:
-                fields: dynamic
+                mode: observed
     """
 
     name = "openrouter_batch_llm"
@@ -158,7 +158,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,

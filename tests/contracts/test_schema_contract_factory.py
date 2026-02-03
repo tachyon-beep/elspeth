@@ -10,17 +10,17 @@ from elspeth.contracts.schema_contract_factory import (
 class TestMapSchemaMode:
     """Test mapping SchemaConfig modes to SchemaContract modes."""
 
-    def test_strict_maps_to_fixed(self) -> None:
-        """strict mode maps to FIXED."""
-        assert map_schema_mode("strict") == "FIXED"
+    def test_fixed_maps_to_fixed(self) -> None:
+        """fixed mode maps to FIXED."""
+        assert map_schema_mode("fixed") == "FIXED"
 
-    def test_free_maps_to_flexible(self) -> None:
-        """free mode maps to FLEXIBLE."""
-        assert map_schema_mode("free") == "FLEXIBLE"
+    def test_flexible_maps_to_flexible(self) -> None:
+        """flexible mode maps to FLEXIBLE."""
+        assert map_schema_mode("flexible") == "FLEXIBLE"
 
-    def test_none_maps_to_observed(self) -> None:
-        """None (dynamic) maps to OBSERVED."""
-        assert map_schema_mode(None) == "OBSERVED"
+    def test_observed_maps_to_observed(self) -> None:
+        """observed mode maps to OBSERVED."""
+        assert map_schema_mode("observed") == "OBSERVED"
 
 
 class TestCreateContractFromConfig:
@@ -28,7 +28,7 @@ class TestCreateContractFromConfig:
 
     def test_dynamic_schema_creates_observed_contract(self) -> None:
         """Dynamic schema creates unlocked OBSERVED contract."""
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         contract = create_contract_from_config(config)
 
         assert contract.mode == "OBSERVED"
@@ -39,7 +39,7 @@ class TestCreateContractFromConfig:
         """Strict schema creates FIXED contract with declared fields."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -57,7 +57,7 @@ class TestCreateContractFromConfig:
         """Free schema creates FLEXIBLE contract."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int"],
             }
         )
@@ -69,7 +69,7 @@ class TestCreateContractFromConfig:
         """Optional field (?) has required=False."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "note: str?"],
             }
         )
@@ -82,7 +82,7 @@ class TestCreateContractFromConfig:
         """Field types map correctly to Python types."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": [
                     "a: int",
                     "b: str",
@@ -106,7 +106,7 @@ class TestCreateContractFromConfig:
         """Explicit schemas (strict/free) start locked."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int"],
             }
         )
@@ -117,7 +117,7 @@ class TestCreateContractFromConfig:
 
     def test_dynamic_contract_is_unlocked(self) -> None:
         """Dynamic schemas start unlocked (types inferred from first row)."""
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         contract = create_contract_from_config(config)
 
         assert contract.locked is False
@@ -130,7 +130,7 @@ class TestContractWithFieldResolution:
         """Field resolution mapping populates original_name."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["amount_usd: int", "customer_id: str"],
             }
         )
@@ -150,7 +150,7 @@ class TestContractWithFieldResolution:
         """Without resolution, original_name equals normalized_name."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int"],
             }
         )
@@ -163,7 +163,7 @@ class TestContractWithFieldResolution:
         """Resolution mapping can be partial (not all fields mapped)."""
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["mapped_field: int", "unmapped_field: str"],
             }
         )

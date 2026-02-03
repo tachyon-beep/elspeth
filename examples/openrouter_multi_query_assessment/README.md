@@ -52,7 +52,7 @@ Plus metadata columns per query (usage, model, template_hash, etc.)
 export OPENROUTER_API_KEY="sk-or-v1-..."
 
 # Run the pipeline
-uv run elspeth run -s examples/openrouter_multi_query_assessment/suite.yaml --execute
+uv run elspeth run -s examples/openrouter_multi_query_assessment/settings.yaml --execute
 ```
 
 ### Run with JSONL Change Journal
@@ -60,14 +60,14 @@ uv run elspeth run -s examples/openrouter_multi_query_assessment/suite.yaml --ex
 Enable the optional JSONL change journal for an append-only backup stream:
 
 ```bash
-uv run elspeth run -s examples/openrouter_multi_query_assessment/suite_journal.yaml --execute
+uv run elspeth run -s examples/openrouter_multi_query_assessment/settings_journal.yaml --execute
 ```
 
 The journal is disabled by default. See [JSONL Change Journal](../../README.md#jsonl-change-journal-optional) for configuration details.
 
 ## Model Selection
 
-Change the model in `suite.yaml` to use different providers:
+Change the model in `settings.yaml` to use different providers:
 
 ```yaml
 # Best quality (Claude 3 Opus)
@@ -92,7 +92,7 @@ See [OpenRouter Models](https://openrouter.ai/models) for the full list.
 
 ### Adding More Case Studies
 
-Add entries to `case_studies` in suite.yaml:
+Add entries to `case_studies` in settings.yaml:
 ```yaml
 case_studies:
   - name: cs3
@@ -101,7 +101,7 @@ case_studies:
 
 ### Adding More Criteria
 
-Add entries to `criteria` in suite.yaml:
+Add entries to `criteria` in settings.yaml:
 ```yaml
 criteria:
   - name: safety

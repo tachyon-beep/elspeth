@@ -18,7 +18,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import token_outcomes_table
 
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestTokenOutcomeConstraints:

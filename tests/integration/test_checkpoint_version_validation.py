@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.types import NodeID
+from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 
@@ -116,7 +117,7 @@ class TestCheckpointVersionValidation:
         """Verify restore succeeds with matching checkpoint version.
 
         Scenario:
-        1. Create AggregationExecutor
+        1. Create AggregationExecutor with aggregation settings for test_node
         2. Create checkpoint with valid version
         3. Restore from checkpoint
         4. Verify: No errors, restoration succeeds
@@ -124,10 +125,16 @@ class TestCheckpointVersionValidation:
         This confirms valid checkpoints still work after Bug #12 fix.
         """
         span_factory = SpanFactory()
+        # AggregationExecutor requires aggregation_settings for nodes that appear in checkpoint
+        # The restore_from_checkpoint method expects _trigger_evaluators to exist for each node
+        node_id = NodeID("test_node")
+        trigger = TriggerConfig(count=10)
+        aggregation_settings = {node_id: AggregationSettings(name="test_agg", plugin="batch_stats", trigger=trigger)}
         executor = AggregationExecutor(
             recorder=None,  # type: ignore
             span_factory=span_factory,
             run_id="test_run",
+            aggregation_settings=aggregation_settings,
         )
 
         # Valid checkpoint state with matching version
@@ -140,6 +147,9 @@ class TestCheckpointVersionValidation:
                         "row_id": "row-001",
                         "row_data": {"value": 1},
                         "branch_name": None,
+                        "fork_group_id": None,
+                        "join_group_id": None,
+                        "expand_group_id": None,
                     }
                 ],
                 "batch_id": "batch-001",

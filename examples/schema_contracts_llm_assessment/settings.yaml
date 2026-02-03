@@ -22,7 +22,7 @@
 #   export OPENROUTER_API_KEY="your-openrouter-api-key"
 #
 # Run with:
-#   uv run elspeth run -s examples/schema_contracts_llm_assessment/suite.yaml --execute
+#   uv run elspeth run -s examples/schema_contracts_llm_assessment/settings.yaml --execute
 #
 # After running, inspect the audit trail:
 #   uv run elspeth-mcp --database sqlite:///examples/schema_contracts_llm_assessment/runs/audit.db
@@ -38,7 +38,7 @@ source:
     schema:
       # OBSERVED mode: infer schema from first row
       # The contract will capture BOTH original crazy names AND normalized names
-      fields: dynamic
+      mode: observed
     # Enable automatic header normalization
     normalize_fields: true
     on_validation_failure: discard
@@ -129,7 +129,7 @@ transforms:
       max_tokens: 500
 
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -137,7 +137,7 @@ sinks:
     options:
       path: examples/schema_contracts_llm_assessment/output/results.csv
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

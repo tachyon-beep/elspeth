@@ -281,9 +281,9 @@ class AzureBlobSource(BaseSource):
         - on_validation_failure: Sink name or "discard" (required)
 
     The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]}
-        - Free: {"mode": "free", "fields": ["id: int"]} - at least these fields
+        - Observed: {"mode": "observed"} - accept any fields
+        - Fixed: {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        - Flexible: {"mode": "flexible", "fields": ["id: int"]} - at least these fields
 
     Three-tier trust model:
         - Azure Blob SDK calls = EXTERNAL SYSTEM -> wrap with try/except
@@ -466,7 +466,7 @@ class AzureBlobSource(BaseSource):
             if not has_header:
                 if self._columns is not None:
                     names_arg = self._columns
-                elif not self._schema_config.is_dynamic and self._schema_config.fields:
+                elif not self._schema_config.is_observed and self._schema_config.fields:
                     names_arg = [field_def.name for field_def in self._schema_config.fields]
 
             df = pd.read_csv(
@@ -647,7 +647,7 @@ class AzureBlobSource(BaseSource):
             ctx.record_validation_error(
                 row=row,
                 error=str(e),
-                schema_mode=self._schema_config.mode or "dynamic",
+                schema_mode=self._schema_config.mode,
                 destination=self._on_validation_failure,
             )
 

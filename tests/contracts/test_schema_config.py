@@ -83,45 +83,45 @@ class TestSchemaConfig:
 
         assert SchemaConfig is not None
 
-    def test_dynamic_schema(self) -> None:
-        """Parse dynamic schema config."""
+    def test_observed_schema(self) -> None:
+        """Parse observed schema config."""
         from elspeth.contracts.schema import SchemaConfig
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
-        assert config.is_dynamic is True
-        assert config.mode is None
+        config = SchemaConfig.from_dict({"mode": "observed"})
+        assert config.is_observed is True
+        assert config.mode == "observed"
         assert config.fields is None
 
-    def test_strict_schema(self) -> None:
-        """Parse strict schema with explicit fields."""
+    def test_fixed_schema(self) -> None:
+        """Parse fixed schema with explicit fields."""
         from elspeth.contracts.schema import SchemaConfig
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
-        assert config.is_dynamic is False
-        assert config.mode == "strict"
-        assert config.fields is not None  # strict mode always has fields
+        assert config.is_observed is False
+        assert config.mode == "fixed"
+        assert config.fields is not None  # fixed mode always has fields
         assert len(config.fields) == 2
         assert config.fields[0].name == "id"
         assert config.fields[1].name == "name"
 
-    def test_free_schema(self) -> None:
-        """Parse free schema with explicit fields."""
+    def test_flexible_schema(self) -> None:
+        """Parse flexible schema with explicit fields."""
         from elspeth.contracts.schema import SchemaConfig
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int", "name: str", "score: float?"],
             }
         )
-        assert config.is_dynamic is False
-        assert config.mode == "free"
-        assert config.fields is not None  # free mode with explicit fields
+        assert config.is_observed is False
+        assert config.mode == "flexible"
+        assert config.fields is not None  # flexible mode with explicit fields
         assert len(config.fields) == 3
         assert config.fields[2].required is False
 
@@ -132,19 +132,18 @@ class TestSchemaConfig:
         with pytest.raises(ValueError, match=r"mode.*required"):
             SchemaConfig.from_dict({"fields": ["id: int"]})
 
-    def test_dynamic_ignores_mode(self) -> None:
-        """Dynamic fields ignores mode if provided."""
+    def test_observed_with_fields_raises(self) -> None:
+        """Observed mode with explicit fields raises error."""
         from elspeth.contracts.schema import SchemaConfig
 
-        config = SchemaConfig.from_dict({"fields": "dynamic", "mode": "strict"})
-        assert config.is_dynamic is True
-        assert config.mode is None  # Ignored
+        with pytest.raises(ValueError, match=r"Observed schemas.*cannot have explicit field definitions"):
+            SchemaConfig.from_dict({"mode": "observed", "fields": ["id: int"]})
 
-    def test_missing_fields_raises(self) -> None:
-        """Missing fields key raises error."""
+    def test_missing_mode_raises(self) -> None:
+        """Missing mode key raises error."""
         from elspeth.contracts.schema import SchemaConfig
 
-        with pytest.raises(ValueError, match=r"fields.*required"):
+        with pytest.raises(ValueError, match=r"mode.*required"):
             SchemaConfig.from_dict({})
 
     def test_empty_fields_raises(self) -> None:
@@ -152,7 +151,7 @@ class TestSchemaConfig:
         from elspeth.contracts.schema import SchemaConfig
 
         with pytest.raises(ValueError, match="at least one field"):
-            SchemaConfig.from_dict({"mode": "strict", "fields": []})
+            SchemaConfig.from_dict({"mode": "fixed", "fields": []})
 
     def test_duplicate_field_names_raises(self) -> None:
         """Duplicate field names raise error."""
@@ -161,7 +160,7 @@ class TestSchemaConfig:
         with pytest.raises(ValueError, match="Duplicate field names"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "id: str"],
                 }
             )
@@ -176,12 +175,12 @@ class TestSchemaConfig:
         # YAML `- id: int` parses as [{"id": "int"}]
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": [{"id": "int"}, {"name": "str"}],
             }
         )
-        assert config.is_dynamic is False
-        assert config.mode == "strict"
+        assert config.is_observed is False
+        assert config.mode == "fixed"
         assert config.fields is not None
         assert len(config.fields) == 2
         assert config.fields[0].name == "id"
@@ -199,7 +198,7 @@ class TestSchemaConfig:
         # YAML `- score: float?` parses as [{"score": "float?"}]
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": [{"score": "float?"}],
             }
         )
@@ -217,7 +216,7 @@ class TestSchemaConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", {"name": "str"}, "score: float?"],
             }
         )
@@ -237,7 +236,7 @@ class TestSchemaConfig:
         with pytest.raises(ValueError, match=r"dict with 2 keys"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": [{"id": "int", "name": "str"}],
                 }
             )
@@ -252,7 +251,7 @@ class TestSchemaConfig:
         with pytest.raises(ValueError, match=r"must be a string.*or a dict"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": [[1, 2, 3]],
                 }
             )
@@ -261,49 +260,49 @@ class TestSchemaConfig:
 class TestSchemaConfigSerialization:
     """Tests for SchemaConfig serialization and round-trip."""
 
-    def test_dynamic_schema_to_dict(self) -> None:
-        """Dynamic schema serializes with mode='dynamic'."""
+    def test_observed_schema_to_dict(self) -> None:
+        """Observed schema serializes with mode='observed'."""
         from elspeth.contracts.schema import SchemaConfig
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         serialized = config.to_dict()
-        assert serialized == {"mode": "dynamic", "fields": None}
+        assert serialized == {"mode": "observed", "fields": None}
 
-    def test_dynamic_schema_roundtrip(self) -> None:
-        """Dynamic schema survives serialization round-trip."""
+    def test_observed_schema_roundtrip(self) -> None:
+        """Observed schema survives serialization round-trip."""
         from elspeth.contracts.schema import SchemaConfig
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         serialized = config.to_dict()
         roundtrip = SchemaConfig.from_dict(serialized)
-        assert roundtrip.is_dynamic is True
-        assert roundtrip.mode is None
+        assert roundtrip.is_observed is True
+        assert roundtrip.mode == "observed"
         assert roundtrip.fields is None
 
-    def test_strict_schema_to_dict(self) -> None:
-        """Strict schema with fields serializes correctly."""
+    def test_fixed_schema_to_dict(self) -> None:
+        """Fixed schema with fields serializes correctly."""
         from elspeth.contracts.schema import SchemaConfig
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str", "score: float?"],
             }
         )
         serialized = config.to_dict()
-        assert serialized["mode"] == "strict"
+        assert serialized["mode"] == "fixed"
         assert len(serialized["fields"]) == 3
         assert serialized["fields"][0] == {"name": "id", "type": "int", "required": True}
         assert serialized["fields"][1] == {"name": "name", "type": "str", "required": True}
         assert serialized["fields"][2] == {"name": "score", "type": "float", "required": False}
 
-    def test_strict_schema_roundtrip(self) -> None:
-        """Strict schema survives serialization round-trip via dict-form fields."""
+    def test_fixed_schema_roundtrip(self) -> None:
+        """Fixed schema survives serialization round-trip via dict-form fields."""
         from elspeth.contracts.schema import SchemaConfig
 
         original = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -314,8 +313,8 @@ class TestSchemaConfigSerialization:
                 "fields": [{f["name"]: f["type"] + ("?" if not f["required"] else "")} for f in serialized["fields"]],
             }
         )
-        assert roundtrip.is_dynamic is False
-        assert roundtrip.mode == "strict"
+        assert roundtrip.is_observed is False
+        assert roundtrip.mode == "fixed"
         assert roundtrip.fields is not None
         assert len(roundtrip.fields) == 2
         assert roundtrip.fields[0].name == "id"
@@ -338,7 +337,7 @@ class TestAuditFields:
         from elspeth.contracts.schema import SchemaConfig
 
         config = {
-            "fields": "dynamic",
+            "mode": "observed",
             "guaranteed_fields": ["response", "response_usage"],
             "audit_fields": ["response_template_hash", "response_lookup_source"],
         }
@@ -352,9 +351,8 @@ class TestAuditFields:
         from elspeth.contracts.schema import SchemaConfig
 
         schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("response", "response_usage"),
             audit_fields=("response_template_hash",),
         )
@@ -369,9 +367,8 @@ class TestAuditFields:
         from elspeth.contracts.schema import SchemaConfig
 
         schema = SchemaConfig(
-            mode=None,
+            mode="observed",
             fields=None,
-            is_dynamic=True,
             guaranteed_fields=("response",),
             audit_fields=("response_template_hash", "response_lookup_source"),
         )
@@ -388,21 +385,21 @@ class TestAuditFields:
         from elspeth.contracts.schema import SchemaConfig
 
         with pytest.raises(ValueError, match="must be a list"):
-            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": "not_a_list"})
+            SchemaConfig.from_dict({"mode": "observed", "audit_fields": "not_a_list"})
 
     def test_audit_fields_rejects_duplicates(self) -> None:
         """audit_fields must not contain duplicates."""
         from elspeth.contracts.schema import SchemaConfig
 
         with pytest.raises(ValueError, match="Duplicate field names"):
-            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": ["hash", "hash"]})
+            SchemaConfig.from_dict({"mode": "observed", "audit_fields": ["hash", "hash"]})
 
     def test_audit_fields_rejects_invalid_identifiers(self) -> None:
         """audit_fields must be valid Python identifiers."""
         from elspeth.contracts.schema import SchemaConfig
 
         with pytest.raises(ValueError, match="valid Python identifier"):
-            SchemaConfig.from_dict({"fields": "dynamic", "audit_fields": ["valid", "invalid-field"]})
+            SchemaConfig.from_dict({"mode": "observed", "audit_fields": ["valid", "invalid-field"]})
 
 
 class TestContractFieldSubsetValidation:
@@ -410,13 +407,13 @@ class TestContractFieldSubsetValidation:
 
     Bug: P2-2026-01-31-schema-config-undefined-contract-fields
 
-    For explicit schemas (mode=strict/free), guaranteed_fields, required_fields,
+    For explicit schemas (mode=fixed/flexible), guaranteed_fields, required_fields,
     and audit_fields MUST be subsets of declared field names. Typos in these
     lists would otherwise create false audit claims.
 
-    For dynamic schemas, there are no declared fields to validate against,
+    For observed schemas, there are no declared fields to validate against,
     so arbitrary field names are allowed (this is the only way to express
-    contracts for dynamic schemas).
+    contracts for observed schemas).
     """
 
     def test_guaranteed_fields_typo_in_explicit_schema_raises(self) -> None:
@@ -426,7 +423,7 @@ class TestContractFieldSubsetValidation:
         with pytest.raises(ValueError, match=r"guaranteed_fields.*not declared.*custmer_id"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["customer_id: str", "amount: float"],
                     "guaranteed_fields": ["custmer_id"],  # Typo!
                 }
@@ -439,7 +436,7 @@ class TestContractFieldSubsetValidation:
         with pytest.raises(ValueError, match=r"required_fields.*not declared.*custmer_id"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["customer_id: str"],
                     "required_fields": ["custmer_id"],  # Typo!
                 }
@@ -452,7 +449,7 @@ class TestContractFieldSubsetValidation:
         with pytest.raises(ValueError, match=r"audit_fields.*not declared.*custmer_id"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["customer_id: str"],
                     "audit_fields": ["custmer_id"],  # Typo!
                 }
@@ -465,7 +462,7 @@ class TestContractFieldSubsetValidation:
         with pytest.raises(ValueError, match=r"(typo1.*typo2|typo2.*typo1)"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["customer_id: str"],
                     "guaranteed_fields": ["typo1", "typo2"],
                 }
@@ -477,7 +474,7 @@ class TestContractFieldSubsetValidation:
 
         schema = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["customer_id: str", "amount: float", "timestamp: str"],
                 "guaranteed_fields": ["customer_id", "amount"],
                 "required_fields": ["customer_id"],
@@ -488,17 +485,17 @@ class TestContractFieldSubsetValidation:
         assert schema.required_fields == ("customer_id",)
         assert schema.audit_fields == ("timestamp",)
 
-    def test_dynamic_schema_allows_arbitrary_contract_fields(self) -> None:
-        """Dynamic schemas allow arbitrary field names in contracts.
+    def test_observed_schema_allows_arbitrary_contract_fields(self) -> None:
+        """Observed schemas allow arbitrary field names in contracts.
 
-        For dynamic schemas, there are no declared fields, so contract fields
+        For observed schemas, there are no declared fields, so contract fields
         are the ONLY way to express guarantees. We can't validate them.
         """
         from elspeth.contracts.schema import SchemaConfig
 
         schema = SchemaConfig.from_dict(
             {
-                "fields": "dynamic",
+                "mode": "observed",
                 "guaranteed_fields": ["any_field_name", "another_field"],
                 "required_fields": ["completely_arbitrary"],
             }
@@ -506,14 +503,14 @@ class TestContractFieldSubsetValidation:
         assert schema.guaranteed_fields == ("any_field_name", "another_field")
         assert schema.required_fields == ("completely_arbitrary",)
 
-    def test_free_mode_also_validates_contract_fields(self) -> None:
-        """Free mode schemas also validate contract field subsets."""
+    def test_flexible_mode_also_validates_contract_fields(self) -> None:
+        """Flexible mode schemas also validate contract field subsets."""
         from elspeth.contracts.schema import SchemaConfig
 
         with pytest.raises(ValueError, match=r"guaranteed_fields.*not declared"):
             SchemaConfig.from_dict(
                 {
-                    "mode": "free",
+                    "mode": "flexible",
                     "fields": ["customer_id: str"],
                     "guaranteed_fields": ["typo_field"],
                 }

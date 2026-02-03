@@ -21,7 +21,7 @@ def test_azure_blob_sink_configure_for_resume_raises():
             "connection_string": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net",
             "container": "test-container",
             "blob_path": "test/output.csv",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
         }
     )
 

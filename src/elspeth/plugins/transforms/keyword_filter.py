@@ -62,7 +62,7 @@ class KeywordFilter(BaseTransform):
                 - "(?i)confidential"
               on_error: quarantine_sink
               schema:
-                fields: dynamic
+                mode: observed
     """
 
     name = "keyword_filter"

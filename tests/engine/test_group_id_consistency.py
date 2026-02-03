@@ -102,8 +102,8 @@ class TestForkGroupIDConsistency:
                 )
             ],
             sinks={
-                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
-                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
+                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}},
+                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}},
             },
             default_sink="branch_a",
         )
@@ -171,8 +171,8 @@ class TestForkGroupIDConsistency:
                 )
             ],
             sinks={
-                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
-                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}},
+                "branch_a": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}},
+                "branch_b": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}},
             },
             default_sink="branch_a",
         )
@@ -253,7 +253,7 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             coalesce=[
                 CoalesceSettings(
                     name="output",
@@ -321,7 +321,7 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             coalesce=[
                 CoalesceSettings(
                     name="output",
@@ -408,7 +408,7 @@ class TestJoinGroupIDConsistency:
                     fork_to=["branch_a", "branch_b"],
                 )
             ],
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             coalesce=[
                 CoalesceSettings(
                     name="output",
@@ -490,7 +490,7 @@ class TestExpandGroupIDConsistency:
         sink = CollectSink()
 
         transform_config = {
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "array_field": "items",
             "output_field": "item",
             "include_index": False,
@@ -500,7 +500,7 @@ class TestExpandGroupIDConsistency:
         settings = ElspethSettings(
             source={"plugin": "null"},
             transforms=[{"plugin": "json_explode", "options": transform_config}],
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             default_sink="output",
         )
 
@@ -553,7 +553,7 @@ class TestExpandGroupIDConsistency:
         sink = CollectSink()
 
         transform_config = {
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "array_field": "items",
             "output_field": "item",
             "include_index": False,
@@ -563,7 +563,7 @@ class TestExpandGroupIDConsistency:
         settings = ElspethSettings(
             source={"plugin": "null"},
             transforms=[{"plugin": "json_explode", "options": transform_config}],
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             default_sink="output",
         )
 
@@ -631,7 +631,7 @@ class TestSequentialCoalesces:
 
         settings = ElspethSettings(
             source={"plugin": "null"},
-            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"fields": "dynamic"}}}},
+            sinks={"output": {"plugin": "json", "options": {"path": "/dev/null", "schema": {"mode": "observed"}}}},
             default_sink="output",
             gates=[
                 GateSettings(

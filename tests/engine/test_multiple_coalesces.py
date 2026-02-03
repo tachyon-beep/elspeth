@@ -42,7 +42,7 @@ class TestMultipleCoalescePoints:
             transforms=[
                 TransformSettings(
                     plugin="passthrough",
-                    options={"schema": {"fields": "dynamic"}},
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             default_sink="output",
@@ -51,7 +51,7 @@ class TestMultipleCoalescePoints:
                     plugin="json",
                     options={
                         "path": "/tmp/test_multiple_coalesces.json",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 ),
             },

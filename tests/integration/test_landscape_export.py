@@ -18,7 +18,7 @@ from elspeth.contracts import NodeType, RoutingMode, RunStatus
 from elspeth.contracts.schema import SchemaConfig
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 runner = CliRunner()
 
@@ -47,7 +47,7 @@ class TestLandscapeExport:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -55,7 +55,7 @@ class TestLandscapeExport:
                     "plugin": "json",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                         "format": "jsonl",
                     },
                 },
@@ -63,7 +63,7 @@ class TestLandscapeExport:
                     "plugin": "json",
                     "options": {
                         "path": str(audit_json),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -163,7 +163,7 @@ class TestLandscapeExport:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -171,7 +171,7 @@ class TestLandscapeExport:
                     "plugin": "json",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                         "format": "jsonl",
                     },
                 },
@@ -179,7 +179,7 @@ class TestLandscapeExport:
                     "plugin": "json",
                     "options": {
                         "path": str(audit_json),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -313,7 +313,7 @@ class TestSignedExportDeterminism:
                 "options": {
                     "path": str(input_csv),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -321,7 +321,7 @@ class TestSignedExportDeterminism:
                     "plugin": "json",
                     "options": {
                         "path": str(output_csv.with_suffix(".json")),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                         "format": "jsonl",
                     },
                 },
@@ -329,7 +329,7 @@ class TestSignedExportDeterminism:
                     "plugin": "json",
                     "options": {
                         "path": str(audit_json),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -386,7 +386,7 @@ class TestSignedExportDeterminism:
                     "options": {
                         "path": str(input_csv),
                         "on_validation_failure": "discard",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
                 "sinks": {
@@ -394,7 +394,7 @@ class TestSignedExportDeterminism:
                         "plugin": "json",
                         "options": {
                             "path": str(output_csv.with_suffix(".json")),
-                            "schema": {"fields": "dynamic"},
+                            "schema": {"mode": "observed"},
                             "format": "jsonl",
                         },
                     },
@@ -402,7 +402,7 @@ class TestSignedExportDeterminism:
                         "plugin": "json",
                         "options": {
                             "path": str(audit_json),
-                            "schema": {"fields": "dynamic"},
+                            "schema": {"mode": "observed"},
                         },
                     },
                 },

@@ -28,7 +28,7 @@ sinks:
     options:
       path: out.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -55,10 +55,10 @@ def test_unknown_transform_plugin_error():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"fields": "dynamic"}, "on_validation_failure": "discard"},
+            "options": {"path": "test.csv", "schema": {"mode": "observed"}, "on_validation_failure": "discard"},
         },
         "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "strict", "fields": ["data: str"]}}}},
+        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["data: str"]}}}},
         "default_sink": "out",
     }
 
@@ -83,7 +83,7 @@ source:
   plugin: csv
   options:
     # Missing required 'path' option
-    schema: {fields: dynamic}
+    schema: {mode: observed}
 
 sinks:
   output:
@@ -91,7 +91,7 @@ sinks:
     options:
       path: out.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -125,9 +125,9 @@ def test_schema_extraction_from_instance():
     config_dict = {
         "source": {
             "plugin": "csv",
-            "options": {"path": "test.csv", "schema": {"mode": "strict", "fields": ["value: float"]}, "on_validation_failure": "discard"},
+            "options": {"path": "test.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}, "on_validation_failure": "discard"},
         },
-        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "strict", "fields": ["value: float"]}}}},
+        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "fixed", "fields": ["value: float"]}}}},
         "default_sink": "out",
     }
 
@@ -154,7 +154,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -173,7 +173,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -190,7 +190,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
   low_values:
@@ -198,7 +198,7 @@ sinks:
     options:
       path: low.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -237,7 +237,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -258,7 +258,7 @@ sinks:
     options:
       path: high.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
   low_values:
@@ -266,7 +266,7 @@ sinks:
     options:
       path: low.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
   output:
@@ -274,7 +274,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -326,7 +326,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -345,7 +345,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -366,7 +366,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -406,7 +406,7 @@ source:
   plugin: csv
   options:
     path: test.csv
-    schema: {fields: dynamic}  # Dynamic schema
+    schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
 
 sinks:
@@ -415,7 +415,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"  # Specific schema
 
@@ -442,7 +442,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"  # Specific
     on_validation_failure: discard
@@ -450,7 +450,7 @@ source:
 transforms:
   - plugin: passthrough
     options:
-      schema: {fields: dynamic}  # Dynamic transform
+      schema: {mode: observed}  # Dynamic transform
 
 sinks:
   output:
@@ -458,7 +458,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"  # Specific
 

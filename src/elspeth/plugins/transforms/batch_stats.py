@@ -59,7 +59,7 @@ class BatchStats(BaseTransform):
               count: 100
             options:
               schema:
-                fields: dynamic
+                mode: observed
               value_field: amount
               group_by: category
               compute_mean: true
@@ -91,7 +91,7 @@ class BatchStats(BaseTransform):
         # The output shape has no relation to the input schema.
         # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
         self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "BatchStatsOutputSchema",
             allow_coercion=False,
         )

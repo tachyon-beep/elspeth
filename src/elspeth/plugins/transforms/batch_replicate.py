@@ -71,7 +71,7 @@ class BatchReplicate(BaseTransform):
             output_mode: transform  # CRITICAL: Creates new tokens for outputs
             options:
               schema:
-                fields: dynamic
+                mode: observed
               copies_field: quantity
               default_copies: 1
     """
@@ -100,7 +100,7 @@ class BatchReplicate(BaseTransform):
         # Output schema MUST be dynamic because BatchReplicate adds copy_index field
         # Per P1-2026-01-19-shape-changing-transforms-output-schema-mismatch
         self.output_schema = create_schema_from_config(
-            SchemaConfig.from_dict({"fields": "dynamic"}),
+            SchemaConfig.from_dict({"mode": "observed"}),
             "BatchReplicateOutputSchema",
             allow_coercion=False,
         )

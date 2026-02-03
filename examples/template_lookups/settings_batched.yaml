@@ -37,7 +37,7 @@ source:
     path: examples/template_lookups/input.csv
     on_validation_failure: discard
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "ticket_id: str"
         - "category_id: str"
@@ -85,7 +85,7 @@ aggregations:
       required_input_fields: [ticket_id, category_id, priority_id, subject, body]
 
       schema:
-        fields: dynamic
+        mode: observed
 
       # === BATCH PARALLEL EXECUTION CONFIG ===
       # Process buffered rows in parallel when batch is released
@@ -101,7 +101,7 @@ sinks:
     options:
       path: examples/template_lookups/output/results_batched.json
       schema:
-        fields: dynamic
+        mode: observed
       format: jsonl
 
 default_sink: output

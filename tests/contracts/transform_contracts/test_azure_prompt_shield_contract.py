@@ -77,7 +77,7 @@ class TestAzurePromptShieldBatchContract(BatchTransformContractTestBase):
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
             }
         )

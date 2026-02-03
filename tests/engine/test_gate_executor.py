@@ -12,7 +12,7 @@ from elspeth.engine.expression_parser import ExpressionEvaluationError
 from tests.conftest import as_gate
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 # Gate type identifiers for parametrization

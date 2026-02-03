@@ -14,7 +14,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import SinkProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Standard connection string for tests
 TEST_CONNECTION_STRING = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key"

@@ -11,7 +11,7 @@ def test_validator_accepts_valid_source_config():
 
     config = {
         "path": "/tmp/test.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 
@@ -25,7 +25,7 @@ def test_validator_rejects_missing_required_field():
 
     config = {
         # Missing 'path' - required by CSVSourceConfig
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 
@@ -42,7 +42,7 @@ def test_validator_rejects_invalid_field_type():
     config = {
         "path": "/tmp/test.csv",
         "skip_rows": "not_an_int",  # Should be int
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     }
 
@@ -79,7 +79,7 @@ def test_validator_accepts_valid_transform_config():
     validator = PluginConfigValidator()
 
     config = {
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     errors = validator.validate_transform_config("passthrough", config)
@@ -92,7 +92,7 @@ def test_validator_accepts_valid_sink_config():
 
     config = {
         "path": "/tmp/output.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     errors = validator.validate_sink_config("csv", config)
@@ -106,7 +106,7 @@ def test_validator_rejects_unknown_gate_type():
     config = {
         "field": "score",
         "threshold": 0.5,
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     # No gate plugins exist in codebase yet, so this should raise
@@ -137,7 +137,7 @@ def test_validator_rejects_invalid_sink_config():
     config = {
         # Missing 'url' - required by DatabaseSinkConfig
         "table": "test_table",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     errors = validator.validate_sink_config("database", config)
@@ -151,7 +151,7 @@ def test_validator_rejects_unknown_transform_type():
     validator = PluginConfigValidator()
 
     config = {
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     with pytest.raises(ValueError) as exc_info:
@@ -166,7 +166,7 @@ def test_validator_rejects_unknown_sink_type():
 
     config = {
         "path": "/tmp/output.txt",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     with pytest.raises(ValueError) as exc_info:
@@ -181,7 +181,7 @@ def test_validator_rejects_unknown_source_type():
 
     config = {
         "path": "/tmp/input.txt",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     with pytest.raises(ValueError) as exc_info:
@@ -197,7 +197,7 @@ def test_validator_accepts_database_sink_config():
     config = {
         "url": "sqlite:///test.db",
         "table": "test_table",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     }
 
     errors = validator.validate_sink_config("database", config)
@@ -212,7 +212,7 @@ def test_validator_accepts_azure_blob_source_config():
         "container": "test-container",
         "blob_path": "data/input.csv",
         "format": "csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
         "connection_string": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test==;EndpointSuffix=core.windows.net",
     }
@@ -229,7 +229,7 @@ def test_validator_accepts_azure_blob_sink_config():
         "container": "test-container",
         "blob_path": "output_{{ run_id }}.csv",
         "format": "csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "connection_string": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test==;EndpointSuffix=core.windows.net",
     }
 
@@ -242,13 +242,13 @@ def test_validator_validates_schema_config():
     validator = PluginConfigValidator()
 
     # Valid dynamic schema
-    schema_config = {"fields": "dynamic"}
+    schema_config = {"mode": "observed"}
     errors = validator.validate_schema_config(schema_config)
     assert errors == []
 
     # Valid explicit strict schema
     schema_config = {
-        "mode": "strict",
+        "mode": "fixed",
         "fields": ["id: int", "name: str", "score: float?"],
     }
     errors = validator.validate_schema_config(schema_config)
@@ -256,7 +256,7 @@ def test_validator_validates_schema_config():
 
     # Valid explicit free schema
     schema_config = {
-        "mode": "free",
+        "mode": "flexible",
         "fields": ["id: int"],
     }
     errors = validator.validate_schema_config(schema_config)
@@ -283,7 +283,7 @@ def test_validator_rejects_schema_missing_fields():
     """Schema missing required 'fields' key returns error."""
     validator = PluginConfigValidator()
 
-    schema_config = {"mode": "strict"}  # Missing 'fields'
+    schema_config = {"mode": "fixed"}  # Missing 'fields'
 
     errors = validator.validate_schema_config(schema_config)
     assert len(errors) > 0
@@ -295,7 +295,7 @@ def test_validator_rejects_schema_empty_fields():
     validator = PluginConfigValidator()
 
     schema_config = {
-        "mode": "strict",
+        "mode": "fixed",
         "fields": [],  # Empty list
     }
 
@@ -308,7 +308,7 @@ def test_validator_rejects_schema_invalid_field_type():
     validator = PluginConfigValidator()
 
     schema_config = {
-        "mode": "strict",
+        "mode": "fixed",
         "fields": "not_a_list",  # Should be list
     }
 
@@ -321,7 +321,7 @@ def test_validator_rejects_malformed_field_spec():
     validator = PluginConfigValidator()
 
     schema_config = {
-        "mode": "strict",
+        "mode": "fixed",
         "fields": ["id-int"],  # Wrong format, should be "id: int"
     }
 

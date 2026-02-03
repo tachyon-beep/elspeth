@@ -260,7 +260,7 @@ class TestManagerValidation:
 
         # Invalid config - missing required 'path'
         invalid_config = {
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "on_validation_failure": "quarantine",
         }
 
@@ -279,7 +279,7 @@ class TestManagerValidation:
 
         valid_config = {
             "path": "/tmp/test.csv",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "on_validation_failure": "quarantine",
         }
 

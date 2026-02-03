@@ -641,17 +641,14 @@ class LandscapeRecorder:
         schema_fields_json: str | None = None
         schema_fields_list: list[dict[str, object]] | None = None
 
-        if schema_config.is_dynamic:
-            schema_mode = "dynamic"
-        else:
-            # mode is non-None when is_dynamic is False
-            schema_mode = schema_config.mode or "free"  # Fallback shouldn't happen
-            if schema_config.fields:
-                # FieldDefinition.to_dict() returns dict[str, str | bool]
-                # Cast each dict to wider type for storage
-                field_dicts = [f.to_dict() for f in schema_config.fields]
-                schema_fields_list = [dict(d) for d in field_dicts]
-                schema_fields_json = canonical_json(field_dicts)
+        # Extract schema mode directly - no translation needed
+        schema_mode = schema_config.mode
+        if not schema_config.is_observed and schema_config.fields:
+            # FieldDefinition.to_dict() returns dict[str, str | bool]
+            # Cast each dict to wider type for storage
+            field_dicts = [f.to_dict() for f in schema_config.fields]
+            schema_fields_list = [dict(d) for d in field_dicts]
+            schema_fields_json = canonical_json(field_dicts)
 
         # Convert schema contracts to audit records if provided
         input_contract_json: str | None = None
@@ -2870,7 +2867,7 @@ class LandscapeRecorder:
             node_id: Node where validation failed
             row_data: The row that failed validation (may be non-dict or contain non-finite values)
             error: Error description
-            schema_mode: Schema mode that caught the error ("strict", "free", "dynamic")
+            schema_mode: Schema mode that caught the error ("fixed", "flexible", "observed")
             destination: Where row was routed ("discard" or sink name)
             contract_violation: Optional contract violation details for structured auditing
 

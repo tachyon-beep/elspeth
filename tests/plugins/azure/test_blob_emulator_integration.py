@@ -8,7 +8,7 @@ from elspeth.plugins.azure.blob_sink import AzureBlobSink
 from elspeth.plugins.azure.blob_source import AzureBlobSource
 from elspeth.plugins.context import PluginContext
 
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 @pytest.mark.integration

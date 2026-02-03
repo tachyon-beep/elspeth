@@ -184,7 +184,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
 
         # Create minimal graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
         graph.add_edge("source", "sink", label="continue", mode=RoutingMode.MOVE)
@@ -203,6 +203,7 @@ class TestOrchestratorThreadsMaxWorkersThroughRowProcessor:
         mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
         mock_source.get_field_resolution.return_value = None
+        mock_source.get_schema_contract.return_value = None  # Prevent MagicMock nesting
 
         # Create mock sink
         mock_sink = MagicMock()

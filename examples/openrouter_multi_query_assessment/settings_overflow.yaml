@@ -17,14 +17,14 @@
 # the echoed values won't match the expected combination.
 #
 # Run with:
-#   uv run elspeth run -s examples/openrouter_multi_query_assessment/suite_overflow.yaml --execute
+#   uv run elspeth run -s examples/openrouter_multi_query_assessment/settings_overflow.yaml --execute
 
 source:
   plugin: csv
   options:
     path: examples/openrouter_multi_query_assessment/input_overflow.csv
     schema:
-      mode: free
+      mode: flexible
       fields:
         - "user_id: str"
         - "cs1_word: str"
@@ -122,7 +122,7 @@ transforms:
       max_tokens: 200
 
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -130,7 +130,7 @@ sinks:
     options:
       path: examples/openrouter_multi_query_assessment/output/overflow_results.csv
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

@@ -25,7 +25,7 @@ class TestCreateSchemaFromConfig:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "TestSchema")
 
         # Should accept any fields
@@ -39,7 +39,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -60,7 +60,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -77,7 +77,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -97,7 +97,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -114,7 +114,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "score: float?"],
             }
         )
@@ -139,7 +139,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -156,7 +156,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["count: int"],
             }
         )
@@ -173,7 +173,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -189,7 +189,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["active: bool"],
             }
         )
@@ -214,7 +214,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["data: any"],
             }
         )
@@ -233,7 +233,7 @@ class TestCreateSchemaFromConfig:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["count: int"],
             }
         )
@@ -253,7 +253,7 @@ class TestCoercionControl:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["count: int"],
             }
         )
@@ -271,7 +271,7 @@ class TestCoercionControl:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["count: int"],
             }
         )
@@ -289,7 +289,7 @@ class TestCoercionControl:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -305,7 +305,7 @@ class TestCoercionControl:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["count: int", "value: float", "name: str"],
             }
         )
@@ -324,7 +324,7 @@ class TestCoercionControl:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -339,7 +339,7 @@ class TestCoercionControl:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "DynamicSchema", allow_coercion=False)
 
         # Dynamic accepts anything - no type checking
@@ -367,7 +367,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -384,7 +384,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -400,7 +400,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -416,7 +416,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -432,7 +432,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -448,7 +448,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float?"],
             }
         )
@@ -469,7 +469,7 @@ class TestNonFiniteFloatRejection:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -491,7 +491,7 @@ class TestSchemaPluginSchemaCompliance:
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.schema_factory import create_schema_from_config
 
-        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(config, "TestSchema")
 
         assert issubclass(Schema, PluginSchema)
@@ -503,7 +503,7 @@ class TestSchemaPluginSchemaCompliance:
 
         config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int"],
             }
         )

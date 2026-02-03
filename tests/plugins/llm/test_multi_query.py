@@ -238,7 +238,7 @@ class TestMultiQueryConfig:
                     "criteria": [{"name": "diagnosis"}],
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
@@ -257,7 +257,7 @@ class TestMultiQueryConfig:
                     "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
@@ -276,7 +276,7 @@ class TestMultiQueryConfig:
                     "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                     "criteria": [{"name": "diagnosis"}],
                     "response_format": "standard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
@@ -305,7 +305,7 @@ class TestMultiQueryConfig:
                     "score": {"suffix": "score", "type": "integer"},
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -330,7 +330,7 @@ class TestMultiQueryConfig:
                     "case_studies": [{"name": "cs1", "input_fields": ["a"]}],
                     "criteria": [{"name": "diagnosis"}],
                     "output_mapping": {},  # Empty!
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],  # Explicit opt-out for this test
                 }
             )
@@ -355,7 +355,7 @@ class TestMultiQueryConfig:
                 ],
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -393,7 +393,7 @@ class TestMultiQueryConfig:
                     "criteria": [{"name": "diagnosis"}],
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],
                 }
             )
@@ -420,7 +420,7 @@ class TestMultiQueryConfig:
                     ],
                     "response_format": "standard",
                     "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],
                 }
             )
@@ -448,7 +448,7 @@ class TestMultiQueryConfig:
                         "score": {"suffix": "score", "type": "integer"},
                         "usage": {"suffix": "usage", "type": "string"},  # Collides with _usage!
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "required_input_fields": [],
                 }
             )
@@ -554,7 +554,7 @@ class TestResponseFormatBuilding:
                 "criteria": [{"name": "crit1"}],
                 "response_format": "structured",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -586,7 +586,7 @@ class TestResponseFormatBuilding:
                     "rationale": {"suffix": "rationale", "type": "string"},
                     "confidence": {"suffix": "confidence", "type": "enum", "values": ["low", "medium", "high"]},
                 },
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -614,7 +614,7 @@ class TestResponseFormatBuilding:
                 "criteria": [{"name": "crit1"}],
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -640,7 +640,7 @@ class TestResponseFormatBuilding:
                     "score": {"suffix": "score", "type": "integer"},
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -668,7 +668,7 @@ class TestResponseFormatBuilding:
                 "criteria": [{"name": "crit1"}],
                 # No response_format specified
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )

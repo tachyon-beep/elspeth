@@ -82,7 +82,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": 'Analyze: {{ row["Product Name"] }}',
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["product_name"],
             }
         )
@@ -109,7 +109,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": "Analyze: {{ row.product_name }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["product_name"],
             }
         )
@@ -129,7 +129,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": "{{ row.product_name }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["product_name"],
                 "response_field": "llm_result",
             }
@@ -154,7 +154,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": "{{ row.product_name }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["product_name"],
             }
         )
@@ -175,7 +175,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": 'Analyze: {{ row["Product Name"] }}',
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Opt-out of field checking
             }
         )
@@ -198,7 +198,7 @@ class TestLLMTransformContract:
             {
                 "model": "test-model",
                 "template": "{{ row.product_name }}",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": ["product_name"],
                 "response_field": "analysis",
             }

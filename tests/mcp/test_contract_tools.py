@@ -20,7 +20,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.mcp.server import LandscapeAnalyzer
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestGetRunContract:
@@ -266,7 +266,7 @@ class TestListContractViolations:
             node_id="source_1",
             row_data={"amount": "not_a_number"},
             error="Type mismatch",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             contract_violation=violation,
         )
@@ -314,7 +314,7 @@ class TestListContractViolations:
             node_id="source_1",
             row_data={},
             error="Missing required field",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
             contract_violation=violation,
         )
@@ -376,7 +376,7 @@ class TestListContractViolations:
                 node_id="source_1",
                 row_data={f"field_{i}": "bad"},
                 error="Type mismatch",
-                schema_mode="strict",
+                schema_mode="fixed",
                 destination="quarantine",
                 contract_violation=violation,
             )

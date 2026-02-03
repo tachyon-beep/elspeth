@@ -157,7 +157,7 @@ class TestSinkSchemaValidationCommon:
         """When target doesn't exist, validation should pass (will create)."""
         sink = sink_factory(
             target_fields=[],  # Empty = don't create target
-            schema_config={"mode": "strict", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "fixed", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
@@ -177,7 +177,7 @@ class TestSinkSchemaValidationCommon:
         """
         sink = json_only_sink_factory(
             target_fields=["wrong", "fields", "entirely"],
-            schema_config={"fields": "dynamic"},
+            schema_config={"mode": "observed"},
         )
         try:
             result = sink.validate_output_target()
@@ -195,7 +195,7 @@ class TestSinkSchemaValidationCommon:
         """Strict mode should pass when fields match exactly."""
         sink = sink_factory(
             target_fields=["id", "name"],
-            schema_config={"mode": "strict", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "fixed", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
@@ -207,12 +207,12 @@ class TestSinkSchemaValidationCommon:
         """Strict mode should fail when schema field is missing from target."""
         sink = sink_factory(
             target_fields=["id"],  # Missing 'name'
-            schema_config={"mode": "strict", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "fixed", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
             assert result.valid is False
-            assert "strict mode" in result.error_message
+            assert "fixed mode" in result.error_message
             assert "name" in result.missing_fields
         finally:
             sink.close()
@@ -221,12 +221,12 @@ class TestSinkSchemaValidationCommon:
         """Strict mode should fail when target has extra field."""
         sink = sink_factory(
             target_fields=["id", "name", "extra"],
-            schema_config={"mode": "strict", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "fixed", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
             assert result.valid is False
-            assert "strict mode" in result.error_message
+            assert "fixed mode" in result.error_message
             assert "extra" in result.extra_fields
         finally:
             sink.close()
@@ -243,7 +243,7 @@ class TestSinkSchemaValidationCommon:
         """
         sink = json_only_sink_factory(
             target_fields=["id", "name"],
-            schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "flexible", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
@@ -255,12 +255,12 @@ class TestSinkSchemaValidationCommon:
         """Free mode should fail when required schema field is missing (JSONSink only)."""
         sink = json_only_sink_factory(
             target_fields=["id"],  # Missing 'name'
-            schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "flexible", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
             assert result.valid is False
-            assert "free mode" in result.error_message
+            assert "flexible mode" in result.error_message
             assert "name" in result.missing_fields
         finally:
             sink.close()
@@ -269,7 +269,7 @@ class TestSinkSchemaValidationCommon:
         """Free mode should pass when target has extra fields (JSONSink only)."""
         sink = json_only_sink_factory(
             target_fields=["id", "name", "extra", "another"],
-            schema_config={"mode": "free", "fields": ["id: int", "name: str"]},
+            schema_config={"mode": "flexible", "fields": ["id: int", "name: str"]},
         )
         try:
             result = sink.validate_output_target()
@@ -297,14 +297,14 @@ class TestCSVSinkOrderValidation:
         sink = CSVSink(
             {
                 "path": str(tmp_csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
         result = sink.validate_output_target()
 
         assert result.valid is False
-        assert "strict mode" in result.error_message
+        assert "fixed mode" in result.error_message
         assert result.order_mismatch is True
         # No missing or extra fields - just order wrong
         assert len(result.missing_fields) == 0
@@ -316,7 +316,7 @@ class TestCSVSinkOrderValidation:
         sink = CSVSink(
             {
                 "path": str(tmp_csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -334,7 +334,7 @@ class TestCSVSinkOrderValidation:
         sink = CSVSink(
             {
                 "path": str(tmp_csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "delimiter": "\t",
             }
         )
@@ -363,7 +363,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(tmp_jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "jsonl",
             }
         )
@@ -381,7 +381,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(tmp_json_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "json",
             }
         )
@@ -397,7 +397,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(tmp_jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "jsonl",
             }
         )
@@ -413,7 +413,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(tmp_jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "jsonl",
             }
         )
@@ -432,7 +432,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 # format not specified - auto-detect from extension
             }
         )
@@ -450,7 +450,7 @@ class TestJSONSinkSpecific:
         sink = JSONSink(
             {
                 "path": str(json_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 # format not specified - auto-detect from extension
             }
         )
@@ -477,7 +477,7 @@ class TestDatabaseSinkSpecific:
             {
                 "url": sqlite_path,
                 "table": "output_data",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 

@@ -112,7 +112,7 @@ def create_recorder_and_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[L
         canonical_version="v1",
     )
 
-    schema = SchemaConfig.from_dict({"fields": "dynamic"})
+    schema = SchemaConfig.from_dict({"mode": "observed"})
     node = recorder.register_node(
         run_id=run.run_id,
         plugin_name="openrouter_multi_query_llm",

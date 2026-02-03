@@ -60,9 +60,9 @@ class CSVSink(BaseSink):
         mode: "write" (truncate, default) or "append" (add to existing file)
 
     The schema can be (all use infer-and-lock pattern):
-        - Strict: {"mode": "strict", "fields": [...]} - columns from config, extras rejected
-        - Free: {"mode": "free", "fields": [...]} - declared + first-row extras, then locked
-        - Dynamic: {"fields": "dynamic"} - columns from first row, then locked
+        - Fixed: {"mode": "fixed", "fields": [...]} - columns from config, extras rejected
+        - Flexible: {"mode": "flexible", "fields": [...]} - declared + first-row extras, then locked
+        - Observed: {"mode": "observed"} - columns from first row, then locked
 
     Append mode behavior:
         - If file exists: reads headers from it and appends rows without header
@@ -115,7 +115,7 @@ class CSVSink(BaseSink):
             return OutputValidationResult.success()
 
         # Dynamic schema = no validation needed
-        if self._schema_config.is_dynamic:
+        if self._schema_config.is_observed:
             return OutputValidationResult.success(target_fields=existing)
 
         # Get expected fields from schema (guaranteed non-None when not dynamic)
@@ -137,23 +137,23 @@ class CSVSink(BaseSink):
 
         existing_set, expected_set = set(existing), set(expected)
 
-        if self._schema_config.mode == "strict":
-            # Strict: exact match including order
+        if self._schema_config.mode == "fixed":
+            # Fixed: exact match including order
             if existing != expected:
                 return OutputValidationResult.failure(
-                    message="CSV headers do not match schema (strict mode)",
+                    message="CSV headers do not match schema (fixed mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(expected_set - existing_set),
                     extra_fields=sorted(existing_set - expected_set),
                     order_mismatch=(existing_set == expected_set),
                 )
-        else:  # mode == "free"
-            # Free: schema fields must exist (extras allowed)
+        else:  # mode == "flexible"
+            # Flexible: schema fields must exist (extras allowed)
             missing = expected_set - existing_set
             if missing:
                 return OutputValidationResult.failure(
-                    message="CSV missing required schema fields (free mode)",
+                    message="CSV missing required schema fields (flexible mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(missing),
@@ -192,9 +192,9 @@ class CSVSink(BaseSink):
         self._schema_config = cfg.schema_config
 
         # CSV supports all schema modes via infer-and-lock:
-        # - mode='strict': columns from config, extras rejected at write time
-        # - mode='free': declared columns + extras from first row, then locked
-        # - fields='dynamic': columns from first row, then locked
+        # - mode='fixed': columns from config, extras rejected at write time
+        # - mode='flexible': declared columns + extras from first row, then locked
+        # - mode='observed': columns from first row, then locked
         #
         # DictWriter's default extrasaction='raise' enforces the lock - any row
         # with fields not in the established fieldnames will error.
@@ -237,7 +237,7 @@ class CSVSink(BaseSink):
             )
 
         # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)
@@ -306,7 +306,7 @@ class CSVSink(BaseSink):
             if existing_fieldnames:
                 # Validate headers against explicit schema before opening
                 # Dynamic schema = no validation (file headers are authoritative)
-                if not self._schema_config.is_dynamic:
+                if not self._schema_config.is_observed:
                     validation = self.validate_output_target()
                     if not validation.valid:
                         # Build clear error message
@@ -370,10 +370,10 @@ class CSVSink(BaseSink):
     def _get_field_names_and_display(self, row: dict[str, Any]) -> tuple[list[str], list[str]]:
         """Get data field names and display names for CSV output.
 
-        When schema is explicit, field names come from schema definition.
-        This ensures all defined fields (including optional ones) are present.
-
-        When schema is dynamic, falls back to inferring from row keys.
+        Field selection depends on schema mode:
+        - fixed: Only declared fields (extras rejected)
+        - flexible: Declared fields first, then extras from first row
+        - observed: All fields from first row (infer and lock)
 
         Returns:
             Tuple of (data_fields, display_fields):
@@ -381,12 +381,24 @@ class CSVSink(BaseSink):
             - display_fields: Display names for CSV header row
             When no display headers are configured, both lists are identical.
         """
-        # Get base field names from schema or row
-        if not self._schema_config.is_dynamic and self._schema_config.fields:
-            # Explicit schema: use field names from schema definition
-            data_fields = [field_def.name for field_def in self._schema_config.fields]
+        # Get base field names based on schema mode
+        if self._schema_config.is_observed:
+            # Observed mode: infer all fields from row keys
+            data_fields = list(row.keys())
+        elif self._schema_config.fields:
+            # Explicit schema: start with declared field names in schema order
+            declared_fields = [field_def.name for field_def in self._schema_config.fields]
+            declared_set = set(declared_fields)
+
+            if self._schema_config.mode == "flexible":
+                # Flexible mode: declared fields first, then extras from row
+                extras = [key for key in row if key not in declared_set]
+                data_fields = declared_fields + extras
+            else:
+                # Fixed mode: only declared fields (extras will be rejected by DictWriter)
+                data_fields = declared_fields
         else:
-            # Dynamic schema: infer from row keys
+            # Fallback (shouldn't happen with valid config): use row keys
             data_fields = list(row.keys())
 
         # Apply display header mapping if configured

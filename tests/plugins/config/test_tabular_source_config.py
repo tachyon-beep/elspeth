@@ -17,7 +17,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "columns": ["a", "b"],
                     "normalize_fields": True,
@@ -32,7 +32,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "field_mapping": {"a": "b"},
                 }
@@ -46,7 +46,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "columns": ["id", "class", "name"],
                 }
@@ -60,7 +60,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "columns": ["id", "123_bad", "name"],
                 }
@@ -74,7 +74,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "columns": ["id", "name", "id"],
                 }
@@ -88,7 +88,7 @@ class TestTabularSourceDataConfigValidation:
             TabularSourceDataConfig.from_dict(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "quarantine",
                     "normalize_fields": True,
                     "field_mapping": {"user_id": "class"},
@@ -102,7 +102,7 @@ class TestTabularSourceDataConfigValidation:
         cfg = TabularSourceDataConfig.from_dict(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -118,7 +118,7 @@ class TestTabularSourceDataConfigValidation:
         cfg = TabularSourceDataConfig.from_dict(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "columns": ["id", "name", "amount"],
             }
@@ -133,7 +133,7 @@ class TestTabularSourceDataConfigValidation:
         cfg = TabularSourceDataConfig.from_dict(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
                 "field_mapping": {"user_id": "uid"},
@@ -149,7 +149,7 @@ class TestTabularSourceDataConfigValidation:
         cfg = TabularSourceDataConfig.from_dict(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
                 "field_mapping": {},
@@ -165,7 +165,7 @@ class TestTabularSourceDataConfigValidation:
         cfg = TabularSourceDataConfig.from_dict(
             {
                 "path": "/tmp/test.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "columns": ["id"],
             }

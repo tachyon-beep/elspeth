@@ -88,7 +88,7 @@ class TestSinkDurability:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         return graph

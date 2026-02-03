@@ -69,7 +69,7 @@ class TestCoercionIdempotence:
         """
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: int"],
             }
         )
@@ -95,7 +95,7 @@ class TestCoercionIdempotence:
         """Property: Coercing str→float, then validating again, produces same float."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -119,7 +119,7 @@ class TestCoercionIdempotence:
         """Property: Coercing str→bool, then validating again, produces same bool."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: bool"],
             }
         )
@@ -149,7 +149,7 @@ class TestNativeTypePassthrough:
         """Property: Native int passes through coercion unchanged."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: int"],
             }
         )
@@ -168,7 +168,7 @@ class TestNativeTypePassthrough:
         """Property: Native float passes through coercion unchanged."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -187,7 +187,7 @@ class TestNativeTypePassthrough:
         """Property: Native bool passes through coercion unchanged."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: bool"],
             }
         )
@@ -206,7 +206,7 @@ class TestNativeTypePassthrough:
         """Property: Native string passes through coercion unchanged."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: str"],
             }
         )
@@ -233,7 +233,7 @@ class TestIntToFloatWidening:
         """
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: float"],
             }
         )
@@ -274,7 +274,7 @@ class TestMultiFieldCoercionStability:
         """Property: Multi-field schema coercion is idempotent for all fields."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": [
                     "int_field: int",
                     "float_field: float",
@@ -314,7 +314,7 @@ class TestCoercionDeterminism:
         """Property: Same input always produces same coerced output."""
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: int"],
             }
         )
@@ -334,7 +334,7 @@ class TestNoCoercionRejection:
     @given(str_value=str_integers)
     @settings(max_examples=50)
     def test_string_to_int_rejected_when_coercion_disabled(self, str_value: str) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: int"]})
         Schema = create_schema_from_config(schema_config, "NoCoerceInt", allow_coercion=False)
 
         with pytest.raises(ValidationError):
@@ -343,7 +343,7 @@ class TestNoCoercionRejection:
     @given(str_value=str_floats)
     @settings(max_examples=50)
     def test_string_to_float_rejected_when_coercion_disabled(self, str_value: str) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float"]})
         Schema = create_schema_from_config(schema_config, "NoCoerceFloat", allow_coercion=False)
 
         with pytest.raises(ValidationError):
@@ -352,7 +352,7 @@ class TestNoCoercionRejection:
     @given(str_value=str_bools)
     @settings(max_examples=50)
     def test_string_to_bool_rejected_when_coercion_disabled(self, str_value: str) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: bool"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: bool"]})
         Schema = create_schema_from_config(schema_config, "NoCoerceBool", allow_coercion=False)
 
         with pytest.raises(ValidationError):
@@ -367,7 +367,7 @@ class TestExtraFieldHandling:
     def test_strict_schema_rejects_extra_fields(self, extra_key: str, extra_value: object) -> None:
         assume(extra_key != "value")
 
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: int"]})
         Schema = create_schema_from_config(schema_config, "StrictSchema", allow_coercion=True)
 
         with pytest.raises(ValidationError):
@@ -378,7 +378,7 @@ class TestExtraFieldHandling:
     def test_free_schema_allows_extra_fields(self, extra_key: str, extra_value: object) -> None:
         assume(extra_key != "value")
 
-        schema_config = SchemaConfig.from_dict({"mode": "free", "fields": ["value: int"]})
+        schema_config = SchemaConfig.from_dict({"mode": "flexible", "fields": ["value: int"]})
         Schema = create_schema_from_config(schema_config, "FreeSchema", allow_coercion=True)
 
         result = Schema.model_validate({"value": 1, extra_key: extra_value})
@@ -393,21 +393,21 @@ class TestOptionalAndDynamicSchemas:
     @given(value=st.one_of(native_ints, st.none()))
     @settings(max_examples=50)
     def test_optional_field_accepts_none(self, value: int | None) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int?"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: int?"]})
         Schema = create_schema_from_config(schema_config, "OptionalSchema", allow_coercion=False)
 
         result = Schema.model_validate({"value": value})
         assert result.to_row()["value"] == value
 
     def test_optional_field_missing_defaults_to_none(self) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int?"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: int?"]})
         Schema = create_schema_from_config(schema_config, "OptionalMissingSchema", allow_coercion=False)
 
         result = Schema.model_validate({})
         assert result.to_row()["value"] is None
 
     def test_required_field_missing_rejected(self) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: int"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: int"]})
         Schema = create_schema_from_config(schema_config, "RequiredSchema", allow_coercion=False)
 
         with pytest.raises(ValidationError):
@@ -416,7 +416,7 @@ class TestOptionalAndDynamicSchemas:
     @given(row=row_data)
     @settings(max_examples=50)
     def test_dynamic_schema_accepts_any_fields(self, row: dict[str, object]) -> None:
-        schema_config = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema_config = SchemaConfig.from_dict({"mode": "observed"})
         Schema = create_schema_from_config(schema_config, "DynamicSchema", allow_coercion=False)
 
         result = Schema.model_validate(row)
@@ -429,7 +429,7 @@ class TestFiniteFloatRejection:
     @given(value=st.sampled_from([float("nan"), float("inf"), float("-inf")]))
     @settings(max_examples=50)
     def test_nan_and_infinity_rejected(self, value: float) -> None:
-        schema_config = SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]})
+        schema_config = SchemaConfig.from_dict({"mode": "fixed", "fields": ["value: float"]})
         Schema = create_schema_from_config(schema_config, "FiniteFloatSchema", allow_coercion=True)
 
         with pytest.raises(ValidationError):

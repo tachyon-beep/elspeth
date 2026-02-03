@@ -23,7 +23,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.core.landscape.lineage import explain
 
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 @pytest.mark.integration

@@ -32,7 +32,7 @@ class TestValidationErrorRepository:
             node_id="source_1",
             row_hash="hash_abc",
             error='{"code": "INVALID"}',
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             created_at=created_at,
             row_data_json='{"field": "value"}',
@@ -47,7 +47,7 @@ class TestValidationErrorRepository:
         assert result.node_id == "source_1"
         assert result.row_hash == "hash_abc"
         assert result.error == '{"code": "INVALID"}'
-        assert result.schema_mode == "strict"
+        assert result.schema_mode == "fixed"
         assert result.destination == "quarantine"
         assert result.created_at == created_at
         assert result.row_data_json == '{"field": "value"}'
@@ -60,7 +60,7 @@ class TestValidationErrorRepository:
             node_id=None,
             row_hash="hash_def",
             error="Missing required field",
-            schema_mode="dynamic",
+            schema_mode="observed",
             destination="quarantine",
             created_at=datetime.now(UTC),
             row_data_json=None,

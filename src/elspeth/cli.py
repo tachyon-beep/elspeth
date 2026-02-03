@@ -6,6 +6,7 @@ Entry point for the elspeth CLI tool.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -161,6 +162,85 @@ def main(
 # === Subcommand stubs (to be implemented in later tasks) ===
 
 
+def _validate_output_directories(config: ElspethSettings) -> list[str]:
+    """Validate that required output directories exist or can be created.
+
+    Checks directories BEFORE attempting to create databases or files,
+    providing clear error messages instead of cryptic SQLite errors.
+
+    Args:
+        config: Validated ElspethSettings
+
+    Returns:
+        List of error messages (empty if all directories are valid)
+    """
+    from sqlalchemy.engine.url import make_url
+
+    errors: list[str] = []
+
+    # 1. Check Landscape database directory (for SQLite)
+    db_url = config.landscape.url
+    parsed_url = make_url(db_url)
+
+    if parsed_url.drivername.startswith("sqlite"):
+        # Extract the file path from SQLite URL
+        # SQLite URLs: sqlite:///./path/to/file.db or sqlite:////absolute/path.db
+        db_path = parsed_url.database
+        if db_path:
+            # Handle relative paths (./foo) and absolute paths (/foo)
+            db_file = Path(db_path)
+            parent_dir = db_file.parent
+
+            # Resolve to absolute path for clearer error messages
+            resolved_parent = parent_dir.resolve()
+
+            if not parent_dir.exists():
+                errors.append(
+                    f"Landscape database directory does not exist: {resolved_parent}\n"
+                    f"  Database URL: {db_url}\n"
+                    f"  Create the directory with: mkdir -p {resolved_parent}"
+                )
+            elif not parent_dir.is_dir():
+                errors.append(f"Landscape database path exists but is not a directory: {resolved_parent}\n  Database URL: {db_url}")
+            elif not os.access(parent_dir, os.W_OK):
+                errors.append(f"Landscape database directory is not writable: {resolved_parent}\n  Database URL: {db_url}")
+
+    # 2. Check payload store directory
+    payload_path = config.payload_store.base_path
+    if not payload_path.exists():
+        # Try to create it - this is more permissive than the database
+        try:
+            payload_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            errors.append(f"Cannot create payload store directory: {payload_path.resolve()}\n  Error: {e}")
+    elif not payload_path.is_dir():
+        errors.append(f"Payload store path exists but is not a directory: {payload_path.resolve()}")
+    elif not os.access(payload_path, os.W_OK):
+        errors.append(f"Payload store directory is not writable: {payload_path.resolve()}")
+
+    # 3. Check sink output directories (for file-based sinks)
+    for sink_name, sink_config in config.sinks.items():
+        # Check if sink has a path option (CSVSink, JSONSink)
+        if hasattr(sink_config, "options") and isinstance(sink_config.options, dict):
+            sink_path = sink_config.options.get("path")
+            if sink_path:
+                sink_file = Path(sink_path)
+                sink_parent = sink_file.parent
+
+                if sink_parent and str(sink_parent) != ".":
+                    resolved_sink_parent = sink_parent.resolve()
+                    if not sink_parent.exists():
+                        errors.append(
+                            f"Sink '{sink_name}' output directory does not exist: {resolved_sink_parent}\n"
+                            f"  Output path: {sink_path}\n"
+                            f"  Create the directory with: mkdir -p {resolved_sink_parent}"
+                        )
+                    elif not sink_parent.is_dir():
+                        errors.append(f"Sink '{sink_name}' output path parent exists but is not a directory: {resolved_sink_parent}")
+
+    return errors
+
+
 @app.command()
 def run(
     settings: str = typer.Option(
@@ -273,6 +353,17 @@ def run(
         # JSON mode: early exits without console output
         if dry_run or not execute:
             raise typer.Exit(1)
+
+    # Validate output directories BEFORE attempting to create resources
+    # This catches missing directories early with clear error messages
+    # instead of cryptic database or filesystem errors later
+    # NOTE: Only validated when actually executing (not dry-run or validation-only)
+    dir_errors = _validate_output_directories(config)
+    if dir_errors:
+        typer.echo("Output directory errors:", err=True)
+        for dir_error in dir_errors:
+            typer.echo(f"\n{dir_error}", err=True)
+        raise typer.Exit(1)
 
     # Execute pipeline with pre-instantiated plugins
     try:

@@ -139,12 +139,12 @@ class TestOrchestratorOutputSinkRouting:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"fields": "dynamic"}}),
-                "errors": SinkSettings(plugin="json", options={"path": "errors.json", "schema": {"fields": "dynamic"}}),
+                "results": SinkSettings(plugin="json", options={"path": "results.json", "schema": {"mode": "observed"}}),
+                "errors": SinkSettings(plugin="json", options={"path": "errors.json", "schema": {"mode": "observed"}}),
             },
             default_sink="results",
         )

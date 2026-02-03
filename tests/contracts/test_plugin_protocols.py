@@ -11,7 +11,7 @@ def test_source_validates_output_schema_on_init() -> None:
     # Valid schema - should succeed
     config = {
         "path": "test.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "discard",
     }
     CSVSource(config)  # Should not raise
@@ -19,7 +19,7 @@ def test_source_validates_output_schema_on_init() -> None:
     # Invalid schema - should fail during __init__
     bad_config = {
         "path": "test.csv",
-        "schema": {"mode": "strict", "fields": ["invalid syntax"]},
+        "schema": {"mode": "fixed", "fields": ["invalid syntax"]},
         "on_validation_failure": "discard",
     }
 

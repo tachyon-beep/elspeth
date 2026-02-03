@@ -29,7 +29,7 @@ class TestRecordCall:
     @pytest.fixture
     def state_id(self, recorder: LandscapeRecorder) -> str:
         """Create a node state to attach calls to."""
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
             run_id=run.run_id,
@@ -367,7 +367,7 @@ class TestRecordCall:
         )
 
         # Create another state for second call
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
             run_id=run.run_id,
@@ -417,7 +417,7 @@ class TestCallPayloadPersistence:
 
     def _create_state(self, recorder: LandscapeRecorder) -> str:
         """Helper to create a node state for attaching calls."""
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
         node = recorder.register_node(
             run_id=run.run_id,
@@ -588,7 +588,7 @@ class TestFindCallByRequestHashRunIsolation:
         Returns:
             Tuple of (run_id, call_id)
         """
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run = recorder.begin_run(config={}, canonical_version="v1")
 
         # Register node with specified node_id
@@ -706,7 +706,7 @@ class TestFindCallByRequestHashRunIsolation:
         )
 
         # Create Run B WITHOUT any calls (just the node)
-        schema = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema = SchemaConfig.from_dict({"mode": "observed"})
         run_b = recorder.begin_run(config={}, canonical_version="v1")
         recorder.register_node(
             run_id=run_b.run_id,

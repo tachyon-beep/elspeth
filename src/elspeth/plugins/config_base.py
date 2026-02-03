@@ -66,7 +66,7 @@ class PluginConfig(BaseModel):
                     raise PluginConfigError(
                         f"Invalid configuration for {cls.__name__}: "
                         f"'schema' must be a dict, got {type(schema_dict).__name__}. "
-                        f"Use 'schema: {{fields: dynamic}}' or provide explicit field definitions."
+                        f"Use 'schema: {{mode: observed}}' or provide explicit field definitions."
                     )
                 config_copy["schema_config"] = SchemaConfig.from_dict(schema_dict)
             return cls.model_validate(config_copy)
@@ -82,8 +82,8 @@ class DataPluginConfig(PluginConfig):
     Used by sources, transforms, and sinks that handle data rows.
     Schema is REQUIRED to ensure auditable schema choices.
 
-    Use 'schema: {fields: dynamic}' to accept any fields, or provide
-    explicit field definitions with mode (strict/free).
+    Use 'schema: {mode: observed}' to infer types from data, or provide
+    explicit field definitions with mode (fixed/flexible).
 
     Type Safety:
         This class overrides schema_config from Optional to required.
@@ -97,8 +97,8 @@ class DataPluginConfig(PluginConfig):
         ...,
         description=(
             "Schema configuration for data validation. "
-            "Use 'schema: {fields: dynamic}' to accept any fields, or "
-            "provide explicit field definitions with mode (strict/free)."
+            "Use 'schema: {mode: observed}' to infer types from data, or "
+            "provide explicit field definitions with mode (fixed/flexible)."
         ),
     )
 

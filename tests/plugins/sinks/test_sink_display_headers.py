@@ -24,7 +24,7 @@ class TestSinkPathConfigValidation:
             SinkPathConfig.from_dict(
                 {
                     "path": "output.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "display_headers": {"user_id": "User ID"},
                     "restore_source_headers": True,
                 }
@@ -35,7 +35,7 @@ class TestSinkPathConfigValidation:
         cfg = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
             }
         )
@@ -47,7 +47,7 @@ class TestSinkPathConfigValidation:
         cfg = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "restore_source_headers": True,
             }
         )
@@ -59,7 +59,7 @@ class TestSinkPathConfigValidation:
         cfg = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
         assert cfg.display_headers is None
@@ -82,7 +82,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
             }
         )
@@ -118,7 +118,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float", "status: str"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float", "status: str"]},
                 "display_headers": {"user_id": "User ID"},  # Only user_id is mapped
             }
         )
@@ -141,7 +141,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "case_study_1: str"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "case_study_1: str"]},
                 "restore_source_headers": True,
             }
         )
@@ -185,7 +185,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["id: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: str"]},
                 "restore_source_headers": True,
             }
         )
@@ -211,7 +211,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["id: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: str"]},
                 "restore_source_headers": True,
             }
         )
@@ -236,7 +236,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "computed_score: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "computed_score: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -268,7 +268,7 @@ class TestCSVSinkDisplayHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
             }
         )
 
@@ -298,7 +298,7 @@ class TestJSONSinkDisplayHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "display_headers": {"user_id": "User ID", "amount": "Transaction Amount"},
             }
         )
@@ -333,7 +333,7 @@ class TestJSONSinkDisplayHeaders:
             {
                 "path": str(output_file),
                 "format": "json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "display_headers": {"user_id": "User ID"},
             }
         )
@@ -355,7 +355,7 @@ class TestJSONSinkDisplayHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "restore_source_headers": True,
             }
         )
@@ -385,7 +385,7 @@ class TestJSONSinkDisplayHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -464,7 +464,7 @@ class TestCSVDisplayHeadersAppendMode:
         sink1 = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Amount"},
             }
         )
@@ -476,7 +476,7 @@ class TestCSVDisplayHeadersAppendMode:
         sink2 = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
@@ -512,7 +512,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["amount: float", "currency: str"]},
+                "schema": {"mode": "fixed", "fields": ["amount: float", "currency: str"]},
                 "display_headers": {"amount": "Amount, USD", "currency": "Currency"},
             }
         )
@@ -544,7 +544,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["value: str"]},
+                "schema": {"mode": "fixed", "fields": ["value: str"]},
                 "display_headers": {"value": 'Value "quoted"'},
             }
         )
@@ -567,7 +567,7 @@ class TestCSVDisplayHeadersSpecialCharacters:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["description: str"]},
+                "schema": {"mode": "fixed", "fields": ["description: str"]},
                 "display_headers": {"description": "Description\n(multi-line)"},
             }
         )
@@ -601,7 +601,7 @@ class TestJSONLDisplayHeadersAppendMode:
         sink1 = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Amount"},
             }
         )
@@ -613,7 +613,7 @@ class TestJSONLDisplayHeadersAppendMode:
         sink2 = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
@@ -645,7 +645,7 @@ class TestJSONLDisplayHeadersAppendMode:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount: float"]},
                 "display_headers": {"user_id": "User ID", "amount": "Amount"},
                 "mode": "append",
             }
@@ -687,7 +687,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -727,7 +727,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -753,7 +753,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -783,7 +783,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -810,7 +810,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "status: str"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "status: str"]},
                 "restore_source_headers": True,
             }
         )
@@ -834,7 +834,7 @@ class TestResumeValidationWithRestoreSourceHeaders:
         sink = JSONSink(
             {
                 "path": str(output_file),
-                "schema": {"mode": "free", "fields": ["user_id: str", "amount: float"]},
+                "schema": {"mode": "flexible", "fields": ["user_id: str", "amount: float"]},
                 "restore_source_headers": True,
             }
         )

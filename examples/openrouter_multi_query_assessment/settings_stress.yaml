@@ -6,7 +6,7 @@ source:
   options:
     path: examples/openrouter_multi_query_assessment/input_500.csv
     schema:
-      mode: free
+      mode: flexible
       fields:
         - "user_id: str"
         - "cs1_background: str"
@@ -109,7 +109,7 @@ transforms:
       max_tokens: 300  # Shorter to speed up
 
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -117,7 +117,7 @@ sinks:
     options:
       path: examples/openrouter_multi_query_assessment/output/results_stress.csv
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

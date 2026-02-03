@@ -248,10 +248,10 @@ def test_aggregation_dual_schema_both_edges_validated() -> None:
             "trigger": {"count": 1},
             "output_mode": "transform",
             "options": {
-                "schema": {"mode": "strict", "fields": ["value: float", "label: str"]},
+                "schema": {"mode": "fixed", "fields": ["value: float", "label: str"]},
                 "value_field": "value",
             },
-            "schema": {"mode": "strict", "fields": ["value: float", "label: str"]},
+            "schema": {"mode": "fixed", "fields": ["value: float", "label: str"]},
         },
     )
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv", input_schema=SinkInput)

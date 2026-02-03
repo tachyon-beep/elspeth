@@ -237,7 +237,7 @@ class TestRecordTokenOutcome:
             plugin_version="1.0.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Create row and token
@@ -298,7 +298,7 @@ class TestRecordTokenOutcome:
             plugin_version="1.0.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Create a batch (required for batch_id FK)
@@ -372,7 +372,7 @@ class TestOutcomeContractValidation:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -514,7 +514,7 @@ class TestGetTokenOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -560,7 +560,7 @@ class TestExplainIncludesOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -586,7 +586,7 @@ class TestExplainIncludesOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)

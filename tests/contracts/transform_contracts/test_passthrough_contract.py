@@ -31,7 +31,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
         """Create a PassThrough instance with dynamic schema."""
         return PassThrough(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -101,7 +101,7 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
         return PassThrough(
             {
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str"],
                 },
                 "validate_input": True,
@@ -139,7 +139,7 @@ class TestPassThroughPropertyBased:
         """Create a PassThrough instance with dynamic schema."""
         return PassThrough(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

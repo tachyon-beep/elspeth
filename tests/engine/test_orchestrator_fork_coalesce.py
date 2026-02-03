@@ -102,7 +102,7 @@ class TestOrchestratorForkExecution:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -180,7 +180,7 @@ class TestCoalesceWiring:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),  # Use null source - no file access
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_out.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_out.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -268,7 +268,7 @@ class TestCoalesceWiring:
         # structure (gates, coalesce), but we use test_source in config for actual rows
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_coalesced.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_coalesced.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -390,7 +390,7 @@ class TestCoalesceWiring:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),  # Use null source - no file access
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_flush.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_flush.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -465,7 +465,7 @@ class TestCoalesceWiring:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),  # Use null source - no file access
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_routes.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_routes.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -594,7 +594,7 @@ class TestCoalesceWiring:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),  # Use null source - no file access
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_failures.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_failures.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -683,11 +683,11 @@ class TestCoalesceWiring:
 
         settings = ElspethSettings(
             source=SourceSettings(plugin="null"),  # Use null source - no file access
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_stepmap.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test_stepmap.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 1
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),  # Step 0
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),  # Step 1
             ],
             gates=[
                 GateSettings(
@@ -791,7 +791,7 @@ class TestCoalesceStepMapCalculation:
                     routes={"true": "output", "false": "continue"},
                 ),
             ],
-            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "/tmp/test.json", "schema": {"mode": "observed"}})},
             coalesce=[
                 CoalesceSettings(
                     name="merge_branches",

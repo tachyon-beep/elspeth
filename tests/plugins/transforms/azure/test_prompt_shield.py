@@ -71,7 +71,7 @@ class TestAzurePromptShieldConfig:
                 {
                     "api_key": "test-key",
                     "fields": ["prompt"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "endpoint" in str(exc_info.value).lower()
@@ -87,7 +87,7 @@ class TestAzurePromptShieldConfig:
                 {
                     "endpoint": "https://test.cognitiveservices.azure.com",
                     "fields": ["prompt"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "api_key" in str(exc_info.value).lower()
@@ -103,7 +103,7 @@ class TestAzurePromptShieldConfig:
                 {
                     "endpoint": "https://test.cognitiveservices.azure.com",
                     "api_key": "test-key",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "fields" in str(exc_info.value).lower()
@@ -136,7 +136,7 @@ class TestAzurePromptShieldConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -155,7 +155,7 @@ class TestAzurePromptShieldConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": "prompt",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -172,7 +172,7 @@ class TestAzurePromptShieldConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": "all",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -191,7 +191,7 @@ class TestAzurePromptShieldTransform:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -209,7 +209,7 @@ class TestAzurePromptShieldTransform:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -233,7 +233,7 @@ class TestPromptShieldPoolConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -250,7 +250,7 @@ class TestPromptShieldPoolConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 5,
             }
         )
@@ -268,7 +268,7 @@ class TestPromptShieldPoolConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 1,
             }
         )
@@ -286,7 +286,7 @@ class TestPromptShieldPoolConfig:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 3,
             }
         )
@@ -317,7 +317,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -335,7 +335,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -367,7 +367,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -406,7 +406,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -448,7 +448,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -488,7 +488,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -529,7 +529,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt", "optional_field"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -568,7 +568,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt", "count"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -604,7 +604,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -641,7 +641,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -682,7 +682,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": "all",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -727,7 +727,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -767,7 +767,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com/",
                 "api_key": "my-secret-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -816,7 +816,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 3,
             }
         )
@@ -868,7 +868,7 @@ class TestPromptShieldBatchProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -919,7 +919,7 @@ class TestPromptShieldInternalProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -950,7 +950,7 @@ class TestPromptShieldInternalProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -978,7 +978,7 @@ class TestPromptShieldInternalProcessing:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1011,7 +1011,7 @@ class TestResourceCleanup:
                     "endpoint": "https://test.cognitiveservices.azure.com",
                     "api_key": "test-key",
                     "fields": ["prompt"],
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "pool_size": 3,
                 }
             )
@@ -1039,7 +1039,7 @@ class TestResourceCleanup:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1058,7 +1058,7 @@ class TestResourceCleanup:
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

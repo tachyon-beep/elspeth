@@ -13,7 +13,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import SourceProtocol
 
 # Dynamic schema config for tests - DataPluginConfig requires schema
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 # Standard quarantine routing for tests
 QUARANTINE_SINK = "quarantine"
@@ -474,7 +474,7 @@ class TestAzureBlobSourceValidation:
         source = AzureBlobSource(
             make_config(
                 schema={
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
                 on_validation_failure="quarantine",
@@ -511,7 +511,7 @@ class TestAzureBlobSourceValidation:
         source = AzureBlobSource(
             make_config(
                 schema={
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: int"],
                 },
                 on_validation_failure="discard",
@@ -574,7 +574,7 @@ class TestAzureBlobSourceErrors:
         source = AzureBlobSource(
             make_config(
                 schema={
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["col1: str", "col2: str", "col3: str"],
                 }
             )
@@ -599,7 +599,7 @@ class TestAzureBlobSourceErrors:
         source = AzureBlobSource(
             make_config(
                 schema={
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["col1: str"],
                 }
             )

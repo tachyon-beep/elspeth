@@ -27,7 +27,7 @@ class TestPluginTypeDetection:
         """Transforms should be instances of BaseTransform."""
         from elspeth.plugins.transforms.passthrough import PassThrough
 
-        transform = PassThrough({"schema": {"fields": "dynamic"}})
+        transform = PassThrough({"schema": {"mode": "observed"}})
         assert isinstance(transform, BaseTransform)
 
     def test_unknown_type_is_not_recognized(self) -> None:
@@ -90,7 +90,7 @@ class TestPluginInheritanceHierarchy:
         """Transforms should NOT be instances of BaseGate."""
         from elspeth.plugins.transforms.passthrough import PassThrough
 
-        transform = PassThrough({"schema": {"fields": "dynamic"}})
+        transform = PassThrough({"schema": {"mode": "observed"}})
         # mypy knows these are incompatible hierarchies - that's what we're verifying
         assert not isinstance(transform, BaseGate)  # type: ignore[unreachable]
 
@@ -136,7 +136,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         processor = RowProcessor(
@@ -194,7 +194,7 @@ class TestProcessorRejectsDuckTypedPlugins:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         processor = RowProcessor(

@@ -10,7 +10,7 @@ source:
   options:
     path: examples/boolean_routing/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "message: str"
@@ -33,7 +33,7 @@ sinks:
     options:
       path: examples/boolean_routing/output/approved.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "message: str"
@@ -43,7 +43,7 @@ sinks:
     options:
       path: examples/boolean_routing/output/rejected.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "message: str"

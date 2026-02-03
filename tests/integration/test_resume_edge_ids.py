@@ -79,7 +79,7 @@ class TestResumeEdgeIDs:
     def gate_graph(self) -> ExecutionGraph:
         """Create a graph with a gate routing to multiple sinks."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
         graph.add_node("gate", node_type=NodeType.GATE, plugin_name="simple_gate", config=schema_config)
         graph.add_node("sink_a", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)

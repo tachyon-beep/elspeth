@@ -357,12 +357,12 @@ class TestConfigGateIntegration:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "a_sink": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"fields": "dynamic"}}),
-                "b_sink": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"fields": "dynamic"}}),
+                "a_sink": SinkSettings(plugin="json", options={"path": "a.json", "schema": {"mode": "observed"}}),
+                "b_sink": SinkSettings(plugin="json", options={"path": "b.json", "schema": {"mode": "observed"}}),
             },
             default_sink="a_sink",
             gates=[
@@ -458,12 +458,12 @@ class TestConfigGateIntegration:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "priority_1": SinkSettings(plugin="json", options={"path": "priority_1.json", "schema": {"fields": "dynamic"}}),
-                "priority_2": SinkSettings(plugin="json", options={"path": "priority_2.json", "schema": {"fields": "dynamic"}}),
+                "priority_1": SinkSettings(plugin="json", options={"path": "priority_1.json", "schema": {"mode": "observed"}}),
+                "priority_2": SinkSettings(plugin="json", options={"path": "priority_2.json", "schema": {"mode": "observed"}}),
             },
             default_sink="priority_1",
             gates=[
@@ -597,12 +597,12 @@ class TestConfigGateFromSettings:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "review": SinkSettings(plugin="json", options={"path": "review.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "review": SinkSettings(plugin="json", options={"path": "review.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             gates=[
@@ -656,10 +656,10 @@ class TestConfigGateFromSettings:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             gates=[
                 GateSettings(
@@ -701,13 +701,13 @@ class TestConfigGateFromSettings:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
             transforms=[
-                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                TransformSettings(plugin="passthrough", options={"schema": {"mode": "observed"}}),
             ],
             gates=[
                 GateSettings(

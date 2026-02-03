@@ -16,7 +16,7 @@ source:
   options:
     path: examples/azure_openai_sentiment/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "text: str"
@@ -39,7 +39,7 @@ transforms:
       temperature: 0.0  # Deterministic for consistent results
       response_field: sentiment_analysis
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -48,7 +48,7 @@ sinks:
       path: examples/azure_openai_sentiment/output/results.json
       format: jsonl
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output
 

@@ -27,7 +27,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 10},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -43,7 +43,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 100},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -59,7 +59,7 @@ class TestTruncate:
             {
                 "fields": {"title": 13},
                 "suffix": "...",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -76,7 +76,7 @@ class TestTruncate:
             {
                 "fields": {"title": 100},
                 "suffix": "...",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -91,7 +91,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 5, "description": 10},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -114,7 +114,7 @@ class TestTruncate:
             {
                 "fields": {"title": 10, "description": 20},
                 "strict": False,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -131,7 +131,7 @@ class TestTruncate:
             {
                 "fields": {"title": 10, "description": 20},
                 "strict": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -147,7 +147,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"count": 5},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -162,7 +162,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 5},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -188,7 +188,7 @@ class TestTruncate:
                 {
                     "fields": {"title": 3},
                     "suffix": "...",  # 3 chars, same as max - invalid
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
 
@@ -197,7 +197,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 5},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -212,7 +212,7 @@ class TestTruncate:
         transform = Truncate(
             {
                 "fields": {"title": 10},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

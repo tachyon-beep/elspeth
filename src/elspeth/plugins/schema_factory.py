@@ -56,9 +56,9 @@ def create_schema_from_config(
         A PluginSchema subclass with the specified fields and validation
 
     The generated schema:
-    - Dynamic mode: extra="allow", accepts any fields (no type checking)
-    - Strict mode: extra="forbid", rejects unknown fields
-    - Free mode: extra="allow", requires specified fields, allows extras
+    - Observed mode: extra="allow", accepts any fields (no type checking)
+    - Fixed mode: extra="forbid", rejects unknown fields
+    - Flexible mode: extra="allow", requires specified fields, allows extras
 
     Examples:
         # Source - coerces external data
@@ -67,11 +67,11 @@ def create_schema_from_config(
         # Transform - expects clean data from upstream
         transform_schema = create_schema_from_config(config, "Input", allow_coercion=False)
     """
-    if config.is_dynamic:
-        # Dynamic schema - accept anything (no type validation either way)
+    if config.is_observed:
+        # Observed schema - accept anything (no type validation either way)
         return _create_dynamic_schema(name)
 
-    # Explicit schema - strict or free mode
+    # Explicit schema - fixed or flexible mode
     return _create_explicit_schema(config, name, allow_coercion)
 
 
@@ -97,8 +97,8 @@ def _create_explicit_schema(
     allow_coercion: bool,
 ) -> type[PluginSchema]:
     """Create a schema with explicit field definitions."""
-    if config.fields is None or config.mode is None:
-        raise ValueError("_create_explicit_schema requires fields and mode to be set")
+    if config.fields is None or config.mode == "observed":
+        raise ValueError("_create_explicit_schema requires fields and non-observed mode")
 
     # Build field definitions for create_model
     # Format: field_name=(type, default) or field_name=(type, ...)
@@ -115,7 +115,7 @@ def _create_explicit_schema(
             field_definitions[field_def.name] = (python_type, None)
 
     # Determine extra field handling
-    extra_mode: ExtraMode = "allow" if config.mode == "free" else "forbid"
+    extra_mode: ExtraMode = "allow" if config.mode == "flexible" else "forbid"
 
     # Coercion control: strict=True means NO coercion (Pydantic's semantics)
     # allow_coercion=True  -> strict=False (coerce)

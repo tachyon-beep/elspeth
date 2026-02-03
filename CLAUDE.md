@@ -750,7 +750,7 @@ def test_fork_coalesce_production_path():
 ## Configuration Precedence (High to Low)
 
 1. Runtime overrides (CLI flags, env vars)
-2. Suite configuration (`suite.yaml`)
+2. Pipeline configuration (`settings.yaml`)
 3. Profile configuration (`profiles/production.yaml`)
 4. Plugin pack defaults (`packs/llm/defaults.yaml`)
 5. System defaults

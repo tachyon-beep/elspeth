@@ -42,14 +42,14 @@ export AZURE_OPENAI_KEY="your-api-key"
 export AZURE_OPENAI_DEPLOYMENT="gpt-4o"
 
 # Run the pipeline
-uv run elspeth run -s examples/multi_query_assessment/suite.yaml --execute
+uv run elspeth run -s examples/multi_query_assessment/settings.yaml --execute
 ```
 
 ## Customization
 
 ### Adding More Case Studies
 
-Add entries to `case_studies` in suite.yaml:
+Add entries to `case_studies` in settings.yaml:
 ```yaml
 case_studies:
   - name: cs3
@@ -58,7 +58,7 @@ case_studies:
 
 ### Adding More Criteria
 
-Add entries to `criteria` in suite.yaml:
+Add entries to `criteria` in settings.yaml:
 ```yaml
 criteria:
   - name: safety

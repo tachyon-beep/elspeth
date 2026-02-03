@@ -57,7 +57,7 @@ class TestProcessorGuards:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         span_factory = SpanFactory()
@@ -189,7 +189,7 @@ class TestProcessorGuards:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> PluginTransformResult:

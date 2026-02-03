@@ -112,7 +112,7 @@ class AzureBatchLLMTransform(BaseTransform):
               template: |
                 Analyze: {{ row.text }}
               schema:
-                fields: dynamic
+                mode: observed
               poll_interval_seconds: 300
     """
 
@@ -173,7 +173,6 @@ class AzureBatchLLMTransform(BaseTransform):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | set(guaranteed)),
             audit_fields=tuple(set(base_audit) | set(audit)),
             required_fields=schema_config.required_fields,

@@ -60,7 +60,7 @@ class AzurePromptShieldConfig(TransformDataConfig):
               fields: [prompt, user_message]
               on_error: quarantine_sink
               schema:
-                fields: dynamic
+                mode: observed
     """
 
     endpoint: str = Field(..., description="Azure Content Safety endpoint URL")

@@ -8,7 +8,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 # Strict schema config for tests - CSVSink requires fixed columns
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: int", "value: str"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: int", "value: str"]}
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ class TestCSVSinkAppendMode:
         output_path = tmp_path / "output.csv"
 
         # Use a schema matching the test data
-        name_age_schema = {"mode": "strict", "fields": ["name: str", "age: int"]}
+        name_age_schema = {"mode": "fixed", "fields": ["name: str", "age: int"]}
 
         # First write with specific column order
         sink1 = CSVSink(
@@ -249,7 +249,7 @@ class TestCSVSinkAppendExplicitSchema:
 
         # Strict schema requires both 'id' and 'score'
         strict_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "score: float?"],
         }
 
@@ -283,7 +283,7 @@ class TestCSVSinkAppendExplicitSchema:
 
         # Strict schema requires exact order: id, score
         strict_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "score: float"],
         }
 
@@ -313,7 +313,7 @@ class TestCSVSinkAppendExplicitSchema:
 
         # Strict schema matches file headers
         strict_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "score: float"],
         }
 

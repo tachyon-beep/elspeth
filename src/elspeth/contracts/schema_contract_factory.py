@@ -25,22 +25,21 @@ _FIELD_TYPE_MAP: dict[str, type] = {
 
 
 def map_schema_mode(
-    mode: Literal["strict", "free"] | None,
+    mode: Literal["fixed", "flexible", "observed"],
 ) -> Literal["FIXED", "FLEXIBLE", "OBSERVED"]:
     """Map SchemaConfig mode to SchemaContract mode.
 
+    YAML uses lowercase (fixed/flexible/observed) per YAML convention,
+    runtime uses uppercase (FIXED/FLEXIBLE/OBSERVED) for enum-like behavior.
+
     Args:
-        mode: SchemaConfig mode ('strict', 'free', or None for dynamic)
+        mode: SchemaConfig mode ('fixed', 'flexible', or 'observed')
 
     Returns:
-        SchemaContract mode literal
+        SchemaContract mode literal (uppercase)
     """
-    if mode == "strict":
-        return "FIXED"
-    elif mode == "free":
-        return "FLEXIBLE"
-    else:
-        return "OBSERVED"
+    # Simple uppercase conversion - YAML lowercase to runtime uppercase
+    return mode.upper()  # type: ignore[return-value]
 
 
 def create_contract_from_config(
@@ -49,8 +48,8 @@ def create_contract_from_config(
 ) -> SchemaContract:
     """Create SchemaContract from SchemaConfig.
 
-    For explicit schemas (strict/free), creates a locked contract with
-    declared fields. For dynamic schemas, creates an unlocked contract
+    For explicit schemas (fixed/flexible), creates a locked contract with
+    declared fields. For observed schemas, creates an unlocked contract
     that will infer types from the first row.
 
     Args:
@@ -90,8 +89,8 @@ def create_contract_from_config(
         fields = tuple(field_contracts)
 
     # Explicit schemas start locked (types are known)
-    # Dynamic schemas start unlocked (types inferred from first row)
-    locked = not config.is_dynamic
+    # Observed schemas start unlocked (types inferred from first row)
+    locked = not config.is_observed
 
     return SchemaContract(
         mode=mode,

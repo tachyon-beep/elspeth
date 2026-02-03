@@ -43,7 +43,7 @@ class TestCSVSourceContract:
         source = CSVSource(
             {
                 "path": str(temp_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -62,7 +62,7 @@ class TestCSVSourceContract:
             {
                 "path": str(temp_csv),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "name: str", "score: float"],
                 },
                 "on_validation_failure": "quarantine",
@@ -81,7 +81,7 @@ class TestCSVSourceContract:
         source = CSVSource(
             {
                 "path": str(temp_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -98,7 +98,7 @@ class TestCSVSourceContract:
         source = CSVSource(
             {
                 "path": str(temp_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -126,7 +126,7 @@ class TestCSVSourceContract:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
                 "normalize_fields": True,
             }
@@ -146,7 +146,7 @@ class TestCSVSourceContract:
         source = CSVSource(
             {
                 "path": str(temp_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -178,7 +178,7 @@ class TestCSVSourceContract:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",

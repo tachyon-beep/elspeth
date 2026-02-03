@@ -24,7 +24,7 @@ source:
   options:
     path: examples/deaggregation/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "name: str"
@@ -42,7 +42,7 @@ aggregations:
     output_mode: transform  # CRITICAL: Creates new tokens for each output row
     options:
       schema:
-        fields: dynamic
+        mode: observed
       copies_field: copies
       default_copies: 1
       include_copy_index: true
@@ -53,7 +53,7 @@ sinks:
     options:
       path: examples/deaggregation/output/replicated.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "name: str"

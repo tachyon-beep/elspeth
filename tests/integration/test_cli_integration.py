@@ -36,7 +36,7 @@ class TestCLIIntegration:
                 "options": {
                     "path": str(sample_csv),
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -45,7 +45,7 @@ class TestCLIIntegration:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -151,7 +151,7 @@ class TestSourceQuarantineRouting:
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "quarantine",  # Route to quarantine sink
                     "schema": {
-                        "mode": "strict",
+                        "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
                     },
                 },
@@ -161,14 +161,14 @@ class TestSourceQuarantineRouting:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
                 "quarantine": {
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "quarantine.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -215,7 +215,7 @@ class TestSourceQuarantineRouting:
                     "path": str(csv_with_invalid_rows),
                     "on_validation_failure": "discard",  # Intentionally drop
                     "schema": {
-                        "mode": "strict",
+                        "mode": "fixed",
                         "fields": ["id: int", "name: str", "score: int"],
                     },
                 },
@@ -225,7 +225,7 @@ class TestSourceQuarantineRouting:
                     "plugin": "json",
                     "options": {
                         "path": str(tmp_path / "output.json"),
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },

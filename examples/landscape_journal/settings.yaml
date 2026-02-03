@@ -16,7 +16,7 @@ source:
     format: jsonl
     on_validation_failure: discard
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "message: str"
@@ -25,7 +25,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
   output:
@@ -34,6 +34,6 @@ sinks:
       path: examples/landscape_journal/output/output.jsonl
       format: jsonl
       schema:
-        fields: dynamic
+        mode: observed
 
 default_sink: output

@@ -54,7 +54,7 @@ class _PassthroughTransform(BaseTransform):
     output_schema = _InputSchema
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
@@ -71,7 +71,7 @@ class _EnrichingTransform(BaseTransform):
     output_schema = _OutputSchema
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
         from elspeth.plugins.results import TransformResult
@@ -86,7 +86,7 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     Creates: source -> transforms... -> sinks
     """
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
 
     # Add source
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)

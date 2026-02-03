@@ -64,9 +64,9 @@ class JSONSource(BaseSource):
         encoding: File encoding (default: "utf-8")
 
     The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]}
-        - Free: {"mode": "free", "fields": ["id: int"]} - at least these fields
+        - Observed: {"mode": "observed"} - accept any fields
+        - Fixed: {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        - Flexible: {"mode": "flexible", "fields": ["id: int"]} - at least these fields
     """
 
     name = "json"
@@ -282,7 +282,7 @@ class JSONSource(BaseSource):
             ctx.record_validation_error(
                 row=row,
                 error=str(e),
-                schema_mode=self._schema_config.mode or "dynamic",
+                schema_mode=self._schema_config.mode,
                 destination=self._on_validation_failure,
             )
 

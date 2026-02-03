@@ -85,7 +85,7 @@ class Node:
     schema_hash: str | None = None
     sequence_in_pipeline: int | None = None
     # Schema configuration for audit trail (WP-11.99)
-    schema_mode: str | None = None  # "dynamic", "strict", "free", "parse"
+    schema_mode: str | None = None  # "observed", "fixed", "flexible", "parse"
     schema_fields: list[dict[str, object]] | None = None  # Field definitions if explicit
 
     def __post_init__(self) -> None:
@@ -472,7 +472,7 @@ class ValidationErrorRecord:
     node_id: str | None
     row_hash: str
     error: str
-    schema_mode: str  # "strict", "free", "dynamic", "parse"
+    schema_mode: str  # "fixed", "flexible", "observed", "parse"
     destination: str
     created_at: datetime
     row_data_json: str | None = None

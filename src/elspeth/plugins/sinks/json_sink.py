@@ -52,9 +52,9 @@ class JSONSink(BaseSink):
         validate_input: Validate incoming rows against schema (default: False)
 
     The schema can be:
-        - Dynamic: {"fields": "dynamic"} - accept any fields
-        - Strict: {"mode": "strict", "fields": ["id: int", "name: str"]}
-        - Free: {"mode": "free", "fields": ["id: int"]} - at least these fields
+        - Observed: {"mode": "observed"} - accept any fields
+        - Fixed: {"mode": "fixed", "fields": ["id: int", "name: str"]}
+        - Flexible: {"mode": "flexible", "fields": ["id: int"]} - at least these fields
     """
 
     name = "json"
@@ -131,7 +131,7 @@ class JSONSink(BaseSink):
             existing = list(first_record.keys())
 
         # Dynamic schema = no validation needed
-        if self._schema_config.is_dynamic:
+        if self._schema_config.is_observed:
             return OutputValidationResult.success(target_fields=existing)
 
         # Get expected fields from schema (guaranteed non-None when not dynamic)
@@ -153,22 +153,22 @@ class JSONSink(BaseSink):
 
         existing_set, expected_set = set(existing), set(expected)
 
-        if self._schema_config.mode == "strict":
-            # Strict: exact field match (set comparison)
+        if self._schema_config.mode == "fixed":
+            # Fixed: exact field match (set comparison)
             if existing_set != expected_set:
                 return OutputValidationResult.failure(
-                    message="JSONL record fields do not match schema (strict mode)",
+                    message="JSONL record fields do not match schema (fixed mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(expected_set - existing_set),
                     extra_fields=sorted(existing_set - expected_set),
                 )
-        else:  # mode == "free"
-            # Free: schema fields must exist (extras allowed)
+        else:  # mode == "flexible"
+            # Flexible: schema fields must exist (extras allowed)
             missing = expected_set - existing_set
             if missing:
                 return OutputValidationResult.failure(
-                    message="JSONL record missing required schema fields (free mode)",
+                    message="JSONL record missing required schema fields (flexible mode)",
                     target_fields=existing,
                     schema_fields=expected,
                     missing_fields=sorted(missing),
@@ -246,7 +246,7 @@ class JSONSink(BaseSink):
             )
 
         # Optional input validation - crash on failure (upstream bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             for row in rows:
                 # Raises ValidationError on failure - this is intentional
                 self._schema_class.model_validate(row)

@@ -12,7 +12,7 @@ source:
   options:
     path: examples/batch_aggregation/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "date: str"
@@ -32,7 +32,7 @@ aggregations:
     # Use expected_output_count: 1 to validate N→1 cardinality
     options:
       schema:
-        fields: dynamic
+        mode: observed
       value_field: amount
       group_by: category
       compute_mean: true
@@ -43,7 +43,7 @@ sinks:
     options:
       path: examples/batch_aggregation/output/batch_summaries.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "count: int"
           - "sum: float"

@@ -28,7 +28,7 @@ def _build_simple_graph(config: PipelineConfig) -> ExecutionGraph:
     from elspeth.core.dag import ExecutionGraph
 
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=config.source.name, config=schema_config)
 
     # Build sink nodes and ID mapping

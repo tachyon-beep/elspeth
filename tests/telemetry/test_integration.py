@@ -163,7 +163,7 @@ class PassthroughTransform:
     output_schema = DynamicSchema
     plugin_version = "1.0.0"
     determinism = Determinism.DETERMINISTIC
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     is_batch_aware = False
     creates_tokens = False
@@ -201,7 +201,7 @@ def create_minimal_graph(source_name: str = "list_source", transform_name: str =
     from elspeth.contracts import NodeID, NodeType, RoutingMode, SinkName
 
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
 
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name=source_name, config=schema_config)
     graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name=transform_name, config=schema_config)

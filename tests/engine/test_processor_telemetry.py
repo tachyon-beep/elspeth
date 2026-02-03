@@ -64,7 +64,7 @@ class PassthroughTransform(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -80,7 +80,7 @@ class FailingTransform(BaseTransform):
     _on_error = "discard"  # Route errors to discard (quarantine)
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.error({"reason": "intentional_failure"})
@@ -158,7 +158,7 @@ class RecordingExporter:
 def create_minimal_graph() -> ExecutionGraph:
     """Create a minimal valid execution graph."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
     graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -173,7 +173,7 @@ def create_minimal_graph() -> ExecutionGraph:
 def create_graph_with_gate() -> ExecutionGraph:
     """Create a graph with a gate transform."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
     graph.add_node("gate", node_type=NodeType.GATE, plugin_name="simple_gate", config=schema_config)
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -188,7 +188,7 @@ def create_graph_with_gate() -> ExecutionGraph:
 def create_graph_with_failing_transform() -> ExecutionGraph:
     """Create a graph with a failing transform."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
     graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="failing", config=schema_config)
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -300,7 +300,7 @@ class TestTransformCompletedTelemetry:
 
         # Create graph with two transforms
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
         graph.add_node("transform1", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
         graph.add_node("transform2", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
@@ -522,7 +522,7 @@ class BatchAwareTransformForTelemetry(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, list):
@@ -550,7 +550,7 @@ class FailingBatchAwareTransform(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, list):
@@ -575,7 +575,7 @@ class PassthroughBatchAwareTransform(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         if isinstance(row, list):
@@ -598,7 +598,7 @@ class TelemetryTestSource:
 
     name = "telemetry_test_source"
     output_schema = DynamicSchema
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     determinism = Determinism.IO_READ
     plugin_version = "1.0.0"
@@ -606,7 +606,7 @@ class TelemetryTestSource:
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
-        self.config = {"schema": {"fields": "dynamic"}}
+        self.config = {"schema": {"mode": "observed"}}
 
     def load(self, ctx: Any) -> Any:
         for row in self._rows:
@@ -634,7 +634,7 @@ class TelemetryTestSink:
 
     name = "telemetry_test_sink"
     input_schema = DynamicSchema
-    config: ClassVar[dict[str, Any]] = {"schema": {"fields": "dynamic"}}
+    config: ClassVar[dict[str, Any]] = {"schema": {"mode": "observed"}}
     node_id: str | None = None
     determinism = Determinism.IO_WRITE
     plugin_version = "1.0.0"
@@ -642,7 +642,7 @@ class TelemetryTestSink:
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
-        self.config = {"schema": {"fields": "dynamic"}}
+        self.config = {"schema": {"mode": "observed"}}
 
     def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
         for row in rows:

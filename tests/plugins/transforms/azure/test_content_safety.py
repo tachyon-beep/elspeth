@@ -77,7 +77,7 @@ class TestAzureContentSafetyConfig:
                         "sexual": 2,
                         "self_harm": 0,
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "endpoint" in str(exc_info.value).lower()
@@ -99,7 +99,7 @@ class TestAzureContentSafetyConfig:
                         "sexual": 2,
                         "self_harm": 0,
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "api_key" in str(exc_info.value).lower()
@@ -121,7 +121,7 @@ class TestAzureContentSafetyConfig:
                         "sexual": 2,
                         "self_harm": 0,
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         assert "fields" in str(exc_info.value).lower()
@@ -139,7 +139,7 @@ class TestAzureContentSafetyConfig:
                     "api_key": "test-key",
                     "fields": ["content"],
                     "thresholds": {"hate": 2},  # Missing violence, sexual, self_harm
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
         # Should mention one of the missing fields or thresholds
@@ -164,7 +164,7 @@ class TestAzureContentSafetyConfig:
                         "sexual": 2,
                         "self_harm": 0,
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
 
@@ -186,7 +186,7 @@ class TestAzureContentSafetyConfig:
                         "sexual": 2,
                         "self_harm": 0,
                     },
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 }
             )
 
@@ -202,7 +202,7 @@ class TestAzureContentSafetyConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 4, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -226,7 +226,7 @@ class TestAzureContentSafetyConfig:
                 "api_key": "test-key",
                 "fields": "content",
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -244,7 +244,7 @@ class TestAzureContentSafetyConfig:
                 "api_key": "test-key",
                 "fields": "all",
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -285,7 +285,7 @@ class TestAzureContentSafetyConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 0, "violence": 0, "sexual": 0, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -303,7 +303,7 @@ class TestAzureContentSafetyConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 6, "violence": 6, "sexual": 6, "self_harm": 6},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -323,7 +323,7 @@ class TestAzureContentSafetyTransform:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -342,7 +342,7 @@ class TestAzureContentSafetyTransform:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -367,7 +367,7 @@ class TestContentSafetyPoolConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -385,7 +385,7 @@ class TestContentSafetyPoolConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 5,
             }
         )
@@ -404,7 +404,7 @@ class TestContentSafetyPoolConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 1,
             }
         )
@@ -423,7 +423,7 @@ class TestContentSafetyPoolConfig:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 3,
             }
         )
@@ -455,7 +455,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -474,7 +474,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -511,7 +511,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -555,7 +555,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -602,7 +602,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content", "optional_field"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -638,7 +638,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -684,7 +684,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -729,7 +729,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -773,7 +773,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -818,7 +818,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -865,7 +865,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "my-secret-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -920,7 +920,7 @@ class TestContentSafetyBatchProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 2},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "pool_size": 3,
             }
         )
@@ -988,7 +988,7 @@ class TestContentSafetyInternalProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1020,7 +1020,7 @@ class TestContentSafetyInternalProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1049,7 +1049,7 @@ class TestContentSafetyInternalProcessing:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1083,7 +1083,7 @@ class TestResourceCleanup:
                     "api_key": "test-key",
                     "fields": ["content"],
                     "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "pool_size": 3,
                 }
             )
@@ -1112,7 +1112,7 @@ class TestResourceCleanup:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -1132,7 +1132,7 @@ class TestResourceCleanup:
                 "api_key": "test-key",
                 "fields": ["content"],
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

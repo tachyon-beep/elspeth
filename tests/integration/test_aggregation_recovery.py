@@ -43,12 +43,12 @@ class TestAggregationRecoveryIntegration:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for aggregation recovery tests."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         agg_config = {
             "trigger": {"count": 1},
             "output_mode": "transform",
-            "options": {"schema": {"fields": "dynamic"}},
-            "schema": {"fields": "dynamic"},
+            "options": {"schema": {"mode": "observed"}},
+            "schema": {"mode": "observed"},
         }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test", config=schema_config)
         graph.add_node("sum_aggregator", node_type=NodeType.AGGREGATION, plugin_name="test", config=agg_config)

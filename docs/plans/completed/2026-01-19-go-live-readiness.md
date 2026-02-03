@@ -144,7 +144,7 @@ These items represent operational or compliance risks that should be addressed w
 |----|-------------|-------|
 | CFG-016 | Profile system (`--profile` flag) | Dynaconf supports; not integrated |
 | CFG-019 | Pack defaults (`packs/*/defaults.yaml`) | Not needed without plugin packs |
-| CFG-020 | Suite configuration (`suite.yaml`) | Single settings file per run works |
+| CFG-020 | Pipeline configuration (`settings.yaml`) | Single settings file per run works |
 | CLI-002 | `elspeth --profile <name>` | Part of profile story |
 | CLI-004 | `elspeth explain --full` | Has `--json` and `--no-tui` |
 | CLI-007 | `elspeth status` | Query landscape directly |

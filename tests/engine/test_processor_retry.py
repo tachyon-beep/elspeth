@@ -155,7 +155,7 @@ class TestRowProcessorWorkQueue:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -448,7 +448,7 @@ class TestRowProcessorRetry:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         transform_node = recorder.register_node(
             run_id=run.run_id,
@@ -456,7 +456,7 @@ class TestRowProcessorRetry:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         class AlwaysFailsTransform(BaseTransform):
@@ -467,7 +467,7 @@ class TestRowProcessorRetry:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -577,7 +577,7 @@ class TestNoRetryAuditCompleteness:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         transform_node = recorder.register_node(
             run_id=run.run_id,
@@ -585,7 +585,7 @@ class TestNoRetryAuditCompleteness:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         class RateLimitedTransform(BaseTransform):
@@ -596,7 +596,7 @@ class TestNoRetryAuditCompleteness:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
                 # Explicitly set _on_error (normally done by config mixins)
                 self._on_error = "error_sink"
@@ -675,7 +675,7 @@ class TestNoRetryAuditCompleteness:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         transform_node = recorder.register_node(
             run_id=run.run_id,
@@ -683,7 +683,7 @@ class TestNoRetryAuditCompleteness:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         class NetworkFailTransform(BaseTransform):
@@ -695,7 +695,7 @@ class TestNoRetryAuditCompleteness:
 
             def __init__(self, node_id: str) -> None:
                 # NO on_error configured - this is the default
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:

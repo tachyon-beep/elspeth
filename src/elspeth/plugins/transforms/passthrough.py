@@ -22,7 +22,7 @@ class PassThroughConfig(TransformDataConfig):
     """Configuration for passthrough transform.
 
     Requires 'schema' in config to define input/output expectations.
-    Use 'schema: {fields: dynamic}' for dynamic field handling.
+    Use 'schema: {mode: observed}' for dynamic field handling.
     """
 
     validate_input: bool = Field(
@@ -40,7 +40,7 @@ class PassThrough(BaseTransform):
     - Placeholder for future transform logic
 
     Config options:
-        schema: Required. Schema for input/output (use {fields: dynamic} for any fields)
+        schema: Required. Schema for input/output (use {mode: observed} for any fields)
         validate_input: If True, validate input against schema (default: False)
     """
 
@@ -80,7 +80,7 @@ class PassThrough(BaseTransform):
                 This indicates a bug in the upstream source/transform.
         """
         # Optional input validation - crash on wrong types (source bug!)
-        if self._validate_input and not self._schema_config.is_dynamic:
+        if self._validate_input and not self._schema_config.is_observed:
             self.input_schema.model_validate(row)  # Raises on failure
 
         return TransformResult.success(

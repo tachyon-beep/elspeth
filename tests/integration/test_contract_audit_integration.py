@@ -75,7 +75,7 @@ class TestFullAuditTrailWithContracts:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
             }
@@ -153,7 +153,7 @@ class TestFullAuditTrailWithContracts:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -215,7 +215,7 @@ class TestValidationErrorWithContractDetails:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
@@ -256,7 +256,7 @@ class TestValidationErrorWithContractDetails:
         )
 
         # Register a source node
-        schema_config = SchemaConfig(mode="strict", fields=None, is_dynamic=False)
+        schema_config = SchemaConfig(mode="fixed", fields=None)
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="csv",
@@ -272,7 +272,7 @@ class TestValidationErrorWithContractDetails:
             node_id=node.node_id,
             row_data={"id": 2, "amount": "not_int"},
             error="Type mismatch: expected int, got str for field 'amount'",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             contract_violation=violation,
         )
@@ -307,7 +307,7 @@ class TestValidationErrorWithContractDetails:
             node_id=None,
             row_data={"field": "value"},
             error="Generic validation error",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
             # No contract_violation
         )
@@ -347,7 +347,7 @@ class TestContractSurvivesAuditRoundTrip:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
             }
@@ -524,8 +524,7 @@ class TestContractSurvivesAuditRoundTrip:
         )
 
         # Register node with contracts
-        # Note: mode="free" is the closest match to FLEXIBLE contract mode
-        schema_config = SchemaConfig(mode="free", fields=None, is_dynamic=False)
+        schema_config = SchemaConfig(mode="flexible", fields=None)
         node = recorder.register_node(
             run_id=run.run_id,
             plugin_name="test_transform",
@@ -571,7 +570,7 @@ class TestContractWithCheckpointRegistry:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "normalize_fields": True,
                 "on_validation_failure": "discard",
             }

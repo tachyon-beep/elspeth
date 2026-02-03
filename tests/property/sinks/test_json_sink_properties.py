@@ -62,7 +62,7 @@ class TestJSONSinkProperties:
                 {
                     "path": str(path),
                     "format": "jsonl",
-                    "schema": {"mode": "strict", "fields": ["id: int", "name: str", "score: float?"]},
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
             ctx = PluginContext(run_id="test-run", config={})
@@ -84,7 +84,7 @@ class TestJSONSinkProperties:
                 {
                     "path": str(path),
                     "format": "json",
-                    "schema": {"mode": "strict", "fields": ["id: int", "name: str", "score: float?"]},
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
             ctx = PluginContext(run_id="test-run", config={})
@@ -102,7 +102,7 @@ class TestJSONSinkProperties:
             {
                 "path": str(path),
                 "format": "jsonl",
-                "schema": {"mode": "strict", "fields": ["value: int"]},
+                "schema": {"mode": "fixed", "fields": ["value: int"]},
                 "validate_input": True,
             }
         )

@@ -48,7 +48,7 @@ class PassthroughTransform(BaseTransform):
     plugin_version = "1.0.0"
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: Any, ctx: Any) -> TransformResult:
         return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -98,7 +98,7 @@ class RecordingExporter:
 def create_minimal_graph() -> ExecutionGraph:
     """Create a minimal valid execution graph."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
     graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
     graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="passthrough", config=schema_config)
     graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -379,7 +379,7 @@ class TestTelemetryOnRunFailure:
             plugin_version = "1.0.0"
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 raise RuntimeError("Simulated transform failure")

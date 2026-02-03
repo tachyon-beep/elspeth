@@ -22,7 +22,7 @@ source:
   options:
     path: test.csv
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   output:

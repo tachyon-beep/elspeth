@@ -384,11 +384,11 @@ class TestNodeTypeMetadata:
         settings = ElspethSettings(
             source=SourceSettings(
                 plugin="null",
-                options={"schema": {"fields": "dynamic"}},
+                options={"schema": {"mode": "observed"}},
             ),
             sinks={
-                "high": SinkSettings(plugin="json", options={"path": "high.json", "schema": {"fields": "dynamic"}}),
-                "low": SinkSettings(plugin="json", options={"path": "low.json", "schema": {"fields": "dynamic"}}),
+                "high": SinkSettings(plugin="json", options={"path": "high.json", "schema": {"mode": "observed"}}),
+                "low": SinkSettings(plugin="json", options={"path": "low.json", "schema": {"mode": "observed"}}),
             },
             default_sink="low",
             gates=[
@@ -468,7 +468,7 @@ class TestCheckpointSequencing:
 
         # Build graph matching the nodes used in _maybe_checkpoint calls
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source-1", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("sink-1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)

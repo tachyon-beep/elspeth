@@ -55,12 +55,12 @@ class TestOrchestratorResume:
     def mock_graph(self) -> ExecutionGraph:
         """Create a minimal mock graph for recovery tests."""
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         agg_config = {
             "trigger": {"count": 1},
             "output_mode": "transform",
-            "options": {"schema": {"fields": "dynamic"}},
-            "schema": {"fields": "dynamic"},
+            "options": {"schema": {"mode": "observed"}},
+            "schema": {"mode": "observed"},
         }
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="null", config=schema_config)
         graph.add_node("agg_node", node_type=NodeType.AGGREGATION, plugin_name="test_agg", config=agg_config)
@@ -255,8 +255,8 @@ class TestOrchestratorResume:
         from elspeth.plugins.sinks.json_sink import JSONSink
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"schema": {"fields": "dynamic"}})
-        sink = JSONSink({"path": "/tmp/test_recovery.json", "schema": {"fields": "dynamic"}, "mode": "write"})
+        source = NullSource({"schema": {"mode": "observed"}})
+        sink = JSONSink({"path": "/tmp/test_recovery.json", "schema": {"mode": "observed"}, "mode": "write"})
 
         return PipelineConfig(
             source=source,
@@ -273,12 +273,12 @@ class TestOrchestratorResume:
         from elspeth.contracts.types import SinkName
 
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         agg_config = {
             "trigger": {"count": 1},
             "output_mode": "transform",
-            "options": {"schema": {"fields": "dynamic"}},
-            "schema": {"fields": "dynamic"},
+            "options": {"schema": {"mode": "observed"}},
+            "schema": {"mode": "observed"},
         }
 
         # Must match the node IDs registered in failed_run_with_batch
@@ -298,4 +298,4 @@ class TestOrchestratorResume:
 
 def _make_dynamic_schema() -> SchemaConfig:
     """Create a dynamic schema config for test nodes."""
-    return SchemaConfig(mode=None, fields=None, is_dynamic=True)
+    return SchemaConfig(mode="observed", fields=None)

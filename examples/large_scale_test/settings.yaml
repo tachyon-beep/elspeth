@@ -17,7 +17,7 @@ source:
   options:
     path: examples/large_scale_test/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "value: float"
@@ -43,7 +43,7 @@ sinks:
     options:
       path: examples/large_scale_test/output/normal.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "value: float"
@@ -57,7 +57,7 @@ sinks:
     options:
       path: examples/large_scale_test/output/high_value.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "value: float"

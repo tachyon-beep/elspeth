@@ -30,16 +30,16 @@ from elspeth.plugins.manager import PluginManager
 SOURCE_CONFIGS: dict[str, dict[str, Any] | None] = {
     "csv": {
         "path": "/tmp/test.csv",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     },
     "json": {
         "path": "/tmp/test.json",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     },
     "null": {
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "on_validation_failure": "quarantine",
     },
     # Azure Blob Source requires valid Azure credentials - cannot test without mocking
@@ -50,36 +50,36 @@ SOURCE_CONFIGS: dict[str, dict[str, Any] | None] = {
 # Transforms: require schema at minimum, some require additional config
 TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
     "passthrough": {
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     },
     "batch_replicate": {
         # Uses copies_field (default "copies"), default_copies, include_copy_index
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
     },
     "batch_stats": {
         # Requires value_field (no default)
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "value_field": "amount",
     },
     "keyword_filter": {
         # Requires fields (str or list) and blocked_patterns (list of regex)
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "fields": "text",
         "blocked_patterns": ["test_pattern"],
     },
     "truncate": {
         # Uses fields dict of field_name -> max_length
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "fields": {"text": 100},
     },
     "json_explode": {
         # Requires array_field (the field to explode)
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "array_field": "items",
     },
     "field_mapper": {
         # Uses mapping dict of source_field -> target_field
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "mapping": {"old_name": "new_name"},
     },
     # Azure transforms require valid Azure credentials
@@ -101,12 +101,12 @@ TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
 SINK_CONFIGS: dict[str, dict[str, Any] | None] = {
     "csv": {
         "path": "/tmp/output.csv",
-        "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+        "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
         "test_row": {"id": 1, "name": "test"},  # Matches strict schema
     },
     "json": {
         "path": "/tmp/output.json",
-        "schema": {"fields": "dynamic"},
+        "schema": {"mode": "observed"},
         "test_row": {"test_field": "test_value"},  # Dynamic accepts any fields
     },
     # Database sink requires valid database URL
@@ -381,7 +381,7 @@ class TestPluginInitSafety:
         instance = csv_source_cls(
             {
                 "path": "/nonexistent/file/that/does/not/exist.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -402,7 +402,7 @@ class TestPluginInitSafety:
         instance = json_source_cls(
             {
                 "path": "/nonexistent/file/that/does/not/exist.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "quarantine",
             }
         )
@@ -422,7 +422,7 @@ class TestPluginInitSafety:
         instance = csv_sink_cls(
             {
                 "path": "/nonexistent/directory/that/does/not/exist/output.csv",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -441,7 +441,7 @@ class TestPluginInitSafety:
         instance = json_sink_cls(
             {
                 "path": "/nonexistent/directory/that/does/not/exist/output.json",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 

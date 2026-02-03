@@ -1,23 +1,25 @@
-# ELSPETH Multi-Query Case Study Assessment Example (OpenRouter)
+# ELSPETH Multi-Query Case Study Assessment Example
 #
 # This pipeline reads case studies from a CSV, evaluates each against multiple
-# criteria using OpenRouter API, and outputs assessment scores and rationales.
-#
-# OpenRouter provides access to 100+ LLM models including Claude, GPT-4, Llama,
-# Mistral, and more through a unified API.
+# criteria using Azure OpenAI, and outputs assessment scores and rationales.
 #
 # Prerequisites:
-#   export OPENROUTER_API_KEY="your-openrouter-api-key"
+#   export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+#   export AZURE_OPENAI_KEY="your-api-key-here"
+#   export AZURE_OPENAI_DEPLOYMENT="your-gpt-deployment-name"
 #
 # Run with:
-#   uv run elspeth run -s examples/openrouter_multi_query_assessment/suite.yaml --execute
+#   uv run elspeth run -s examples/multi_query_assessment/settings.yaml --execute
+
+name: case_study_assessment
+description: Assess multiple case studies against multiple criteria
 
 source:
   plugin: csv
   options:
-    path: examples/openrouter_multi_query_assessment/input.csv
+    path: examples/multi_query_assessment/input.csv
     schema:
-      mode: free
+      mode: flexible
       fields:
         - "user_id: str"
         - "cs1_background: str"
@@ -29,16 +31,11 @@ source:
     on_validation_failure: discard
 
 transforms:
-  - plugin: openrouter_multi_query_llm
+  - plugin: azure_multi_query_llm
     options:
-      # OpenRouter model - choose from 100+ providers
-      # Popular options:
-      #   - anthropic/claude-3-opus (best quality)
-      #   - anthropic/claude-3-sonnet (balanced)
-      #   - openai/gpt-4o (fast, capable)
-      #   - meta-llama/llama-3.1-70b-instruct (open source)
-      model: "anthropic/claude-3-5-sonnet"
-      api_key: "${OPENROUTER_API_KEY}"
+      deployment_name: "${AZURE_OPENAI_DEPLOYMENT}"
+      endpoint: "${AZURE_OPENAI_ENDPOINT}"
+      api_key: "${AZURE_OPENAI_KEY}"
 
       system_prompt: |
         You are a medical assessment AI. For each case study and criterion,
@@ -125,17 +122,17 @@ transforms:
       max_tokens: 500
 
       schema:
-        fields: dynamic
+        mode: observed
 
 sinks:
-  output:
+  results:
     plugin: csv
     options:
-      path: examples/openrouter_multi_query_assessment/output/results.csv
+      path: examples/multi_query_assessment/output/results.csv
       schema:
-        fields: dynamic
+        mode: observed
 
-default_sink: output
+default_sink: results
 
 landscape:
-  url: sqlite:///examples/openrouter_multi_query_assessment/runs/audit.db
+  url: sqlite:///examples/multi_query_assessment/runs/audit.db

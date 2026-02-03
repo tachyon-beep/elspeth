@@ -18,7 +18,7 @@ source:
   options:
     path: test_input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         field_a: {type: str}
 
@@ -35,7 +35,7 @@ sinks:
     options:
       path: test_output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           field_b: {type: int}  # INCOMPATIBLE
 
@@ -67,7 +67,7 @@ source:
   options:
     path: test_input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         field_a: {type: str}
 
@@ -84,7 +84,7 @@ sinks:
     options:
       path: test_output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           field_b: {type: int}  # INCOMPATIBLE
 

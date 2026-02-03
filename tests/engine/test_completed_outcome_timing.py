@@ -56,7 +56,7 @@ from tests.conftest import (
 def _build_graph(config: PipelineConfig) -> ExecutionGraph:
     """Build a simple linear graph for testing."""
     graph = ExecutionGraph()
-    schema_config = {"schema": {"fields": "dynamic"}}
+    schema_config = {"schema": {"mode": "observed"}}
 
     # Add source
     graph.add_node(
@@ -149,7 +149,7 @@ class TestCompletedOutcomeTimingContract:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -250,7 +250,7 @@ class TestCompletedOutcomeTimingContract:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})
@@ -336,7 +336,7 @@ class TestCompletedOutcomeTimingContract:
             output_schema = RowSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "passthrough"})

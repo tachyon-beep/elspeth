@@ -18,7 +18,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.base import BaseLLMTransform, LLMConfig
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def create_test_transform_class(
@@ -246,7 +246,7 @@ class TestLLMConfig:
                 "template_source": "prompts/test.j2",
                 "lookup": {"key": "value"},
                 "lookup_source": "prompts/lookups.yaml",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )
@@ -618,7 +618,7 @@ class TestBaseLLMTransformSchemaHandling:
             {
                 "model": "gpt-4",
                 "template": "{{ row.text }}",
-                "schema": {"mode": "strict", "fields": ["count: int"]},
+                "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "required_input_fields": [],  # Explicit opt-out for this test
             }
         )

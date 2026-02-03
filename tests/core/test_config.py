@@ -2944,7 +2944,7 @@ transforms:
       template_file: prompts/test.j2
       lookup_file: prompts/lookups.yaml
       schema:
-        fields: dynamic
+        mode: observed
 """)
 
         settings = load_settings(settings_file)
@@ -3187,6 +3187,6 @@ class TestPluginConfigSchemaValidation:
         """Valid schema dict should work fine."""
         from elspeth.plugins.config_base import PluginConfig
 
-        config = PluginConfig.from_dict({"schema": {"fields": "dynamic"}})
+        config = PluginConfig.from_dict({"schema": {"mode": "observed"}})
         assert config.schema_config is not None
-        assert config.schema_config.is_dynamic
+        assert config.schema_config.is_observed

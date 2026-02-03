@@ -23,7 +23,7 @@ class TestValidateCommand:
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -31,7 +31,7 @@ class TestValidateCommand:
                     "plugin": "json",
                     "options": {
                         "path": "/data/output.json",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -57,7 +57,7 @@ class TestValidateCommand:
                     "plugin": "json",
                     "options": {
                         "path": "/data/output.json",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -76,7 +76,7 @@ class TestValidateCommand:
                 "options": {
                     "path": "/data/input.csv",
                     "on_validation_failure": "quarantine",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             },
             "sinks": {
@@ -84,7 +84,7 @@ class TestValidateCommand:
                     "plugin": "json",
                     "options": {
                         "path": "/data/output.json",
-                        "schema": {"fields": "dynamic"},
+                        "schema": {"mode": "observed"},
                     },
                 },
             },
@@ -144,7 +144,7 @@ source:
     path: /data/input.csv
     on_validation_failure: quarantine
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   output:
@@ -152,7 +152,7 @@ sinks:
     options:
       path: /data/output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 
@@ -182,7 +182,7 @@ source:
     path: /data/input.csv
     on_validation_failure: quarantine
     schema:
-      fields: dynamic
+      mode: observed
 
 sinks:
   results:
@@ -190,7 +190,7 @@ sinks:
     options:
       path: /data/results.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
   flagged:
@@ -198,7 +198,7 @@ sinks:
     options:
       path: /data/flagged.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "data: str"
 

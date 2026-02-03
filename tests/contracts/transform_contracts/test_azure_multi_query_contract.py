@@ -67,7 +67,7 @@ class TestAzureMultiQueryLLMSpecific:
                 ],
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
@@ -96,7 +96,7 @@ class TestAzureMultiQueryLLMSpecific:
                 "criteria": [{"name": "crit1"}],
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
@@ -121,7 +121,7 @@ class TestAzureMultiQueryLLMAuditTrail:
                 "criteria": [{"name": "crit1"}],
                 "response_format": "standard",
                 "output_mapping": {"score": {"suffix": "score", "type": "integer"}},
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }
@@ -153,7 +153,7 @@ class TestAzureMultiQueryBatchContract(BatchTransformContractTestBase):
                     "score": {"suffix": "score", "type": "integer"},
                     "rationale": {"suffix": "rationale", "type": "string"},
                 },
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_error": "quarantine_sink",
                 "required_input_fields": [],
             }

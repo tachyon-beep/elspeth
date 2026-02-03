@@ -16,7 +16,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestBatchStatsHappyPath:
@@ -157,7 +157,7 @@ class TestBatchStatsOutputSchema:
     The output shape is completely different from input, so output_schema must be dynamic.
     """
 
-    def test_output_schema_is_dynamic(self) -> None:
+    def test_output_schema_is_observed(self) -> None:
         """BatchStats uses dynamic output_schema.
 
         BatchStats always outputs {count, sum, mean, batch_size, ...} regardless
@@ -169,7 +169,7 @@ class TestBatchStatsOutputSchema:
         # Explicit schema: expects id, amount, category
         transform = BatchStats(
             {
-                "schema": {"mode": "strict", "fields": ["id: int", "amount: float", "category: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "amount: float", "category: str"]},
                 "value_field": "amount",
                 "group_by": "category",
             }

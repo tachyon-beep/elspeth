@@ -51,7 +51,7 @@ class TestSourceContractIntegration:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -87,7 +87,7 @@ class TestSourceContractIntegration:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
                 "normalize_fields": True,
             }
@@ -129,7 +129,7 @@ class TestSourceContractIntegration:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
@@ -170,7 +170,7 @@ class TestSourceContractIntegration:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -215,7 +215,7 @@ class TestSourceContractIntegration:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -256,7 +256,7 @@ class TestSourceContractIntegration:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",
@@ -284,7 +284,7 @@ class TestSourceContractIntegration:
         source = CSVSource(
             {
                 "path": str(csv_file),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -315,7 +315,7 @@ class TestSourceContractIntegration:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "free",
+                    "mode": "flexible",
                     "fields": ["id: int"],  # Only id declared
                 },
                 "on_validation_failure": "discard",
@@ -368,7 +368,7 @@ class TestSourceContractIntegration:
             {
                 "path": str(csv_file),
                 "schema": {
-                    "mode": "strict",
+                    "mode": "fixed",
                     "fields": ["id: int", "amount: int"],
                 },
                 "on_validation_failure": "quarantine",

@@ -89,7 +89,7 @@ class TrackingTransform(BaseTransform):
     output_schema = ValueSchema
 
     def __init__(self, name: str = "tracking") -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
         self.name = name  # type: ignore[misc]
         self.close_called = False
         self.close_call_count = 0
@@ -202,7 +202,7 @@ class TestOrchestratorCleanup:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "test"})

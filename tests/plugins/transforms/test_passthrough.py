@@ -8,7 +8,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import TransformProtocol
 
 # Common schema config for dynamic field handling (accepts any fields)
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 class TestPassThrough:
@@ -109,7 +109,7 @@ class TestPassThrough:
 
         transform = PassThrough(
             {
-                "schema": {"mode": "strict", "fields": ["count: int"]},
+                "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "validate_input": True,
             }
         )
@@ -127,7 +127,7 @@ class TestPassThrough:
 
         transform = PassThrough(
             {
-                "schema": {"mode": "strict", "fields": ["count: int"]},
+                "schema": {"mode": "fixed", "fields": ["count: int"]},
                 "validate_input": False,  # Explicit default
             }
         )
@@ -147,7 +147,7 @@ class TestPassThrough:
 
         transform = PassThrough(
             {
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "validate_input": True,  # Would validate, but schema is dynamic
             }
         )
@@ -161,11 +161,11 @@ class TestPassThrough:
         from elspeth.plugins.transforms.passthrough import PassThrough
 
         # Valid: Dynamic schema (always compatible with itself)
-        dynamic_config = {"schema": {"fields": "dynamic"}}
+        dynamic_config = {"schema": {"mode": "observed"}}
         PassThrough(dynamic_config)  # Should succeed
 
         # Valid: Explicit schema (compatible with itself)
-        explicit_config = {"schema": {"mode": "strict", "fields": ["id: int", "name: str"]}}
+        explicit_config = {"schema": {"mode": "fixed", "fields": ["id: int", "name: str"]}}
         PassThrough(explicit_config)  # Should succeed
 
         # Note: PassThrough has same input/output schema, so always compatible

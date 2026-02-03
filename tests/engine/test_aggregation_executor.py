@@ -11,7 +11,7 @@ from elspeth.contracts.types import NodeID
 from tests.conftest import as_transform
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 def unique_id(prefix: str = "") -> str:

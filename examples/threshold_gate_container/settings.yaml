@@ -19,7 +19,7 @@ source:
   options:
     path: /app/pipeline/input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "id: int"
         - "name: str"
@@ -40,7 +40,7 @@ sinks:
     options:
       path: /app/pipeline/output/normal.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "name: str"
@@ -51,7 +51,7 @@ sinks:
     options:
       path: /app/pipeline/output/high_values.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "id: int"
           - "name: str"

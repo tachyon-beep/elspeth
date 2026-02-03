@@ -86,14 +86,14 @@ class TestHashStability:
         # Current dict format (only explicit fields)
         current_config = {
             "routes": {"true": "continue", "false": "sink_a"},
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "condition": "row['amount'] > 100",
         }
 
         # Typed config with None for optional fields
         typed_config = MockGateNodeConfig(
             routes={"true": "continue", "false": "sink_a"},
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             condition="row['amount'] > 100",
             fork_to=None,  # Optional, not set
             plugin_config=None,  # Optional, not set
@@ -115,14 +115,14 @@ class TestHashStability:
         # Current dict format
         current_config = {
             "routes": {"true": "continue", "false": "sink_a"},
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "condition": "row['amount'] > 100",
         }
 
         # Typed config
         typed_config = MockGateNodeConfig(
             routes={"true": "continue", "false": "sink_a"},
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             condition="row['amount'] > 100",
             fork_to=None,
             plugin_config=None,
@@ -144,7 +144,7 @@ class TestHashStability:
         current_config = {
             "routes": {"a": "sink_1", "b": "sink_2"},
             "schema": {
-                "fields": "dynamic",
+                "mode": "observed",
                 "guaranteed_fields": ["id", "name"],
             },
         }
@@ -152,7 +152,7 @@ class TestHashStability:
         typed_config = MockGateNodeConfig(
             routes={"a": "sink_1", "b": "sink_2"},
             schema={
-                "fields": "dynamic",
+                "mode": "observed",
                 "guaranteed_fields": ["id", "name"],
             },
             condition=None,
@@ -167,14 +167,14 @@ class TestHashStability:
         """Verify hash matches when optional fields ARE set."""
         current_config = {
             "routes": {"true": "continue"},
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "condition": "x > 0",
             "fork_to": ["branch_a", "branch_b"],
         }
 
         typed_config = MockGateNodeConfig(
             routes={"true": "continue"},
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             condition="x > 0",
             fork_to=["branch_a", "branch_b"],
             plugin_config=None,  # Still None
@@ -188,12 +188,12 @@ class TestHashStability:
         """Verify transform config hash stability."""
         current_config = {
             "plugin_config": {"model": "gpt-4", "temperature": 0.7},
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
         }
 
         typed_config = MockTransformNodeConfig(
             plugin_config={"model": "gpt-4", "temperature": 0.7},
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             required_input_fields=None,
         )
 
@@ -206,14 +206,14 @@ class TestHashStability:
             "branches": ["path_a", "path_b"],
             "policy": "require_all",
             "merge": "union",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
         }
 
         typed_config = MockCoalesceNodeConfig(
             branches=["path_a", "path_b"],
             policy="require_all",
             merge="union",
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             timeout_seconds=None,
             quorum_count=None,
             select_branch=None,
@@ -228,7 +228,7 @@ class TestHashStability:
             "branches": ["a", "b"],
             "policy": "quorum",
             "merge": "select",
-            "schema": {"fields": "dynamic"},
+            "schema": {"mode": "observed"},
             "quorum_count": 1,
             "select_branch": "a",
         }
@@ -237,7 +237,7 @@ class TestHashStability:
             branches=["a", "b"],
             policy="quorum",
             merge="select",
-            schema={"fields": "dynamic"},
+            schema={"mode": "observed"},
             timeout_seconds=None,  # Not set
             quorum_count=1,  # Set
             select_branch="a",  # Set
@@ -269,10 +269,10 @@ class TestSchemaPresence:
         from elspeth.plugins.sources.null_source import NullSource
         from elspeth.plugins.transforms.passthrough import PassThrough
 
-        source = NullSource({"schema": {"fields": "dynamic"}})
-        transform = PassThrough({"schema": {"fields": "dynamic"}})
+        source = NullSource({"schema": {"mode": "observed"}})
+        transform = PassThrough({"schema": {"mode": "observed"}})
         # Sinks require schema_config for validation
-        sink = JSONSink({"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})
+        sink = JSONSink({"path": "/tmp/test.json", "schema": {"mode": "observed"}})
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
@@ -290,7 +290,7 @@ class TestSchemaPresence:
         # Transform should have schema in config
         transform_node = graph.get_node_info(transform_nodes[0])
         assert "schema" in transform_node.config, "Transform missing schema in config"
-        assert transform_node.config["schema"] == {"fields": "dynamic"}
+        assert transform_node.config["schema"] == {"mode": "observed"}
 
     def test_config_gate_has_schema_after_construction(self) -> None:
         """Verify config-driven gates have schema from upstream."""
@@ -299,10 +299,10 @@ class TestSchemaPresence:
         from elspeth.plugins.sinks.json_sink import JSONSink
         from elspeth.plugins.sources.null_source import NullSource
 
-        source = NullSource({"schema": {"fields": "dynamic"}})
+        source = NullSource({"schema": {"mode": "observed"}})
         # Sinks require schema_config
-        sink_a = JSONSink({"path": "/tmp/a.json", "schema": {"fields": "dynamic"}})
-        sink_b = JSONSink({"path": "/tmp/b.json", "schema": {"fields": "dynamic"}})
+        sink_a = JSONSink({"path": "/tmp/a.json", "schema": {"mode": "observed"}})
+        sink_b = JSONSink({"path": "/tmp/b.json", "schema": {"mode": "observed"}})
 
         gate = GateSettings(
             name="router",
@@ -345,7 +345,7 @@ class TestPluginConfigAccess:
         """Verify plugins receive and store config dict."""
         from elspeth.plugins.transforms.passthrough import PassThrough
 
-        config = {"schema": {"fields": "dynamic"}, "validate_input": True}
+        config = {"schema": {"mode": "observed"}, "validate_input": True}
         plugin = PassThrough(config)
 
         # Plugin stores config as dict
@@ -360,9 +360,9 @@ class TestPluginConfigAccess:
         from elspeth.plugins.sources.null_source import NullSource
         from elspeth.plugins.transforms.passthrough import PassThrough
 
-        source = NullSource({"schema": {"fields": "dynamic"}})
-        transform = PassThrough({"schema": {"fields": "dynamic"}, "validate_input": True})
-        sink = JSONSink({"path": "/tmp/test.json", "schema": {"fields": "dynamic"}})
+        source = NullSource({"schema": {"mode": "observed"}})
+        transform = PassThrough({"schema": {"mode": "observed"}, "validate_input": True})
+        sink = JSONSink({"path": "/tmp/test.json", "schema": {"mode": "observed"}})
 
         graph = ExecutionGraph.from_plugin_instances(
             source=source,
@@ -398,7 +398,7 @@ class TestPluginConfigAccess:
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
         # CSVSink requires strict schema (fixed columns, no dynamic)
-        config = {"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "strict"}}
+        config = {"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "fixed"}}
         sink = CSVSink(config)
 
         # Direct access works
@@ -433,25 +433,25 @@ class TestJsonSafeConfig:
             CSVSource(
                 {
                     "path": "/tmp/test.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "discard",
                 }
             ),
             JSONSource(
                 {
                     "path": "/tmp/test.json",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "on_validation_failure": "discard",
                 }
             ),
-            NullSource({"schema": {"fields": "dynamic"}, "rows": [{"id": 1}]}),
+            NullSource({"schema": {"mode": "observed"}, "rows": [{"id": 1}]}),
         ]
 
         for source in sources:
             # Use the actual plugin config (what would go into NodeInfo)
             typed = MockTransformNodeConfig(
                 plugin_config=dict(source.config),
-                schema={"fields": "dynamic"},
+                schema={"mode": "observed"},
             )
             serialized = config_to_dict_filtered(typed)
             # Must survive canonical_json (the actual hot path)
@@ -466,16 +466,16 @@ class TestJsonSafeConfig:
 
         # Create real plugin instances with correct field names
         transforms = [
-            PassThrough({"schema": {"fields": "dynamic"}, "validate_input": True}),
+            PassThrough({"schema": {"mode": "observed"}, "validate_input": True}),
             FieldMapper(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "mapping": {"old_field": "new_field"},
                 }
             ),
             Truncate(
                 {
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "fields": {"description": 100},  # Correct: fields is a dict
                 }
             ),
@@ -484,7 +484,7 @@ class TestJsonSafeConfig:
         for transform in transforms:
             typed = MockTransformNodeConfig(
                 plugin_config=dict(transform.config),
-                schema={"fields": "dynamic"},
+                schema={"mode": "observed"},
             )
             serialized = config_to_dict_filtered(typed)
             result = canonical_json(serialized)
@@ -497,15 +497,15 @@ class TestJsonSafeConfig:
 
         # Create real plugin instances and extract their configs
         sinks = [
-            CSVSink({"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "strict"}}),
-            JSONSink({"path": "/tmp/output.json", "schema": {"fields": "dynamic"}}),
+            CSVSink({"path": "/tmp/output.csv", "schema": {"fields": ["data: str"], "mode": "fixed"}}),
+            JSONSink({"path": "/tmp/output.json", "schema": {"mode": "observed"}}),
         ]
 
         for sink in sinks:
             # Sinks use opaque plugin_config
             typed = MockTransformNodeConfig(
                 plugin_config=dict(sink.config),
-                schema={"fields": "dynamic"},
+                schema={"mode": "observed"},
             )
             serialized = config_to_dict_filtered(typed)
             result = canonical_json(serialized)
@@ -517,7 +517,7 @@ class TestJsonSafeConfig:
             branches=["branch_a", "branch_b"],
             policy="require_all",
             merge="union",
-            schema={"fields": "dynamic", "guaranteed_fields": ["id"]},
+            schema={"mode": "observed", "guaranteed_fields": ["id"]},
             timeout_seconds=30.0,
             quorum_count=None,
             select_branch=None,

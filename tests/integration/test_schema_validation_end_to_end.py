@@ -29,7 +29,7 @@ source:
   options:
     path: test_input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -38,7 +38,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -48,7 +48,7 @@ sinks:
     options:
       path: test_output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
 
@@ -78,7 +78,7 @@ source:
   options:
     path: test_input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "field_a: str"
     on_validation_failure: discard
@@ -87,13 +87,13 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_b: int"  # INCOMPATIBLE: requires field_b, gets field_a
 
@@ -102,7 +102,7 @@ sinks:
     plugin: json
     options:
       path: test_output.json
-      schema: {fields: dynamic}
+      schema: {mode: observed}
       format: jsonl
 
 default_sink: output
@@ -138,7 +138,7 @@ source:
   options:
     path: test_input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -150,7 +150,7 @@ aggregations:
       count: 10
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
       value_field: value
@@ -161,7 +161,7 @@ sinks:
     options:
       path: test_output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "total_records: int"  # Would be incompatible, but validation is skipped
 
@@ -191,20 +191,20 @@ source:
   plugin: csv
   options:
     path: test_input.csv
-    schema: {fields: dynamic}  # Dynamic schema
+    schema: {mode: observed}  # Dynamic schema
     on_validation_failure: discard
 
 transforms:
   - plugin: passthrough
     options:
-      schema: {fields: dynamic}
+      schema: {mode: observed}
 
 sinks:
   output:
     plugin: json
     options:
       path: test_output.json
-      schema: {fields: dynamic}
+      schema: {mode: observed}
       format: jsonl
 
 default_sink: output
@@ -233,7 +233,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "wrong_field: str"  # Aggregation expects 'value', not 'wrong_field'
     on_validation_failure: discard
@@ -245,7 +245,7 @@ aggregations:
       count: 10
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"  # Requires 'value' field
       value_field: value
@@ -255,7 +255,7 @@ sinks:
     plugin: json
     options:
       path: out.json
-      schema: {fields: dynamic}
+      schema: {mode: observed}
       format: jsonl
 
 default_sink: output
@@ -292,7 +292,7 @@ source:
   options:
     path: test.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "value: float"
     on_validation_failure: discard
@@ -304,7 +304,7 @@ aggregations:
       count: 10
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "value: float"
       value_field: value
@@ -316,7 +316,7 @@ sinks:
     options:
       path: out.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "nonexistent_field: str"  # Would be incompatible, but validation is skipped
 
@@ -349,7 +349,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
     # PHASE 1 should fail: Malformed schema in plugin config
     bad_self_config = {
         "path": "test.csv",
-        "schema": {"mode": "strict", "fields": ["invalid syntax!!!"]},
+        "schema": {"mode": "fixed", "fields": ["invalid syntax!!!"]},
         "on_validation_failure": "discard",
     }
 
@@ -364,7 +364,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
             "plugin": "csv",
             "options": {
                 "path": "test.csv",
-                "schema": {"mode": "strict", "fields": ["id: int"]},  # Only has 'id'
+                "schema": {"mode": "fixed", "fields": ["id: int"]},  # Only has 'id'
                 "on_validation_failure": "discard",
             },
         },
@@ -372,14 +372,14 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
             {
                 "plugin": "passthrough",
                 "options": {
-                    "schema": {"mode": "strict", "fields": ["id: int", "email: str"]},  # Requires 'email'!
+                    "schema": {"mode": "fixed", "fields": ["id: int", "email: str"]},  # Requires 'email'!
                 },
             }
         ],
         "sinks": {
             "out": {
                 "plugin": "json",
-                "options": {"path": "out.json", "schema": {"fields": "dynamic"}, "format": "jsonl"},
+                "options": {"path": "out.json", "schema": {"mode": "observed"}, "format": "jsonl"},
             }
         },
         "default_sink": "out",

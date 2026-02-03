@@ -37,7 +37,7 @@ ELSPETH's schema contracts automatically:
 
 ```bash
 # Execute the pipeline
-uv run elspeth run -s examples/schema_contracts_demo/suite.yaml --execute
+uv run elspeth run -s examples/schema_contracts_demo/settings.yaml --execute
 
 # Inspect the audit trail with MCP server
 uv run elspeth-mcp --database sqlite:///examples/schema_contracts_demo/runs/audit.db
@@ -75,7 +75,7 @@ After running, use these MCP tools to explore the contract:
 | File | Purpose |
 |------|---------|
 | `input.csv` | CSV with intentionally crazy headers |
-| `suite.yaml` | Pipeline with `normalize_fields: true` and typed schema |
+| `settings.yaml` | Pipeline with `normalize_fields: true` and typed schema |
 | `output/processed.csv` | Regular transactions (< $500) |
 | `output/high_value.csv` | High-value transactions (>= $500) |
 | `runs/audit.db` | Landscape audit trail with contract records |

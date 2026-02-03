@@ -21,7 +21,7 @@ from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import nodes_table, runs_table, validation_errors_table
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestBeginRunWithSchemaContract:
@@ -615,7 +615,7 @@ class TestRecordValidationErrorWithContract:
             node_id="source_1",
             row_data={"amount": "not_a_number"},
             error="Type mismatch: expected int, got str",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="quarantine",
             contract_violation=violation,
         )
@@ -670,7 +670,7 @@ class TestRecordValidationErrorWithContract:
             node_id="source_1",
             row_data={},
             error="Missing required field: Customer ID",
-            schema_mode="strict",
+            schema_mode="fixed",
             destination="discard",
             contract_violation=violation,
         )
@@ -719,7 +719,7 @@ class TestRecordValidationErrorWithContract:
             node_id="source_1",
             row_data={"bad": "data"},
             error="Generic validation error",
-            schema_mode="free",
+            schema_mode="flexible",
             destination="discard",
         )
 

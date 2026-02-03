@@ -11,7 +11,7 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestLandscapeRecorderNodes:
@@ -281,7 +281,7 @@ class TestSchemaRecording:
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
 
-        schema_config = SchemaConfig.from_dict({"fields": "dynamic"})
+        schema_config = SchemaConfig.from_dict({"mode": "observed"})
 
         node = recorder.register_node(
             run_id=run.run_id,
@@ -294,7 +294,7 @@ class TestSchemaRecording:
 
         retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
-        assert retrieved.schema_mode == "dynamic"
+        assert retrieved.schema_mode == "observed"
         assert retrieved.schema_fields is None
 
     def test_register_node_with_explicit_schema(self) -> None:
@@ -305,7 +305,7 @@ class TestSchemaRecording:
 
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["id: int", "name: str"],
             }
         )
@@ -321,7 +321,7 @@ class TestSchemaRecording:
 
         retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
-        assert retrieved.schema_mode == "strict"
+        assert retrieved.schema_mode == "fixed"
         assert retrieved.schema_fields is not None
         assert len(retrieved.schema_fields) == 2
         assert retrieved.schema_fields[0]["name"] == "id"
@@ -335,7 +335,7 @@ class TestSchemaRecording:
 
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "free",
+                "mode": "flexible",
                 "fields": ["id: int", "name: str", "score: float?"],
             }
         )
@@ -351,7 +351,7 @@ class TestSchemaRecording:
 
         retrieved = recorder.get_node(node.node_id, run.run_id)
         assert retrieved is not None
-        assert retrieved.schema_mode == "free"
+        assert retrieved.schema_mode == "flexible"
         assert retrieved.schema_fields is not None
         assert len(retrieved.schema_fields) == 3
         # Verify optional field is marked correctly
@@ -367,7 +367,7 @@ class TestSchemaRecording:
         # Register one node with explicit schema
         schema_config = SchemaConfig.from_dict(
             {
-                "mode": "strict",
+                "mode": "fixed",
                 "fields": ["value: int"],
             }
         )
@@ -382,6 +382,6 @@ class TestSchemaRecording:
 
         nodes = recorder.get_nodes(run.run_id)
         assert len(nodes) == 1
-        assert nodes[0].schema_mode == "strict"
+        assert nodes[0].schema_mode == "fixed"
         assert nodes[0].schema_fields is not None
         assert len(nodes[0].schema_fields) == 1

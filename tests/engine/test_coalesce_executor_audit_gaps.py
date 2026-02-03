@@ -21,7 +21,7 @@ from elspeth.engine.coalesce_executor import CoalesceExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 @pytest.fixture

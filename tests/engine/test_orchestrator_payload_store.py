@@ -316,7 +316,7 @@ class TestOrchestratorPayloadStoreIntegration:
             output_schema = DoubledSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(

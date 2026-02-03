@@ -383,7 +383,7 @@ class AzureBlobSink(BaseSink):
 
         When schema is dynamic, falls back to inferring from row keys.
         """
-        if not self._schema_config.is_dynamic and self._schema_config.fields:
+        if not self._schema_config.is_observed and self._schema_config.fields:
             # Explicit schema: use field names from schema definition
             return [field_def.name for field_def in self._schema_config.fields]
         else:

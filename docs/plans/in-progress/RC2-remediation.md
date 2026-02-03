@@ -109,7 +109,7 @@ if checkpoint.format_version < CHECKPOINT_FORMAT_VERSION:
 ### QW-06: Fix Broken Example (multi_query_assessment)
 **Source:** Examples Analysis | **Effort:** 0.25 days | **Impact:** Example works
 
-**File:** `examples/multi_query_assessment/suite.yaml`
+**File:** `examples/multi_query_assessment/settings.yaml`
 ```yaml
 # CURRENT (broken):
 source:

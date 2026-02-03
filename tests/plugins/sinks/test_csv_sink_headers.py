@@ -15,7 +15,7 @@ from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 # CSVSink requires fixed-column structure (strict mode)
-STRICT_SCHEMA = {"mode": "strict", "fields": ["amount_usd: int", "customer_id: str"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["amount_usd: int", "customer_id: str"]}
 
 
 class TestCSVSinkContractSupport:

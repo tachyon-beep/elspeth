@@ -54,7 +54,7 @@ class NullSource(BaseSource):
         """
         config_copy = dict(config)
         if "schema" not in config_copy:
-            config_copy["schema"] = {"fields": "dynamic"}
+            config_copy["schema"] = {"mode": "observed"}
         super().__init__(config_copy)
         # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema

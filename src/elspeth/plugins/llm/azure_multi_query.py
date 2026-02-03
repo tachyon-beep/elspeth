@@ -104,7 +104,7 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
                   type: string
               pool_size: 4
               schema:
-                fields: dynamic
+                mode: observed
 
     Output fields per query:
         {case_study}_{criterion}_{json_field} for each output_mapping entry
@@ -178,7 +178,6 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._output_schema_config = SchemaConfig(
             mode=schema_config.mode,
             fields=schema_config.fields,
-            is_dynamic=schema_config.is_dynamic,
             guaranteed_fields=tuple(set(base_guaranteed) | all_guaranteed),
             audit_fields=tuple(set(base_audit) | all_audit),
             required_fields=schema_config.required_fields,

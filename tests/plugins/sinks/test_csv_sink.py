@@ -15,7 +15,7 @@ from elspeth.plugins.context import PluginContext
 # Strict schema config for tests - PathConfig now requires schema
 # CSVSink requires fixed-column structure, so we use strict mode
 # Tests that need specific fields define their own schema
-STRICT_SCHEMA = {"mode": "strict", "fields": ["id: str", "name: str"]}
+STRICT_SCHEMA = {"mode": "fixed", "fields": ["id: str", "name: str"]}
 
 
 class TestCSVSink:
@@ -251,7 +251,7 @@ class TestCSVSink:
 
         # Strict schema with optional field 'score'
         explicit_schema = {
-            "mode": "strict",
+            "mode": "fixed",
             "fields": ["id: int", "score: float?"],
         }
 
@@ -340,7 +340,7 @@ class TestCSVSinkSchemaValidation:
         """CSVSink accepts strict mode - columns from config."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        strict_schema = {"mode": "strict", "fields": ["id: int", "name: str"]}
+        strict_schema = {"mode": "fixed", "fields": ["id: int", "name: str"]}
 
         sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": strict_schema})
         assert sink is not None
@@ -349,7 +349,7 @@ class TestCSVSinkSchemaValidation:
         """CSVSink accepts free mode - declared + first-row extras, then locked."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        free_schema = {"mode": "free", "fields": ["id: int"]}
+        free_schema = {"mode": "flexible", "fields": ["id: int"]}
 
         sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": free_schema})
         assert sink is not None
@@ -358,7 +358,7 @@ class TestCSVSinkSchemaValidation:
         """CSVSink accepts dynamic mode - columns from first row, then locked."""
         from elspeth.plugins.sinks.csv_sink import CSVSink
 
-        dynamic_schema = {"fields": "dynamic"}
+        dynamic_schema = {"mode": "observed"}
 
         sink = CSVSink({"path": str(tmp_path / "output.csv"), "schema": dynamic_schema})
         assert sink is not None
@@ -371,7 +371,7 @@ class TestCSVSinkSchemaValidation:
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -392,7 +392,7 @@ class TestCSVSinkSchemaValidation:
         sink = CSVSink(
             {
                 "path": str(tmp_path / "output.csv"),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -404,3 +404,71 @@ class TestCSVSinkSchemaValidation:
             sink.write([{"a": 3, "b": 4, "c": 5}], ctx)
 
         sink.close()
+
+    def test_flexible_mode_includes_extras_from_first_row(self, tmp_path: Path) -> None:
+        """Flexible mode includes declared fields + extras from first row.
+
+        This is the documented behavior: flexible mode should accept at least
+        the declared fields, plus any extras present in the first row.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        # Schema declares only 'id', but first row has 'id', 'name', 'extra'
+        flexible_schema = {"mode": "flexible", "fields": ["id: int"]}
+        sink = CSVSink(
+            {
+                "path": str(tmp_path / "output.csv"),
+                "schema": flexible_schema,
+            }
+        )
+
+        # First write has declared field + two extras
+        sink.write([{"id": 1, "name": "alice", "extra": "value"}], ctx)
+        sink.close()
+
+        # Verify all fields are in output (declared + extras)
+        with open(tmp_path / "output.csv") as f:
+            reader = csv.DictReader(f)
+            fieldnames = set(reader.fieldnames or [])
+            rows = list(reader)
+
+        # All three fields should be present
+        assert "id" in fieldnames, "Declared field 'id' should be present"
+        assert "name" in fieldnames, "Extra field 'name' from first row should be present"
+        assert "extra" in fieldnames, "Extra field 'extra' from first row should be present"
+
+        # Verify data was written correctly
+        assert len(rows) == 1
+        assert rows[0]["id"] == "1"
+        assert rows[0]["name"] == "alice"
+        assert rows[0]["extra"] == "value"
+
+    def test_flexible_mode_declared_fields_come_first(self, tmp_path: Path) -> None:
+        """Flexible mode should place declared fields before extras for predictability."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        ctx = PluginContext(run_id="test-run", config={})
+        # Schema declares 'id' and 'name'
+        flexible_schema = {"mode": "flexible", "fields": ["id: int", "name: str"]}
+        sink = CSVSink(
+            {
+                "path": str(tmp_path / "output.csv"),
+                "schema": flexible_schema,
+            }
+        )
+
+        # First row has extras interspersed (dict order depends on Python version)
+        sink.write([{"extra1": "a", "id": 1, "extra2": "b", "name": "alice"}], ctx)
+        sink.close()
+
+        # Verify declared fields come first in header order
+        with open(tmp_path / "output.csv") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+
+        # Declared fields should be first (in schema order)
+        assert fieldnames[0] == "id", "First declared field should be first"
+        assert fieldnames[1] == "name", "Second declared field should be second"
+        # Extras come after (order not guaranteed among extras)
+        assert set(fieldnames[2:]) == {"extra1", "extra2"}, "Extra fields should follow declared fields"

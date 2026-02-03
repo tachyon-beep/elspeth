@@ -14,7 +14,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.types import GateName, NodeID
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 class TestProcessorRecordsOutcomes:
@@ -106,7 +106,7 @@ class TestAllOutcomeTypesRecorded:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -159,7 +159,7 @@ class TestAllOutcomeTypesRecorded:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         # Need an aggregation node for the batch
         recorder.register_node(
@@ -170,7 +170,7 @@ class TestAllOutcomeTypesRecorded:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -217,7 +217,7 @@ class TestTerminalUniquenessConstraint:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -250,7 +250,7 @@ class TestTerminalUniquenessConstraint:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         # Need an aggregation node for batches
         recorder.register_node(
@@ -261,7 +261,7 @@ class TestTerminalUniquenessConstraint:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"x": 1})
         token = recorder.create_token(row.row_id)
@@ -305,7 +305,7 @@ class TestExplainShowsRecordedOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"data": "test"})
         token = recorder.create_token(row.row_id)
@@ -338,7 +338,7 @@ class TestExplainShowsRecordedOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"data": "test"})
         token = recorder.create_token(row.row_id)
@@ -377,7 +377,7 @@ class TestExplainShowsRecordedOutcome:
             plugin_version="1.0",
             config={},
             determinism=Determinism.DETERMINISTIC,
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         row = recorder.create_row(run.run_id, "src", 0, {"data": "test"})
         token = recorder.create_token(row.row_id)
@@ -423,7 +423,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         transform = recorder.register_node(
             run_id=run.run_id,
@@ -431,7 +431,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         class EnricherTransform(BaseTransform):
@@ -440,7 +440,7 @@ class TestEngineIntegrationOutcomes:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -504,7 +504,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         transform = recorder.register_node(
             run_id=run.run_id,
@@ -512,7 +512,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         class ValidatingTransform(BaseTransform):
@@ -522,7 +522,7 @@ class TestEngineIntegrationOutcomes:
             _on_error = "discard"  # Quarantine on error
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -577,7 +577,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         gate = recorder.register_node(
             run_id=run.run_id,
@@ -585,7 +585,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.GATE,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         path_a = recorder.register_node(
             run_id=run.run_id,
@@ -593,7 +593,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
         path_b = recorder.register_node(
             run_id=run.run_id,
@@ -601,7 +601,7 @@ class TestEngineIntegrationOutcomes:
             node_type=NodeType.TRANSFORM,
             plugin_version="1.0",
             config={},
-            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            schema_config=SchemaConfig.from_dict({"mode": "observed"}),
         )
 
         # Register edges for fork

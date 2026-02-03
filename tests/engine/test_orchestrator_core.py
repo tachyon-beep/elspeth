@@ -71,7 +71,7 @@ class TestOrchestrator:
             output_schema = OutputSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(
@@ -231,7 +231,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] + 1}, success_reason={"action": "add_one"})
@@ -242,7 +242,7 @@ class TestOrchestratorMultipleTransforms:
             output_schema = NumberSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success({"value": row["value"] * 2}, success_reason={"action": "multiply_two"})
@@ -384,7 +384,7 @@ class TestOrchestratorEmptyPipeline:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "identity"})
@@ -451,10 +451,10 @@ class TestOrchestratorAcceptsGraph:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}})},
+            sinks={"output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}})},
             default_sink="output",
         )
         plugins = instantiate_plugins_from_config(settings)
@@ -530,7 +530,7 @@ class TestOrchestratorAcceptsGraph:
 
         # Build a simple graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source_1", node_type=NodeType.SOURCE, plugin_name="csv", config=schema_config)
         graph.add_node("sink_1", node_type=NodeType.SINK, plugin_name="csv", config=schema_config)
         graph.add_edge("source_1", "sink_1", label="continue", mode=RoutingMode.MOVE)

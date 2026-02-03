@@ -3,6 +3,12 @@ defaults:
   fail_on_stale: true
   fail_on_expired: true
 per_file_rules:
+- pattern: contracts/schema.py
+  rules:
+  - R1
+  - R5
+  reason: SchemaConfig.from_dict() parses user YAML config (Tier 3) - defensive access for optional fields
+  expires: null
 - pattern: contracts/contract_records.py
   rules:
   - R5
@@ -13,10 +19,36 @@ per_file_rules:
   - R5
   reason: Type normalization requires isinstance() for polymorphic serialization of numeric types
   expires: null
+- pattern: cli.py
+  rules:
+  - R1
+  - R3
+  - R4
+  - R5
+  - R6
+  reason: CLI handles user input, env vars, and external system checks (Tier 3)
+  expires: null
 - pattern: mcp/server.py
   rules:
   - R1
   reason: MCP tool arguments are external client data (Tier 3) - defensive access is correct
+  expires: null
+- pattern: plugins/sources/*
+  rules:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  reason: Source plugins ingest external data (Tier 3) - all defensive patterns legitimate
+  expires: null
+- pattern: plugins/config_base.py
+  rules:
+  - R1
+  - R5
+  reason: Plugin config parsing handles user YAML config (Tier 3) - defensive access for optional fields
   expires: null
 - pattern: plugins/llm/*
   rules:

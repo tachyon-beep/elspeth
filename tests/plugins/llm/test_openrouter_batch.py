@@ -31,7 +31,7 @@ from elspeth.plugins.llm.openrouter_batch import (
 from .conftest import chaosllm_openrouter_http_responses, chaosllm_openrouter_httpx_response
 
 # Common schema config for dynamic field handling
-DYNAMIC_SCHEMA = {"fields": "dynamic"}
+DYNAMIC_SCHEMA = {"mode": "observed"}
 
 
 def _make_valid_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:

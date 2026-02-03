@@ -33,7 +33,7 @@ class TestCSVSinkResumeSchemaValidation:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -43,7 +43,7 @@ class TestCSVSinkResumeSchemaValidation:
 
         # CLI would check this and exit with error
         assert validation.valid is False
-        assert "strict mode" in validation.error_message
+        assert "fixed mode" in validation.error_message
         assert "id" in validation.missing_fields
         assert "name" in validation.missing_fields
 
@@ -59,7 +59,7 @@ class TestCSVSinkResumeSchemaValidation:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -90,7 +90,7 @@ class TestDatabaseSinkResumeSchemaValidation:
             {
                 "url": url,
                 "table": "output_data",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -98,7 +98,7 @@ class TestDatabaseSinkResumeSchemaValidation:
         validation = sink.validate_output_target()
 
         assert validation.valid is False
-        assert "strict mode" in validation.error_message
+        assert "fixed mode" in validation.error_message
         sink.close()
 
     def test_resume_succeeds_on_matching_table_schema(self, tmp_path: Path):
@@ -119,7 +119,7 @@ class TestDatabaseSinkResumeSchemaValidation:
             {
                 "url": url,
                 "table": "output_data",
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -144,7 +144,7 @@ class TestJSONLSinkResumeSchemaValidation:
         sink = JSONSink(
             {
                 "path": str(jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "jsonl",
             }
         )
@@ -153,7 +153,7 @@ class TestJSONLSinkResumeSchemaValidation:
         validation = sink.validate_output_target()
 
         assert validation.valid is False
-        assert "strict mode" in validation.error_message
+        assert "fixed mode" in validation.error_message
 
     def test_resume_succeeds_on_matching_jsonl_schema(self, tmp_path: Path):
         """CLI resume should proceed when JSONL records match schema."""
@@ -166,7 +166,7 @@ class TestJSONLSinkResumeSchemaValidation:
         sink = JSONSink(
             {
                 "path": str(jsonl_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "format": "jsonl",
             }
         )
@@ -192,7 +192,7 @@ class TestResumeSchemaValidationOrder:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
                 "mode": "write",  # Original mode
             }
         )
@@ -220,7 +220,7 @@ class TestResumeSchemaValidationOrder:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["id: int", "name: str"]},
+                "schema": {"mode": "fixed", "fields": ["id: int", "name: str"]},
             }
         )
 
@@ -258,7 +258,7 @@ class TestResumeWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -293,7 +293,7 @@ class TestResumeWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "restore_source_headers": True,
             }
         )
@@ -318,7 +318,7 @@ class TestResumeWithRestoreSourceHeaders:
         sink = JSONSink(
             {
                 "path": str(jsonl_path),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 "format": "jsonl",
                 "restore_source_headers": True,
             }
@@ -347,7 +347,7 @@ class TestResumeWithRestoreSourceHeaders:
         sink = CSVSink(
             {
                 "path": str(csv_path),
-                "schema": {"mode": "strict", "fields": ["user_id: str", "amount_usd: float"]},
+                "schema": {"mode": "fixed", "fields": ["user_id: str", "amount_usd: float"]},
                 # NOT using restore_source_headers
             }
         )

@@ -14,7 +14,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
             }
         )
 
@@ -25,7 +25,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "normalized",
             }
         )
@@ -37,7 +37,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "original",
             }
         )
@@ -49,7 +49,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": {"amount_usd": "AMOUNT_USD"},
             }
         )
@@ -62,7 +62,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "restore_source_headers": True,
             }
         )
@@ -74,7 +74,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "display_headers": {"id": "ID"},
             }
         )
@@ -87,7 +87,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "normalized",
                 "restore_source_headers": True,  # Should be ignored
             }
@@ -100,7 +100,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "original",
                 "display_headers": {"id": "ID"},  # Should be ignored
             }
@@ -113,7 +113,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "normalized",
             }
         )
@@ -125,7 +125,7 @@ class TestSinkHeaderConfig:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "original",
             }
         )
@@ -142,7 +142,7 @@ class TestSinkHeaderConfigValidation:
             SinkPathConfig.from_dict(
                 {
                     "path": "output.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "headers": "invalid_mode",
                 }
             )
@@ -155,7 +155,7 @@ class TestSinkHeaderConfigValidation:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": {},
             }
         )
@@ -168,7 +168,7 @@ class TestSinkHeaderConfigValidation:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": {"field": "FIELD"},
                 "restore_source_headers": True,
             }
@@ -183,7 +183,7 @@ class TestSinkHeaderConfigValidation:
             SinkPathConfig.from_dict(
                 {
                     "path": "output.csv",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                     "display_headers": {"a": "A"},
                     "restore_source_headers": True,
                 }
@@ -197,7 +197,7 @@ class TestSinkHeaderConfigValidation:
         config = SinkPathConfig.from_dict(
             {
                 "path": "output.csv",
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "headers": "normalized",
                 "display_headers": {"a": "A"},
                 "restore_source_headers": True,

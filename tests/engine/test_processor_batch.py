@@ -47,7 +47,7 @@ class TestProcessorBatchTransforms:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -140,7 +140,7 @@ class TestProcessorBatchTransforms:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -217,7 +217,7 @@ class TestProcessorBatchTransforms:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -365,7 +365,7 @@ class TestProcessorDeaggregation:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -452,7 +452,7 @@ class TestProcessorDeaggregation:
             output_schema = _TestSchema
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -528,7 +528,7 @@ class TestProcessorDeaggregation:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:
@@ -632,7 +632,7 @@ class TestProcessorDeaggregation:
             plugin_version = "1.0"
 
             def __init__(self, node_id: str) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
             def process(self, rows: list[dict[str, Any]] | dict[str, Any], ctx: PluginContext) -> TransformResult:

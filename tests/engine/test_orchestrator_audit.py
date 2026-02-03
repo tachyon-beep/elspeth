@@ -66,7 +66,7 @@ class TestOrchestratorAuditTrail:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "identity"})
@@ -242,12 +242,12 @@ class TestOrchestratorLandscapeExport:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -371,12 +371,12 @@ class TestOrchestratorLandscapeExport:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -498,12 +498,12 @@ class TestOrchestratorLandscapeExport:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "audit_export": SinkSettings(plugin="json", options={"path": "audit_export.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -615,12 +615,12 @@ class TestOrchestratorLandscapeExport:
                 options={
                     "path": "test.csv",
                     "on_validation_failure": "discard",
-                    "schema": {"fields": "dynamic"},
+                    "schema": {"mode": "observed"},
                 },
             ),
             sinks={
-                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"fields": "dynamic"}}),
-                "audit": SinkSettings(plugin="json", options={"path": "audit.json", "schema": {"fields": "dynamic"}}),
+                "output": SinkSettings(plugin="json", options={"path": "output.json", "schema": {"mode": "observed"}}),
+                "audit": SinkSettings(plugin="json", options={"path": "audit.json", "schema": {"mode": "observed"}}),
             },
             default_sink="output",
             landscape=LandscapeSettings(
@@ -701,7 +701,7 @@ class TestOrchestratorConfigRecording:
             output_schema = ValueSchema
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "identity"})
@@ -881,7 +881,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "versioned"})
@@ -918,7 +918,7 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="versioned_source", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="versioned_transform", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="versioned_sink", config=schema_config)
@@ -996,7 +996,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.EXTERNAL_CALL  # Explicit nondeterministic
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(self, row: Any, ctx: Any) -> TransformResult:
                 return TransformResult.success(row, success_reason={"action": "nondeterministic"})
@@ -1033,7 +1033,7 @@ class TestNodeMetadataFromPlugin:
 
         # Build graph
         graph = ExecutionGraph()
-        schema_config = {"schema": {"fields": "dynamic"}}
+        schema_config = {"schema": {"mode": "observed"}}
         graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="test_source", config=schema_config)
         graph.add_node("transform", node_type=NodeType.TRANSFORM, plugin_name="nondeterministic_transform", config=schema_config)
         graph.add_node("sink", node_type=NodeType.SINK, plugin_name="test_sink", config=schema_config)
@@ -1108,7 +1108,7 @@ class TestNodeMetadataFromPlugin:
             determinism = Determinism.NON_DETERMINISTIC  # LLM-like
 
             def __init__(self) -> None:
-                super().__init__({"schema": {"fields": "dynamic"}})
+                super().__init__({"schema": {"mode": "observed"}})
 
             def process(
                 self,
@@ -1153,7 +1153,7 @@ class TestNodeMetadataFromPlugin:
             plugin="nondeterministic_batch",
             trigger=TriggerConfig(count=2),  # Trigger after 2 rows
             output_mode="transform",
-            options={"schema": {"fields": "dynamic"}},
+            options={"schema": {"mode": "observed"}},
         )
 
         # Build graph with aggregation
@@ -1345,18 +1345,18 @@ class TestNodeMetadataFromPlugin:
                 TransformSettings(
                     plugin="passthrough",
                     name="path_a",
-                    options={"schema": {"fields": "dynamic"}},
+                    options={"schema": {"mode": "observed"}},
                 ),
                 TransformSettings(
                     plugin="passthrough",
                     name="path_b",
-                    options={"schema": {"fields": "dynamic"}},
+                    options={"schema": {"mode": "observed"}},
                 ),
             ],
             sinks={
                 "default": SinkSettings(
                     plugin="json",
-                    options={"path": "/tmp/test_coalesce_audit.json", "schema": {"fields": "dynamic"}},
+                    options={"path": "/tmp/test_coalesce_audit.json", "schema": {"mode": "observed"}},
                 ),
             },
             default_sink="default",

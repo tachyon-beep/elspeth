@@ -9,7 +9,7 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.landscape.exporter import LandscapeExporter
 
 # Dynamic schema for tests that don't care about specific fields
-DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ class TestLandscapeExporterNodes:
             "config_hash",
             "config",  # Full resolved config for audit trail portability
             "schema_hash",
-            "schema_mode",  # Schema validation mode (dynamic/strict/free/parse/null)
+            "schema_mode",  # Schema validation mode (observed/fixed/flexible/parse/null)
             "schema_fields",  # Explicit field definitions (list or null)
             "sequence_in_pipeline",
         ]

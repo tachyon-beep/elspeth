@@ -30,7 +30,7 @@ source:
   options:
     path: input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "field_a: str"
         - "field_b: int"
@@ -40,7 +40,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
           - "field_b: int"
@@ -51,7 +51,7 @@ sinks:
     options:
       path: output.csv
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_c: float"  # INCOMPATIBLE: requires field_c, gets field_a/field_b
 
@@ -91,7 +91,7 @@ source:
   options:
     path: input.csv
     schema:
-      mode: strict
+      mode: fixed
       fields:
         - "field_a: str"
         - "field_b: int"
@@ -101,7 +101,7 @@ transforms:
   - plugin: passthrough
     options:
       schema:
-        mode: strict
+        mode: fixed
         fields:
           - "field_a: str"
           - "field_b: int"
@@ -112,7 +112,7 @@ sinks:
     options:
       path: output.json
       schema:
-        mode: free
+        mode: flexible
         fields:
           - "field_a: str"  # Compatible: subset of producer schema
       format: jsonl

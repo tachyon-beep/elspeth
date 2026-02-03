@@ -55,7 +55,7 @@ class TestSourceToSinkContractFlow:
             {
                 "path": str(input_csv),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -89,7 +89,7 @@ class TestSourceToSinkContractFlow:
             {
                 "path": str(output_csv),
                 "headers": "original",
-                "schema": {"mode": "strict", "fields": ["first_name: str", "last_name: str", "email_address: str"]},
+                "schema": {"mode": "fixed", "fields": ["first_name: str", "last_name: str", "email_address: str"]},
             }
         )
 
@@ -121,7 +121,7 @@ class TestSourceToSinkContractFlow:
             {
                 "path": str(input_csv),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -158,7 +158,7 @@ class TestSourceToSinkContractFlow:
             {
                 "path": str(input_csv),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -188,7 +188,7 @@ class TestContractPreservationThroughTransforms:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -224,7 +224,7 @@ class TestContractPreservationThroughTransforms:
             {
                 "path": str(input_csv),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -263,7 +263,7 @@ class TestContractPreservationThroughTransforms:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -296,7 +296,7 @@ class TestContractWithSinkHeaderModes:
             {
                 "path": str(input_csv),
                 "normalize_fields": True,
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -313,7 +313,7 @@ class TestContractWithSinkHeaderModes:
             {
                 "path": str(output_csv),
                 "headers": "normalized",
-                "schema": {"mode": "strict", "fields": ["first_name: str", "last_name: str"]},
+                "schema": {"mode": "fixed", "fields": ["first_name: str", "last_name: str"]},
             }
         )
 
@@ -337,7 +337,7 @@ class TestContractWithSinkHeaderModes:
         source = CSVSource(
             {
                 "path": str(input_csv),
-                "schema": {"fields": "dynamic"},
+                "schema": {"mode": "observed"},
                 "on_validation_failure": "discard",
             }
         )
@@ -354,7 +354,7 @@ class TestContractWithSinkHeaderModes:
             {
                 "path": str(output_csv),
                 "headers": {"amount": "TRANSACTION_AMOUNT", "currency": "CURRENCY_CODE"},
-                "schema": {"mode": "strict", "fields": ["amount: str", "currency: str"]},
+                "schema": {"mode": "fixed", "fields": ["amount: str", "currency: str"]},
             }
         )
 

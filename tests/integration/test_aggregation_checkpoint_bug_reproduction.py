@@ -51,7 +51,7 @@ class BatchCollectorTransform(BaseTransform):
     is_batch_aware = True
 
     def __init__(self) -> None:
-        super().__init__({"schema": {"fields": "dynamic"}})
+        super().__init__({"schema": {"mode": "observed"}})
 
     def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: Any) -> TransformResult:
         if isinstance(row, list):

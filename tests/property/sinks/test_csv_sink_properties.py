@@ -65,7 +65,7 @@ class TestCSVSinkProperties:
             sink = CSVSink(
                 {
                     "path": str(path),
-                    "schema": {"mode": "strict", "fields": ["id: int", "name: str", "score: float?"]},
+                    "schema": {"mode": "fixed", "fields": ["id: int", "name: str", "score: float?"]},
                 }
             )
             ctx = PluginContext(run_id="test-run", config={})
@@ -97,7 +97,7 @@ class TestCSVSinkProperties:
             sink = CSVSink(
                 {
                     "path": str(path),
-                    "schema": {"mode": "strict", "fields": schema_fields},
+                    "schema": {"mode": "fixed", "fields": schema_fields},
                 }
             )
             ctx = PluginContext(run_id="test-run", config={})
@@ -117,7 +117,7 @@ class TestCSVSinkProperties:
         sink = CSVSink(
             {
                 "path": str(path),
-                "schema": {"mode": "strict", "fields": ["value: int"]},
+                "schema": {"mode": "fixed", "fields": ["value: int"]},
                 "validate_input": True,
             }
         )
