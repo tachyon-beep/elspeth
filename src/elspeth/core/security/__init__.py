@@ -28,18 +28,15 @@ from elspeth.core.security.secret_loader import (
 )
 
 __all__ = [
-    # Fingerprinting
-    "get_fingerprint_key",
-    "secret_fingerprint",
-    # Config-based loading (new)
-    "load_secrets_from_config",
-    "SecretLoadError",
-    # Secret loader classes (still used by config_secrets and other code)
     "CachedSecretLoader",
     "CompositeSecretLoader",
     "EnvSecretLoader",
     "KeyVaultSecretLoader",
+    "SecretLoadError",
     "SecretLoader",
     "SecretNotFoundError",
     "SecretRef",
+    "get_fingerprint_key",
+    "load_secrets_from_config",
+    "secret_fingerprint",
 ]
