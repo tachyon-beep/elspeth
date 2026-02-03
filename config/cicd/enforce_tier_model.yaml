@@ -1956,3 +1956,9 @@ allow_hits:
   reason: Raw YAML config is Tier 3 external data - secrets section is optional in user config
   safety: Missing 'secrets' key defaults to empty dict, then Pydantic validates with SecretsConfig()
   expires: null
+# Orchestrator aggregation refactor - isinstance for protocol checking
+- key: engine/orchestrator/aggregation.py:R5:find_aggregation_transform:fp=d2da84f2bce50af4
+  owner: refactor
+  reason: isinstance() check required to find batch-aware transforms - protocol contract verification
+  safety: RuntimeError raised if no matching transform found - explicit failure, not silent
+  expires: null
