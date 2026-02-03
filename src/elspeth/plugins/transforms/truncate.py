@@ -106,7 +106,8 @@ class Truncate(BaseTransform):
         Returns:
             TransformResult with truncated field values
         """
-        output = copy.deepcopy(row.to_dict())
+        row_dict = row.to_dict()
+        output = copy.deepcopy(row_dict)
 
         for field_name, max_len in self._fields.items():
             if field_name not in output:
@@ -140,7 +141,7 @@ class Truncate(BaseTransform):
         fields_modified = [
             field_name
             for field_name, max_len in self._fields.items()
-            if field_name in row and isinstance(row[field_name], str) and len(row[field_name]) > max_len
+            if field_name in row_dict and isinstance(row_dict[field_name], str) and len(row_dict[field_name]) > max_len
         ]
 
         return TransformResult.success(
