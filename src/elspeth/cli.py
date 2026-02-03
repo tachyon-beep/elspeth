@@ -1578,18 +1578,38 @@ def purge(
     config: ElspethSettings | None = None
 
     # Try loading settings.yaml first (for payload_store config)
+    # Uses _load_settings_with_secrets to support Key Vault-backed configs
     settings_path = Path("settings.yaml")
     if settings_path.exists():
         try:
-            config = load_settings(settings_path)
-        except Exception as e:
+            config, _secret_resolutions = _load_settings_with_secrets(settings_path)
+        except (YamlParserError, YamlScannerError) as e:
             if not database:
-                # Only fail if we needed settings for database URL
-                typer.echo(f"Error loading settings.yaml: {e}", err=True)
+                typer.echo(f"YAML syntax error in settings.yaml: {e.problem}", err=True)
                 typer.echo("Specify --database to provide path directly.", err=True)
                 raise typer.Exit(1) from None
-            # Otherwise warn but continue with CLI-provided database
-            typer.echo(f"Warning: Could not load settings.yaml: {e}", err=True)
+            typer.echo(f"Warning: YAML syntax error in settings.yaml: {e.problem}", err=True)
+        except yaml.YAMLError as e:
+            if not database:
+                typer.echo(f"YAML error in settings.yaml: {e}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"Warning: YAML error in settings.yaml: {e}", err=True)
+        except ValidationError as e:
+            if not database:
+                typer.echo("Configuration errors in settings.yaml:", err=True)
+                for error in e.errors():
+                    loc = ".".join(str(x) for x in error["loc"])
+                    typer.echo(f"  - {loc}: {error['msg']}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo("Warning: Configuration errors in settings.yaml (continuing with --database)", err=True)
+        except SecretLoadError as e:
+            if not database:
+                typer.echo(f"Error loading secrets: {e}", err=True)
+                typer.echo("Specify --database to provide path directly.", err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"Warning: Could not load secrets: {e}", err=True)
 
     if database:
         db_path = Path(database).expanduser().resolve()

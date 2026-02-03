@@ -480,6 +480,46 @@ class TestSchemaContractValidation:
         violations = contract.validate({"x": None})
         assert violations == []
 
+    def test_validate_optional_field_allows_none_value(self) -> None:
+        """Optional field (required=False) allows None value even if typed as str.
+
+        P2 fix: This matches Pydantic semantics where Optional[T] = T | None.
+        An optional field declared as 'str?' should accept None values.
+        """
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract("note", "Note", str, False, "declared"),  # optional str
+            ),
+            locked=True,
+        )
+        # None value for optional str field should be valid
+        violations = contract.validate({"note": None})
+        assert violations == []
+
+    def test_validate_required_field_rejects_none_value(self) -> None:
+        """Required field with typed value rejects None (type mismatch).
+
+        A required field declared as 'str' (not 'str?') should reject None
+        because None != str.
+        """
+        from elspeth.contracts.errors import TypeMismatchViolation
+
+        contract = SchemaContract(
+            mode="FIXED",
+            fields=(
+                FieldContract("name", "Name", str, True, "declared"),  # required str
+            ),
+            locked=True,
+        )
+        # None value for required str field should be type mismatch
+        violations = contract.validate({"name": None})
+
+        assert len(violations) == 1
+        assert isinstance(violations[0], TypeMismatchViolation)
+        assert violations[0].expected_type is str
+        assert violations[0].actual_type is type(None)
+
     def test_validate_fixed_rejects_extras(self) -> None:
         """FIXED mode rejects extra fields."""
         from elspeth.contracts.errors import ExtraFieldViolation
