@@ -22,36 +22,14 @@ import os
 
 import pytest
 
-
-def pytest_addoption(parser: pytest.Parser) -> None:
-    """Add command line option for Key Vault URL."""
-    parser.addoption(
-        "--keyvault-url",
-        action="store",
-        default=None,
-        help="Azure Key Vault URL for integration tests",
-    )
-
-
-@pytest.fixture
-def keyvault_url(request: pytest.FixtureRequest) -> str:
-    """Get Key Vault URL from command line or environment."""
-    url = request.config.getoption("--keyvault-url") or os.environ.get("TEST_KEYVAULT_URL")
-    if not url:
-        pytest.skip(
-            "Key Vault URL not configured. Pass --keyvault-url or set TEST_KEYVAULT_URL. "
-            "Note: ELSPETH_KEYVAULT_URL is no longer used for fingerprint keys."
-        )
-    return url
+# Fixture keyvault_url is provided by tests/integration/conftest.py
 
 
 @pytest.mark.integration
 class TestKeyVaultSecretsConfig:
     """Integration tests using the new YAML-based secrets configuration."""
 
-    def test_load_fingerprint_key_via_secrets_config(
-        self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_fingerprint_key_via_secrets_config(self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """Can load fingerprint key from Key Vault via secrets config.
 
         This test verifies the end-to-end flow:
@@ -61,7 +39,7 @@ class TestKeyVaultSecretsConfig:
         4. Verify get_fingerprint_key() returns the loaded value
         """
         from elspeth.core.config import SecretsConfig
-        from elspeth.core.config_secrets import load_secrets
+        from elspeth.core.security.config_secrets import load_secrets_from_config
         from elspeth.core.security.fingerprint import get_fingerprint_key
 
         # Ensure we're starting without the env var
@@ -69,17 +47,19 @@ class TestKeyVaultSecretsConfig:
 
         # Create secrets config that loads fingerprint key from Key Vault
         secrets_config = SecretsConfig(
-            keyvault_url=keyvault_url,
-            load=[
-                {
-                    "secret": "elspeth-fingerprint-key",
-                    "env": "ELSPETH_FINGERPRINT_KEY",
-                }
-            ],
+            source="keyvault",
+            vault_url=keyvault_url,
+            mapping={
+                "ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key",
+            },
         )
 
         # Load secrets (this calls Key Vault)
-        load_secrets(secrets_config)
+        resolutions = load_secrets_from_config(secrets_config)
+
+        # Should have loaded one secret
+        assert len(resolutions) == 1
+        assert resolutions[0]["env_var_name"] == "ELSPETH_FINGERPRINT_KEY"
 
         # Now get_fingerprint_key should work
         key = get_fingerprint_key()
@@ -87,39 +67,33 @@ class TestKeyVaultSecretsConfig:
         assert isinstance(key, bytes)
         assert len(key) > 0
 
-    def test_load_multiple_secrets(
-        self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_load_multiple_secrets(self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """Can load multiple secrets from Key Vault in one config."""
         from elspeth.core.config import SecretsConfig
-        from elspeth.core.config_secrets import load_secrets
+        from elspeth.core.security.config_secrets import load_secrets_from_config
 
         # Clear any existing env vars
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
         monkeypatch.delenv("TEST_API_KEY", raising=False)
 
         # Create secrets config with multiple secrets
-        # Note: This test assumes 'test-api-key' exists in the Key Vault
+        # Note: This test assumes 'elspeth-fingerprint-key' exists in the Key Vault
         secrets_config = SecretsConfig(
-            keyvault_url=keyvault_url,
-            load=[
-                {
-                    "secret": "elspeth-fingerprint-key",
-                    "env": "ELSPETH_FINGERPRINT_KEY",
-                },
-                # Uncomment if you have a test-api-key secret:
-                # {
-                #     "secret": "test-api-key",
-                #     "env": "TEST_API_KEY",
-                # },
-            ],
+            source="keyvault",
+            vault_url=keyvault_url,
+            mapping={
+                "ELSPETH_FINGERPRINT_KEY": "elspeth-fingerprint-key",
+                # Add more secrets here if available in your test vault:
+                # "TEST_API_KEY": "test-api-key",
+            },
         )
 
         # Load secrets
-        load_secrets(secrets_config)
+        resolutions = load_secrets_from_config(secrets_config)
 
         # Verify fingerprint key was loaded
         assert os.environ.get("ELSPETH_FINGERPRINT_KEY") is not None
+        assert len(resolutions) >= 1
 
 
 @pytest.mark.integration
@@ -129,9 +103,7 @@ class TestOldEnvVarApproachRemoved:
     BREAKING CHANGE: These tests document that the migration is required.
     """
 
-    def test_elspeth_keyvault_url_no_longer_used(
-        self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_elspeth_keyvault_url_no_longer_used(self, keyvault_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """ELSPETH_KEYVAULT_URL no longer triggers Key Vault lookup.
 
         This is a BREAKING CHANGE. The old approach was:
@@ -141,7 +113,7 @@ class TestOldEnvVarApproachRemoved:
 
         The new approach is:
         - Configure secrets in YAML
-        - CLI calls load_secrets() at startup
+        - CLI calls load_secrets_from_config() at startup
         - ELSPETH_FINGERPRINT_KEY env var is set
         - get_fingerprint_key() reads the env var
         """
