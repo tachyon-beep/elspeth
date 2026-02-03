@@ -481,32 +481,32 @@ allow_hits:
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R5:Orchestrator:_process_resumed_rows:fp=03801a0fadd874ac
+- key: engine/orchestrator_legacy.py:R5:Orchestrator:_process_resumed_rows:fp=2497fdfa89ec4c3e
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=ce911f5ca1abfd3f
+- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=480dd9e330cf97e3
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=6d7d7ba7d2e82910
+- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=26bebba69646980d
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=18ff4d0503d109d5
+- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=9c13c114397df01a
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=44590623316ac95f
+- key: engine/orchestrator_legacy.py:R4:Orchestrator:_process_resumed_rows:fp=25f564fd75712384
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)
   expires: '2026-05-02'
-- key: engine/orchestrator_legacy.py:R5:Orchestrator:_find_aggregation_transform:fp=1233c7c1a6420aa3
+- key: engine/orchestrator_legacy.py:R5:Orchestrator:_find_aggregation_transform:fp=659e865ba2eb1dd9
   owner: architecture
   reason: AST/type checking - required for safe parsing or discriminated unions
   safety: Code reviewed - legitimate pattern (inherited from orchestrator.py during refactor)

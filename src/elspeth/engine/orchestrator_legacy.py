@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -55,6 +54,10 @@ from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.core.operations import track_operation
+from elspeth.engine.orchestrator.export import (
+    export_landscape,
+    reconstruct_schema_from_json,
+)
 
 # Import types from new location (refactoring in progress)
 from elspeth.engine.orchestrator.types import (
@@ -1678,272 +1681,12 @@ class Orchestrator:
         settings: ElspethSettings,
         sinks: dict[str, Any],
     ) -> None:
-        """Export audit trail to configured sink after run completion.
-
-        For JSON format: writes all records to a single sink (records are
-        heterogeneous but JSON handles that naturally).
-
-        For CSV format: writes separate files per record_type to a directory,
-        since CSV requires homogeneous schemas per file.
-
-        Args:
-            run_id: The completed run ID
-            settings: Full settings containing export configuration
-            sinks: Dict of sink_name -> sink instance from PipelineConfig
-
-        Raises:
-            ValueError: If signing requested but ELSPETH_SIGNING_KEY not set,
-                       or if configured sink not found
-        """
-        from elspeth.core.landscape.exporter import LandscapeExporter
-
-        export_config = settings.landscape.export
-
-        # Get signing key from environment if signing enabled
-        signing_key: bytes | None = None
-        if export_config.sign:
-            try:
-                key_str = os.environ["ELSPETH_SIGNING_KEY"]
-            except KeyError:
-                raise ValueError("ELSPETH_SIGNING_KEY environment variable required for signed export") from None
-            signing_key = key_str.encode("utf-8")
-
-        # Create exporter
-        exporter = LandscapeExporter(self._db, signing_key=signing_key)
-
-        # Get target sink config
-        sink_name = export_config.sink
-        if sink_name not in sinks:
-            raise ValueError(f"Export sink '{sink_name}' not found in sinks")
-        sink = sinks[sink_name]
-
-        # Create context for sink writes
-        ctx = PluginContext(run_id=run_id, config={}, landscape=None)
-
-        if export_config.format == "csv":
-            # Multi-file CSV export: one file per record type
-            # CSV export writes files directly (not via sink.write), so we need
-            # the path from sink config. CSV format requires file-based sink.
-            if "path" not in sink.config:
-                raise ValueError(
-                    f"CSV export requires file-based sink with 'path' in config, but sink '{sink_name}' has no path configured"
-                )
-            artifact_path: str = sink.config["path"]
-            self._export_csv_multifile(
-                exporter=exporter,
-                run_id=run_id,
-                artifact_path=artifact_path,
-                sign=export_config.sign,
-                ctx=ctx,
-            )
-        else:
-            # JSON export: batch all records for single write
-            records = list(exporter.export_run(run_id, sign=export_config.sign))
-            if records:
-                # Capture ArtifactDescriptor for audit trail (future use)
-                _artifact_descriptor = sink.write(records, ctx)
-            sink.flush()
-            sink.close()
-
-    def _export_csv_multifile(
-        self,
-        exporter: Any,  # LandscapeExporter (avoid circular import in type hint)
-        run_id: str,
-        artifact_path: str,
-        sign: bool,
-        ctx: PluginContext,  # - reserved for future use
-    ) -> None:
-        """Export audit trail as multiple CSV files (one per record type).
-
-        Creates a directory at the artifact path, then writes
-        separate CSV files for each record type (run.csv, nodes.csv, etc.).
-
-        Args:
-            exporter: LandscapeExporter instance
-            run_id: The completed run ID
-            artifact_path: Path from sink config (validated by caller)
-            sign: Whether to sign records
-            ctx: Plugin context for sink operations (reserved for future use)
-        """
-        import csv
-        from pathlib import Path
-
-        from elspeth.core.landscape.formatters import CSVFormatter
-
-        export_dir = Path(artifact_path)
-        if export_dir.suffix:
-            # Remove file extension if present, treat as directory
-            export_dir = export_dir.with_suffix("")
-
-        export_dir.mkdir(parents=True, exist_ok=True)
-
-        # Get records grouped by type
-        grouped = exporter.export_run_grouped(run_id, sign=sign)
-        formatter = CSVFormatter()
-
-        # Write each record type to its own CSV file
-        for record_type, records in grouped.items():
-            if not records:
-                continue
-
-            csv_path = export_dir / f"{record_type}.csv"
-
-            # Flatten all records for CSV
-            flat_records = [formatter.format(r) for r in records]
-
-            # Get union of all keys (some records may have optional fields)
-            all_keys: set[str] = set()
-            for rec in flat_records:
-                all_keys.update(rec.keys())
-            fieldnames = sorted(all_keys)  # Sorted for determinism
-
-            with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for rec in flat_records:
-                    writer.writerow(rec)
+        """Delegate to export module."""
+        export_landscape(self._db, run_id, settings, sinks)
 
     def _reconstruct_schema_from_json(self, schema_dict: dict[str, Any]) -> type:
-        """Reconstruct Pydantic schema class from JSON schema dict.
-
-        Handles complete Pydantic JSON schema including:
-        - Primitive types: string, integer, number, boolean
-        - datetime: string with format="date-time"
-        - Decimal: anyOf with number/string (for precision preservation)
-        - Arrays: type="array" with items schema
-        - Nested objects: type="object" with properties schema
-
-        Args:
-            schema_dict: Pydantic JSON schema dict (from model_json_schema())
-
-        Returns:
-            Dynamically created Pydantic model class
-
-        Raises:
-            ValueError: If schema is malformed, empty, or contains unsupported types
-        """
-
-        from pydantic import create_model
-
-        from elspeth.contracts import PluginSchema
-
-        # Extract field definitions from Pydantic JSON schema
-        # This is OUR data (from Landscape DB) - crash if malformed
-        if "properties" not in schema_dict:
-            raise ValueError(
-                "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
-            )
-        properties = schema_dict["properties"]
-
-        if not properties:
-            raise ValueError(
-                "Resume failed: Schema has zero fields defined. "
-                "Cannot resume with empty schema - this would silently discard all row data. "
-                "The original source schema must have at least one field."
-            )
-
-        # "required" is optional in JSON Schema spec - empty list is valid default
-        if "required" in schema_dict:
-            required_fields = set(schema_dict["required"])
-        else:
-            required_fields = set()
-
-        # Build field definitions for create_model
-        field_definitions: dict[str, Any] = {}
-
-        for field_name, field_info in properties.items():
-            # Determine Python type from JSON schema
-            field_type = self._json_schema_to_python_type(field_name, field_info)
-
-            # Handle optional vs required fields
-            if field_name in required_fields:
-                field_definitions[field_name] = (field_type, ...)  # Required field
-            else:
-                field_definitions[field_name] = (field_type, None)  # Optional field
-
-        # Recreate the schema class dynamically
-        return create_model("RestoredSourceSchema", __base__=PluginSchema, **field_definitions)
-
-    def _json_schema_to_python_type(self, field_name: str, field_info: dict[str, Any]) -> type:
-        """Map Pydantic JSON schema field to Python type.
-
-        Handles Pydantic's type mapping including special cases:
-        - datetime: {"type": "string", "format": "date-time"}
-        - Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
-        - list[T]: {"type": "array", "items": {...}}
-        - dict: {"type": "object"} without properties
-
-        Args:
-            field_name: Field name (for error messages)
-            field_info: JSON schema field definition
-
-        Returns:
-            Python type for Pydantic field
-
-        Raises:
-            ValueError: If field type is not supported (prevents silent degradation)
-        """
-        from datetime import datetime
-        from decimal import Decimal
-
-        # Check for datetime first (string with format annotation)
-        # "format" is optional in JSON Schema, so check with "in" first
-        if "type" in field_info and field_info["type"] == "string" and "format" in field_info and field_info["format"] == "date-time":
-            return datetime
-
-        # Check for Decimal (anyOf pattern)
-        if "anyOf" in field_info:
-            # Pydantic emits: {"anyOf": [{"type": "number"}, {"type": "string"}]}
-            # This indicates Decimal (accepts both for parsing flexibility)
-            any_of_types = field_info["anyOf"]
-            # Only consider items that have "type" key, then access directly
-            type_strs = {item["type"] for item in any_of_types if "type" in item}
-            if {"number", "string"}.issubset(type_strs):
-                return Decimal
-
-        # Get basic type - required for all non-anyOf fields
-        if "type" not in field_info:
-            raise ValueError(
-                f"Resume failed: Field '{field_name}' has no 'type' in schema. "
-                f"Schema definition: {field_info}. "
-                f"Cannot determine Python type for field."
-            )
-        field_type_str = field_info["type"]
-
-        # Handle array types
-        if field_type_str == "array":
-            # "items" is optional in JSON Schema arrays
-            if "items" not in field_info:
-                # Generic list without item type constraint
-                return list
-            # items_schema = field_info["items"]  # Available if needed for recursive handling
-            # For typed arrays, we'd need recursive handling
-            # For now, return list (Pydantic will validate items at parse time)
-            return list
-
-        # Handle nested object types
-        if field_type_str == "object":
-            # Generic dict (no specific structure)
-            return dict
-
-        # Handle primitive types
-        primitive_type_map = {
-            "string": str,
-            "integer": int,
-            "number": float,
-            "boolean": bool,
-        }
-
-        if field_type_str in primitive_type_map:
-            return primitive_type_map[field_type_str]
-
-        # Unknown type - CRASH instead of silent degradation
-        raise ValueError(
-            f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
-            f"Supported types: string, integer, number, boolean, date-time, Decimal, array, object. "
-            f"Schema definition: {field_info}. "
-            f"This is a bug in schema reconstruction - please report this."
-        )
+        """Delegate to export module."""
+        return reconstruct_schema_from_json(schema_dict)
 
     def resume(
         self,
