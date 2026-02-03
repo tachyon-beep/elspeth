@@ -1087,8 +1087,9 @@ class AggregationExecutor:
         batch_id = self._batch_ids[node_id]
         assert batch_id is not None  # We just created it if it was None
 
-        # Buffer the row
-        self._buffers[node_id].append(token.row_data)
+        # Buffer the row - store dict (JSON-serializable for checkpoints)
+        # TokenInfo.row_data is PipelineRow, extract dict for buffer
+        self._buffers[node_id].append(token.row_data.to_dict())
         self._buffer_tokens[node_id].append(token)
 
         # Record batch membership for audit trail
@@ -1518,6 +1519,15 @@ class AggregationExecutor:
 
             # Store full TokenInfo as dicts (not just IDs)
             # Include all lineage fields to preserve fork/join/expand metadata
+            #
+            # PipelineRow Migration (v2.0):
+            # - row_data is stored as dict via to_dict() for JSON serialization
+            # - contract is stored once per node (not per token) for efficiency
+            # - contract_version links tokens to their contract for restoration
+            #
+            # Get contract from first token (all tokens in buffer share same contract)
+            # Per CLAUDE.md Tier 1: tokens exist, so first token MUST exist
+            first_token_contract = tokens[0].row_data.contract
             state[node_id] = {
                 "tokens": [
                     {
@@ -1527,7 +1537,8 @@ class AggregationExecutor:
                         "fork_group_id": t.fork_group_id,
                         "join_group_id": t.join_group_id,
                         "expand_group_id": t.expand_group_id,
-                        "row_data": t.row_data,
+                        "row_data": t.row_data.to_dict(),  # Extract dict for JSON serialization
+                        "contract_version": t.row_data.contract.version_hash(),
                     }
                     for t in tokens
                 ],
@@ -1536,6 +1547,8 @@ class AggregationExecutor:
                 # P2-2026-02-01: Preserve trigger fire time offsets
                 "count_fire_offset": count_fire_offset,
                 "condition_fire_offset": condition_fire_offset,
+                # Store contract once per node (all buffered tokens share the same contract)
+                "contract": first_token_contract.to_checkpoint_format(),
             }
 
         # Checkpoint format version
@@ -1628,6 +1641,15 @@ class AggregationExecutor:
             if not isinstance(tokens_data, list):
                 raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
 
+            # Restore contract from checkpoint (v2.0: stored once per node)
+            # Per CLAUDE.md Tier 1: contract MUST exist if tokens exist
+            if "contract" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'contract' key. "
+                    f"v2.0 format requires contract for PipelineRow restoration."
+                )
+            restored_contract = SchemaContract.from_checkpoint(node_state["contract"])
+
             # Reconstruct TokenInfo objects directly from checkpoint
             reconstructed_tokens = []
             for t in tokens_data:
@@ -1641,6 +1663,7 @@ class AggregationExecutor:
                     "fork_group_id",
                     "join_group_id",
                     "expand_group_id",
+                    "contract_version",  # v2.0: required for contract reference
                 }
                 missing = required_fields - set(t.keys())
                 if missing:
@@ -1648,6 +1671,18 @@ class AggregationExecutor:
                         f"Checkpoint token missing required fields: {missing}. "
                         f"Required in v2.0 format: {required_fields}. Found: {set(t.keys())}"
                     )
+
+                # Validate contract_version matches restored contract
+                # Per CLAUDE.md Tier 1: integrity check on our data
+                if t["contract_version"] != restored_contract.version_hash():
+                    raise ValueError(
+                        f"Contract version mismatch for token {t['token_id']}: "
+                        f"expected {restored_contract.version_hash()}, got {t['contract_version']}. "
+                        f"Checkpoint may be corrupted."
+                    )
+
+                # Reconstruct PipelineRow from checkpoint data
+                row_data = PipelineRow(t["row_data"], restored_contract)
 
                 # Reconstruct TokenInfo from checkpoint data
                 # NOTE: These fields CAN be None (valid state for unforked tokens), but they
@@ -1658,7 +1693,7 @@ class AggregationExecutor:
                     TokenInfo(
                         row_id=t["row_id"],
                         token_id=t["token_id"],
-                        row_data=t["row_data"],
+                        row_data=row_data,  # PipelineRow, not dict
                         branch_name=t["branch_name"],
                         fork_group_id=t["fork_group_id"],
                         join_group_id=t["join_group_id"],
@@ -1667,8 +1702,10 @@ class AggregationExecutor:
                 )
 
             # Restore buffer state
+            # _buffer_tokens stores TokenInfo with PipelineRow
+            # _buffers stores dicts (JSON-serializable for future checkpoints)
             self._buffer_tokens[node_id] = reconstructed_tokens
-            self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
+            self._buffers[node_id] = [t.row_data.to_dict() for t in reconstructed_tokens]
 
             if "batch_id" not in node_state:
                 raise ValueError(

@@ -1144,3 +1144,380 @@ class TestSinkExecutorPipelineRow:
         rows = call_args[0][0]
         assert len(rows) == 1
         assert rows[0] == {"value": "test", "extra_field": "extra_value", "another": 123}
+
+
+class TestAggregationExecutorPipelineRow:
+    """Tests for AggregationExecutor with PipelineRow.
+
+    AggregationExecutor buffers rows for batch aggregations. The buffer stores
+    dicts (JSON-serializable for checkpoints), not PipelineRow objects.
+    """
+
+    def test_buffer_row_stores_dict_not_pipeline_row(self) -> None:
+        """AggregationExecutor should store dicts in buffer, not PipelineRow.
+
+        Internal buffer must be JSON-serializable for checkpoints.
+        """
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings with a count trigger
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor with aggregation_settings
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+
+        # Buffer the row
+        executor.buffer_row(node_id, token)
+
+        # Verify buffer contains dict, NOT PipelineRow
+        buffered = executor.get_buffered_rows(node_id)
+        assert len(buffered) == 1
+        assert isinstance(buffered[0], dict), f"Expected dict in buffer, got {type(buffered[0])}"
+        assert not isinstance(buffered[0], PipelineRow), "Buffer should not contain PipelineRow"
+        assert buffered[0] == {"value": "test"}
+
+    def test_buffer_row_extracts_dict_from_pipeline_row(self) -> None:
+        """buffer_row should call to_dict() on token.row_data."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup token with PipelineRow containing extra fields
+        contract = _make_contract()
+        row_data = {"value": "test", "extra": "field", "number": 42}
+        row = PipelineRow(row_data, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+
+        # Buffer the row
+        executor.buffer_row(node_id, token)
+
+        # Verify all fields are preserved in the buffer
+        buffered = executor.get_buffered_rows(node_id)
+        assert buffered[0] == {"value": "test", "extra": "field", "number": 42}
+
+    def test_buffer_tokens_preserves_pipeline_row(self) -> None:
+        """TokenInfo in buffer_tokens should keep PipelineRow as row_data."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+
+        # Buffer the row
+        executor.buffer_row(node_id, token)
+
+        # Verify buffer_tokens preserves TokenInfo with PipelineRow
+        buffered_tokens = executor.get_buffered_tokens(node_id)
+        assert len(buffered_tokens) == 1
+        assert isinstance(buffered_tokens[0].row_data, PipelineRow)
+        assert buffered_tokens[0].row_data.contract is contract
+
+    def test_checkpoint_contains_dicts_not_pipeline_row(self) -> None:
+        """get_checkpoint_state() should return JSON-serializable dicts."""
+        import json
+
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+
+        # Buffer the row
+        executor.buffer_row(node_id, token)
+
+        # Get checkpoint state
+        checkpoint = executor.get_checkpoint_state()
+
+        # Verify checkpoint is JSON-serializable
+        try:
+            serialized = json.dumps(checkpoint)
+            assert len(serialized) > 0
+        except (TypeError, ValueError) as e:
+            pytest.fail(f"Checkpoint should be JSON-serializable but got error: {e}")
+
+        # Verify row_data is stored as dict in checkpoint
+        node_checkpoint = checkpoint[str(node_id)]
+        assert "tokens" in node_checkpoint
+        token_data = node_checkpoint["tokens"][0]
+        assert "row_data" in token_data
+        # row_data should be a dict, not PipelineRow
+        assert isinstance(token_data["row_data"], dict)
+        assert token_data["row_data"] == {"value": "test"}
+
+    def test_checkpoint_includes_contract_for_restore(self) -> None:
+        """Checkpoint should include contract info to enable PipelineRow restoration."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+
+        # Buffer the row
+        executor.buffer_row(node_id, token)
+
+        # Get checkpoint state
+        checkpoint = executor.get_checkpoint_state()
+
+        # Verify contract info is stored (either per-token or per-node)
+        node_checkpoint = checkpoint[str(node_id)]
+        # Contract should be stored somewhere in checkpoint
+        # Either as "contract" at node level or "contract_version" per token
+        assert "contract" in node_checkpoint or any("contract_version" in t for t in node_checkpoint["tokens"]), (
+            "Checkpoint must include contract info for PipelineRow restoration"
+        )
+
+    def test_restore_from_checkpoint_creates_pipeline_row(self) -> None:
+        """restore_from_checkpoint should reconstruct TokenInfo with PipelineRow."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup contract and token
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor and buffer row
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+        executor.buffer_row(node_id, token)
+
+        # Get checkpoint
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        # Verify restored tokens have PipelineRow
+        restored_tokens = new_executor.get_buffered_tokens(node_id)
+        assert len(restored_tokens) == 1
+        assert isinstance(restored_tokens[0].row_data, PipelineRow)
+        assert restored_tokens[0].row_data["value"] == "test"
+        # Verify contract is restored
+        assert restored_tokens[0].row_data.contract is not None
+        assert restored_tokens[0].row_data.contract.mode == "FLEXIBLE"
+
+    def test_restore_from_checkpoint_buffer_has_dicts(self) -> None:
+        """After restore, _buffers should contain dicts (not PipelineRow)."""
+        from elspeth.contracts.types import NodeID
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup contract and token
+        contract = _make_contract()
+        row = PipelineRow({"value": "test"}, contract)
+        token = TokenInfo(row_id="row_001", token_id="token_001", row_data=row)
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_batch = MagicMock()
+        mock_batch.batch_id = "batch_001"
+        mock_recorder.create_batch.return_value = mock_batch
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+
+        # Create aggregation settings
+        agg_settings = AggregationSettings(
+            name="test_agg",
+            plugin="batch_stats",
+            trigger=TriggerConfig(count=10),
+        )
+        node_id = NodeID("agg_001")
+
+        # Create executor and buffer row
+        executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+        executor.buffer_row(node_id, token)
+
+        # Get checkpoint
+        checkpoint = executor.get_checkpoint_state()
+
+        # Create new executor and restore from checkpoint
+        new_executor = AggregationExecutor(
+            mock_recorder,
+            mock_span_factory,
+            run_id="run_001",
+            aggregation_settings={node_id: agg_settings},
+        )
+        new_executor.restore_from_checkpoint(checkpoint)
+
+        # Verify _buffers contains dicts, not PipelineRow
+        restored_rows = new_executor.get_buffered_rows(node_id)
+        assert len(restored_rows) == 1
+        assert isinstance(restored_rows[0], dict)
+        assert not isinstance(restored_rows[0], PipelineRow)
+        assert restored_rows[0] == {"value": "test"}

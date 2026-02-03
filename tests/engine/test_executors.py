@@ -33,6 +33,7 @@ from elspeth.contracts import (
 from elspeth.contracts.enums import Determinism, NodeType, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import OrchestrationInvariantError
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -742,6 +743,40 @@ class TestGateExecutor:
 class TestAggregationExecutor:
     """Tests for AggregationExecutor class."""
 
+    def _make_test_contract(self) -> SchemaContract:
+        """Create a test contract for PipelineRow wrapping."""
+        return SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=int,
+                    required=False,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+
+    def _make_token_with_pipeline_row(
+        self,
+        row_id: str,
+        token_id: str,
+        row_data: dict[str, Any],
+        contract: SchemaContract | None = None,
+        branch_name: str | None = None,
+    ) -> TokenInfo:
+        """Create a TokenInfo with PipelineRow-wrapped row_data."""
+        if contract is None:
+            contract = self._make_test_contract()
+        return TokenInfo(
+            row_id=row_id,
+            token_id=token_id,
+            row_data=PipelineRow(row_data, contract),
+            branch_name=branch_name,
+        )
+
     def _register_agg_node(self, recorder: LandscapeRecorder, run_id: str) -> tuple[NodeID, AggregationSettings]:
         """Helper to register an aggregation node and return settings."""
         node = recorder.register_node(
@@ -796,11 +831,13 @@ class TestAggregationExecutor:
             )
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
+        contract = self._make_test_contract()
         for i in range(3):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
@@ -846,21 +883,24 @@ class TestAggregationExecutor:
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
         # Buffer 2 rows - not enough
+        contract = self._make_test_contract()
         for i in range(2):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
         assert not executor.should_flush(node_id)
 
         # Buffer 1 more - now should flush
-        token = TokenInfo(
+        token = self._make_token_with_pipeline_row(
             row_id="row-2",
             token_id="tok-2",
             row_data={"value": 2},
+            contract=contract,
         )
         executor.buffer_row(node_id, token)
 
@@ -905,11 +945,13 @@ class TestAggregationExecutor:
             )
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
+        contract = self._make_test_contract()
         for i in range(2):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
             )
             executor.buffer_row(node_id, token)
 
@@ -955,7 +997,7 @@ class TestAggregationExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id="tok-1")
 
-        token = TokenInfo(
+        token = self._make_token_with_pipeline_row(
             row_id="row-1",
             token_id="tok-1",
             row_data={"value": 1},
@@ -1008,11 +1050,13 @@ class TestAggregationExecutor:
             recorder.create_token(row_id=row.row_id, token_id=f"tok-{i}")
 
         # Buffer some rows
+        contract = self._make_test_contract()
         for i in range(3):
-            token = TokenInfo(
+            token = self._make_token_with_pipeline_row(
                 row_id=f"row-{i}",
                 token_id=f"tok-{i}",
                 row_data={"value": i},
+                contract=contract,
                 branch_name="main" if i == 0 else None,
             )
             executor.buffer_row(node_id, token)
