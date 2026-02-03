@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import types
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -237,10 +238,16 @@ class SchemaContract:
                     continue
 
                 value = row[fc.normalized_name]
+
+                # Optional fields (required=False) allow None values
+                # This matches Pydantic semantics where Optional[T] = T | None
+                if value is None and not fc.required:
+                    continue
+
                 # Normalize runtime type for comparison
                 # (handles numpy.int64 matching int, etc.)
                 actual_type = normalize_type_for_contract(value)
-                # type(None) matches None values
+                # type(None) matches None values (for explicitly declared type(None) fields)
                 if actual_type != fc.python_type:
                     violations.append(
                         TypeMismatchViolation(
@@ -530,17 +537,28 @@ class PipelineRow:
     def __contains__(self, key: str) -> bool:
         """Support 'if field in row' checks.
 
+        Checks if field exists in actual row data (not just in contract).
+        This enables guard patterns like 'if field in row: use(row[field])'
+        to work correctly for optional fields that may be absent from data.
+
         Args:
             key: Field name (original or normalized)
 
         Returns:
-            True if field exists in contract
+            True if field exists in actual row data
+
+        Note:
+            P2 fix: __contains__ must check _data after name resolution,
+            not just the contract. This matches ContractAwareRow behavior
+            and enables standard Python guard patterns for optional fields.
         """
         try:
-            self._contract.resolve_name(key)
-            return True
+            resolved = self._contract.resolve_name(key)
+            return resolved in self._data
         except KeyError:
-            return False
+            # Field not in contract - check if it exists in data anyway
+            # (supports FLEXIBLE/OBSERVED modes with extra fields)
+            return key in self._data
 
     def to_dict(self) -> dict[str, Any]:
         """Export raw data (normalized keys) for serialization.
@@ -549,6 +567,39 @@ class PipelineRow:
             Copy of internal data dict
         """
         return dict(self._data)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get field value with optional default (Jinja2 compatibility).
+
+        Supports dual-name resolution like __getitem__.
+
+        Args:
+            key: Field name (original or normalized)
+            default: Value to return if field not found
+
+        Returns:
+            Field value or default
+        """
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def keys(self) -> list[str]:
+        """Return normalized field names (Jinja2 compatibility).
+
+        Returns:
+            List of normalized field names from the underlying data
+        """
+        return list(self._data.keys())
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate over normalized field names (Jinja2 compatibility).
+
+        Yields:
+            Normalized field names
+        """
+        return iter(self._data)
 
     @property
     def contract(self) -> SchemaContract:

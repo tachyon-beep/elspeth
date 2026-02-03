@@ -108,7 +108,7 @@ allow_hits:
     name as original name
   safety: Fallback to same value is correct behavior, not silent coercion
   expires: null
-- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=460065a513661e29
+- key: contracts/schema_contract.py:R1:SchemaContract:get_field:fp=29ec70025ab11d9a
   owner: architecture
   reason: 'Optional lookup API: get_field() intentionally returns None for missing fields - callers use
     resolve_name() for strict lookup'

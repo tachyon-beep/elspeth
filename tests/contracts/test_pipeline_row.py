@@ -61,6 +61,46 @@ class TestPipelineRowAccess:
         """'in' returns False for unknown fields."""
         assert "nonexistent" not in sample_row
 
+    def test_contains_checks_actual_data_not_just_contract(self) -> None:
+        """'in' checks actual data presence, not just contract membership.
+
+        P2 fix: For optional fields that exist in contract but are missing from
+        actual data, 'in' should return False so guard patterns work correctly.
+        """
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract("required_field", "Required", str, True, "declared"),
+                FieldContract("optional_field", "Optional", str, False, "declared"),
+            ),
+            locked=True,
+        )
+        # Data only has the required field, not the optional one
+        row = PipelineRow({"required_field": "present"}, contract)
+
+        # Required field present in both contract and data -> True
+        assert "required_field" in row
+
+        # Optional field in contract but NOT in data -> False
+        # This enables guard patterns like: if "optional" in row: use(row["optional"])
+        assert "optional_field" not in row
+
+        # Unknown field not in contract or data -> False
+        assert "unknown" not in row
+
+    def test_contains_with_extra_fields_in_flexible_mode(self) -> None:
+        """'in' returns True for extra fields in FLEXIBLE mode."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(FieldContract("declared", "Declared", int, True, "declared"),),
+            locked=True,
+        )
+        # Data has extra field not in contract
+        row = PipelineRow({"declared": 1, "extra": "value"}, contract)
+
+        assert "declared" in row
+        assert "extra" in row  # Present in data even if not in contract
+
     def test_to_dict_returns_raw_data(self, sample_row: PipelineRow) -> None:
         """to_dict() returns raw data with normalized keys."""
         d = sample_row.to_dict()
@@ -190,3 +230,83 @@ class TestPipelineRowImmutability:
 
         # Row should still have original value
         assert row["amount"] == 100
+
+
+class TestPipelineRowJinja2Compatibility:
+    """Test Jinja2 template compatibility methods (get, keys, __iter__).
+
+    These methods enable PipelineRow to be used directly in Jinja2 templates,
+    eliminating the need for a separate ContractAwareRow wrapper.
+    """
+
+    @pytest.fixture
+    def sample_row(self) -> PipelineRow:
+        """Sample row for Jinja2 compatibility tests."""
+        contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                FieldContract("amount_usd", "'Amount USD'", int, True, "declared"),
+                FieldContract("customer_id", "Customer ID", str, True, "declared"),
+                FieldContract("simple", "simple", str, True, "declared"),
+            ),
+            locked=True,
+        )
+        data = {"amount_usd": 100, "customer_id": "C001", "simple": "value"}
+        return PipelineRow(data, contract)
+
+    def test_get_with_normalized_name(self, sample_row: PipelineRow) -> None:
+        """get() works with normalized field names."""
+        assert sample_row.get("amount_usd") == 100
+        assert sample_row.get("customer_id") == "C001"
+
+    def test_get_with_original_name(self, sample_row: PipelineRow) -> None:
+        """get() works with original field names (dual-name resolution)."""
+        assert sample_row.get("'Amount USD'") == 100
+        assert sample_row.get("Customer ID") == "C001"
+
+    def test_get_missing_field_returns_default(self, sample_row: PipelineRow) -> None:
+        """get() returns default for missing fields."""
+        assert sample_row.get("nonexistent") is None
+        assert sample_row.get("nonexistent", "default") == "default"
+        assert sample_row.get("nonexistent", 42) == 42
+
+    def test_keys_returns_normalized_names(self, sample_row: PipelineRow) -> None:
+        """keys() returns normalized field names."""
+        keys = sample_row.keys()
+        assert set(keys) == {"amount_usd", "customer_id", "simple"}
+        # Should NOT include original names
+        assert "'Amount USD'" not in keys
+        assert "Customer ID" not in keys
+
+    def test_keys_returns_list(self, sample_row: PipelineRow) -> None:
+        """keys() returns a list (not a view) for Jinja2 compatibility."""
+        keys = sample_row.keys()
+        assert isinstance(keys, list)
+
+    def test_iter_yields_normalized_keys(self, sample_row: PipelineRow) -> None:
+        """Iteration yields normalized field names."""
+        keys = list(sample_row)
+        assert set(keys) == {"amount_usd", "customer_id", "simple"}
+
+    def test_iter_supports_for_loop(self, sample_row: PipelineRow) -> None:
+        """Can use for loop over PipelineRow (Jinja2 {% for key in row %})."""
+        collected = []
+        for key in sample_row:
+            collected.append(key)
+        assert set(collected) == {"amount_usd", "customer_id", "simple"}
+
+    def test_jinja2_template_pattern_iteration(self, sample_row: PipelineRow) -> None:
+        """Simulates Jinja2 pattern: {% for key in row %}{{ row[key] }}{% endfor %}."""
+        # This is the exact pattern Jinja2 uses when iterating
+        result = {key: sample_row[key] for key in sample_row}
+        assert result == {"amount_usd": 100, "customer_id": "C001", "simple": "value"}
+
+    def test_jinja2_template_pattern_conditional(self, sample_row: PipelineRow) -> None:
+        """Simulates Jinja2 pattern: {% if "field" in row %}{{ row.get("field") }}{% endif %}."""
+        # Combination of __contains__ and get()
+        if "amount_usd" in sample_row:
+            value = sample_row.get("amount_usd")
+            assert value == 100
+
+        if "nonexistent" in sample_row:
+            pytest.fail("Should not enter block for missing field")

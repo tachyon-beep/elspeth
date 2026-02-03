@@ -4,12 +4,11 @@ import pytest
 from jinja2 import StrictUndefined, UndefinedError
 from jinja2.sandbox import SandboxedEnvironment
 
-from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-from elspeth.plugins.llm.contract_aware_row import ContractAwareRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 
 class TestJinja2Integration:
-    """Test ContractAwareRow works correctly with Jinja2."""
+    """Test PipelineRow works correctly with Jinja2."""
 
     @pytest.fixture
     def env(self) -> SandboxedEnvironment:
@@ -48,7 +47,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template with normalized dot access renders correctly."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("Amount: {{ row.amount_usd }}")
 
         result = template.render(row=row)
@@ -62,7 +61,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template with normalized bracket access renders correctly."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string('Amount: {{ row["amount_usd"] }}')
 
         result = template.render(row=row)
@@ -76,7 +75,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template with original name bracket access renders correctly."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("Amount: {{ row[\"'Amount USD'\"] }}")
 
         result = template.render(row=row)
@@ -90,7 +89,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template mixing access styles renders correctly."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string('Customer {{ row.customer_name }} ordered {{ row["\'Amount USD\'"] }} ({{ row["ORDER-ID"] }})')
 
         result = template.render(row=row)
@@ -104,7 +103,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template with conditional on original name works."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("{% if row[\"'Amount USD'\"] > 50 %}High value{% else %}Low value{% endif %}")
 
         result = template.render(row=row)
@@ -118,7 +117,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template iterating over row keys yields normalized names."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("{% for k in row %}{{ k }},{% endfor %}")
 
         result = template.render(row=row)
@@ -134,7 +133,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template with 'in' operator works with both name forms."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
 
         # Check normalized name
         template1 = env.from_string("{% if 'amount_usd' in row %}YES{% endif %}")
@@ -151,7 +150,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template accessing undefined field raises UndefinedError."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("{{ row.nonexistent }}")
 
         with pytest.raises(UndefinedError):
@@ -164,7 +163,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Template using get() with default works."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("{{ row.get('nonexistent', 'N/A') }}")
 
         result = template.render(row=row)
@@ -178,7 +177,7 @@ class TestJinja2Integration:
         contract: SchemaContract,
     ) -> None:
         """Jinja2 filters work on resolved values."""
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
         template = env.from_string("{{ row['Customer Name'] | upper }}")
 
         result = template.render(row=row)

@@ -3,19 +3,18 @@
 
 These tests verify the full integration of:
 1. SchemaContract with original/normalized name mappings
-2. ContractAwareRow for dual-name access in templates
+2. PipelineRow for dual-name access in templates
 3. PromptTemplate rendering with contract support
 4. extract_jinja2_fields_with_names for field discovery
 5. Hash stability across access styles
 
 Per CLAUDE.md Test Path Integrity: These tests use production code paths
-(SchemaContract, ContractAwareRow, PromptTemplate, extract_jinja2_fields_with_names)
+(SchemaContract, PipelineRow, PromptTemplate, extract_jinja2_fields_with_names)
 rather than manual construction.
 """
 
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.core.templates import extract_jinja2_fields_with_names
-from elspeth.plugins.llm.contract_aware_row import ContractAwareRow
 from elspeth.plugins.llm.templates import PromptTemplate
 
 
@@ -207,7 +206,7 @@ class TestHashStabilityAcrossAccessStyles:
         )
 
         data = {"amount_usd": 100}
-        row = ContractAwareRow(data, contract)
+        row = PipelineRow(data, contract)
 
         # Access via original name
         value_via_original = row["'Amount USD'"]

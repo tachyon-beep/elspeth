@@ -11,8 +11,8 @@ from jinja2 import StrictUndefined, TemplateSyntaxError, UndefinedError
 from jinja2.exceptions import SecurityError
 from jinja2.sandbox import SandboxedEnvironment
 
+from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.canonical import canonical_json
-from elspeth.plugins.llm.contract_aware_row import ContractAwareRow
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema_contract import SchemaContract
@@ -160,7 +160,7 @@ class PromptTemplate:
         """
         # Wrap row for dual-name access if contract provided
         if contract is not None:
-            row_context: Any = ContractAwareRow(row, contract)
+            row_context: Any = PipelineRow(row, contract)
         else:
             row_context = row
 
