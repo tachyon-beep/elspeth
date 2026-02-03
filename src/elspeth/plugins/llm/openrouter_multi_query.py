@@ -15,7 +15,8 @@ with FIFO output ordering) and PooledExecutor for query-level concurrency
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,6 +41,12 @@ from elspeth.plugins.llm.multi_query import (
 )
 from elspeth.plugins.llm.openrouter import OpenRouterConfig
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.pooling import CapacityError, PooledExecutor, is_capacity_error
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -356,6 +363,11 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
 
+        # Tier 2: Plugin-internal tracing (Langfuse only)
+        self._tracing_config: TracingConfig | None = parse_tracing_config(cfg.tracing)
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None  # Langfuse client if configured
+
     def connect_output(
         self,
         output: OutputPort,
@@ -386,12 +398,174 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder, telemetry, and rate limit context for pooled execution."""
+        """Capture recorder, telemetry, rate limit context, and initialize tracing."""
         self._recorder = ctx.landscape
         self._run_id = ctx.run_id
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for OpenRouter service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("openrouter") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider.
+
+        OpenRouter uses HTTP directly (not the OpenAI SDK), so Azure AI
+        auto-instrumentation is NOT supported. Only Langfuse (manual spans)
+        is available.
+        """
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Type narrowing - caller ensures config is not None
+        if self._tracing_config is None:
+            return
+
+        # Validate configuration completeness
+        errors = validate_tracing_config(self._tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return  # Don't attempt setup with incomplete config
+
+        match self._tracing_config.provider:
+            case "azure_ai":
+                # Azure AI tracing NOT supported for OpenRouter
+                logger.warning(
+                    "Azure AI tracing not supported for OpenRouter - use Langfuse instead",
+                    provider="azure_ai",
+                    hint="Azure AI auto-instruments the OpenAI SDK; OpenRouter uses HTTP directly",
+                )
+                return
+            case "langfuse":
+                self._setup_langfuse_tracing(logger)
+            case "none" | _:
+                pass  # No tracing
+
+    def _setup_langfuse_tracing(self, logger: Any) -> None:
+        """Initialize Langfuse tracing.
+
+        Langfuse requires manual span creation around LLM calls.
+        The Langfuse client is stored for use in _process_single_query().
+        """
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found]
+
+            cfg = self._tracing_config
+            if not isinstance(cfg, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=cfg.public_key,
+                secret_key=cfg.secret_key,
+                host=cfg.host,
+            )
+            self._tracing_active = True
+
+            logger.info(
+                "Langfuse tracing initialized",
+                provider="langfuse",
+                host=cfg.host,
+            )
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                provider="langfuse",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
+
+    @contextmanager
+    def _create_langfuse_trace(
+        self,
+        token_id: str,
+        row_data: dict[str, Any],
+    ) -> Generator[Any, None, None]:
+        """Create a Langfuse trace context for a row's LLM calls.
+
+        For multi-query transforms, we trace at the row level since each row
+        triggers multiple queries. Individual query timing is captured in
+        the pool_context metadata.
+
+        Args:
+            token_id: Token ID for correlation
+            row_data: Input row data (for metadata)
+
+        Yields:
+            Langfuse trace object, or None if tracing not active
+        """
+        if not self._tracing_active or self._langfuse_client is None:
+            yield None
+            return
+
+        if not isinstance(self._tracing_config, LangfuseTracingConfig):
+            yield None
+            return
+
+        trace = self._langfuse_client.trace(
+            name=f"elspeth.{self.name}",
+            metadata={
+                "token_id": token_id,
+                "plugin": self.name,
+                "model": self._model,
+                "query_count": len(self._query_specs),
+            },
+        )
+        try:
+            yield trace
+        finally:
+            # Trace auto-closes, but we ensure it's ended
+            pass
+
+    def _record_langfuse_generation(
+        self,
+        trace: Any,
+        query_count: int,
+        succeeded_count: int,
+        total_usage: dict[str, int] | None = None,
+        latency_ms: float | None = None,
+    ) -> None:
+        """Record multi-query execution summary in Langfuse.
+
+        For multi-query transforms, we record aggregate metrics since
+        individual query details are in the audit trail.
+
+        Args:
+            trace: Langfuse trace object from _create_langfuse_trace
+            query_count: Total number of queries executed
+            succeeded_count: Number of successful queries
+            total_usage: Aggregated token usage across all queries
+            latency_ms: Total row processing latency in milliseconds
+        """
+        if trace is None:
+            return
+
+        generation_kwargs: dict[str, Any] = {
+            "name": "multi_query_batch",
+            "model": self._model,
+            "input": f"{query_count} queries",
+            "output": f"{succeeded_count}/{query_count} succeeded",
+        }
+
+        if total_usage:
+            generation_kwargs["usage"] = {
+                "input": total_usage.get("prompt_tokens", 0),
+                "output": total_usage.get("completion_tokens", 0),
+                "total": total_usage.get("total_tokens", 0),
+            }
+
+        metadata: dict[str, Any] = {
+            "query_count": query_count,
+            "succeeded_count": succeeded_count,
+        }
+        if latency_ms is not None:
+            metadata["latency_ms"] = latency_ms
+        generation_kwargs["metadata"] = metadata
+
+        trace.generation(**generation_kwargs)
 
     def _get_http_client(self, state_id: str) -> AuditedHTTPClient:
         """Get or create HTTP client for a state_id.
@@ -777,8 +951,32 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         if ctx.state_id is None:
             raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
 
+        import time
+
+        token_id = ctx.token.token_id if ctx.token else "unknown"
+        start_time = time.monotonic()
+
         try:
-            return self._process_single_row_internal(row, ctx.state_id)
+            with self._create_langfuse_trace(token_id, row) as trace:
+                result = self._process_single_row_internal(row, ctx.state_id)
+
+                # Record in Langfuse if tracing is active
+                if trace is not None:
+                    latency_ms = (time.monotonic() - start_time) * 1000
+                    # Count successes - if result is successful, all queries succeeded
+                    if result.status == "success":
+                        succeeded = len(self._query_specs)
+                    else:
+                        # Parse succeeded_count from error reason if available
+                        succeeded = result.reason.get("succeeded_count", 0) if result.reason else 0
+                    self._record_langfuse_generation(
+                        trace=trace,
+                        query_count=len(self._query_specs),
+                        succeeded_count=succeeded,
+                        latency_ms=latency_ms,
+                    )
+
+                return result
         finally:
             # Clean up cached clients for this state_id
             with self._http_clients_lock:
@@ -963,7 +1161,11 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         return results
 
     def close(self) -> None:
-        """Release resources."""
+        """Release resources and flush tracing."""
+        # Flush Tier 2 tracing if active
+        if self._tracing_active:
+            self._flush_tracing()
+
         # Shutdown batch processing infrastructure first
         if self._batch_initialized:
             self.shutdown_batch_processing()
@@ -975,3 +1177,18 @@ class OpenRouterMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._recorder = None
         with self._http_clients_lock:
             self._http_clients.clear()
+        self._langfuse_client = None
+
+    def _flush_tracing(self) -> None:
+        """Flush any pending tracing data."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Langfuse needs explicit flush
+        if self._langfuse_client is not None:
+            try:
+                self._langfuse_client.flush()
+                logger.debug("Langfuse tracing flushed")
+            except Exception as e:
+                logger.warning("Failed to flush Langfuse tracing", error=str(e))
