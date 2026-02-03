@@ -895,3 +895,252 @@ class TestGateExecutorPipelineRow:
             # Verify error message is clear
             assert "Cannot create PipelineRow: no contract available" in str(exc_info.value)
             assert "test_gate" in str(exc_info.value)
+
+
+class TestSinkExecutorPipelineRow:
+    """Tests for SinkExecutor with PipelineRow.
+
+    Sinks receive list[dict], NOT list[PipelineRow]. The SinkExecutor must
+    extract dicts from PipelineRow before calling sink.write().
+
+    Contract metadata is preserved in Landscape audit trail, not sink output.
+    """
+
+    def test_execute_sink_extracts_dicts_from_pipeline_rows(self) -> None:
+        """SinkExecutor should extract dicts before calling sink.write()."""
+        from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup tokens with PipelineRow
+        contract = _make_contract()
+        tokens = [
+            TokenInfo(row_id="r1", token_id="t1", row_data=PipelineRow({"value": "a"}, contract)),
+            TokenInfo(row_id="r2", token_id="t2", row_data=PipelineRow({"value": "b"}, contract)),
+        ]
+
+        # Mock sink - capture what gets passed to write()
+        mock_sink = MagicMock()
+        mock_sink.name = "test_sink"
+        mock_sink.node_id = "sink_001"
+        mock_sink.write.return_value = ArtifactDescriptor(
+            artifact_type="csv",
+            path_or_uri="/output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+        mock_artifact = MagicMock()
+        mock_recorder.register_artifact.return_value = mock_artifact
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.sink_span.return_value = nullcontext()
+
+        # Create executor
+        executor = SinkExecutor(mock_recorder, mock_span_factory, run_id="run_001")
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        executor.write(
+            sink=mock_sink,
+            tokens=tokens,
+            ctx=ctx,
+            step_in_pipeline=5,
+            sink_name="test_sink",
+            pending_outcome=PendingOutcome(outcome=RowOutcome.COMPLETED),
+        )
+
+        # Verify dicts (not PipelineRow) were passed to sink.write()
+        mock_sink.write.assert_called_once()
+        call_args = mock_sink.write.call_args
+        rows = call_args[0][0]
+        assert len(rows) == 2
+        assert all(isinstance(r, dict) for r in rows), f"Expected dicts, got {[type(r) for r in rows]}"
+        assert all(not isinstance(r, PipelineRow) for r in rows), "Sink should not receive PipelineRow objects"
+        assert rows == [{"value": "a"}, {"value": "b"}]
+
+    def test_execute_sink_extracts_dict_for_landscape_input(self) -> None:
+        """SinkExecutor should extract dict for Landscape input_data recording."""
+        from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        token = TokenInfo(row_id="r1", token_id="t1", row_data=PipelineRow({"value": "test"}, contract))
+
+        # Mock sink
+        mock_sink = MagicMock()
+        mock_sink.name = "test_sink"
+        mock_sink.node_id = "sink_001"
+        mock_sink.write.return_value = ArtifactDescriptor(
+            artifact_type="csv",
+            path_or_uri="/output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
+
+        # Mock recorder - capture what gets passed
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+        mock_artifact = MagicMock()
+        mock_recorder.register_artifact.return_value = mock_artifact
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.sink_span.return_value = nullcontext()
+
+        # Create executor
+        executor = SinkExecutor(mock_recorder, mock_span_factory, run_id="run_001")
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        executor.write(
+            sink=mock_sink,
+            tokens=[token],
+            ctx=ctx,
+            step_in_pipeline=5,
+            sink_name="test_sink",
+            pending_outcome=PendingOutcome(outcome=RowOutcome.COMPLETED),
+        )
+
+        # Verify dict was passed to begin_node_state (for Landscape recording)
+        mock_recorder.begin_node_state.assert_called_once()
+        call_kwargs = mock_recorder.begin_node_state.call_args[1]
+        input_data = call_kwargs["input_data"]
+        assert isinstance(input_data, dict), f"Expected dict for Landscape input_data, got {type(input_data)}"
+        assert not isinstance(input_data, PipelineRow), "Landscape should not receive PipelineRow objects"
+        assert input_data == {"value": "test"}
+
+    def test_execute_sink_extracts_dict_for_landscape_output(self) -> None:
+        """SinkExecutor should extract dict for Landscape output_data recording."""
+        from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow
+        contract = _make_contract()
+        token = TokenInfo(row_id="r1", token_id="t1", row_data=PipelineRow({"value": "test"}, contract))
+
+        # Mock sink
+        mock_sink = MagicMock()
+        mock_sink.name = "test_sink"
+        mock_sink.node_id = "sink_001"
+        mock_sink.write.return_value = ArtifactDescriptor(
+            artifact_type="csv",
+            path_or_uri="/output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
+
+        # Mock recorder - capture what gets passed to complete_node_state
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+        mock_artifact = MagicMock()
+        mock_recorder.register_artifact.return_value = mock_artifact
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.sink_span.return_value = nullcontext()
+
+        # Create executor
+        executor = SinkExecutor(mock_recorder, mock_span_factory, run_id="run_001")
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        executor.write(
+            sink=mock_sink,
+            tokens=[token],
+            ctx=ctx,
+            step_in_pipeline=5,
+            sink_name="test_sink",
+            pending_outcome=PendingOutcome(outcome=RowOutcome.COMPLETED),
+        )
+
+        # Verify dict was passed to complete_node_state output_data
+        # complete_node_state is called once for successful sink write
+        complete_calls = [c for c in mock_recorder.complete_node_state.call_args_list if c[1].get("output_data") is not None]
+        assert len(complete_calls) == 1
+        output_data = complete_calls[0][1]["output_data"]
+        row_in_output = output_data["row"]
+        assert isinstance(row_in_output, dict), f"Expected dict in output_data['row'], got {type(row_in_output)}"
+        assert not isinstance(row_in_output, PipelineRow), "Landscape output should not contain PipelineRow"
+        assert row_in_output == {"value": "test"}
+
+    def test_execute_sink_preserves_all_fields_in_dict(self) -> None:
+        """Sink should receive all fields, including extras not in contract."""
+        from elspeth.contracts import ArtifactDescriptor, PendingOutcome, RowOutcome
+        from elspeth.engine.executors import SinkExecutor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup token with PipelineRow that has extra fields not in contract
+        contract = _make_contract()  # Only declares 'value' field
+        # PipelineRow allows extra fields in FLEXIBLE mode
+        row_data = {"value": "test", "extra_field": "extra_value", "another": 123}
+        token = TokenInfo(row_id="r1", token_id="t1", row_data=PipelineRow(row_data, contract))
+
+        # Mock sink - capture what gets passed
+        mock_sink = MagicMock()
+        mock_sink.name = "test_sink"
+        mock_sink.node_id = "sink_001"
+        mock_sink.write.return_value = ArtifactDescriptor(
+            artifact_type="csv",
+            path_or_uri="/output/test.csv",
+            content_hash="abc123",
+            size_bytes=100,
+        )
+
+        # Mock recorder
+        mock_recorder = MagicMock()
+        mock_state = MagicMock()
+        mock_state.state_id = "state_001"
+        mock_recorder.begin_node_state.return_value = mock_state
+        mock_artifact = MagicMock()
+        mock_recorder.register_artifact.return_value = mock_artifact
+
+        # Mock span factory
+        mock_span_factory = MagicMock(spec=SpanFactory)
+        mock_span_factory.sink_span.return_value = nullcontext()
+
+        # Create executor
+        executor = SinkExecutor(mock_recorder, mock_span_factory, run_id="run_001")
+
+        # Create context
+        ctx = PluginContext(run_id="run_001", config={})
+
+        # Execute
+        executor.write(
+            sink=mock_sink,
+            tokens=[token],
+            ctx=ctx,
+            step_in_pipeline=5,
+            sink_name="test_sink",
+            pending_outcome=PendingOutcome(outcome=RowOutcome.COMPLETED),
+        )
+
+        # Verify ALL fields are passed to sink, not just contract fields
+        mock_sink.write.assert_called_once()
+        call_args = mock_sink.write.call_args
+        rows = call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0] == {"value": "test", "extra_field": "extra_value", "another": 123}

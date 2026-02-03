@@ -1953,7 +1953,10 @@ class SinkExecutor:
         if not tokens:
             return None
 
-        rows = [t.row_data for t in tokens]
+        # Extract dicts from PipelineRow for sink write
+        # Sinks serialize data to external formats - they receive plain dicts
+        # Contract metadata is preserved in Landscape audit trail, not sink output
+        rows = [t.row_data.to_dict() for t in tokens]
 
         # Create node_state for EACH token - this is how we derive COMPLETED terminal state
         # Sink must have node_id assigned by orchestrator before execution
@@ -1963,12 +1966,15 @@ class SinkExecutor:
 
         states: list[tuple[TokenInfo, NodeStateOpen]] = []
         for token in tokens:
+            # Extract dict from PipelineRow for Landscape recording
+            # Landscape stores raw dicts, not PipelineRow objects
+            input_dict = token.row_data.to_dict()
             state = self._recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=sink_node_id,
                 run_id=ctx.run_id,
                 step_index=step_in_pipeline,
-                input_data=token.row_data,
+                input_data=input_dict,
             )
             states.append((token, state))
 
@@ -2051,8 +2057,10 @@ class SinkExecutor:
         # Complete all token states - status=NodeStateStatus.COMPLETED means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
         for token, state in states:
+            # Extract dict from PipelineRow for Landscape output recording
+            output_dict = token.row_data.to_dict()
             sink_output = {
-                "row": token.row_data,
+                "row": output_dict,
                 "artifact_path": artifact_info.path_or_uri,
                 "content_hash": artifact_info.content_hash,
             }
