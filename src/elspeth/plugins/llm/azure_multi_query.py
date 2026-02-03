@@ -30,6 +30,13 @@ from elspeth.plugins.llm.multi_query import (
     ResponseFormat,
 )
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
+from elspeth.plugins.llm.tracing import (
+    AzureAITracingConfig,
+    LangfuseTracingConfig,
+    TracingConfig,
+    parse_tracing_config,
+    validate_tracing_config,
+)
 from elspeth.plugins.llm.validation import ValidationSuccess, validate_json_object_response
 from elspeth.plugins.pooling import CapacityError, PooledExecutor
 from elspeth.plugins.schema_factory import create_schema_from_config
@@ -207,6 +214,13 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
 
+        # Tier 2: Plugin-internal tracing
+        self._tracing_config: TracingConfig | None = parse_tracing_config(
+            cfg.tracing
+        )
+        self._tracing_active: bool = False
+        self._langfuse_client: Any = None
+
         # Batch processing state (initialized by connect_output)
         self._batch_initialized = False
 
@@ -246,6 +260,10 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
         self._telemetry_emit = ctx.telemetry_emit
         # Get rate limiter for Azure OpenAI service (None if rate limiting disabled)
         self._limiter = ctx.rate_limit_registry.get_limiter("azure_openai") if ctx.rate_limit_registry is not None else None
+
+        # Initialize Tier 2 tracing if configured
+        if self._tracing_config is not None:
+            self._setup_tracing()
 
     def _get_underlying_client(self) -> AzureOpenAI:
         """Get or create the underlying Azure OpenAI client."""
@@ -773,6 +791,81 @@ class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
             results.append(result)
 
         return results
+
+    def _setup_tracing(self) -> None:
+        """Initialize Tier 2 tracing based on provider."""
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+
+        # Type narrowing for mypy - caller guarantees this is not None
+        assert self._tracing_config is not None
+        tracing_config = self._tracing_config
+
+        errors = validate_tracing_config(tracing_config)
+        if errors:
+            for error in errors:
+                logger.warning("Tracing configuration error", error=error)
+            return
+
+        match tracing_config.provider:
+            case "azure_ai":
+                self._setup_azure_ai_tracing(logger, tracing_config)
+            case "langfuse":
+                self._setup_langfuse_tracing(logger, tracing_config)
+            case "none" | _:
+                pass
+
+    def _setup_azure_ai_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Azure AI tracing."""
+        try:
+            from opentelemetry import trace as otel_trace
+
+            if otel_trace.get_tracer_provider().__class__.__name__ != "ProxyTracerProvider":
+                logger.warning(
+                    "Existing OpenTelemetry tracer detected - Azure AI tracing may conflict",
+                    existing_provider=otel_trace.get_tracer_provider().__class__.__name__,
+                )
+
+            from elspeth.plugins.llm.azure import _configure_azure_monitor
+
+            success = _configure_azure_monitor(tracing_config)
+            if success:
+                self._tracing_active = True
+                logger.info(
+                    "Azure AI tracing initialized",
+                    provider="azure_ai",
+                    content_recording=tracing_config.enable_content_recording if isinstance(tracing_config, AzureAITracingConfig) else None,
+                )
+
+        except ImportError:
+            logger.warning(
+                "Azure AI tracing requested but package not installed",
+                hint="Install with: uv pip install elspeth[tracing-azure]",
+            )
+
+    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
+        """Initialize Langfuse tracing."""
+        try:
+            from langfuse import Langfuse  # type: ignore[import-not-found]
+
+            if not isinstance(tracing_config, LangfuseTracingConfig):
+                return
+
+            self._langfuse_client = Langfuse(
+                public_key=tracing_config.public_key,
+                secret_key=tracing_config.secret_key,
+                host=tracing_config.host,
+            )
+            self._tracing_active = True
+
+            logger.info("Langfuse tracing initialized", provider="langfuse", host=tracing_config.host)
+
+        except ImportError:
+            logger.warning(
+                "Langfuse tracing requested but package not installed",
+                hint="Install with: uv pip install elspeth[tracing-langfuse]",
+            )
 
     def close(self) -> None:
         """Release resources and flush tracing."""

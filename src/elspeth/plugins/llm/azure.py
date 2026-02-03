@@ -268,22 +268,26 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
 
         logger = structlog.get_logger(__name__)
 
+        # Type narrowing for mypy - caller guarantees this is not None
+        assert self._tracing_config is not None
+        tracing_config = self._tracing_config
+
         # Validate configuration completeness
-        errors = validate_tracing_config(self._tracing_config)
+        errors = validate_tracing_config(tracing_config)
         if errors:
             for error in errors:
                 logger.warning("Tracing configuration error", error=error)
             return  # Don't attempt setup with incomplete config
 
-        match self._tracing_config.provider:
+        match tracing_config.provider:
             case "azure_ai":
-                self._setup_azure_ai_tracing(logger)
+                self._setup_azure_ai_tracing(logger, tracing_config)
             case "langfuse":
-                self._setup_langfuse_tracing(logger)
+                self._setup_langfuse_tracing(logger, tracing_config)
             case "none" | _:
                 pass  # No tracing
 
-    def _setup_azure_ai_tracing(self, logger: Any) -> None:
+    def _setup_azure_ai_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
         """Initialize Azure AI / Application Insights tracing.
 
         Azure Monitor OpenTelemetry auto-instruments the OpenAI SDK.
@@ -302,15 +306,14 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                     existing_provider=otel_trace.get_tracer_provider().__class__.__name__,
                 )
 
-            success = _configure_azure_monitor(self._tracing_config)
+            success = _configure_azure_monitor(tracing_config)
             if success:
                 self._tracing_active = True
-                cfg = self._tracing_config
                 logger.info(
                     "Azure AI tracing initialized",
                     provider="azure_ai",
-                    content_recording=cfg.enable_content_recording if isinstance(cfg, AzureAITracingConfig) else None,
-                    live_metrics=cfg.enable_live_metrics if isinstance(cfg, AzureAITracingConfig) else None,
+                    content_recording=tracing_config.enable_content_recording if isinstance(tracing_config, AzureAITracingConfig) else None,
+                    live_metrics=tracing_config.enable_live_metrics if isinstance(tracing_config, AzureAITracingConfig) else None,
                 )
 
         except ImportError:
@@ -320,30 +323,29 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
                 hint="Install with: uv pip install elspeth[tracing-azure]",
             )
 
-    def _setup_langfuse_tracing(self, logger: Any) -> None:
+    def _setup_langfuse_tracing(self, logger: Any, tracing_config: TracingConfig) -> None:
         """Initialize Langfuse tracing.
 
         Langfuse requires manual span creation around LLM calls.
         The Langfuse client is stored for use in _process_row().
         """
         try:
-            from langfuse import Langfuse
+            from langfuse import Langfuse  # type: ignore[import-not-found]
 
-            cfg = self._tracing_config
-            if not isinstance(cfg, LangfuseTracingConfig):
+            if not isinstance(tracing_config, LangfuseTracingConfig):
                 return
 
             self._langfuse_client = Langfuse(
-                public_key=cfg.public_key,
-                secret_key=cfg.secret_key,
-                host=cfg.host,
+                public_key=tracing_config.public_key,
+                secret_key=tracing_config.secret_key,
+                host=tracing_config.host,
             )
             self._tracing_active = True
 
             logger.info(
                 "Langfuse tracing initialized",
                 provider="langfuse",
-                host=cfg.host,
+                host=tracing_config.host,
             )
 
         except ImportError:
@@ -438,7 +440,7 @@ class AzureLLMTransform(BaseTransform, BatchTransformMixin):
             # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
             # to let the engine's RetryManager handle them. Non-retryable errors
             # (ContentPolicyError, ContextLengthError) return TransformResult.error().
-            token_id = ctx.token_id or "unknown"
+            token_id = ctx.token.token_id if ctx.token else "unknown"
             start_time = time.monotonic()
 
             with self._create_langfuse_trace(token_id, row) as trace:
