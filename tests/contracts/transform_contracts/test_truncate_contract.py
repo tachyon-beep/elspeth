@@ -15,6 +15,7 @@ from elspeth.plugins.transforms.truncate import Truncate
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,
     TransformErrorContractTestBase,
+    _make_pipeline_row,
 )
 
 if TYPE_CHECKING:
@@ -94,7 +95,8 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
         from elspeth.plugins.context import PluginContext
 
         ctx = PluginContext(run_id="test", config={})
-        result = transform.process(error_input, ctx)
+        pipeline_row = _make_pipeline_row(error_input)
+        result = transform.process(pipeline_row, ctx)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "missing_field"

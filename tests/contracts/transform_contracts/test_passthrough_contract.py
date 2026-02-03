@@ -17,6 +17,7 @@ from elspeth.plugins.transforms.passthrough import PassThrough
 from .test_transform_protocol import (
     TransformContractPropertyTestBase,
     TransformContractTestBase,
+    _make_pipeline_row,
 )
 
 if TYPE_CHECKING:
@@ -48,8 +49,9 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"a": 1, "b": "two", "c": [1, 2, 3], "d": {"nested": True}}
+        pipeline_row = _make_pipeline_row(input_row)
 
-        result = transform.process(input_row, ctx)
+        result = transform.process(pipeline_row, ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -64,8 +66,9 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
         input_copy = deepcopy(input_row)
+        pipeline_row = _make_pipeline_row(input_row)
 
-        transform.process(input_row, ctx)
+        transform.process(pipeline_row, ctx)
 
         assert input_row == input_copy, "PassThrough mutated input row"
 
@@ -75,8 +78,9 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         input_row = {"id": 1, "nested": {"value": [1, 2, 3]}}
+        pipeline_row = _make_pipeline_row(input_row)
 
-        result = transform.process(input_row, ctx)
+        result = transform.process(pipeline_row, ctx)
         assert result.row is not None
         row = result.row
         assert isinstance(row, dict)
@@ -121,10 +125,11 @@ class TestPassThroughStrictSchemaContract(TransformContractTestBase):
 
         ctx = PluginContext(run_id="test", config={})
         wrong_type_input = {"id": "not_an_int", "name": "test"}
+        pipeline_row = _make_pipeline_row(wrong_type_input)
 
         # Per Three-Tier Trust Model: wrong types in pipeline data = crash
         with pytest.raises(ValidationError):
-            transform.process(wrong_type_input, ctx)
+            transform.process(pipeline_row, ctx)
 
 
 class TestPassThroughPropertyBased:
@@ -167,7 +172,8 @@ class TestPassThroughPropertyBased:
     @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_passthrough_preserves_arbitrary_dicts(self, transform: PassThrough, ctx: Any, data: dict[str, Any]) -> None:
         """Property: PassThrough preserves any valid JSON-like dict."""
-        result = transform.process(data, ctx)
+        pipeline_row = _make_pipeline_row(data)
+        result = transform.process(pipeline_row, ctx)
 
         assert result.status == "success"
         assert result.row is not None
@@ -184,8 +190,9 @@ class TestPassThroughPropertyBased:
     @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_passthrough_is_deterministic(self, transform: PassThrough, ctx: Any, data: dict[str, Any]) -> None:
         """Property: PassThrough produces same output for same input."""
-        result1 = transform.process(data, ctx)
-        result2 = transform.process(data, ctx)
+        pipeline_row = _make_pipeline_row(data)
+        result1 = transform.process(pipeline_row, ctx)
+        result2 = transform.process(pipeline_row, ctx)
 
         assert result1.status == "success"
         assert result2.status == "success"

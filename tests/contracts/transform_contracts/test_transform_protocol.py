@@ -37,10 +37,33 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts import Determinism, PluginSchema, TransformResult
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.context import PluginContext
 
 if TYPE_CHECKING:
     from elspeth.plugins.protocols import TransformProtocol
+
+
+def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
+    """Create a PipelineRow with OBSERVED schema for testing.
+
+    Helper to wrap test dicts in PipelineRow with flexible schema.
+    Uses object type for all fields since OBSERVED mode accepts any type.
+    """
+    # Create OBSERVED schema that accepts any fields
+    # Use object type for all fields (OBSERVED mode is permissive)
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,  # OBSERVED mode - accept any type
+            required=False,
+            source="observed",
+        )
+        for key, value in data.items()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return PipelineRow(data, contract)
 
 
 class TransformContractTestBase(ABC):
@@ -131,7 +154,8 @@ class TransformContractTestBase(ABC):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
         assert isinstance(result, TransformResult), f"process() returned {type(result).__name__}, expected TransformResult"
 
     def test_success_result_has_status(
@@ -147,7 +171,8 @@ class TransformContractTestBase(ABC):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
         assert hasattr(result, "status")
         assert result.status in ("success", "error")
 
@@ -164,7 +189,8 @@ class TransformContractTestBase(ABC):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
         if result.status == "success":
             assert result.has_output_data, (
                 "Success TransformResult has no output data. Use TransformResult.success(row) or TransformResult.success_multi(rows)."
@@ -183,7 +209,8 @@ class TransformContractTestBase(ABC):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
         if result.status == "success" and result.row is not None:
             assert isinstance(result.row, dict), f"TransformResult.row is {type(result.row).__name__}, expected dict"
 
@@ -200,7 +227,8 @@ class TransformContractTestBase(ABC):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(valid_input, ctx)
+        pipeline_row = _make_pipeline_row(valid_input)
+        result = transform.process(pipeline_row, ctx)
         if result.status == "success" and result.rows is not None:
             assert isinstance(result.rows, list), f"TransformResult.rows is {type(result.rows).__name__}, expected list"
             for i, row in enumerate(result.rows):
@@ -221,7 +249,8 @@ class TransformContractTestBase(ABC):
         from elspeth.plugins.batching.mixin import BatchTransformMixin
 
         if not isinstance(transform, BatchTransformMixin):
-            transform.process(valid_input, ctx)
+            pipeline_row = _make_pipeline_row(valid_input)
+            transform.process(pipeline_row, ctx)
 
         # close() should not raise on first call
         transform.close()
@@ -249,7 +278,8 @@ class TransformContractTestBase(ABC):
         from elspeth.plugins.batching.mixin import BatchTransformMixin
 
         if not isinstance(transform, BatchTransformMixin):
-            transform.process(valid_input, ctx)
+            pipeline_row = _make_pipeline_row(valid_input)
+            transform.process(pipeline_row, ctx)
         transform.on_complete(ctx)
 
 
@@ -285,7 +315,8 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
         input_with_extra = {**valid_input, extra_field: "extra_value"}
-        result = transform.process(input_with_extra, ctx)
+        pipeline_row = _make_pipeline_row(input_with_extra)
+        result = transform.process(pipeline_row, ctx)
         assert isinstance(result, TransformResult)
 
     def test_deterministic_transform_produces_same_output(
@@ -296,8 +327,9 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
     ) -> None:
         """Property: DETERMINISTIC transforms MUST produce same output for same input."""
         if transform.determinism == Determinism.DETERMINISTIC:
-            result1 = transform.process(valid_input, ctx)
-            result2 = transform.process(valid_input, ctx)
+            pipeline_row = _make_pipeline_row(valid_input)
+            result1 = transform.process(pipeline_row, ctx)
+            result2 = transform.process(pipeline_row, ctx)
 
             assert result1.status == "success"
             assert result2.status == "success"
@@ -331,7 +363,8 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(error_input, ctx)
+        pipeline_row = _make_pipeline_row(error_input)
+        result = transform.process(pipeline_row, ctx)
         assert result.status == "error", f"error_input MUST produce error, got status={result.status}"
 
     def test_error_result_has_reason(
@@ -347,7 +380,8 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(error_input, ctx)
+        pipeline_row = _make_pipeline_row(error_input)
+        result = transform.process(pipeline_row, ctx)
         assert result.status == "error"
         assert result.reason is not None, "Error TransformResult has None reason"
         assert isinstance(result.reason, dict), f"TransformResult.reason is {type(result.reason).__name__}, expected dict"
@@ -365,7 +399,8 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(error_input, ctx)
+        pipeline_row = _make_pipeline_row(error_input)
+        result = transform.process(pipeline_row, ctx)
         assert result.status == "error"
         assert result.row is None, "Error result should not have row"
         assert result.rows is None, "Error result should not have rows"
@@ -383,6 +418,7 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         if isinstance(transform, BatchTransformMixin):
             pytest.skip("Transform uses BatchTransformMixin - process() not supported, use accept()")
 
-        result = transform.process(error_input, ctx)
+        pipeline_row = _make_pipeline_row(error_input)
+        result = transform.process(pipeline_row, ctx)
         assert result.status == "error"
         assert isinstance(result.retryable, bool)
