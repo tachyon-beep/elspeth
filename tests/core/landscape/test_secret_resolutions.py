@@ -59,11 +59,7 @@ class TestRecordSecretResolutions:
 
         # Verify stored in database
         with db.connection() as conn:
-            result = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == run.run_id
-                )
-            )
+            result = conn.execute(select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == run.run_id))
             rows = result.fetchall()
 
         assert len(rows) == 1
@@ -150,9 +146,7 @@ class TestRecordSecretResolutions:
         # Verify each has correct fingerprint
         env_var_to_secret = {r["env_var_name"]: r["secret_value"] for r in resolutions}
         for row in rows:
-            expected_fp = secret_fingerprint(
-                env_var_to_secret[row.env_var_name], key=fingerprint_key
-            )
+            expected_fp = secret_fingerprint(env_var_to_secret[row.env_var_name], key=fingerprint_key)
             assert row.fingerprint == expected_fp
 
     def test_empty_resolutions_does_nothing(self) -> None:
@@ -174,11 +168,7 @@ class TestRecordSecretResolutions:
 
         # Verify nothing stored
         with db.connection() as conn:
-            result = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == run.run_id
-                )
-            )
+            result = conn.execute(select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == run.run_id))
             rows = result.fetchall()
 
         assert len(rows) == 0
@@ -213,11 +203,7 @@ class TestRecordSecretResolutions:
         )
 
         with db.connection() as conn:
-            result = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == run.run_id
-                )
-            )
+            result = conn.execute(select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == run.run_id))
             row = result.fetchone()
 
         assert row is not None
@@ -266,11 +252,7 @@ class TestRecordSecretResolutions:
         )
 
         with db.connection() as conn:
-            result = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == run.run_id
-                )
-            )
+            result = conn.execute(select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == run.run_id))
             rows = result.fetchall()
 
         fingerprints = {row.fingerprint for row in rows}

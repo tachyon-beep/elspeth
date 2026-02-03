@@ -528,9 +528,7 @@ class TestOrchestratorSecretResolutions:
 
         with db.engine.connect() as conn:
             resolution_row = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == result.run_id
-                )
+                select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == result.run_id)
             ).fetchone()
 
             assert resolution_row is not None
@@ -595,9 +593,7 @@ class TestOrchestratorSecretResolutions:
 
         with db.engine.connect() as conn:
             resolution_rows = conn.execute(
-                select(secret_resolutions_table).where(
-                    secret_resolutions_table.c.run_id == result.run_id
-                )
+                select(secret_resolutions_table).where(secret_resolutions_table.c.run_id == result.run_id)
             ).fetchall()
 
             assert len(resolution_rows) == 0
