@@ -48,6 +48,28 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     return PipelineRow(data, contract)
 
 
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
+
+
 class TestRowProcessorCoalesce:
     """Test RowProcessor integration with CoalesceExecutor."""
 
@@ -248,7 +270,7 @@ class TestRowProcessorCoalesce:
         # 4. Coalesce both paths (merged token COALESCED)
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "ACME earnings"},
+            source_row=make_source_row({"text": "ACME earnings"}),
             transforms=[
                 EnrichA(transform_a.node_id),
                 EnrichB(transform_b.node_id),
@@ -427,7 +449,7 @@ class TestRowProcessorCoalesce:
         # Process the row through enrich -> fork -> coalesce
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "ACME earnings"},
+            source_row=make_source_row({"text": "ACME earnings"}),
             transforms=[
                 EnrichA(transform_a.node_id),
                 EnrichB(transform_b.node_id),
@@ -566,7 +588,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "ACME earnings report"},
+            source_row=make_source_row({"text": "ACME earnings report"}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -694,7 +716,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "test input"},
+            source_row=make_source_row({"text": "test input"}),
         )
         children, _fork_group_id = token_manager.fork_token(
             parent_token=initial_token,
@@ -865,7 +887,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "Document for nested processing"},
+            source_row=make_source_row({"text": "Document for nested processing"}),
         )
 
         # === Level 1: Fork to path_a and path_b (gate1) ===
@@ -1158,7 +1180,7 @@ class TestRowProcessorCoalesce:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"text": "test"},
+            source_row=make_source_row({"text": "test"}),
         )
 
         # Fork into fast and slow branches
@@ -1457,7 +1479,7 @@ class TestAggregationCoalesceMetadataPropagation:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
         )
 
         # Fork to create a token with branch_name
@@ -1488,7 +1510,7 @@ class TestAggregationCoalesceMetadataPropagation:
             run_id=run.run_id,
             source_node_id=NodeID(source.node_id),
             row_index=1,
-            row_data={"id": 2, "value": 200},
+            source_row=make_source_row({"id": 2, "value": 200}),
         )
         forked_tokens2, _fork_group_id2 = token_manager.fork_token(
             parent_token=source_token2,
@@ -1663,7 +1685,7 @@ class TestCoalesceSelectBranchFailure:
         # This should NOT raise an IntegrityError
         results = processor.process_row(
             row_index=0,
-            row_data={"text": "test"},
+            source_row=make_source_row({"text": "test"}),
             transforms=[],
             ctx=ctx,
         )
