@@ -157,7 +157,7 @@ class TestProcessorBatchTransforms:
         # The flush produces a NEW aggregated row that gets COMPLETED
         completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
         assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
-        assert completed[0].final_data == {"total": 6}
+        assert completed[0].final_data.to_dict() == {"total": 6}
 
     def test_processor_batch_transform_without_aggregation_config(self) -> None:
         """Batch-aware transform without aggregation config uses single-row mode."""
@@ -233,7 +233,7 @@ class TestProcessorBatchTransforms:
 
         result = result_list[0]
         assert result.outcome == RowOutcome.COMPLETED
-        assert result.final_data == {"value": 10}  # Doubled, not summed
+        assert result.final_data.to_dict() == {"value": 10}  # Doubled, not summed
 
     def test_processor_buffers_restored_on_recovery(self) -> None:
         """Processor restores buffer state from checkpoint."""
@@ -335,6 +335,24 @@ class TestProcessorBatchTransforms:
         # Note: elapsed_age_seconds required since Bug #6 timeout SLA preservation fix
         # Note: fire_offset fields required since P2-2026-02-01 trigger ordering fix
         # Note: All lineage fields required in v2.0 format (values can be None)
+        # Note: contract and contract_version required since PipelineRow migration (v2.0)
+
+        # Create contract for checkpoint restoration
+        checkpoint_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                FieldContract(
+                    normalized_name="value",
+                    original_name="value",
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                ),
+            ),
+            locked=True,
+        )
+        contract_version_hash = checkpoint_contract.version_hash()
+
         restored_buffer_state = {
             "_version": "2.0",
             sum_node.node_id: {
@@ -347,6 +365,7 @@ class TestProcessorBatchTransforms:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": contract_version_hash,
                     },
                     {
                         "token_id": token1.token_id,
@@ -356,12 +375,14 @@ class TestProcessorBatchTransforms:
                         "fork_group_id": None,
                         "join_group_id": None,
                         "expand_group_id": None,
+                        "contract_version": contract_version_hash,
                     },
                 ],
                 "batch_id": old_batch.batch_id,
                 "elapsed_age_seconds": 0.0,  # Bug #6: timeout elapsed time
                 "count_fire_offset": None,  # P2-2026-02-01: trigger ordering
                 "condition_fire_offset": None,  # P2-2026-02-01: trigger ordering
+                "contract": checkpoint_contract.to_checkpoint_format(),
             },
         }
 
@@ -399,7 +420,7 @@ class TestProcessorBatchTransforms:
 
         assert len(consumed) == 1, f"Expected 1 consumed, got {len(consumed)}"
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
-        assert completed[0].final_data == {"total": 6}  # 1 + 2 + 3
+        assert completed[0].final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
 
 
 class TestProcessorDeaggregation:
@@ -422,13 +443,31 @@ class TestProcessorDeaggregation:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
                 # Expand each row into 2 rows
+                output_rows = [
+                    {**row, "copy": 1},
+                    {**row, "copy": 2},
+                ]
+
+                # Generate contract for multi-row output
+                fields = tuple(
+                    FieldContract(
+                        normalized_name=key,
+                        original_name=key,
+                        python_type=object,
+                        required=False,
+                        source="inferred",
+                    )
+                    for key in output_rows[0]
+                )
+                contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
                 return TransformResult.success_multi(
-                    [
-                        {**row, "copy": 1},
-                        {**row, "copy": 2},
-                    ],
+                    output_rows,
                     success_reason={"action": "test"},
+                    contract=contract,
                 )
 
         # Setup real recorder
@@ -509,7 +548,9 @@ class TestProcessorDeaggregation:
                 self.node_id = node_id
 
             def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
-                return TransformResult.success_multi([row, row], success_reason={"action": "test"})  # But returns multi!
+                # Return multi-row output (but creates_tokens=False, so should raise)
+                # Convert row to dict to avoid PipelineRow canonicalization issues
+                return TransformResult.success_multi([{**row}, {**row}], success_reason={"action": "test"})
 
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)

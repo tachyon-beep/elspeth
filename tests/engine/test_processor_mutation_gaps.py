@@ -26,11 +26,33 @@ from elspeth.plugins.results import RowOutcome, TransformResult
 from tests.engine.conftest import DYNAMIC_SCHEMA, _TestSchema
 
 
+def make_source_row(row_data: dict[str, Any]) -> "SourceRow":
+    """Helper to create SourceRow with contract for tests.
+
+    Wraps dict in SourceRow.valid() with an OBSERVED contract inferred from keys.
+    Required because PipelineRow migration requires all SourceRow to have contracts.
+    """
+    from elspeth.contracts import SourceRow
+
+    fields = tuple(
+        FieldContract(
+            normalized_name=key,
+            original_name=key,
+            python_type=object,
+            required=False,
+            source="inferred",
+        )
+        for key in row_data
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return SourceRow.valid(row_data, contract=contract)
+
+
 def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
     """Create a PipelineRow with OBSERVED schema for testing.
 
-    Helper to wrap test dicts in PipelineRow with flexible schema.
-    Uses object type for all fields since OBSERVED mode accepts any type.
+    DEPRECATED: Use make_source_row() for process_row() calls.
+    This helper creates raw PipelineRow for internal token construction tests.
     """
     fields = tuple(
         FieldContract(
@@ -38,9 +60,9 @@ def _make_pipeline_row(data: dict[str, Any]) -> PipelineRow:
             original_name=key,
             python_type=object,
             required=False,
-            source="observed",
+            source="inferred",
         )
-        for key in data.keys()
+        for key in data
     )
     contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
     return PipelineRow(data, contract)
@@ -81,9 +103,25 @@ class BatchTransform(BaseTransform):
     def process(self, row: dict[str, Any] | list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
         if isinstance(row, list):
             total = sum(r.get("value", 0) for r in row)
+            output_row = {"id": "batch", "value": total, "count": len(row)}
+
+            # PIPELINEROW MIGRATION: Provide contract for transform mode aggregation
+            fields = tuple(
+                FieldContract(
+                    normalized_name=key,
+                    original_name=key,
+                    python_type=object,
+                    required=False,
+                    source="inferred",
+                )
+                for key in output_row
+            )
+            contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
             return TransformResult.success(
-                {"id": "batch", "value": total, "count": len(row)},
+                output_row,
                 success_reason={"action": "batch"},
+                contract=contract,
             )
         return TransformResult.success(dict(row), success_reason={"action": "single"})
 
@@ -157,7 +195,7 @@ class TestTriggerTypeFallback:
         # Process first row - should buffer
         results1 = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -172,7 +210,7 @@ class TestTriggerTypeFallback:
         # Process second row with forced flush
         results2 = processor.process_row(
             row_index=1,
-            row_data={"id": 2, "value": 200},
+            source_row=make_source_row({"id": 2, "value": 200}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -235,7 +273,7 @@ class TestStepBoundaryConditions:
         # Single transform - should complete, not queue more work
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -295,7 +333,7 @@ class TestStepBoundaryConditions:
         # Two transforms - should process both and complete
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform1, transform2],
             ctx=ctx,
         )
@@ -349,7 +387,7 @@ class TestStepBoundaryConditions:
         # Three transforms - should complete successfully
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=transforms,
             ctx=ctx,
         )
@@ -457,7 +495,7 @@ class TestForkRoutingPaths:
 
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -517,7 +555,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data=_make_pipeline_row({"id": 1}),
+            source_row=make_source_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -584,7 +622,7 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data=_make_pipeline_row({"id": 1}),
+            source_row=make_source_row({"id": 1}),
         )
 
         gate_result = GateResult(
@@ -651,20 +689,20 @@ class TestForkRoutingPaths:
         parent_token = TokenInfo(
             row_id="row1",
             token_id="parent",
-            row_data=_make_pipeline_row({"id": 1}),
+            source_row=make_source_row({"id": 1}),
         )
 
         child_tokens = [
             TokenInfo(
                 row_id="row1",
                 token_id="child_a",
-                row_data=_make_pipeline_row({"id": 1}),
+                source_row=make_source_row({"id": 1}),
                 branch_name="path_a",
             ),
             TokenInfo(
                 row_id="row1",
                 token_id="child_b",
-                row_data=_make_pipeline_row({"id": 1}),
+                source_row=make_source_row({"id": 1}),
                 branch_name="path_b",
             ),
         ]
@@ -848,7 +886,7 @@ class TestIterationGuards:
         # Process a row - should complete without hitting iteration limit
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=[transform],
             ctx=ctx,
         )
@@ -903,7 +941,7 @@ class TestIterationGuards:
         # Process through 5 transforms - should complete successfully
         results = processor.process_row(
             row_index=0,
-            row_data={"id": 1, "value": 100},
+            source_row=make_source_row({"id": 1, "value": 100}),
             transforms=transforms,
             ctx=ctx,
         )
@@ -931,7 +969,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data=_make_pipeline_row({"id": 1}),
+            source_row=make_source_row({"id": 1}),
         )
 
         # Create work item with specific step
@@ -957,7 +995,7 @@ class TestCoalesceStepCalculations:
         token = TokenInfo(
             row_id="row1",
             token_id="token1",
-            row_data=_make_pipeline_row({"id": 1}),
+            source_row=make_source_row({"id": 1}),
             branch_name="left_branch",
         )
 
