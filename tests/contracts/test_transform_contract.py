@@ -28,10 +28,12 @@ class TestCreateOutputContract:
     """Test creating output contracts from PluginSchema."""
 
     def test_creates_fixed_contract_from_schema(self) -> None:
-        """PluginSchema creates FIXED contract with declared fields."""
+        """PluginSchema creates FLEXIBLE contract by default (extra='ignore')."""
         contract = create_output_contract_from_schema(OutputSchema)
 
-        assert contract.mode == "FIXED"
+        # Default behavior: extra='ignore' → FLEXIBLE mode
+        # This allows extra fields to pass through while enforcing declared field types
+        assert contract.mode == "FLEXIBLE"
         assert contract.locked is True
         assert len(contract.fields) == 3
 
