@@ -422,6 +422,128 @@ class TestProcessorBatchTransforms:
         assert len(completed) == 1, f"Expected 1 completed, got {len(completed)}"
         assert completed[0].final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
 
+    def test_batch_transform_receives_pipelinerow_objects(self) -> None:
+        """Batch transforms must receive PipelineRow objects, not plain dicts.
+
+        Regression test for P1 issues where aggregation executor passed plain dicts
+        to batch transforms, causing AttributeError when transforms called .to_dict().
+
+        This test explicitly calls .to_dict() on rows to catch the type mismatch.
+        Previous tests used r["value"] which works for both dict and PipelineRow,
+        so they didn't catch this bug.
+        """
+        from elspeth.contracts import Determinism
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+
+        class TypeCheckingBatchTransform(BaseTransform):
+            """Transform that explicitly calls .to_dict() on rows."""
+
+            name = "type_checker"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            is_batch_aware = True
+            determinism = Determinism.DETERMINISTIC
+            plugin_version = "1.0"
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({"schema": {"mode": "observed"}})
+                self.node_id = node_id
+
+            def process(self, rows: list[PipelineRow] | PipelineRow, ctx: PluginContext) -> TransformResult:
+                """Process batch - explicitly calls .to_dict() to catch type errors."""
+                if isinstance(rows, list):
+                    # This will fail if rows are plain dicts instead of PipelineRow objects
+                    total = sum(r.to_dict()["value"] for r in rows)
+                    output_row = {"total": total}
+
+                    # Provide contract for transform mode aggregation
+                    fields = tuple(
+                        FieldContract(
+                            normalized_name=key,
+                            original_name=key,
+                            python_type=object,
+                            required=False,
+                            source="inferred",
+                        )
+                        for key in output_row
+                    )
+                    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+
+                    return TransformResult.success(output_row, success_reason={"action": "type_check"}, contract=contract)
+                # Single row mode - also call .to_dict()
+                row_dict = rows.to_dict()
+                return TransformResult.success(row_dict, success_reason={"action": "type_check"})
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="type_checker",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        transform = TypeCheckingBatchTransform(node_id=transform_node.node_id)
+
+        # Configure aggregation with count trigger
+        aggregation_settings = {
+            NodeID(transform_node.node_id): AggregationSettings(
+                name="type_check_batch",
+                plugin="type_checker",
+                trigger=TriggerConfig(count=3),
+            )
+        }
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=NodeID(source_node.node_id),
+            edge_map={},
+            route_resolution_map={},
+            aggregation_settings=aggregation_settings,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Process 3 rows to trigger batch flush
+        # This should NOT raise AttributeError if PipelineRow objects are passed
+        all_results = []
+        for i in range(3):
+            results = processor.process_row(
+                row_index=i,
+                source_row=make_source_row({"value": i + 1}),
+                transforms=[transform],
+                ctx=ctx,
+            )
+            all_results.extend(results)
+
+        # Verify the batch was processed successfully
+        # If transforms received dicts instead of PipelineRow, .to_dict() would have failed
+        # In transform mode, we expect 3 CONSUMED_IN_BATCH + 1 COMPLETED (the aggregated result)
+        consumed = [r for r in all_results if r.outcome == RowOutcome.CONSUMED_IN_BATCH]
+        completed = [r for r in all_results if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(consumed) == 3, f"Expected 3 consumed rows, got {len(consumed)}"
+        assert len(completed) == 1, f"Expected 1 completed row, got {len(completed)}"
+        assert completed[0].final_data.to_dict() == {"total": 6}  # 1 + 2 + 3
+
 
 class TestProcessorDeaggregation:
     """Tests for deaggregation / multi-row output handling."""

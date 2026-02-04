@@ -1254,6 +1254,22 @@ class AggregationExecutor:
         # Use first token for node_state (represents the batch operation)
         representative_token = buffered_tokens[0]
 
+        # Reconstruct PipelineRow objects from buffered dicts for transform execution
+        # buffered_rows are plain dicts (for checkpoint serialization), but batch transforms
+        # expect list[PipelineRow]. Reconstruct using contracts from buffered_tokens.
+        # Fix for P1: AttributeError when transforms call .to_dict() on dict objects
+        from elspeth.contracts.schema_contract import PipelineRow
+
+        pipeline_rows: list[PipelineRow] = []
+        for row_dict, token in zip(buffered_rows, buffered_tokens):
+            contract = token.row_data.contract
+            if contract is None:
+                raise RuntimeError(
+                    f"Token {token.token_id} has no contract - cannot reconstruct PipelineRow. "
+                    f"This indicates a bug in buffer_row() or checkpoint restore."
+                )
+            pipeline_rows.append(PipelineRow(row_dict, contract))
+
         # Step 1: Transition batch to "executing"
         self._recorder.update_batch_status(
             batch_id=batch_id,
@@ -1298,7 +1314,8 @@ class AggregationExecutor:
         ):
             start = time.perf_counter()
             try:
-                result = transform.process(buffered_rows, ctx)  # type: ignore[arg-type]
+                # Pass reconstructed PipelineRow objects (not plain dicts)
+                result = transform.process(pipeline_rows, ctx)  # type: ignore[arg-type]
                 duration_ms = (time.perf_counter() - start) * 1000
             except BatchPendingError:
                 # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.

@@ -72,7 +72,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Batch mode: enrich each row with batch_size
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
@@ -214,7 +214,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     # Wrong: returns fewer rows than input
                     return TransformResult.success_multi([rows[0]], success_reason={"action": "test"})
@@ -297,7 +297,7 @@ class TestProcessorPassthroughMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -447,7 +447,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -596,7 +596,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -715,7 +715,7 @@ class TestProcessorTransformMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -893,7 +893,7 @@ class TestProcessorSingleMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 
@@ -1039,7 +1039,7 @@ class TestProcessorSingleMode:
                 super().__init__({"schema": {"mode": "observed"}})
                 self.node_id = node_id
 
-            def process(self, rows: list["PipelineRow"] | "PipelineRow", ctx: PluginContext) -> TransformResult:
+            def process(self, rows: "list[PipelineRow] | PipelineRow", ctx: PluginContext) -> TransformResult:
                 if isinstance(rows, list):
                     from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 

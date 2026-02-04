@@ -85,6 +85,28 @@ class TestOrchestratorResume:
         source_schema_json = json.dumps(RowSchema.model_json_schema())
         run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
 
+        # Record schema contract for resume (required after PipelineRow migration)
+        from elspeth.contracts.schema_contract import FieldContract, SchemaContract
+
+        fields = (
+            FieldContract(
+                normalized_name="id",
+                original_name="id",
+                python_type=int,
+                required=True,
+                source="test_fixture",
+            ),
+            FieldContract(
+                normalized_name="value",
+                original_name="value",
+                python_type=int,
+                required=True,
+                source="test_fixture",
+            ),
+        )
+        schema_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        recorder.update_run_contract(run.run_id, schema_contract)
+
         # Register nodes
         recorder.register_node(
             run_id=run.run_id,

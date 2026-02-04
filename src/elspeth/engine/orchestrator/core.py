@@ -1728,30 +1728,20 @@ class Orchestrator:
         # This ensures type fidelity and maintains the same data structures as main run
         schema_contract = recorder.get_run_contract(run_id)
         if schema_contract is None:
-            # Backward compatibility: Generate OBSERVED contract from first row
-            # This handles runs that were started before PipelineRow migration
-            # or test sources that don't set contracts
-            from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-
-            # Get first unprocessed row to infer contract
-            unprocessed_test = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
-            if unprocessed_test:
-                # unprocessed_test is list[tuple[row_id, row_index, row_data]]
-                _, _, first_row_data = unprocessed_test[0]
-                fields = tuple(
-                    FieldContract(
-                        normalized_name=key,
-                        original_name=key,
-                        python_type=object,
-                        required=False,
-                        source="inferred",
-                    )
-                    for key in first_row_data
-                )
-                schema_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-            else:
-                # No rows to process - create empty contract
-                schema_contract = SchemaContract(mode="OBSERVED", fields=(), locked=True)
+            # TIER-1 AUDIT INTEGRITY: Crash if contract is missing from audit trail
+            # Per CLAUDE.md: "Bad data in the audit trail = crash immediately"
+            # Inferring a contract from row data would:
+            # 1. Mask missing/corrupt audit data (evidence tampering)
+            # 2. Produce incomplete contracts (fields appearing later are omitted)
+            # 3. Violate the NO LEGACY CODE POLICY (no backward compatibility shims)
+            raise RuntimeError(
+                f"Cannot resume run '{run_id}': schema contract is missing from audit trail. "
+                f"This indicates either:\n"
+                f"  1. The audit database is corrupt or incomplete\n"
+                f"  2. The run was started with a version that didn't record contracts\n"
+                f"Resume cannot proceed safely without the schema contract. "
+                f"The audit trail must be complete and trustworthy."
+            )
 
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
